@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
+import { supabase } from "./supabaseClient";
 import {
   LayoutDashboard, FolderKanban, CheckSquare, Wallet, AlertTriangle,
   Users, Activity, Plus, X, Trash2, Pencil, Github, ChevronDown,
@@ -77,25 +78,100 @@ const seed = () => ({
   documentos: [],
   habitos: [],
   salud: [],
+  perfilSalud: { alturaCm: "" },
 });
 
 const uid = () => Math.random().toString(36).slice(2, 10);
 const fmtMoney = (n) => (Number(n) || 0).toLocaleString("es-MX", { style: "currency", currency: "MXN" });
 const todayISO = () => new Date().toISOString().slice(0, 10);
 const daysUntil = (dateStr) => Math.ceil((new Date(dateStr) - new Date(todayISO())) / 86400000);
+const calcIMC = (pesoKg, alturaCm) => {
+  const p = Number(pesoKg), a = Number(alturaCm);
+  if (!p || !a) return null;
+  const alturaM = a / 100;
+  return p / (alturaM * alturaM);
+};
+const categoriaIMC = (imc) => {
+  if (imc == null) return null;
+  if (imc < 18.5) return "Bajo peso";
+  if (imc < 25) return "Normal";
+  if (imc < 30) return "Sobrepeso";
+  return "Obesidad";
+};
 
-/* ---------- persistencia ---------- */
-const STORAGE_KEY = "gestion_personal_data";
-async function loadData() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) return JSON.parse(raw);
-  } catch (e) { /* no existe aún */ }
-  return null;
+/* ---------- persistencia relacional ---------- */
+const TABLES = ["proyectos", "pendientes", "equipo", "finanzas", "deudas", "actividades", "activos", "metas", "contactos", "redesMetricas", "documentos", "habitos", "salud"];
+const OLD_STORAGE_KEY = "gestion_personal_data"; // localStorage, versión muy vieja
+const OLD_BLOB_TABLE = "gestion_data"; // tabla única jsonb, versión anterior a este modelo relacional
+
+const camelToSnake = (s) => s.replace(/[A-Z]/g, (c) => "_" + c.toLowerCase());
+const snakeToCamel = (s) => s.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
+const tableName = (key) => camelToSnake(key);
+
+function rowToJs(row) {
+  const out = {};
+  for (const [k, v] of Object.entries(row)) {
+    if (k === "created_at") continue;
+    out[snakeToCamel(k)] = v;
+  }
+  return out;
 }
-async function persist(data) {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); }
-  catch (e) { console.error("No se pudo guardar:", e); }
+function jsToRow(obj) {
+  const out = {};
+  for (const [k, v] of Object.entries(obj)) out[camelToSnake(k)] = v;
+  return out;
+}
+// la tabla "salud" guarda el PDF adjunto como dos columnas planas en vez de un objeto anidado
+function saludToRow(s) {
+  const { estudio, ...rest } = s;
+  const row = jsToRow(rest);
+  row.estudio_nombre = estudio?.nombre || null;
+  row.estudio_url = estudio?.url || null;
+  return row;
+}
+function rowToSalud(row) {
+  const { estudioNombre, estudioUrl, ...rest } = rowToJs(row);
+  return { ...rest, estudio: estudioNombre ? { nombre: estudioNombre, url: estudioUrl } : null };
+}
+const toRow = (key, obj) => (key === "salud" ? saludToRow(obj) : jsToRow(obj));
+const fromRow = (key, row) => (key === "salud" ? rowToSalud(row) : rowToJs(row));
+
+async function fetchTable(key) {
+  const { data, error } = await supabase.from(tableName(key)).select("*").order("created_at", { ascending: true });
+  if (error) { console.error(`Error al leer ${tableName(key)}:`, error); return []; }
+  return data.map((row) => fromRow(key, row));
+}
+
+async function loadAllTables() {
+  const entries = await Promise.all(TABLES.map(async (key) => [key, await fetchTable(key)]));
+  const result = Object.fromEntries(entries);
+  const { data: perfilRow } = await supabase.from("perfil_salud").select("*").eq("id", "main").maybeSingle();
+  result.perfilSalud = { alturaCm: perfilRow?.altura_cm ?? "" };
+  return result;
+}
+
+// migración única desde la versión anterior (un solo blob jsonb), solo si las tablas nuevas están vacías
+async function migrateFromOldBlobIfNeeded(current) {
+  const allEmpty = TABLES.every((k) => current[k].length === 0);
+  if (!allEmpty) return current;
+  try {
+    const { data: blobRow } = await supabase.from(OLD_BLOB_TABLE).select("data").eq("id", "main").maybeSingle();
+    const blob = blobRow?.data;
+    if (!blob) return current;
+    for (const key of TABLES) {
+      for (const item of blob[key] || []) {
+        const { error } = await supabase.from(tableName(key)).insert(toRow(key, item));
+        if (error) console.error(`Error migrando ${key}:`, error);
+      }
+    }
+    if (blob.perfilSalud?.alturaCm) {
+      await supabase.from("perfil_salud").upsert({ id: "main", altura_cm: blob.perfilSalud.alturaCm });
+    }
+    return await loadAllTables();
+  } catch (e) {
+    console.error("No se pudo migrar desde la versión anterior:", e);
+    return current;
+  }
 }
 
 /* ---------- UI genéricos ---------- */
@@ -141,8 +217,60 @@ function Modal({ title, onClose, children }) {
   );
 }
 
-/* ---------- app ---------- */
+/* ---------- login ---------- */
+function LoginScreen() {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError("");
+    setLoading(true);
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    setLoading(false);
+    if (error) setError("Correo o contraseña incorrectos.");
+  };
+
+  return (
+    <div className="gp-root flex items-center justify-center" style={{ minHeight: "100vh" }}>
+      <Tokens />
+      <form onSubmit={handleSubmit} className="gp-panel p-6 w-full max-w-sm">
+        <p className="gp-serif text-xl mb-1">Centro de mando</p>
+        <p className="text-xs gp-text-muted mb-5">Inicia sesión para entrar a tu sistema.</p>
+        <Field label="Correo"><input type="email" required className="gp-input" value={email} onChange={(e) => setEmail(e.target.value)} /></Field>
+        <Field label="Contraseña"><input type="password" required className="gp-input" value={password} onChange={(e) => setPassword(e.target.value)} /></Field>
+        {error && <p className="text-xs gp-text-red mb-3">{error}</p>}
+        <button type="submit" disabled={loading} className="gp-btn w-full py-2 text-sm mt-1">{loading ? "Entrando…" : "Entrar"}</button>
+      </form>
+    </div>
+  );
+}
+
+/* ---------- app (portero de sesión) ---------- */
 export default function App() {
+  const [session, setSession] = useState(undefined); // undefined = cargando, null = sin sesión
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => setSession(data.session));
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, newSession) => setSession(newSession));
+    return () => listener.subscription.unsubscribe();
+  }, []);
+
+  if (session === undefined) {
+    return (
+      <div className="gp-root min-h-[500px] flex items-center justify-center rounded-lg">
+        <Tokens />
+        <p className="gp-text-muted text-sm">Cargando…</p>
+      </div>
+    );
+  }
+  if (!session) return <LoginScreen />;
+  return <AppLoggedIn />;
+}
+
+function AppLoggedIn() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState("dashboard");
@@ -150,23 +278,43 @@ export default function App() {
 
   useEffect(() => {
     (async () => {
-      const stored = await loadData();
-      setData(stored ? { ...seed(), ...stored } : seed());
+      let result = await loadAllTables();
+      result = await migrateFromOldBlobIfNeeded(result);
+      const allEmpty = TABLES.every((k) => result[k].length === 0);
+      if (allEmpty) {
+        // instalación nueva: siembra los proyectos conocidos
+        for (const p of seed().proyectos) {
+          const { error } = await supabase.from("proyectos").insert(jsToRow(p));
+          if (error) console.error("Error al sembrar proyecto:", error);
+        }
+        result = await loadAllTables();
+      }
+      setData(result);
       setLoading(false);
     })();
   }, []);
 
-  const update = (patch) => {
-    setData((prev) => {
-      const next = { ...prev, ...patch };
-      persist(next);
-      return next;
-    });
+  const addItem = async (key, item) => {
+    const newItem = { ...item, id: uid() };
+    const { error } = await supabase.from(tableName(key)).insert(toRow(key, newItem));
+    if (error) { console.error(`Error al guardar en ${tableName(key)}:`, error); alert("No se pudo guardar. Revisa tu conexión a internet."); return; }
+    setData((prev) => ({ ...prev, [key]: [...prev[key], newItem] }));
   };
-
-  const addItem = (key, item) => update({ [key]: [...data[key], { ...item, id: uid() }] });
-  const editItem = (key, id, patch) => update({ [key]: data[key].map((i) => (i.id === id ? { ...i, ...patch } : i)) });
-  const removeItem = (key, id) => update({ [key]: data[key].filter((i) => i.id !== id) });
+  const editItem = async (key, id, patch) => {
+    const { error } = await supabase.from(tableName(key)).update(toRow(key, patch)).eq("id", id);
+    if (error) { console.error(`Error al actualizar ${tableName(key)}:`, error); alert("No se pudo guardar el cambio."); return; }
+    setData((prev) => ({ ...prev, [key]: prev[key].map((i) => (i.id === id ? { ...i, ...patch } : i)) }));
+  };
+  const removeItem = async (key, id) => {
+    const { error } = await supabase.from(tableName(key)).delete().eq("id", id);
+    if (error) { console.error(`Error al borrar en ${tableName(key)}:`, error); alert("No se pudo borrar."); return; }
+    setData((prev) => ({ ...prev, [key]: prev[key].filter((i) => i.id !== id) }));
+  };
+  const updatePerfilSalud = async (patch) => {
+    const { error } = await supabase.from("perfil_salud").upsert({ id: "main", altura_cm: patch.alturaCm || null });
+    if (error) { console.error("Error al guardar tu estatura:", error); return; }
+    setData((prev) => ({ ...prev, perfilSalud: { ...(prev.perfilSalud || {}), ...patch } }));
+  };
 
   if (loading || !data) {
     return (
@@ -210,9 +358,12 @@ export default function App() {
       <div className="flex" style={{ minHeight: "100vh" }}>
         {/* rail lateral */}
         <div className="w-56 shrink-0 border-r gp-border p-4 flex flex-col gap-4 overflow-y-auto gp-scroll" style={{ maxHeight: "100vh" }}>
-          <div className="px-2">
-            <p className="gp-serif text-lg leading-tight">Centro de mando</p>
-            <p className="text-xs gp-text-muted">Angel Rey</p>
+          <div className="px-2 flex items-start justify-between">
+            <div>
+              <p className="gp-serif text-lg leading-tight">Centro de mando</p>
+              <p className="text-xs gp-text-muted">Angel Rey</p>
+            </div>
+            <button onClick={() => supabase.auth.signOut()} title="Cerrar sesión" className="text-xs gp-text-muted gp-btn-ghost px-2 py-1 rounded">Salir</button>
           </div>
           {navGroups.map((g) => (
             <div key={g.label}>
@@ -266,7 +417,7 @@ export default function App() {
             <Habitos data={data} onAdd={(i) => addItem("habitos", i)} onEdit={(id, p) => editItem("habitos", id, p)} onRemove={(id) => removeItem("habitos", id)} />
           )}
           {view === "salud" && (
-            <Salud data={data} onAdd={(i) => addItem("salud", i)} onEdit={(id, p) => editItem("salud", id, p)} onRemove={(id) => removeItem("salud", id)} />
+            <Salud data={data} onAdd={(i) => addItem("salud", i)} onEdit={(id, p) => editItem("salud", id, p)} onRemove={(id) => removeItem("salud", id)} onUpdatePerfil={updatePerfilSalud} />
           )}
           {view === "activos" && (
             <ActivosDigitales data={data} onAdd={(i) => addItem("activos", i)} onEdit={(id, p) => editItem("activos", id, p)} onRemove={(id) => removeItem("activos", id)} />
@@ -1239,10 +1390,14 @@ function Habitos({ data, onAdd, onEdit, onRemove }) {
 }
 
 /* ---------- Salud ---------- */
-function Salud({ data, onAdd, onEdit, onRemove }) {
+function Salud({ data, onAdd, onEdit, onRemove, onUpdatePerfil }) {
   const [modal, setModal] = useState(null);
-  const empty = { fecha: todayISO(), peso: "", notas: "" };
+  const [altura, setAltura] = useState(data.perfilSalud?.alturaCm || "");
+  const empty = { fecha: todayISO(), peso: "", glucosa: "", colesterol: "", trigliceridos: "", notas: "", estudio: null };
   const ordenados = [...data.salud].sort((a, b) => (b.fecha || "").localeCompare(a.fecha || ""));
+  const alturaCm = data.perfilSalud?.alturaCm;
+
+  const toneCategoria = (cat) => (cat === "Normal" ? "teal" : cat === "Bajo peso" ? "gold" : cat === "Sobrepeso" ? "gold" : cat === "Obesidad" ? "red" : "muted");
 
   return (
     <div>
@@ -1250,21 +1405,46 @@ function Salud({ data, onAdd, onEdit, onRemove }) {
         <h2 className="gp-serif text-2xl">Salud</h2>
         <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center gap-1 px-3 py-1.5 text-sm"><Plus size={14} /> Registrar</button>
       </div>
-      <p className="text-sm gp-text-muted mb-6">Peso y notas generales, aparte del registro de actividad física.</p>
+      <p className="text-sm gp-text-muted mb-4">Peso, glucosa, colesterol, triglicéridos y tus estudios en PDF, todo en un mismo historial.</p>
+
+      <div className="gp-panel p-3 mb-5 flex items-center gap-3">
+        <span className="text-xs gp-text-muted">Tu estatura (para calcular IMC):</span>
+        <input type="number" className="gp-input" style={{ maxWidth: 100 }} value={altura}
+          onChange={(e) => setAltura(e.target.value)}
+          onBlur={() => onUpdatePerfil({ alturaCm: altura })} />
+        <span className="text-xs gp-text-muted">cm</span>
+        {!alturaCm && <span className="text-xs gp-text-gold">Captúrala para ver tu categoría de peso.</span>}
+      </div>
 
       <div className="gp-panel overflow-x-auto">
         <table className="gp-table">
-          <thead><tr><th>Fecha</th><th>Peso (kg)</th><th>Notas</th><th></th></tr></thead>
+          <thead><tr><th>Fecha</th><th>Peso (kg)</th><th>IMC</th><th>Categoría</th><th>Glucosa</th><th>Colesterol</th><th>Triglicéridos</th><th>Estudio</th><th>Notas</th><th></th></tr></thead>
           <tbody>
-            {ordenados.map((s) => (
-              <tr key={s.id}>
-                <td className="gp-mono">{s.fecha}</td>
-                <td className="gp-mono">{s.peso || "—"}</td>
-                <td className="gp-text-muted">{s.notas}</td>
-                <td><div className="flex gap-1"><IconBtn onClick={() => setModal({ item: s })}><Pencil size={13} /></IconBtn><IconBtn onClick={() => onRemove(s.id)}><Trash2 size={13} /></IconBtn></div></td>
-              </tr>
-            ))}
-            {ordenados.length === 0 && <tr><td colSpan={4} className="text-center gp-text-muted py-6">Sin registros de salud.</td></tr>}
+            {ordenados.map((s) => {
+              const imc = calcIMC(s.peso, alturaCm);
+              const cat = categoriaIMC(imc);
+              return (
+                <tr key={s.id}>
+                  <td className="gp-mono">{s.fecha}</td>
+                  <td className="gp-mono">{s.peso || "—"}</td>
+                  <td className="gp-mono">{imc ? imc.toFixed(1) : "—"}</td>
+                  <td>{cat ? <Badge tone={toneCategoria(cat)}>{cat}</Badge> : "—"}</td>
+                  <td className="gp-mono">{s.glucosa || "—"}</td>
+                  <td className="gp-mono">{s.colesterol || "—"}</td>
+                  <td className="gp-mono">{s.trigliceridos || "—"}</td>
+                  <td>
+                    {s.estudio ? (
+                      <a href={s.estudio.url} target="_blank" rel="noopener noreferrer" className="gp-text-gold text-xs flex items-center gap-1">
+                        <FileText size={12} /> {s.estudio.nombre.length > 14 ? s.estudio.nombre.slice(0, 14) + "…" : s.estudio.nombre}
+                      </a>
+                    ) : "—"}
+                  </td>
+                  <td className="gp-text-muted">{s.notas}</td>
+                  <td><div className="flex gap-1"><IconBtn onClick={() => setModal({ item: s })}><Pencil size={13} /></IconBtn><IconBtn onClick={() => onRemove(s.id)}><Trash2 size={13} /></IconBtn></div></td>
+                </tr>
+              );
+            })}
+            {ordenados.length === 0 && <tr><td colSpan={10} className="text-center gp-text-muted py-6">Sin registros de salud.</td></tr>}
           </tbody>
         </table>
       </div>
@@ -1280,14 +1460,47 @@ function Salud({ data, onAdd, onEdit, onRemove }) {
 
 function SaludForm({ item, onSave }) {
   const [v, setV] = useState(item);
+  const [error, setError] = useState("");
+  const [subiendo, setSubiendo] = useState(false);
+
+  const handleFile = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.type !== "application/pdf") { setError("Solo se aceptan archivos PDF."); return; }
+    if (file.size > 8 * 1024 * 1024) { setError("El PDF pesa más de 8 MB — intenta comprimirlo primero."); return; }
+    setError("");
+    setSubiendo(true);
+    const path = `${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
+    const { error: upErr } = await supabase.storage.from("estudios").upload(path, file);
+    if (upErr) {
+      setError("No se pudo subir el archivo: " + upErr.message);
+      setSubiendo(false);
+      return;
+    }
+    const { data } = supabase.storage.from("estudios").getPublicUrl(path);
+    setV((prev) => ({ ...prev, estudio: { nombre: file.name, url: data.publicUrl } }));
+    setSubiendo(false);
+  };
+
   return (
     <div>
       <div className="grid grid-cols-2 gap-3">
         <Field label="Fecha"><input type="date" className="gp-input" value={v.fecha} onChange={(e) => setV({ ...v, fecha: e.target.value })} /></Field>
         <Field label="Peso (kg)"><input type="number" className="gp-input" value={v.peso} onChange={(e) => setV({ ...v, peso: e.target.value })} /></Field>
       </div>
+      <div className="grid grid-cols-3 gap-3">
+        <Field label="Glucosa (mg/dL)"><input type="number" className="gp-input" value={v.glucosa} onChange={(e) => setV({ ...v, glucosa: e.target.value })} /></Field>
+        <Field label="Colesterol (mg/dL)"><input type="number" className="gp-input" value={v.colesterol} onChange={(e) => setV({ ...v, colesterol: e.target.value })} /></Field>
+        <Field label="Triglicéridos (mg/dL)"><input type="number" className="gp-input" value={v.trigliceridos} onChange={(e) => setV({ ...v, trigliceridos: e.target.value })} /></Field>
+      </div>
       <Field label="Notas"><textarea className="gp-input" rows={2} value={v.notas} onChange={(e) => setV({ ...v, notas: e.target.value })} /></Field>
-      <button className="gp-btn w-full py-2 text-sm mt-2" onClick={() => onSave(v)}>Guardar</button>
+      <Field label="Adjuntar estudio (PDF)">
+        <input type="file" accept="application/pdf" onChange={handleFile} className="text-xs gp-text-muted" disabled={subiendo} />
+        {subiendo && <p className="text-xs gp-text-muted mt-1">Subiendo…</p>}
+        {v.estudio && !subiendo && <p className="text-xs gp-text-teal mt-1 flex items-center gap-1"><FileText size={12} /> {v.estudio.nombre} adjunto</p>}
+        {error && <p className="text-xs gp-text-red mt-1">{error}</p>}
+      </Field>
+      <button className="gp-btn w-full py-2 text-sm mt-2" disabled={subiendo} onClick={() => onSave(v)}>Guardar</button>
     </div>
   );
 }
