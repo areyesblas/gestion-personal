@@ -4,7 +4,7 @@ import {
   LayoutDashboard, FolderKanban, CheckSquare, Wallet, AlertTriangle,
   Users, Activity, Plus, X, Trash2, Pencil, Github, ChevronDown,
   ChevronRight, Bell, Lightbulb, Rocket, MessageCircle, Mail, Globe,
-  Target, Contact, BarChart3, FileText, Flame, HeartPulse, Check,
+  Target, Contact, BarChart3, FileText, Flame, HeartPulse, Check, Menu,
 } from "lucide-react";
 
 /* ---------- estilos y tokens ---------- */
@@ -274,6 +274,7 @@ function AppLoggedIn() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState("dashboard");
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [modal, setModal] = useState(null); // { type, item }
 
   useEffect(() => {
@@ -355,23 +356,43 @@ function AppLoggedIn() {
   return (
     <div className="gp-root overflow-hidden" style={{ minHeight: "100vh" }}>
       <Tokens />
-      <div className="flex" style={{ minHeight: "100vh" }}>
-        {/* rail lateral */}
-        <div className="w-56 shrink-0 border-r gp-border p-4 flex flex-col gap-4 overflow-y-auto gp-scroll" style={{ maxHeight: "100vh" }}>
+      <div className="flex relative" style={{ minHeight: "100vh" }}>
+        {/* barra superior solo en móvil */}
+        <div className="md:hidden fixed top-0 left-0 right-0 z-30 flex items-center justify-between px-4 py-3 border-b gp-border" style={{ background: "var(--bg)" }}>
+          <button onClick={() => setMobileNavOpen(true)} className="p-2 -ml-2 gp-btn-ghost rounded" aria-label="Abrir menú">
+            <Menu size={20} />
+          </button>
+          <p className="gp-serif text-base">Centro de mando</p>
+          <button onClick={() => supabase.auth.signOut()} className="text-xs gp-text-muted px-2 py-1">Salir</button>
+        </div>
+
+        {/* fondo oscuro al abrir el cajón en móvil */}
+        {mobileNavOpen && (
+          <div className="md:hidden fixed inset-0 z-40" style={{ background: "rgba(0,0,0,.6)" }} onClick={() => setMobileNavOpen(false)} />
+        )}
+
+        {/* rail lateral / cajón */}
+        <div
+          className={`w-64 md:w-56 shrink-0 border-r gp-border p-4 flex flex-col gap-4 overflow-y-auto gp-scroll fixed md:static inset-y-0 left-0 z-50 md:z-auto transition-transform duration-200 ${mobileNavOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"}`}
+          style={{ maxHeight: "100vh", background: "var(--bg)" }}
+        >
           <div className="px-2 flex items-start justify-between">
             <div>
               <p className="gp-serif text-lg leading-tight">Centro de mando</p>
               <p className="text-xs gp-text-muted">Angel Rey</p>
             </div>
-            <button onClick={() => supabase.auth.signOut()} title="Cerrar sesión" className="text-xs gp-text-muted gp-btn-ghost px-2 py-1 rounded">Salir</button>
+            <div className="flex items-center gap-2">
+              <button onClick={() => supabase.auth.signOut()} title="Cerrar sesión" className="text-xs gp-text-muted gp-btn-ghost px-2 py-1 rounded hidden md:inline-block">Salir</button>
+              <button onClick={() => setMobileNavOpen(false)} className="md:hidden p-1 gp-btn-ghost rounded" aria-label="Cerrar menú"><X size={16} /></button>
+            </div>
           </div>
           {navGroups.map((g) => (
             <div key={g.label}>
               <p className="text-xs gp-text-muted px-3 mb-1">{g.label}</p>
               <div className="flex flex-col gap-0.5">
                 {g.items.map((n) => (
-                  <button key={n.id} onClick={() => setView(n.id)}
-                    className={`gp-navitem flex items-center gap-2 px-3 py-2 text-sm text-left ${view === n.id ? "gp-navitem-active" : ""}`}>
+                  <button key={n.id} onClick={() => { setView(n.id); setMobileNavOpen(false); }}
+                    className={`gp-navitem flex items-center gap-2 px-3 py-2.5 md:py-2 text-sm text-left ${view === n.id ? "gp-navitem-active" : ""}`}>
                     <n.icon size={15} /> {n.label}
                   </button>
                 ))}
@@ -381,7 +402,7 @@ function AppLoggedIn() {
         </div>
 
         {/* contenido */}
-        <div className="flex-1 p-6 overflow-y-auto gp-scroll" style={{ maxHeight: "100vh" }}>
+        <div className="flex-1 p-4 pt-16 md:p-6 md:pt-6 overflow-y-auto gp-scroll w-full" style={{ maxHeight: "100vh" }}>
           {view === "dashboard" && <Dashboard data={data} setView={setView} />}
           {view === "proyectos" && (
             <Proyectos data={data} onAdd={(i) => addItem("proyectos", i)} onEdit={(id, p) => editItem("proyectos", id, p)} onRemove={(id) => removeItem("proyectos", id)} />
@@ -458,14 +479,14 @@ function Dashboard({ data, setView }) {
       <h2 className="gp-serif text-2xl mb-1">Panorama general</h2>
       <p className="text-sm gp-text-muted mb-6">Lo que le da sentido a tus proyectos, en un vistazo.</p>
 
-      <div className="grid grid-cols-4 gap-3 mb-6">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
         <Stat label="Proyectos activos" value={activos} />
         <Stat label="Ideas por validar" value={ideas} />
         <Stat label="Ingresos del mes" value={fmtMoney(ingresos)} tone="teal" />
         <Stat label="Egresos del mes" value={fmtMoney(egresos)} tone="red" />
       </div>
 
-      <div className="grid grid-cols-2 gap-4 mb-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
         <div className="gp-panel p-4">
           <div className="flex items-center gap-2 mb-3"><Bell size={14} className="gp-text-gold" /><h3 className="text-sm font-medium">Recordatorios</h3></div>
           {deudasAtrasadas.length === 0 && deudasProximas.length === 0 && pendientesProximos.length === 0 && activosVencidos.length === 0 && activosProximos.length === 0 && docsProximos.length === 0 ? (
@@ -557,9 +578,9 @@ function Proyectos({ data, onAdd, onEdit, onRemove }) {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-1">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-1">
         <h2 className="gp-serif text-2xl">Proyectos e ideas</h2>
-        <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center gap-1 px-3 py-1.5 text-sm"><Plus size={14} /> Nuevo</button>
+        <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm w-full sm:w-auto"><Plus size={14} /> Nuevo</button>
       </div>
       <p className="text-sm gp-text-muted mb-6">De idea a proyecto activo — edita el estatus cuando avance.</p>
 
@@ -590,12 +611,12 @@ function Proyectos({ data, onAdd, onEdit, onRemove }) {
                   </div>
                   {expanded === p.id && (
                     <div className="px-4 pb-4 border-t gp-border pt-3">
-                      <div className="flex items-center gap-4 text-xs gp-text-muted mb-3">
+                      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs gp-text-muted mb-3">
                         <label className="flex items-center gap-1.5">
                           <input type="checkbox" checked={p.githubSubido} onChange={(e) => onEdit(p.id, { githubSubido: e.target.checked })} />
                           Subido a GitHub
                         </label>
-                        <input placeholder="link del repo (opcional)" value={p.github || ""} onChange={(e) => onEdit(p.id, { github: e.target.value })} className="gp-input" style={{ maxWidth: 240 }} />
+                        <input placeholder="link del repo (opcional)" value={p.github || ""} onChange={(e) => onEdit(p.id, { github: e.target.value })} className="gp-input flex-1" style={{ minWidth: 160, maxWidth: 280 }} />
                       </div>
                       <p className="text-xs font-medium mb-2 gp-text-muted">Bitácora de avances</p>
                       <div className="space-y-1.5 mb-2 max-h-40 overflow-y-auto gp-scroll">
@@ -632,7 +653,7 @@ function ProyectoForm({ item, onSave }) {
   return (
     <div>
       <Field label="Nombre"><input className="gp-input" value={v.nombre} onChange={(e) => setV({ ...v, nombre: e.target.value })} /></Field>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Field label="Categoría"><select className="gp-input" value={v.categoria} onChange={(e) => setV({ ...v, categoria: e.target.value })}>{CATS.map((c) => <option key={c}>{c}</option>)}</select></Field>
         <Field label="Estatus"><select className="gp-input" value={v.estatus} onChange={(e) => setV({ ...v, estatus: e.target.value })}>{ESTATUS_PROYECTO.map((c) => <option key={c}>{c}</option>)}</select></Field>
       </div>
@@ -654,9 +675,9 @@ function Pendientes({ data, onAdd, onEdit, onRemove }) {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-1">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-1">
         <h2 className="gp-serif text-2xl">Pendientes</h2>
-        <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center gap-1 px-3 py-1.5 text-sm"><Plus size={14} /> Nuevo</button>
+        <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm w-full sm:w-auto"><Plus size={14} /> Nuevo</button>
       </div>
       <p className="text-sm gp-text-muted mb-6">De todos tus proyectos, en un solo lugar.</p>
 
@@ -708,7 +729,7 @@ function PendienteForm({ item, proyectos, equipo, onSave }) {
           {proyectos.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
         </select>
       </Field>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Field label="Fecha límite"><input type="date" className="gp-input" value={v.fechaLimite} onChange={(e) => setV({ ...v, fechaLimite: e.target.value })} /></Field>
         <Field label="Prioridad"><select className="gp-input" value={v.prioridad} onChange={(e) => setV({ ...v, prioridad: e.target.value })}>{PRIORIDADES.map((c) => <option key={c}>{c}</option>)}</select></Field>
       </div>
@@ -733,9 +754,9 @@ function Finanzas({ data, onAdd, onEdit, onRemove }) {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-1">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-1">
         <h2 className="gp-serif text-2xl">Ingresos y egresos</h2>
-        <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center gap-1 px-3 py-1.5 text-sm"><Plus size={14} /> Nuevo</button>
+        <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm w-full sm:w-auto"><Plus size={14} /> Nuevo</button>
       </div>
       <p className="text-sm gp-text-muted mb-6">Incluye si el proyecto está pautando publicidad activamente.</p>
 
@@ -774,7 +795,7 @@ function FinanzaForm({ item, proyectos, onSave }) {
   const [v, setV] = useState(item);
   return (
     <div>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Field label="Tipo"><select className="gp-input" value={v.tipo} onChange={(e) => setV({ ...v, tipo: e.target.value })}>{TIPO_FIN.map((c) => <option key={c}>{c}</option>)}</select></Field>
         <Field label="Fecha"><input type="date" className="gp-input" value={v.fecha} onChange={(e) => setV({ ...v, fecha: e.target.value })} /></Field>
       </div>
@@ -784,11 +805,11 @@ function FinanzaForm({ item, proyectos, onSave }) {
           {proyectos.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
         </select>
       </Field>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Field label="Categoría"><input className="gp-input" value={v.categoria} onChange={(e) => setV({ ...v, categoria: e.target.value })} placeholder="ej. hosting, venta, renta" /></Field>
         <Field label="Monto"><input type="number" className="gp-input" value={v.monto} onChange={(e) => setV({ ...v, monto: e.target.value })} /></Field>
       </div>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Field label="Forma"><select className="gp-input" value={v.forma} onChange={(e) => setV({ ...v, forma: e.target.value })}>{FORMA_PAGO.map((c) => <option key={c}>{c}</option>)}</select></Field>
         <Field label="Estatus"><select className="gp-input" value={v.estatus} onChange={(e) => setV({ ...v, estatus: e.target.value })}><option>Cobrado</option><option>Pendiente</option></select></Field>
       </div>
@@ -809,9 +830,9 @@ function Deudas({ data, onAdd, onEdit, onRemove }) {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-1">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-1">
         <h2 className="gp-serif text-2xl">Deudas</h2>
-        <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center gap-1 px-3 py-1.5 text-sm"><Plus size={14} /> Nueva</button>
+        <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm w-full sm:w-auto"><Plus size={14} /> Nueva</button>
       </div>
       <p className="text-sm gp-text-muted mb-6">Atrasadas, próximas a vencer y al corriente, todo calculado por fecha.</p>
 
@@ -859,7 +880,7 @@ function DeudaForm({ item, proyectos, onSave }) {
           {proyectos.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
         </select>
       </Field>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Field label="Monto"><input type="number" className="gp-input" value={v.monto} onChange={(e) => setV({ ...v, monto: e.target.value })} /></Field>
         <Field label="Fecha de vencimiento"><input type="date" className="gp-input" value={v.fechaVencimiento} onChange={(e) => setV({ ...v, fechaVencimiento: e.target.value })} /></Field>
       </div>
@@ -876,13 +897,13 @@ function Equipo({ data, onAdd, onEdit, onRemove }) {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-1">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-1">
         <h2 className="gp-serif text-2xl">Equipo</h2>
-        <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center gap-1 px-3 py-1.5 text-sm"><Plus size={14} /> Nuevo</button>
+        <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm w-full sm:w-auto"><Plus size={14} /> Nuevo</button>
       </div>
       <p className="text-sm gp-text-muted mb-6">Colaboradores a los que delegas, con sus tareas y tu evaluación.</p>
 
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         {data.equipo.map((m) => {
           const tareas = tareasDe(m.id);
           const totalPagado = tareas.reduce((s, t) => s + Number(t.precio || 0), 0);
@@ -923,7 +944,7 @@ function EquipoForm({ item, onSave }) {
   return (
     <div>
       <Field label="Nombre"><input className="gp-input" value={v.nombre} onChange={(e) => setV({ ...v, nombre: e.target.value })} /></Field>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Field label="WhatsApp"><input className="gp-input" value={v.whatsapp} onChange={(e) => setV({ ...v, whatsapp: e.target.value })} /></Field>
         <Field label="Correo (opcional)"><input className="gp-input" value={v.correo} onChange={(e) => setV({ ...v, correo: e.target.value })} /></Field>
       </div>
@@ -942,9 +963,9 @@ function Actividades({ data, onAdd, onEdit, onRemove }) {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-1">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-1">
         <h2 className="gp-serif text-2xl">Actividades y vida</h2>
-        <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center gap-1 px-3 py-1.5 text-sm"><Plus size={14} /> Registrar</button>
+        <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm w-full sm:w-auto"><Plus size={14} /> Registrar</button>
       </div>
       <p className="text-sm gp-text-muted mb-6">Gym, eventos, capacitación (PLC's, Vibe Coding/SDD, inglés) — un registro rápido de todo lo que construye tu semana.</p>
 
@@ -981,7 +1002,7 @@ function ActividadForm({ item, proyectos, onSave }) {
   const [v, setV] = useState(item);
   return (
     <div>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Field label="Tipo"><select className="gp-input" value={v.tipo} onChange={(e) => setV({ ...v, tipo: e.target.value })}>{TIPO_ACTIVIDAD.map((c) => <option key={c}>{c}</option>)}</select></Field>
         <Field label="Fecha"><input type="date" className="gp-input" value={v.fecha} onChange={(e) => setV({ ...v, fecha: e.target.value })} /></Field>
       </div>
@@ -1008,9 +1029,9 @@ function ActivosDigitales({ data, onAdd, onEdit, onRemove }) {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-1">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-1">
         <h2 className="gp-serif text-2xl">Activos digitales</h2>
-        <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center gap-1 px-3 py-1.5 text-sm"><Plus size={14} /> Nuevo</button>
+        <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm w-full sm:w-auto"><Plus size={14} /> Nuevo</button>
       </div>
       <p className="text-sm gp-text-muted mb-6">Dominios, hosting, marcas ante IMPI y redes — para que ningún vencimiento te tome por sorpresa.</p>
 
@@ -1052,7 +1073,7 @@ function ActivoForm({ item, proyectos, onSave }) {
   const [v, setV] = useState(item);
   return (
     <div>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Field label="Tipo"><select className="gp-input" value={v.tipo} onChange={(e) => setV({ ...v, tipo: e.target.value })}>{TIPO_ACTIVO.map((c) => <option key={c}>{c}</option>)}</select></Field>
         <Field label="Nombre"><input className="gp-input" placeholder="ej. armoniq.mx, marca ARKeyData" value={v.nombre} onChange={(e) => setV({ ...v, nombre: e.target.value })} /></Field>
       </div>
@@ -1062,7 +1083,7 @@ function ActivoForm({ item, proyectos, onSave }) {
           {proyectos.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
         </select>
       </Field>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Field label="Fecha de vencimiento"><input type="date" className="gp-input" value={v.fechaVencimiento} onChange={(e) => setV({ ...v, fechaVencimiento: e.target.value })} /></Field>
         <Field label="Costo de renovación"><input type="number" className="gp-input" value={v.costoRenovacion} onChange={(e) => setV({ ...v, costoRenovacion: e.target.value })} /></Field>
       </div>
@@ -1081,9 +1102,9 @@ function Metas({ data, onAdd, onEdit, onRemove }) {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-1">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-1">
         <h2 className="gp-serif text-2xl">Metas por proyecto</h2>
-        <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center gap-1 px-3 py-1.5 text-sm"><Plus size={14} /> Nueva</button>
+        <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm w-full sm:w-auto"><Plus size={14} /> Nueva</button>
       </div>
       <p className="text-sm gp-text-muted mb-6">Qué define el éxito de cada proyecto, para que la bitácora tenga rumbo.</p>
 
@@ -1129,7 +1150,7 @@ function MetaForm({ item, proyectos, onSave }) {
         </select>
       </Field>
       <Field label="Meta"><input className="gp-input" placeholder="ej. Llegar a 1000 seguidores, cerrar 3 clientes" value={v.descripcion} onChange={(e) => setV({ ...v, descripcion: e.target.value })} /></Field>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Field label="Fecha objetivo"><input type="date" className="gp-input" value={v.fechaObjetivo} onChange={(e) => setV({ ...v, fechaObjetivo: e.target.value })} /></Field>
         <Field label="Estatus"><select className="gp-input" value={v.estatus} onChange={(e) => setV({ ...v, estatus: e.target.value })}>{ESTATUS_META.map((c) => <option key={c}>{c}</option>)}</select></Field>
       </div>
@@ -1146,13 +1167,13 @@ function Contactos({ data, onAdd, onEdit, onRemove }) {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-1">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-1">
         <h2 className="gp-serif text-2xl">Contactos</h2>
-        <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center gap-1 px-3 py-1.5 text-sm"><Plus size={14} /> Nuevo</button>
+        <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm w-full sm:w-auto"><Plus size={14} /> Nuevo</button>
       </div>
       <p className="text-sm gp-text-muted mb-6">Gente que conoces en eventos y clientes potenciales — para que no se pierdan.</p>
 
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         {data.contactos.map((c) => (
           <div key={c.id} className="gp-panel p-4">
             <div className="flex items-start justify-between">
@@ -1193,7 +1214,7 @@ function ContactoForm({ item, proyectos, onSave }) {
           {proyectos.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
         </select>
       </Field>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Field label="WhatsApp"><input className="gp-input" value={v.whatsapp} onChange={(e) => setV({ ...v, whatsapp: e.target.value })} /></Field>
         <Field label="Correo (opcional)"><input className="gp-input" value={v.correo} onChange={(e) => setV({ ...v, correo: e.target.value })} /></Field>
       </div>
@@ -1212,9 +1233,9 @@ function RedesSociales({ data, onAdd, onEdit, onRemove }) {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-1">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-1">
         <h2 className="gp-serif text-2xl">Redes sociales</h2>
-        <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center gap-1 px-3 py-1.5 text-sm"><Plus size={14} /> Registrar</button>
+        <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm w-full sm:w-auto"><Plus size={14} /> Registrar</button>
       </div>
       <p className="text-sm gp-text-muted mb-6">Seguidores y alcance por proyecto y plataforma, para cruzarlo con ingresos.</p>
 
@@ -1256,11 +1277,11 @@ function RedesForm({ item, proyectos, onSave }) {
           {proyectos.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
         </select>
       </Field>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Field label="Plataforma"><select className="gp-input" value={v.plataforma} onChange={(e) => setV({ ...v, plataforma: e.target.value })}>{PLATAFORMAS.map((c) => <option key={c}>{c}</option>)}</select></Field>
         <Field label="Fecha"><input type="date" className="gp-input" value={v.fecha} onChange={(e) => setV({ ...v, fecha: e.target.value })} /></Field>
       </div>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Field label="Seguidores"><input type="number" className="gp-input" value={v.seguidores} onChange={(e) => setV({ ...v, seguidores: e.target.value })} /></Field>
         <Field label="Alcance / engagement"><input type="number" className="gp-input" value={v.alcance} onChange={(e) => setV({ ...v, alcance: e.target.value })} /></Field>
       </div>
@@ -1278,9 +1299,9 @@ function Documentos({ data, onAdd, onEdit, onRemove }) {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-1">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-1">
         <h2 className="gp-serif text-2xl">Legal y contratos</h2>
-        <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center gap-1 px-3 py-1.5 text-sm"><Plus size={14} /> Nuevo</button>
+        <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm w-full sm:w-auto"><Plus size={14} /> Nuevo</button>
       </div>
       <p className="text-sm gp-text-muted mb-6">Contratos, registros de marca ante IMPI y demás documentos, por proyecto.</p>
 
@@ -1316,7 +1337,7 @@ function DocumentoForm({ item, proyectos, onSave }) {
   const [v, setV] = useState(item);
   return (
     <div>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Field label="Tipo"><select className="gp-input" value={v.tipo} onChange={(e) => setV({ ...v, tipo: e.target.value })}>{TIPO_DOCUMENTO.map((c) => <option key={c}>{c}</option>)}</select></Field>
         <Field label="Nombre"><input className="gp-input" value={v.nombre} onChange={(e) => setV({ ...v, nombre: e.target.value })} /></Field>
       </div>
@@ -1358,9 +1379,9 @@ function Habitos({ data, onAdd, onEdit, onRemove }) {
       <h2 className="gp-serif text-2xl mb-1">Hábitos</h2>
       <p className="text-sm gp-text-muted mb-6">Marca el día con un clic. La racha se calcula sola.</p>
 
-      <div className="flex gap-2 mb-5">
-        <input className="gp-input" placeholder="ej. Leer 20 min, Practicar inglés" value={nuevo} onChange={(e) => setNuevo(e.target.value)} onKeyDown={(e) => e.key === "Enter" && nuevo.trim() && (onAdd({ nombre: nuevo, fechas: [] }), setNuevo(""))} style={{ maxWidth: 320 }} />
-        <button className="gp-btn px-3 text-sm" onClick={() => { if (nuevo.trim()) { onAdd({ nombre: nuevo, fechas: [] }); setNuevo(""); } }}>Agregar hábito</button>
+      <div className="flex flex-col sm:flex-row gap-2 mb-5">
+        <input className="gp-input flex-1 sm:max-w-xs" placeholder="ej. Leer 20 min, Practicar inglés" value={nuevo} onChange={(e) => setNuevo(e.target.value)} onKeyDown={(e) => e.key === "Enter" && nuevo.trim() && (onAdd({ nombre: nuevo, fechas: [] }), setNuevo(""))} />
+        <button className="gp-btn px-3 py-2 sm:py-0 text-sm" onClick={() => { if (nuevo.trim()) { onAdd({ nombre: nuevo, fechas: [] }); setNuevo(""); } }}>Agregar hábito</button>
       </div>
 
       <div className="space-y-2">
@@ -1401,13 +1422,13 @@ function Salud({ data, onAdd, onEdit, onRemove, onUpdatePerfil }) {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-1">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-1">
         <h2 className="gp-serif text-2xl">Salud</h2>
-        <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center gap-1 px-3 py-1.5 text-sm"><Plus size={14} /> Registrar</button>
+        <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm w-full sm:w-auto"><Plus size={14} /> Registrar</button>
       </div>
       <p className="text-sm gp-text-muted mb-4">Peso, glucosa, colesterol, triglicéridos y tus estudios en PDF, todo en un mismo historial.</p>
 
-      <div className="gp-panel p-3 mb-5 flex items-center gap-3">
+      <div className="gp-panel p-3 mb-5 flex flex-wrap items-center gap-3">
         <span className="text-xs gp-text-muted">Tu estatura (para calcular IMC):</span>
         <input type="number" className="gp-input" style={{ maxWidth: 100 }} value={altura}
           onChange={(e) => setAltura(e.target.value)}
@@ -1484,11 +1505,11 @@ function SaludForm({ item, onSave }) {
 
   return (
     <div>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Field label="Fecha"><input type="date" className="gp-input" value={v.fecha} onChange={(e) => setV({ ...v, fecha: e.target.value })} /></Field>
         <Field label="Peso (kg)"><input type="number" className="gp-input" value={v.peso} onChange={(e) => setV({ ...v, peso: e.target.value })} /></Field>
       </div>
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <Field label="Glucosa (mg/dL)"><input type="number" className="gp-input" value={v.glucosa} onChange={(e) => setV({ ...v, glucosa: e.target.value })} /></Field>
         <Field label="Colesterol (mg/dL)"><input type="number" className="gp-input" value={v.colesterol} onChange={(e) => setV({ ...v, colesterol: e.target.value })} /></Field>
         <Field label="Triglicéridos (mg/dL)"><input type="number" className="gp-input" value={v.trigliceridos} onChange={(e) => setV({ ...v, trigliceridos: e.target.value })} /></Field>
