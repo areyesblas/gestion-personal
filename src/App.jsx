@@ -281,7 +281,7 @@ function AppLoggedIn() {
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState("dashboard");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
-  const [modal, setModal] = useState(null); // { type, item }
+  const [confirmDelete, setConfirmDelete] = useState(null); // { key, id, label }
 
   useEffect(() => {
     (async () => {
@@ -317,10 +317,29 @@ function AppLoggedIn() {
     if (error) { console.error(`Error al borrar en ${tableName(key)}:`, error); alert("No se pudo borrar."); return; }
     setData((prev) => ({ ...prev, [key]: prev[key].filter((i) => i.id !== id) }));
   };
+  const askDelete = (key, id) => setConfirmDelete({ key, id });
   const updatePerfilSalud = async (patch) => {
     const { error } = await supabase.from("perfil_salud").upsert({ id: "main", altura_cm: patch.alturaCm || null });
     if (error) { console.error("Error al guardar tu estatura:", error); return; }
     setData((prev) => ({ ...prev, perfilSalud: { ...(prev.perfilSalud || {}), ...patch } }));
+  };
+  const moverFondosApartado = async (apartado, { monto, proyectoId, concepto, nuevoMontoActual }) => {
+    await editItem("apartados", apartado.id, { montoActual: nuevoMontoActual });
+    await addItem("finanzas", {
+      concepto,
+      tipo: "Ingreso",
+      proyectoId: proyectoId || "",
+      contactoId: "",
+      fecha: todayISO(),
+      monto: String(monto),
+      categoria: "Movimiento de apartado",
+      forma: "Transferencia",
+      estatus: "Cobrado",
+      pautando: false,
+      esRecurrente: false,
+      frecuencia: "Mensual",
+      fechaFin: "",
+    });
   };
 
   if (loading || !data) {
@@ -414,53 +433,75 @@ function AppLoggedIn() {
         <div className="flex-1 p-4 pt-16 md:p-6 md:pt-6 overflow-y-auto gp-scroll w-full" style={{ maxHeight: "100vh" }}>
           {view === "dashboard" && <Dashboard data={data} setView={setView} />}
           {view === "proyectos" && (
-            <Proyectos data={data} onAdd={(i) => addItem("proyectos", i)} onEdit={(id, p) => editItem("proyectos", id, p)} onRemove={(id) => removeItem("proyectos", id)} />
+            <Proyectos data={data} onAdd={(i) => addItem("proyectos", i)} onEdit={(id, p) => editItem("proyectos", id, p)} onRemove={(id) => askDelete("proyectos", id)} />
           )}
           {view === "metas" && (
-            <Metas data={data} onAdd={(i) => addItem("metas", i)} onEdit={(id, p) => editItem("metas", id, p)} onRemove={(id) => removeItem("metas", id)} />
+            <Metas data={data} onAdd={(i) => addItem("metas", i)} onEdit={(id, p) => editItem("metas", id, p)} onRemove={(id) => askDelete("metas", id)} />
           )}
           {view === "pendientes" && (
-            <Pendientes data={data} onAdd={(i) => addItem("pendientes", i)} onEdit={(id, p) => editItem("pendientes", id, p)} onRemove={(id) => removeItem("pendientes", id)} />
+            <Pendientes data={data} onAdd={(i) => addItem("pendientes", i)} onEdit={(id, p) => editItem("pendientes", id, p)} onRemove={(id) => askDelete("pendientes", id)} />
           )}
           {view === "finanzas" && (
-            <Finanzas data={data} onAdd={(i) => addItem("finanzas", i)} onEdit={(id, p) => editItem("finanzas", id, p)} onRemove={(id) => removeItem("finanzas", id)} />
+            <Finanzas data={data} onAdd={(i) => addItem("finanzas", i)} onEdit={(id, p) => editItem("finanzas", id, p)} onRemove={(id) => askDelete("finanzas", id)} />
           )}
           {view === "reportes" && <Reportes data={data} />}
           {view === "deudas" && (
-            <Deudas data={data} onAdd={(i) => addItem("deudas", i)} onEdit={(id, p) => editItem("deudas", id, p)} onRemove={(id) => removeItem("deudas", id)} />
+            <Deudas data={data} onAdd={(i) => addItem("deudas", i)} onEdit={(id, p) => editItem("deudas", id, p)} onRemove={(id) => askDelete("deudas", id)} />
           )}
           {view === "apartados" && (
-            <Apartados data={data} onAdd={(i) => addItem("apartados", i)} onEdit={(id, p) => editItem("apartados", id, p)} onRemove={(id) => removeItem("apartados", id)} />
+            <Apartados data={data} onAdd={(i) => addItem("apartados", i)} onEdit={(id, p) => editItem("apartados", id, p)} onRemove={(id) => askDelete("apartados", id)} onMoverFondos={moverFondosApartado} />
           )}
           {view === "documentos" && (
-            <Documentos data={data} onAdd={(i) => addItem("documentos", i)} onEdit={(id, p) => editItem("documentos", id, p)} onRemove={(id) => removeItem("documentos", id)} />
+            <Documentos data={data} onAdd={(i) => addItem("documentos", i)} onEdit={(id, p) => editItem("documentos", id, p)} onRemove={(id) => askDelete("documentos", id)} />
           )}
           {view === "equipo" && (
-            <Equipo data={data} onAdd={(i) => addItem("equipo", i)} onEdit={(id, p) => editItem("equipo", id, p)} onRemove={(id) => removeItem("equipo", id)} />
+            <Equipo data={data} onAdd={(i) => addItem("equipo", i)} onEdit={(id, p) => editItem("equipo", id, p)} onRemove={(id) => askDelete("equipo", id)} />
           )}
           {view === "contactos" && (
-            <Contactos data={data} onAdd={(i) => addItem("contactos", i)} onEdit={(id, p) => editItem("contactos", id, p)} onRemove={(id) => removeItem("contactos", id)} />
+            <Contactos data={data} onAdd={(i) => addItem("contactos", i)} onEdit={(id, p) => editItem("contactos", id, p)} onRemove={(id) => askDelete("contactos", id)} />
           )}
           {view === "redes" && (
-            <RedesSociales data={data} onAdd={(i) => addItem("redesMetricas", i)} onEdit={(id, p) => editItem("redesMetricas", id, p)} onRemove={(id) => removeItem("redesMetricas", id)} />
+            <RedesSociales data={data} onAdd={(i) => addItem("redesMetricas", i)} onEdit={(id, p) => editItem("redesMetricas", id, p)} onRemove={(id) => askDelete("redesMetricas", id)} />
           )}
           {view === "actividades" && (
-            <Actividades data={data} onAdd={(i) => addItem("actividades", i)} onEdit={(id, p) => editItem("actividades", id, p)} onRemove={(id) => removeItem("actividades", id)} />
+            <Actividades data={data} onAdd={(i) => addItem("actividades", i)} onEdit={(id, p) => editItem("actividades", id, p)} onRemove={(id) => askDelete("actividades", id)} />
           )}
           {view === "eventos" && (
-            <Eventos data={data} onAdd={(i) => addItem("eventos", i)} onEdit={(id, p) => editItem("eventos", id, p)} onRemove={(id) => removeItem("eventos", id)} />
+            <Eventos data={data} onAdd={(i) => addItem("eventos", i)} onEdit={(id, p) => editItem("eventos", id, p)} onRemove={(id) => askDelete("eventos", id)} />
           )}
           {view === "habitos" && (
-            <Habitos data={data} onAdd={(i) => addItem("habitos", i)} onEdit={(id, p) => editItem("habitos", id, p)} onRemove={(id) => removeItem("habitos", id)} />
+            <Habitos data={data} onAdd={(i) => addItem("habitos", i)} onEdit={(id, p) => editItem("habitos", id, p)} onRemove={(id) => askDelete("habitos", id)} />
           )}
           {view === "salud" && (
-            <Salud data={data} onAdd={(i) => addItem("salud", i)} onEdit={(id, p) => editItem("salud", id, p)} onRemove={(id) => removeItem("salud", id)} onUpdatePerfil={updatePerfilSalud} />
+            <Salud data={data} onAdd={(i) => addItem("salud", i)} onEdit={(id, p) => editItem("salud", id, p)} onRemove={(id) => askDelete("salud", id)} onUpdatePerfil={updatePerfilSalud} />
           )}
           {view === "activos" && (
-            <ActivosDigitales data={data} onAdd={(i) => addItem("activos", i)} onEdit={(id, p) => editItem("activos", id, p)} onRemove={(id) => removeItem("activos", id)} />
+            <ActivosDigitales data={data} onAdd={(i) => addItem("activos", i)} onEdit={(id, p) => editItem("activos", id, p)} onRemove={(id) => askDelete("activos", id)} />
           )}
         </div>
       </div>
+
+      {confirmDelete && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,.6)" }} onClick={() => setConfirmDelete(null)}>
+          <div className="gp-panel w-full max-w-sm p-5" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-2 mb-2">
+              <AlertTriangle size={16} className="gp-text-red" />
+              <h3 className="gp-serif text-lg">¿Eliminar esto?</h3>
+            </div>
+            <p className="text-sm gp-text-muted mb-5">Esta acción no se puede deshacer.</p>
+            <div className="flex gap-2">
+              <button onClick={() => setConfirmDelete(null)} className="gp-btn-ghost flex-1 py-2 text-sm">Cancelar</button>
+              <button
+                onClick={() => { removeItem(confirmDelete.key, confirmDelete.id); setConfirmDelete(null); }}
+                className="flex-1 py-2 text-sm rounded"
+                style={{ background: "var(--red)", color: "#fff" }}
+              >
+                Eliminar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -748,6 +789,7 @@ function Proyectos({ data, onAdd, onEdit, onRemove }) {
 
 function ProyectoForm({ item, onSave }) {
   const [v, setV] = useState(item);
+  const [error, setError] = useState("");
   return (
     <div>
       <Field label="Nombre"><input className="gp-input" value={v.nombre} onChange={(e) => setV({ ...v, nombre: e.target.value })} /></Field>
@@ -757,7 +799,9 @@ function ProyectoForm({ item, onSave }) {
       </div>
       <Field label="Cómo genera valor"><select className="gp-input" value={v.monetizacion} onChange={(e) => setV({ ...v, monetizacion: e.target.value })}>{MONETIZACION.map((c) => <option key={c}>{c}</option>)}</select></Field>
       <Field label="Descripción"><textarea className="gp-input" rows={3} value={v.descripcion} onChange={(e) => setV({ ...v, descripcion: e.target.value })} /></Field>
-      <button className="gp-btn w-full py-2 text-sm mt-2" onClick={() => onSave(v)}>Guardar</button>
+      {error && <p className="text-xs gp-text-red mb-2">{error}</p>}
+
+      <button className="gp-btn w-full py-2 text-sm mt-2" onClick={() => { if (!v.nombre?.toString().trim()) { setError("El nombre del proyecto es obligatorio."); return; } setError(""); onSave(v); }}>Guardar</button>
     </div>
   );
 }
@@ -820,6 +864,7 @@ function Pendientes({ data, onAdd, onEdit, onRemove }) {
 
 function PendienteForm({ item, proyectos, equipo, contactos, onSave }) {
   const [v, setV] = useState(item);
+  const [error, setError] = useState("");
   return (
     <div>
       <Field label="Descripción"><input className="gp-input" value={v.descripcion} onChange={(e) => setV({ ...v, descripcion: e.target.value })} /></Field>
@@ -846,7 +891,9 @@ function PendienteForm({ item, proyectos, equipo, contactos, onSave }) {
         </select>
       </Field>
       <Field label="Precio pactado (si es delegado)"><input type="number" className="gp-input" value={v.precio} onChange={(e) => setV({ ...v, precio: e.target.value })} /></Field>
-      <button className="gp-btn w-full py-2 text-sm mt-2" onClick={() => onSave(v)}>Guardar</button>
+      {error && <p className="text-xs gp-text-red mb-2">{error}</p>}
+
+      <button className="gp-btn w-full py-2 text-sm mt-2" onClick={() => { if (!v.descripcion?.toString().trim()) { setError("La descripción del pendiente es obligatoria."); return; } setError(""); onSave(v); }}>Guardar</button>
     </div>
   );
 }
@@ -980,6 +1027,7 @@ function Finanzas({ data, onAdd, onEdit, onRemove }) {
 
 function FinanzaForm({ item, proyectos, contactos, onSave }) {
   const [v, setV] = useState(item);
+  const [error, setError] = useState("");
   return (
     <div>
       <Field label="Concepto"><input className="gp-input" placeholder="ej. Claude, PlanetFitness, Renta Xochinahuac" value={v.concepto || ""} onChange={(e) => setV({ ...v, concepto: e.target.value })} /></Field>
@@ -1029,7 +1077,10 @@ function FinanzaForm({ item, proyectos, contactos, onSave }) {
         )}
       </div>
 
-      <button className="gp-btn w-full py-2 text-sm mt-1" onClick={() => onSave(v)}>Guardar</button>
+      {error && <p className="text-xs gp-text-red mb-2">{error}</p>}
+
+
+      <button className="gp-btn w-full py-2 text-sm mt-1" onClick={() => { if (!v.concepto?.toString().trim()) { setError("El concepto es obligatorio."); return; } setError(""); onSave(v); }}>Guardar</button>
     </div>
   );
 }
@@ -1084,6 +1135,7 @@ function Deudas({ data, onAdd, onEdit, onRemove }) {
 
 function DeudaForm({ item, proyectos, onSave }) {
   const [v, setV] = useState(item);
+  const [error, setError] = useState("");
   return (
     <div>
       <Field label="Acreedor"><input className="gp-input" value={v.acreedor} onChange={(e) => setV({ ...v, acreedor: e.target.value })} /></Field>
@@ -1097,7 +1149,9 @@ function DeudaForm({ item, proyectos, onSave }) {
         <Field label="Monto"><input type="number" className="gp-input" value={v.monto} onChange={(e) => setV({ ...v, monto: e.target.value })} /></Field>
         <Field label="Fecha de vencimiento"><input type="date" className="gp-input" value={v.fechaVencimiento} onChange={(e) => setV({ ...v, fechaVencimiento: e.target.value })} /></Field>
       </div>
-      <button className="gp-btn w-full py-2 text-sm mt-2" onClick={() => onSave(v)}>Guardar</button>
+      {error && <p className="text-xs gp-text-red mb-2">{error}</p>}
+
+      <button className="gp-btn w-full py-2 text-sm mt-2" onClick={() => { if (!v.acreedor?.toString().trim()) { setError("El acreedor es obligatorio."); return; } setError(""); onSave(v); }}>Guardar</button>
     </div>
   );
 }
@@ -1154,6 +1208,7 @@ function Equipo({ data, onAdd, onEdit, onRemove }) {
 
 function EquipoForm({ item, onSave }) {
   const [v, setV] = useState(item);
+  const [error, setError] = useState("");
   return (
     <div>
       <Field label="Nombre"><input className="gp-input" value={v.nombre} onChange={(e) => setV({ ...v, nombre: e.target.value })} /></Field>
@@ -1162,7 +1217,9 @@ function EquipoForm({ item, onSave }) {
         <Field label="Correo (opcional)"><input className="gp-input" value={v.correo} onChange={(e) => setV({ ...v, correo: e.target.value })} /></Field>
       </div>
       <Field label="Comentarios sobre esta persona"><textarea className="gp-input" rows={3} value={v.comentarios} onChange={(e) => setV({ ...v, comentarios: e.target.value })} /></Field>
-      <button className="gp-btn w-full py-2 text-sm mt-2" onClick={() => onSave(v)}>Guardar</button>
+      {error && <p className="text-xs gp-text-red mb-2">{error}</p>}
+
+      <button className="gp-btn w-full py-2 text-sm mt-2" onClick={() => { if (!v.nombre?.toString().trim()) { setError("El nombre es obligatorio."); return; } setError(""); onSave(v); }}>Guardar</button>
     </div>
   );
 }
@@ -1213,6 +1270,7 @@ function Actividades({ data, onAdd, onEdit, onRemove }) {
 
 function ActividadForm({ item, proyectos, onSave }) {
   const [v, setV] = useState(item);
+  const [error, setError] = useState("");
   return (
     <div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -1228,7 +1286,9 @@ function ActividadForm({ item, proyectos, onSave }) {
       </Field>
       <Field label="Ganancia generada (si aplica)"><input type="number" className="gp-input" value={v.ganancia} onChange={(e) => setV({ ...v, ganancia: e.target.value })} /></Field>
       <Field label="Notas"><textarea className="gp-input" rows={2} value={v.notas} onChange={(e) => setV({ ...v, notas: e.target.value })} /></Field>
-      <button className="gp-btn w-full py-2 text-sm mt-2" onClick={() => onSave(v)}>Guardar</button>
+      {error && <p className="text-xs gp-text-red mb-2">{error}</p>}
+
+      <button className="gp-btn w-full py-2 text-sm mt-2" onClick={() => { if (!v.nombre?.toString().trim()) { setError("El nombre de la actividad es obligatorio."); return; } setError(""); onSave(v); }}>Guardar</button>
     </div>
   );
 }
@@ -1284,6 +1344,7 @@ function ActivosDigitales({ data, onAdd, onEdit, onRemove }) {
 
 function ActivoForm({ item, proyectos, onSave }) {
   const [v, setV] = useState(item);
+  const [error, setError] = useState("");
   return (
     <div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -1301,7 +1362,9 @@ function ActivoForm({ item, proyectos, onSave }) {
         <Field label="Costo de renovación"><input type="number" className="gp-input" value={v.costoRenovacion} onChange={(e) => setV({ ...v, costoRenovacion: e.target.value })} /></Field>
       </div>
       <Field label="Notas"><textarea className="gp-input" rows={2} value={v.notas} onChange={(e) => setV({ ...v, notas: e.target.value })} /></Field>
-      <button className="gp-btn w-full py-2 text-sm mt-2" onClick={() => onSave(v)}>Guardar</button>
+      {error && <p className="text-xs gp-text-red mb-2">{error}</p>}
+
+      <button className="gp-btn w-full py-2 text-sm mt-2" onClick={() => { if (!v.nombre?.toString().trim()) { setError("El nombre del activo es obligatorio."); return; } setError(""); onSave(v); }}>Guardar</button>
     </div>
   );
 }
@@ -1354,6 +1417,7 @@ function Metas({ data, onAdd, onEdit, onRemove }) {
 
 function MetaForm({ item, proyectos, onSave }) {
   const [v, setV] = useState(item);
+  const [error, setError] = useState("");
   return (
     <div>
       <Field label="Proyecto">
@@ -1367,7 +1431,9 @@ function MetaForm({ item, proyectos, onSave }) {
         <Field label="Fecha objetivo"><input type="date" className="gp-input" value={v.fechaObjetivo} onChange={(e) => setV({ ...v, fechaObjetivo: e.target.value })} /></Field>
         <Field label="Estatus"><select className="gp-input" value={v.estatus} onChange={(e) => setV({ ...v, estatus: e.target.value })}>{ESTATUS_META.map((c) => <option key={c}>{c}</option>)}</select></Field>
       </div>
-      <button className="gp-btn w-full py-2 text-sm mt-2" onClick={() => onSave(v)}>Guardar</button>
+      {error && <p className="text-xs gp-text-red mb-2">{error}</p>}
+
+      <button className="gp-btn w-full py-2 text-sm mt-2" onClick={() => { if (!v.descripcion?.toString().trim()) { setError("La meta es obligatoria."); return; } setError(""); onSave(v); }}>Guardar</button>
     </div>
   );
 }
@@ -1429,6 +1495,7 @@ function Contactos({ data, onAdd, onEdit, onRemove }) {
 
 function ContactoForm({ item, proyectos, onSave }) {
   const [v, setV] = useState(item);
+  const [error, setError] = useState("");
   return (
     <div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -1451,7 +1518,9 @@ function ContactoForm({ item, proyectos, onSave }) {
         <Field label="Correo (opcional)"><input className="gp-input" value={v.correo} onChange={(e) => setV({ ...v, correo: e.target.value })} /></Field>
       </div>
       <Field label="Notas"><textarea className="gp-input" rows={2} value={v.notas} onChange={(e) => setV({ ...v, notas: e.target.value })} /></Field>
-      <button className="gp-btn w-full py-2 text-sm mt-2" onClick={() => onSave(v)}>Guardar</button>
+      {error && <p className="text-xs gp-text-red mb-2">{error}</p>}
+
+      <button className="gp-btn w-full py-2 text-sm mt-2" onClick={() => { if (!v.nombre?.toString().trim()) { setError("El nombre del contacto es obligatorio."); return; } setError(""); onSave(v); }}>Guardar</button>
     </div>
   );
 }
@@ -1567,6 +1636,7 @@ function Documentos({ data, onAdd, onEdit, onRemove }) {
 
 function DocumentoForm({ item, proyectos, onSave }) {
   const [v, setV] = useState(item);
+  const [error, setError] = useState("");
   return (
     <div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -1581,7 +1651,9 @@ function DocumentoForm({ item, proyectos, onSave }) {
       </Field>
       <Field label="Fecha de vencimiento (si aplica)"><input type="date" className="gp-input" value={v.fechaVencimiento} onChange={(e) => setV({ ...v, fechaVencimiento: e.target.value })} /></Field>
       <Field label="Notas"><textarea className="gp-input" rows={2} value={v.notas} onChange={(e) => setV({ ...v, notas: e.target.value })} /></Field>
-      <button className="gp-btn w-full py-2 text-sm mt-2" onClick={() => onSave(v)}>Guardar</button>
+      {error && <p className="text-xs gp-text-red mb-2">{error}</p>}
+
+      <button className="gp-btn w-full py-2 text-sm mt-2" onClick={() => { if (!v.nombre?.toString().trim()) { setError("El nombre del documento es obligatorio."); return; } setError(""); onSave(v); }}>Guardar</button>
     </div>
   );
 }
@@ -1918,9 +1990,10 @@ function Reportes({ data }) {
 }
 
 /* ---------- Apartados / metas de ahorro ---------- */
-function Apartados({ data, onAdd, onEdit, onRemove }) {
+function Apartados({ data, onAdd, onEdit, onRemove, onMoverFondos }) {
   const [modal, setModal] = useState(null);
   const [fondoModal, setFondoModal] = useState(null); // { apartado }
+  const [moverModal, setMoverModal] = useState(null); // { apartado }
   const empty = { nombre: "", proyectoId: "", montoObjetivo: "", montoActual: "0", fechaObjetivo: "", notas: "" };
   const nombreProyecto = (id) => data.proyectos.find((p) => p.id === id)?.nombre || "—";
 
@@ -1957,9 +2030,14 @@ function Apartados({ data, onAdd, onEdit, onRemove }) {
                 </div>
               </div>
               {a.notas && <p className="text-xs gp-text-muted mt-3">{a.notas}</p>}
-              <button onClick={() => setFondoModal({ apartado: a })} className="gp-btn-ghost w-full py-1.5 text-xs mt-3">
-                {completo ? "Meta alcanzada — ajustar monto" : "Agregar fondos"}
-              </button>
+              <div className="flex gap-2 mt-3">
+                <button onClick={() => setFondoModal({ apartado: a })} className="gp-btn-ghost flex-1 py-1.5 text-xs">
+                  {completo ? "Meta alcanzada — ajustar" : "Agregar fondos"}
+                </button>
+                <button onClick={() => setMoverModal({ apartado: a })} disabled={actual <= 0} className="gp-btn-ghost flex-1 py-1.5 text-xs disabled:opacity-40">
+                  Mover a proyecto
+                </button>
+              </div>
             </div>
           );
         })}
@@ -1979,12 +2057,22 @@ function Apartados({ data, onAdd, onEdit, onRemove }) {
           />
         </Modal>
       )}
+      {moverModal && (
+        <Modal title={`Mover fondos — ${moverModal.apartado.nombre}`} onClose={() => setMoverModal(null)}>
+          <MoverFondosForm
+            apartado={moverModal.apartado}
+            proyectos={data.proyectos}
+            onSave={(payload) => { onMoverFondos(moverModal.apartado, payload); setMoverModal(null); }}
+          />
+        </Modal>
+      )}
     </div>
   );
 }
 
 function ApartadoForm({ item, proyectos, onSave }) {
   const [v, setV] = useState(item);
+  const [error, setError] = useState("");
   return (
     <div>
       <Field label="Nombre"><input className="gp-input" placeholder="ej. Viaje a Cancún, Laptop nueva" value={v.nombre} onChange={(e) => setV({ ...v, nombre: e.target.value })} /></Field>
@@ -2000,7 +2088,9 @@ function ApartadoForm({ item, proyectos, onSave }) {
       </div>
       <Field label="Fecha objetivo (opcional)"><input type="date" className="gp-input" value={v.fechaObjetivo} onChange={(e) => setV({ ...v, fechaObjetivo: e.target.value })} /></Field>
       <Field label="Notas"><textarea className="gp-input" rows={2} value={v.notas} onChange={(e) => setV({ ...v, notas: e.target.value })} /></Field>
-      <button className="gp-btn w-full py-2 text-sm mt-2" onClick={() => onSave(v)}>Guardar</button>
+      {error && <p className="text-xs gp-text-red mb-2">{error}</p>}
+
+      <button className="gp-btn w-full py-2 text-sm mt-2" onClick={() => { if (!v.nombre?.toString().trim()) { setError("El nombre del apartado es obligatorio."); return; } setError(""); onSave(v); }}>Guardar</button>
     </div>
   );
 }
@@ -2013,6 +2103,38 @@ function AgregarFondosForm({ apartado, onSave }) {
       <p className="text-xs gp-text-muted mb-3">Llevas {fmtMoney(actual)} de {fmtMoney(apartado.montoObjetivo)}.</p>
       <Field label="Cuánto vas a agregar"><input type="number" autoFocus className="gp-input" value={monto} onChange={(e) => setMonto(e.target.value)} /></Field>
       <button className="gp-btn w-full py-2 text-sm mt-2" onClick={() => onSave(String(actual + (Number(monto) || 0)))}>Agregar</button>
+    </div>
+  );
+}
+
+function MoverFondosForm({ apartado, proyectos, onSave }) {
+  const actual = Number(apartado.montoActual) || 0;
+  const [monto, setMonto] = useState("");
+  const [proyectoId, setProyectoId] = useState(apartado.proyectoId || "");
+  const [concepto, setConcepto] = useState(`Fondos de "${apartado.nombre}"`);
+  const montoNum = Number(monto) || 0;
+  const excede = montoNum > actual;
+
+  return (
+    <div>
+      <p className="text-xs gp-text-muted mb-3">Disponible en este apartado: <span className="gp-mono gp-text-gold">{fmtMoney(actual)}</span></p>
+      <Field label="Cuánto vas a mover"><input type="number" autoFocus className="gp-input" value={monto} onChange={(e) => setMonto(e.target.value)} /></Field>
+      {excede && <p className="text-xs gp-text-red mb-2">Ese monto es mayor al disponible en el apartado.</p>}
+      <Field label="Destino (proyecto o rubro)">
+        <select className="gp-input" value={proyectoId} onChange={(e) => setProyectoId(e.target.value)}>
+          <option value="">— sin proyecto (personal) —</option>
+          {proyectos.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+        </select>
+      </Field>
+      <Field label="Concepto"><input className="gp-input" value={concepto} onChange={(e) => setConcepto(e.target.value)} /></Field>
+      <p className="text-xs gp-text-muted mb-3">Esto resta el monto del apartado y lo registra como un ingreso en Finanzas, para que quede el rastro de a dónde fue el dinero.</p>
+      <button
+        className="gp-btn w-full py-2 text-sm mt-2 disabled:opacity-40"
+        disabled={!montoNum || excede}
+        onClick={() => onSave({ monto: montoNum, proyectoId, concepto, nuevoMontoActual: String(actual - montoNum) })}
+      >
+        Mover fondos
+      </button>
     </div>
   );
 }
@@ -2182,7 +2304,9 @@ function EventoForm({ item, proyectos, contactos, onSave }) {
           </div>
         )}
       </Field>
-      <button className="gp-btn w-full py-2 text-sm mt-2" disabled={subiendo} onClick={() => onSave(v)}>Guardar</button>
+      {error && <p className="text-xs gp-text-red mb-2">{error}</p>}
+
+      <button className="gp-btn w-full py-2 text-sm mt-2" disabled={subiendo} onClick={() => { if (!v.nombre?.toString().trim()) { setError("El nombre del evento es obligatorio."); return; } setError(""); onSave(v); }}>Guardar</button>
     </div>
   );
 }
