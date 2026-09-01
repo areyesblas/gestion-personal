@@ -4,8 +4,13 @@ import {
   LayoutDashboard, FolderKanban, CheckSquare, Wallet, AlertTriangle,
   Users, Activity, Plus, X, Trash2, Pencil, Github, ChevronDown,
   ChevronRight, Bell, Lightbulb, Rocket, MessageCircle, Mail, Globe,
-  Target, Contact, BarChart3, FileText, Flame, HeartPulse, Check, Menu,
+  Target, Contact, BarChart3, FileText, Flame, HeartPulse, Check, Menu, PieChart as PieChartIcon,
+  PiggyBank, Camera, Film, Upload,
 } from "lucide-react";
+import {
+  ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
+  PieChart, Pie, Cell, LineChart, Line,
+} from "recharts";
 
 /* ---------- estilos y tokens ---------- */
 const Tokens = () => (
@@ -50,6 +55,7 @@ const PRIORIDADES = ["Alta", "Media", "Baja"];
 const ESTATUS_TAREA = ["Pendiente", "En progreso", "Hecho"];
 const TIPO_FIN = ["Ingreso", "Egreso"];
 const FORMA_PAGO = ["Efectivo", "Transferencia", "Especie", "Intercambio"];
+const FRECUENCIA = ["Semanal", "Quincenal", "Mensual", "Anual"];
 const TIPO_ACTIVIDAD = ["Gym", "Evento", "Capacitación", "Otro"];
 const TIPO_ACTIVO = ["Dominio", "Hosting", "Marca (IMPI)", "Red social", "Otro"];
 const ESTATUS_META = ["No iniciada", "En progreso", "Cumplida"];
@@ -100,7 +106,7 @@ const categoriaIMC = (imc) => {
 };
 
 /* ---------- persistencia relacional ---------- */
-const TABLES = ["proyectos", "pendientes", "equipo", "finanzas", "deudas", "actividades", "activos", "metas", "contactos", "redesMetricas", "documentos", "habitos", "salud"];
+const TABLES = ["proyectos", "pendientes", "equipo", "finanzas", "deudas", "actividades", "activos", "metas", "contactos", "redesMetricas", "documentos", "habitos", "salud", "pagosRecurrentes", "apartados", "eventos"];
 const OLD_STORAGE_KEY = "gestion_personal_data"; // localStorage, versión muy vieja
 const OLD_BLOB_TABLE = "gestion_data"; // tabla única jsonb, versión anterior a este modelo relacional
 
@@ -335,7 +341,9 @@ function AppLoggedIn() {
     ]},
     { label: "Dinero", items: [
       { id: "finanzas", label: "Ingresos y egresos", icon: Wallet },
+      { id: "reportes", label: "Reportes", icon: PieChartIcon },
       { id: "deudas", label: "Deudas", icon: AlertTriangle },
+      { id: "apartados", label: "Apartados", icon: PiggyBank },
       { id: "activos", label: "Activos digitales", icon: Globe },
       { id: "documentos", label: "Legal y contratos", icon: FileText },
     ]},
@@ -348,6 +356,7 @@ function AppLoggedIn() {
     ]},
     { label: "Vida", items: [
       { id: "actividades", label: "Actividades y vida", icon: Activity },
+      { id: "eventos", label: "Eventos", icon: Camera },
       { id: "habitos", label: "Hábitos", icon: Flame },
       { id: "salud", label: "Salud", icon: HeartPulse },
     ]},
@@ -416,8 +425,12 @@ function AppLoggedIn() {
           {view === "finanzas" && (
             <Finanzas data={data} onAdd={(i) => addItem("finanzas", i)} onEdit={(id, p) => editItem("finanzas", id, p)} onRemove={(id) => removeItem("finanzas", id)} />
           )}
+          {view === "reportes" && <Reportes data={data} />}
           {view === "deudas" && (
             <Deudas data={data} onAdd={(i) => addItem("deudas", i)} onEdit={(id, p) => editItem("deudas", id, p)} onRemove={(id) => removeItem("deudas", id)} />
+          )}
+          {view === "apartados" && (
+            <Apartados data={data} onAdd={(i) => addItem("apartados", i)} onEdit={(id, p) => editItem("apartados", id, p)} onRemove={(id) => removeItem("apartados", id)} />
           )}
           {view === "documentos" && (
             <Documentos data={data} onAdd={(i) => addItem("documentos", i)} onEdit={(id, p) => editItem("documentos", id, p)} onRemove={(id) => removeItem("documentos", id)} />
@@ -433,6 +446,9 @@ function AppLoggedIn() {
           )}
           {view === "actividades" && (
             <Actividades data={data} onAdd={(i) => addItem("actividades", i)} onEdit={(id, p) => editItem("actividades", id, p)} onRemove={(id) => removeItem("actividades", id)} />
+          )}
+          {view === "eventos" && (
+            <Eventos data={data} onAdd={(i) => addItem("eventos", i)} onEdit={(id, p) => editItem("eventos", id, p)} onRemove={(id) => removeItem("eventos", id)} />
           )}
           {view === "habitos" && (
             <Habitos data={data} onAdd={(i) => addItem("habitos", i)} onEdit={(id, p) => editItem("habitos", id, p)} onRemove={(id) => removeItem("habitos", id)} />
@@ -452,9 +468,9 @@ function AppLoggedIn() {
 /* ---------- Dashboard ---------- */
 function Dashboard({ data, setView }) {
   const mesActual = todayISO().slice(0, 7);
-  const finMes = data.finanzas.filter((f) => f.fecha?.startsWith(mesActual));
-  const ingresos = finMes.filter((f) => f.tipo === "Ingreso").reduce((s, f) => s + Number(f.monto || 0), 0);
-  const egresos = finMes.filter((f) => f.tipo === "Egreso").reduce((s, f) => s + Number(f.monto || 0), 0);
+  const ledgerMesActual = useMemo(() => buildMonthlyLedger(data.finanzas, [mesActual]), [data.finanzas, mesActual]);
+  const ingresos = ledgerMesActual.filter((f) => f.tipo === "Ingreso").reduce((s, f) => s + f.monto, 0);
+  const egresos = ledgerMesActual.filter((f) => f.tipo === "Egreso").reduce((s, f) => s + f.monto, 0);
   const deudasAtrasadas = data.deudas.filter((d) => daysUntil(d.fechaVencimiento) < 0);
   const deudasProximas = data.deudas.filter((d) => { const dd = daysUntil(d.fechaVencimiento); return dd >= 0 && dd <= 7; });
   const pendientesProximos = data.pendientes
@@ -467,12 +483,33 @@ function Dashboard({ data, setView }) {
   const ideas = data.proyectos.filter((p) => p.estatus === "Idea").length;
   const sinGithub = data.proyectos.filter((p) => !p.githubSubido);
 
+  const monthKeysAmplios = useMemo(() => lastNMonthKeys(120), []); // ventana amplia (10 años) para acumulados "de siempre"
+  const ledgerAmplio = useMemo(() => buildMonthlyLedger(data.finanzas, monthKeysAmplios), [data.finanzas, monthKeysAmplios]);
   const gananciaPorProyecto = data.proyectos.map((p) => {
-    const propios = data.finanzas.filter((f) => f.proyectoId === p.id);
-    const ing = propios.filter((f) => f.tipo === "Ingreso").reduce((s, f) => s + Number(f.monto || 0), 0);
-    const eg = propios.filter((f) => f.tipo === "Egreso").reduce((s, f) => s + Number(f.monto || 0), 0);
+    const propios = ledgerAmplio.filter((f) => f.proyectoId === p.id);
+    const ing = propios.filter((f) => f.tipo === "Ingreso").reduce((s, f) => s + f.monto, 0);
+    const eg = propios.filter((f) => f.tipo === "Egreso").reduce((s, f) => s + f.monto, 0);
     return { nombre: p.nombre, neto: ing - eg };
   }).filter((p) => p.neto !== 0).sort((a, b) => b.neto - a.neto);
+
+  // avance general: pendientes hechos + metas cumplidas, de todo el sistema
+  const pendientesTotal = data.pendientes.length;
+  const pendientesHechos = data.pendientes.filter((p) => p.estatus === "Hecho").length;
+  const metasTotal = data.metas.length;
+  const metasCumplidas = data.metas.filter((m) => m.estatus === "Cumplida").length;
+  const pctPendientes = pendientesTotal ? Math.round((pendientesHechos / pendientesTotal) * 100) : 0;
+  const pctMetas = metasTotal ? Math.round((metasCumplidas / metasTotal) * 100) : 0;
+
+  // avance por proyecto: % de pendientes hechos, de los proyectos activos con al menos un pendiente
+  const avancePorProyecto = data.proyectos
+    .filter((p) => p.estatus === "Activo" || p.estatus === "En desarrollo")
+    .map((p) => {
+      const pends = data.pendientes.filter((t) => t.proyectoId === p.id);
+      const hechos = pends.filter((t) => t.estatus === "Hecho").length;
+      return { nombre: p.nombre, total: pends.length, hechos, pct: pends.length ? Math.round((hechos / pends.length) * 100) : null };
+    })
+    .filter((p) => p.total > 0)
+    .sort((a, b) => b.pct - a.pct);
 
   return (
     <div>
@@ -526,6 +563,39 @@ function Dashboard({ data, setView }) {
             </ul>
           )}
           <button onClick={() => setView("proyectos")} className="text-xs gp-text-gold mt-3">Ir a proyectos →</button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+        <div className="gp-panel p-4">
+          <h3 className="text-sm font-medium mb-3">Avance general</h3>
+          <div className="mb-3">
+            <div className="flex justify-between text-xs mb-1"><span className="gp-text-muted">Pendientes completados</span><span className="gp-mono">{pendientesHechos}/{pendientesTotal} · {pctPendientes}%</span></div>
+            <div className="h-2 rounded" style={{ background: "var(--border)" }}><div className="h-2 rounded" style={{ width: `${pctPendientes}%`, background: "var(--teal)" }} /></div>
+          </div>
+          <div>
+            <div className="flex justify-between text-xs mb-1"><span className="gp-text-muted">Metas cumplidas</span><span className="gp-mono">{metasCumplidas}/{metasTotal} · {pctMetas}%</span></div>
+            <div className="h-2 rounded" style={{ background: "var(--border)" }}><div className="h-2 rounded" style={{ width: `${pctMetas}%`, background: "var(--gold)" }} /></div>
+          </div>
+        </div>
+
+        <div className="gp-panel p-4">
+          <h3 className="text-sm font-medium mb-3">Avance por proyecto</h3>
+          {avancePorProyecto.length === 0 ? (
+            <p className="text-xs gp-text-muted">Agrega pendientes a tus proyectos activos para ver su avance aquí.</p>
+          ) : (
+            <div className="space-y-2">
+              {avancePorProyecto.map((p) => (
+                <div key={p.nombre} className="flex items-center gap-3 text-xs">
+                  <span className="w-28 truncate gp-text-muted">{p.nombre}</span>
+                  <div className="flex-1 h-2 rounded" style={{ background: "var(--border)" }}>
+                    <div className="h-2 rounded" style={{ width: `${p.pct}%`, background: "var(--teal)" }} />
+                  </div>
+                  <span className="gp-mono w-10 text-right">{p.pct}%</span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
@@ -746,9 +816,50 @@ function PendienteForm({ item, proyectos, equipo, onSave }) {
 }
 
 /* ---------- Finanzas ---------- */
+const CHART_COLORS = ["#c9a227", "#4fa88f", "#d1554a", "#5b8def", "#a67c52", "#8d92a3", "#8e6fce"];
+
+function lastNMonthKeys(n) {
+  const out = [];
+  const now = new Date();
+  for (let i = n - 1; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    out.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
+  }
+  return out;
+}
+const monthLabel = (key) => {
+  const [y, m] = key.split("-");
+  return new Date(Number(y), Number(m) - 1, 1).toLocaleDateString("es-MX", { month: "short", year: "2-digit" });
+};
+
+// "Despliega" cada movimiento en entradas virtuales por mes dentro del rango:
+// los movimientos normales aportan solo en su mes; los recurrentes aportan en cada mes
+// entre su fecha de inicio y su fecha de fin (o indefinidamente si no tiene fin).
+function buildMonthlyLedger(finanzas, monthKeys) {
+  const entries = [];
+  for (const f of finanzas) {
+    const monto = Number(f.monto || 0);
+    if (!monto) continue;
+    if (!f.esRecurrente) {
+      const m = (f.fecha || "").slice(0, 7);
+      if (monthKeys.includes(m)) entries.push({ mes: m, tipo: f.tipo, monto, categoria: f.categoria || "Sin categoría", proyectoId: f.proyectoId });
+      continue;
+    }
+    const inicioM = (f.fecha || "").slice(0, 7);
+    const finM = f.fechaFin ? f.fechaFin.slice(0, 7) : null;
+    for (const m of monthKeys) {
+      if (m < inicioM) continue;
+      if (finM && m > finM) continue;
+      if (f.frecuencia === "Anual" && m.slice(5, 7) !== inicioM.slice(5, 7)) continue;
+      entries.push({ mes: m, tipo: f.tipo, monto, categoria: f.categoria || "Sin categoría", proyectoId: f.proyectoId });
+    }
+  }
+  return entries;
+}
+
 function Finanzas({ data, onAdd, onEdit, onRemove }) {
   const [modal, setModal] = useState(null);
-  const empty = { tipo: "Ingreso", proyectoId: "", fecha: todayISO(), monto: "", categoria: "", forma: "Transferencia", estatus: "Cobrado", pautando: false };
+  const empty = { tipo: "Ingreso", proyectoId: "", fecha: todayISO(), monto: "", categoria: "", forma: "Transferencia", estatus: "Cobrado", pautando: false, esRecurrente: false, frecuencia: "Mensual", fechaFin: "" };
   const ordenados = [...data.finanzas].sort((a, b) => (b.fecha || "").localeCompare(a.fecha || ""));
   const nombreProyecto = (id) => data.proyectos.find((p) => p.id === id)?.nombre || "—";
 
@@ -758,11 +869,11 @@ function Finanzas({ data, onAdd, onEdit, onRemove }) {
         <h2 className="gp-serif text-2xl">Ingresos y egresos</h2>
         <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm w-full sm:w-auto"><Plus size={14} /> Nuevo</button>
       </div>
-      <p className="text-sm gp-text-muted mb-6">Incluye si el proyecto está pautando publicidad activamente.</p>
+      <p className="text-sm gp-text-muted mb-6">Incluye pagos recurrentes (luz, agua, compras a meses) con fecha de inicio y fin, o indefinidos.</p>
 
       <div className="gp-panel overflow-x-auto">
         <table className="gp-table">
-          <thead><tr><th>Fecha</th><th>Tipo</th><th>Proyecto</th><th>Categoría</th><th>Forma</th><th>Estatus</th><th>Pautando</th><th>Monto</th><th></th></tr></thead>
+          <thead><tr><th>Fecha</th><th>Tipo</th><th>Proyecto</th><th>Categoría</th><th>Forma</th><th>Estatus</th><th>Recurrente</th><th>Monto</th><th></th></tr></thead>
           <tbody>
             {ordenados.map((f) => (
               <tr key={f.id}>
@@ -772,7 +883,11 @@ function Finanzas({ data, onAdd, onEdit, onRemove }) {
                 <td className="gp-text-muted">{f.categoria}</td>
                 <td className="gp-text-muted">{f.forma}</td>
                 <td><Badge tone={f.estatus === "Cobrado" ? "teal" : "gold"}>{f.estatus}</Badge></td>
-                <td>{f.pautando ? "Sí" : "—"}</td>
+                <td>
+                  {f.esRecurrente ? (
+                    <Badge tone="gold">{f.frecuencia || "Mensual"}{f.fechaFin ? ` · hasta ${f.fechaFin}` : " · indefinido"}</Badge>
+                  ) : "—"}
+                </td>
                 <td className={`gp-mono ${f.tipo === "Ingreso" ? "gp-text-teal" : "gp-text-red"}`}>{fmtMoney(f.monto)}</td>
                 <td><div className="flex gap-1"><IconBtn onClick={() => setModal({ item: f })}><Pencil size={13} /></IconBtn><IconBtn onClick={() => onRemove(f.id)}><Trash2 size={13} /></IconBtn></div></td>
               </tr>
@@ -797,7 +912,7 @@ function FinanzaForm({ item, proyectos, onSave }) {
     <div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Field label="Tipo"><select className="gp-input" value={v.tipo} onChange={(e) => setV({ ...v, tipo: e.target.value })}>{TIPO_FIN.map((c) => <option key={c}>{c}</option>)}</select></Field>
-        <Field label="Fecha"><input type="date" className="gp-input" value={v.fecha} onChange={(e) => setV({ ...v, fecha: e.target.value })} /></Field>
+        <Field label={v.esRecurrente ? "Fecha de inicio" : "Fecha"}><input type="date" className="gp-input" value={v.fecha} onChange={(e) => setV({ ...v, fecha: e.target.value })} /></Field>
       </div>
       <Field label="Proyecto">
         <select className="gp-input" value={v.proyectoId} onChange={(e) => setV({ ...v, proyectoId: e.target.value })}>
@@ -816,6 +931,20 @@ function FinanzaForm({ item, proyectos, onSave }) {
       <label className="flex items-center gap-2 text-xs gp-text-muted mb-3">
         <input type="checkbox" checked={v.pautando} onChange={(e) => setV({ ...v, pautando: e.target.checked })} /> Este proyecto está pautando publicidad
       </label>
+
+      <div className="gp-panel p-3 mb-3">
+        <label className="flex items-center gap-2 text-xs mb-2">
+          <input type="checkbox" checked={v.esRecurrente} onChange={(e) => setV({ ...v, esRecurrente: e.target.checked })} />
+          Es un pago recurrente (luz, agua, compra a meses…)
+        </label>
+        {v.esRecurrente && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2">
+            <Field label="Frecuencia"><select className="gp-input" value={v.frecuencia} onChange={(e) => setV({ ...v, frecuencia: e.target.value })}>{FRECUENCIA.map((c) => <option key={c}>{c}</option>)}</select></Field>
+            <Field label="Fecha de fin (vacío = indefinido)"><input type="date" className="gp-input" value={v.fechaFin} onChange={(e) => setV({ ...v, fechaFin: e.target.value })} /></Field>
+          </div>
+        )}
+      </div>
+
       <button className="gp-btn w-full py-2 text-sm mt-1" onClick={() => onSave(v)}>Guardar</button>
     </div>
   );
@@ -1520,6 +1649,395 @@ function SaludForm({ item, onSave }) {
         {subiendo && <p className="text-xs gp-text-muted mt-1">Subiendo…</p>}
         {v.estudio && !subiendo && <p className="text-xs gp-text-teal mt-1 flex items-center gap-1"><FileText size={12} /> {v.estudio.nombre} adjunto</p>}
         {error && <p className="text-xs gp-text-red mt-1">{error}</p>}
+      </Field>
+      <button className="gp-btn w-full py-2 text-sm mt-2" disabled={subiendo} onClick={() => onSave(v)}>Guardar</button>
+    </div>
+  );
+}
+
+/* ---------- Reportes ---------- */
+const RANGOS_REPORTE = [
+  { label: "Últimos 3 meses", meses: 3 },
+  { label: "Últimos 6 meses", meses: 6 },
+  { label: "Últimos 12 meses", meses: 12 },
+  { label: "Últimos 24 meses", meses: 24 },
+];
+
+function Reportes({ data }) {
+  const [rangoMeses, setRangoMeses] = useState(6);
+  const [proyectoFiltro, setProyectoFiltro] = useState("");
+
+  const finanzasFiltradas = useMemo(
+    () => (proyectoFiltro ? data.finanzas.filter((f) => f.proyectoId === proyectoFiltro) : data.finanzas),
+    [data.finanzas, proyectoFiltro]
+  );
+
+  const monthKeys = useMemo(() => lastNMonthKeys(rangoMeses), [rangoMeses]);
+  const ledger = useMemo(() => buildMonthlyLedger(finanzasFiltradas, monthKeys), [finanzasFiltradas, monthKeys]);
+
+  const nombreProyecto = (id) => data.proyectos.find((p) => p.id === id)?.nombre || "Sin proyecto";
+
+  // serie mensual: ingresos vs egresos
+  const serieMensual = useMemo(() => monthKeys.map((m) => {
+    const delMes = ledger.filter((e) => e.mes === m);
+    const ingresos = delMes.filter((e) => e.tipo === "Ingreso").reduce((s, e) => s + e.monto, 0);
+    const egresos = delMes.filter((e) => e.tipo === "Egreso").reduce((s, e) => s + e.monto, 0);
+    return { mes: monthLabel(m), ingresos, egresos, neto: ingresos - egresos };
+  }), [ledger, monthKeys]);
+
+  // acumulado neto
+  const serieAcumulada = useMemo(() => {
+    let acc = 0;
+    return serieMensual.map((p) => { acc += p.neto; return { mes: p.mes, acumulado: acc }; });
+  }, [serieMensual]);
+
+  // egresos por categoría (todo el rango)
+  const porCategoria = useMemo(() => {
+    const map = {};
+    for (const e of ledger) {
+      if (e.tipo !== "Egreso") continue;
+      map[e.categoria] = (map[e.categoria] || 0) + e.monto;
+    }
+    return Object.entries(map).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value).slice(0, 8);
+  }, [ledger]);
+
+  // por proyecto (neto, todo el rango)
+  const porProyecto = useMemo(() => {
+    const map = {};
+    for (const e of ledger) {
+      const key = e.proyectoId || "sin-proyecto";
+      if (!map[key]) map[key] = { ingresos: 0, egresos: 0 };
+      map[key][e.tipo === "Ingreso" ? "ingresos" : "egresos"] += e.monto;
+    }
+    return Object.entries(map)
+      .map(([id, v]) => ({ nombre: id === "sin-proyecto" ? "Sin proyecto" : nombreProyecto(id), neto: v.ingresos - v.egresos }))
+      .sort((a, b) => b.neto - a.neto);
+  }, [ledger, data.proyectos]);
+
+  const totalIngresos = serieMensual.reduce((s, m) => s + m.ingresos, 0);
+  const totalEgresos = serieMensual.reduce((s, m) => s + m.egresos, 0);
+  const gastoRecurrenteMensual = useMemo(() => {
+    const hoy = todayISO().slice(0, 7);
+    return finanzasFiltradas
+      .filter((f) => f.esRecurrente && f.tipo === "Egreso" && f.frecuencia !== "Anual" && (!f.fechaFin || f.fechaFin.slice(0, 7) >= hoy) && (f.fecha || "").slice(0, 7) <= hoy)
+      .reduce((s, f) => s + Number(f.monto || 0), 0);
+  }, [finanzasFiltradas]);
+
+  return (
+    <div>
+      <h2 className="gp-serif text-2xl mb-1">Reportes</h2>
+      <p className="text-sm gp-text-muted mb-4">Ingresos, egresos y pagos recurrentes, todos mezclados en un mismo panorama.</p>
+
+      <div className="flex flex-col sm:flex-row gap-3 mb-6">
+        <select className="gp-input sm:max-w-[200px]" value={rangoMeses} onChange={(e) => setRangoMeses(Number(e.target.value))}>
+          {RANGOS_REPORTE.map((r) => <option key={r.meses} value={r.meses}>{r.label}</option>)}
+        </select>
+        <select className="gp-input sm:max-w-[220px]" value={proyectoFiltro} onChange={(e) => setProyectoFiltro(e.target.value)}>
+          <option value="">Todos los proyectos</option>
+          {data.proyectos.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+        </select>
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+        <Stat label="Ingresos del periodo" value={fmtMoney(totalIngresos)} tone="teal" />
+        <Stat label="Egresos del periodo" value={fmtMoney(totalEgresos)} tone="red" />
+        <Stat label="Neto del periodo" value={fmtMoney(totalIngresos - totalEgresos)} />
+        <Stat label="Recurrente mensual activo" value={fmtMoney(gastoRecurrenteMensual)} tone="gold" />
+      </div>
+
+      <div className="gp-panel p-4 mb-4">
+        <h3 className="text-sm font-medium mb-3">Ingresos vs egresos por mes</h3>
+        <ResponsiveContainer width="100%" height={260}>
+          <BarChart data={serieMensual} margin={{ left: -20 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+            <XAxis dataKey="mes" tick={{ fill: "var(--muted)", fontSize: 11 }} />
+            <YAxis tick={{ fill: "var(--muted)", fontSize: 11 }} />
+            <Tooltip contentStyle={{ background: "var(--panel)", border: "1px solid var(--border)", fontSize: 12 }} formatter={(v) => fmtMoney(v)} />
+            <Legend wrapperStyle={{ fontSize: 12 }} />
+            <Bar dataKey="ingresos" name="Ingresos" fill="var(--teal)" radius={[3, 3, 0, 0]} />
+            <Bar dataKey="egresos" name="Egresos" fill="var(--red)" radius={[3, 3, 0, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+        <div className="gp-panel p-4">
+          <h3 className="text-sm font-medium mb-3">Ganancia neta acumulada</h3>
+          <ResponsiveContainer width="100%" height={230}>
+            <LineChart data={serieAcumulada} margin={{ left: -20 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+              <XAxis dataKey="mes" tick={{ fill: "var(--muted)", fontSize: 11 }} />
+              <YAxis tick={{ fill: "var(--muted)", fontSize: 11 }} />
+              <Tooltip contentStyle={{ background: "var(--panel)", border: "1px solid var(--border)", fontSize: 12 }} formatter={(v) => fmtMoney(v)} />
+              <Line type="monotone" dataKey="acumulado" name="Neto acumulado" stroke="var(--gold)" strokeWidth={2} dot={false} />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+
+        <div className="gp-panel p-4">
+          <h3 className="text-sm font-medium mb-3">Egresos por categoría</h3>
+          {porCategoria.length === 0 ? (
+            <p className="text-xs gp-text-muted">Sin egresos en este periodo.</p>
+          ) : (
+            <ResponsiveContainer width="100%" height={230}>
+              <PieChart>
+                <Pie data={porCategoria} dataKey="value" nameKey="name" innerRadius={45} outerRadius={80} paddingAngle={2}>
+                  {porCategoria.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
+                </Pie>
+                <Tooltip contentStyle={{ background: "var(--panel)", border: "1px solid var(--border)", fontSize: 12 }} formatter={(v) => fmtMoney(v)} />
+                <Legend wrapperStyle={{ fontSize: 11 }} />
+              </PieChart>
+            </ResponsiveContainer>
+          )}
+        </div>
+      </div>
+
+      <div className="gp-panel p-4">
+        <h3 className="text-sm font-medium mb-3">Neto por proyecto</h3>
+        {porProyecto.length === 0 ? (
+          <p className="text-xs gp-text-muted">Sin movimientos en este periodo.</p>
+        ) : (
+          <ResponsiveContainer width="100%" height={Math.max(160, porProyecto.length * 40)}>
+            <BarChart data={porProyecto} layout="vertical" margin={{ left: 10 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+              <XAxis type="number" tick={{ fill: "var(--muted)", fontSize: 11 }} />
+              <YAxis type="category" dataKey="nombre" width={120} tick={{ fill: "var(--muted)", fontSize: 11 }} />
+              <Tooltip contentStyle={{ background: "var(--panel)", border: "1px solid var(--border)", fontSize: 12 }} formatter={(v) => fmtMoney(v)} />
+              <Bar dataKey="neto" radius={[0, 3, 3, 0]}>
+                {porProyecto.map((p, i) => <Cell key={i} fill={p.neto >= 0 ? "var(--teal)" : "var(--red)"} />)}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ---------- Apartados / metas de ahorro ---------- */
+function Apartados({ data, onAdd, onEdit, onRemove }) {
+  const [modal, setModal] = useState(null);
+  const [fondoModal, setFondoModal] = useState(null); // { apartado }
+  const empty = { nombre: "", proyectoId: "", montoObjetivo: "", montoActual: "0", fechaObjetivo: "", notas: "" };
+  const nombreProyecto = (id) => data.proyectos.find((p) => p.id === id)?.nombre || "—";
+
+  return (
+    <div>
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-1">
+        <h2 className="gp-serif text-2xl">Apartados</h2>
+        <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm w-full sm:w-auto"><Plus size={14} /> Nuevo</button>
+      </div>
+      <p className="text-sm gp-text-muted mb-6">Dinero apartado para un proyecto o una meta específica, como un viaje.</p>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        {data.apartados.map((a) => {
+          const objetivo = Number(a.montoObjetivo) || 0;
+          const actual = Number(a.montoActual) || 0;
+          const pct = objetivo ? Math.min(100, (actual / objetivo) * 100) : 0;
+          const completo = objetivo > 0 && actual >= objetivo;
+          return (
+            <div key={a.id} className="gp-panel p-4">
+              <div className="flex items-start justify-between">
+                <div>
+                  <p className="text-sm font-medium">{a.nombre}</p>
+                  <p className="text-xs gp-text-muted mt-0.5">{a.proyectoId ? nombreProyecto(a.proyectoId) : "Personal"} {a.fechaObjetivo ? `· para ${a.fechaObjetivo}` : ""}</p>
+                </div>
+                <div className="flex gap-1"><IconBtn onClick={() => setModal({ item: a })}><Pencil size={13} /></IconBtn><IconBtn onClick={() => onRemove(a.id)}><Trash2 size={13} /></IconBtn></div>
+              </div>
+              <div className="mt-3">
+                <div className="flex justify-between text-xs mb-1">
+                  <span className="gp-mono gp-text-gold">{fmtMoney(actual)}</span>
+                  <span className="gp-text-muted">de {fmtMoney(objetivo)}</span>
+                </div>
+                <div className="h-2 rounded" style={{ background: "var(--border)" }}>
+                  <div className="h-2 rounded" style={{ width: `${pct}%`, background: completo ? "var(--teal)" : "var(--gold)" }} />
+                </div>
+              </div>
+              {a.notas && <p className="text-xs gp-text-muted mt-3">{a.notas}</p>}
+              <button onClick={() => setFondoModal({ apartado: a })} className="gp-btn-ghost w-full py-1.5 text-xs mt-3">
+                {completo ? "Meta alcanzada — ajustar monto" : "Agregar fondos"}
+              </button>
+            </div>
+          );
+        })}
+        {data.apartados.length === 0 && <p className="text-sm gp-text-muted col-span-2">Aún no tienes apartados. Crea uno para tu próximo viaje o compra grande.</p>}
+      </div>
+
+      {modal && (
+        <Modal title={modal.item.id ? "Editar apartado" : "Nuevo apartado"} onClose={() => setModal(null)}>
+          <ApartadoForm item={modal.item} proyectos={data.proyectos} onSave={(v) => { modal.item.id ? onEdit(modal.item.id, v) : onAdd(v); setModal(null); }} />
+        </Modal>
+      )}
+      {fondoModal && (
+        <Modal title={`Agregar fondos — ${fondoModal.apartado.nombre}`} onClose={() => setFondoModal(null)}>
+          <AgregarFondosForm
+            apartado={fondoModal.apartado}
+            onSave={(nuevoMonto) => { onEdit(fondoModal.apartado.id, { montoActual: nuevoMonto }); setFondoModal(null); }}
+          />
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+function ApartadoForm({ item, proyectos, onSave }) {
+  const [v, setV] = useState(item);
+  return (
+    <div>
+      <Field label="Nombre"><input className="gp-input" placeholder="ej. Viaje a Cancún, Laptop nueva" value={v.nombre} onChange={(e) => setV({ ...v, nombre: e.target.value })} /></Field>
+      <Field label="Proyecto relacionado (opcional)">
+        <select className="gp-input" value={v.proyectoId} onChange={(e) => setV({ ...v, proyectoId: e.target.value })}>
+          <option value="">— personal —</option>
+          {proyectos.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+        </select>
+      </Field>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <Field label="Monto objetivo"><input type="number" className="gp-input" value={v.montoObjetivo} onChange={(e) => setV({ ...v, montoObjetivo: e.target.value })} /></Field>
+        <Field label="Ya tienes ahorrado"><input type="number" className="gp-input" value={v.montoActual} onChange={(e) => setV({ ...v, montoActual: e.target.value })} /></Field>
+      </div>
+      <Field label="Fecha objetivo (opcional)"><input type="date" className="gp-input" value={v.fechaObjetivo} onChange={(e) => setV({ ...v, fechaObjetivo: e.target.value })} /></Field>
+      <Field label="Notas"><textarea className="gp-input" rows={2} value={v.notas} onChange={(e) => setV({ ...v, notas: e.target.value })} /></Field>
+      <button className="gp-btn w-full py-2 text-sm mt-2" onClick={() => onSave(v)}>Guardar</button>
+    </div>
+  );
+}
+
+function AgregarFondosForm({ apartado, onSave }) {
+  const [monto, setMonto] = useState("");
+  const actual = Number(apartado.montoActual) || 0;
+  return (
+    <div>
+      <p className="text-xs gp-text-muted mb-3">Llevas {fmtMoney(actual)} de {fmtMoney(apartado.montoObjetivo)}.</p>
+      <Field label="Cuánto vas a agregar"><input type="number" autoFocus className="gp-input" value={monto} onChange={(e) => setMonto(e.target.value)} /></Field>
+      <button className="gp-btn w-full py-2 text-sm mt-2" onClick={() => onSave(String(actual + (Number(monto) || 0)))}>Agregar</button>
+    </div>
+  );
+}
+
+/* ---------- Eventos (con fotos y videos) ---------- */
+function Eventos({ data, onAdd, onEdit, onRemove }) {
+  const [modal, setModal] = useState(null);
+  const [expanded, setExpanded] = useState(null);
+  const empty = { nombre: "", fecha: todayISO(), proyectoId: "", ganancia: "", comentarios: "", media: [] };
+  const ordenados = [...data.eventos].sort((a, b) => (b.fecha || "").localeCompare(a.fecha || ""));
+  const nombreProyecto = (id) => data.proyectos.find((p) => p.id === id)?.nombre || "—";
+
+  return (
+    <div>
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-1">
+        <h2 className="gp-serif text-2xl">Eventos</h2>
+        <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm w-full sm:w-auto"><Plus size={14} /> Nuevo</button>
+      </div>
+      <p className="text-sm gp-text-muted mb-6">Eventos a los que vas, con comentarios, fecha y sus fotos o videos.</p>
+
+      <div className="space-y-2">
+        {ordenados.map((e) => (
+          <div key={e.id} className="gp-panel">
+            <div className="p-3 flex items-start gap-3 cursor-pointer" onClick={() => setExpanded(expanded === e.id ? null : e.id)}>
+              {expanded === e.id ? <ChevronDown size={15} className="mt-0.5 gp-text-muted" /> : <ChevronRight size={15} className="mt-0.5 gp-text-muted" />}
+              <div className="flex-1">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-sm font-medium">{e.nombre}</span>
+                  <span className="gp-mono text-xs gp-text-muted">{e.fecha}</span>
+                  {e.proyectoId && <Badge tone="muted">{nombreProyecto(e.proyectoId)}</Badge>}
+                  {e.media?.length > 0 && <Badge tone="gold">{e.media.length} archivo(s)</Badge>}
+                  {e.ganancia ? <Badge tone="teal">{fmtMoney(e.ganancia)}</Badge> : null}
+                </div>
+                {e.comentarios && <p className="text-xs gp-text-muted mt-1">{e.comentarios}</p>}
+              </div>
+              <div className="flex gap-1" onClick={(ev) => ev.stopPropagation()}>
+                <IconBtn onClick={() => setModal({ item: e })}><Pencil size={13} /></IconBtn>
+                <IconBtn onClick={() => onRemove(e.id)}><Trash2 size={13} /></IconBtn>
+              </div>
+            </div>
+            {expanded === e.id && e.media?.length > 0 && (
+              <div className="px-4 pb-4 border-t gp-border pt-3 grid grid-cols-2 sm:grid-cols-3 gap-2">
+                {e.media.map((m, i) => (
+                  <a key={i} href={m.url} target="_blank" rel="noopener noreferrer" className="gp-panel-hi rounded overflow-hidden block" style={{ border: "1px solid var(--border)" }}>
+                    {m.tipo === "video" ? (
+                      <video src={m.url} className="w-full h-24 object-cover" muted />
+                    ) : (
+                      <img src={m.url} alt={m.nombre} className="w-full h-24 object-cover" />
+                    )}
+                    <div className="px-2 py-1 flex items-center gap-1 text-xs gp-text-muted">
+                      {m.tipo === "video" ? <Film size={11} /> : <Camera size={11} />}
+                      <span className="truncate">{m.nombre}</span>
+                    </div>
+                  </a>
+                ))}
+              </div>
+            )}
+          </div>
+        ))}
+        {ordenados.length === 0 && <p className="text-sm gp-text-muted">Sin eventos registrados todavía.</p>}
+      </div>
+
+      {modal && (
+        <Modal title={modal.item.id ? "Editar evento" : "Nuevo evento"} onClose={() => setModal(null)}>
+          <EventoForm item={modal.item} proyectos={data.proyectos} onSave={(v) => { modal.item.id ? onEdit(modal.item.id, v) : onAdd(v); setModal(null); }} />
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+function EventoForm({ item, proyectos, onSave }) {
+  const [v, setV] = useState(item);
+  const [subiendo, setSubiendo] = useState(false);
+  const [error, setError] = useState("");
+
+  const handleFiles = async (e) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+    setError("");
+    setSubiendo(true);
+    const nuevos = [];
+    for (const file of files) {
+      const esVideo = file.type.startsWith("video/");
+      const esImagen = file.type.startsWith("image/");
+      if (!esVideo && !esImagen) { setError(`"${file.name}" no es foto ni video, se omitió.`); continue; }
+      if (file.size > 25 * 1024 * 1024) { setError(`"${file.name}" pesa más de 25 MB, se omitió.`); continue; }
+      const path = `${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
+      const { error: upErr } = await supabase.storage.from("eventos").upload(path, file);
+      if (upErr) { setError(`No se pudo subir "${file.name}": ${upErr.message}`); continue; }
+      const { data } = supabase.storage.from("eventos").getPublicUrl(path);
+      nuevos.push({ tipo: esVideo ? "video" : "imagen", nombre: file.name, url: data.publicUrl });
+    }
+    setV((prev) => ({ ...prev, media: [...(prev.media || []), ...nuevos] }));
+    setSubiendo(false);
+  };
+
+  const quitarMedia = (idx) => setV((prev) => ({ ...prev, media: prev.media.filter((_, i) => i !== idx) }));
+
+  return (
+    <div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <Field label="Evento"><input className="gp-input" value={v.nombre} onChange={(e) => setV({ ...v, nombre: e.target.value })} /></Field>
+        <Field label="Fecha"><input type="date" className="gp-input" value={v.fecha} onChange={(e) => setV({ ...v, fecha: e.target.value })} /></Field>
+      </div>
+      <Field label="Proyecto relacionado (opcional)">
+        <select className="gp-input" value={v.proyectoId} onChange={(e) => setV({ ...v, proyectoId: e.target.value })}>
+          <option value="">— ninguno —</option>
+          {proyectos.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+        </select>
+      </Field>
+      <Field label="Ganancia generada (si aplica)"><input type="number" className="gp-input" value={v.ganancia} onChange={(e) => setV({ ...v, ganancia: e.target.value })} /></Field>
+      <Field label="Comentarios"><textarea className="gp-input" rows={2} value={v.comentarios} onChange={(e) => setV({ ...v, comentarios: e.target.value })} /></Field>
+      <Field label="Fotos y videos">
+        <input type="file" accept="image/*,video/*" multiple onChange={handleFiles} className="text-xs gp-text-muted" disabled={subiendo} />
+        {subiendo && <p className="text-xs gp-text-muted mt-1">Subiendo…</p>}
+        {error && <p className="text-xs gp-text-red mt-1">{error}</p>}
+        {v.media?.length > 0 && (
+          <div className="flex flex-wrap gap-2 mt-2">
+            {v.media.map((m, i) => (
+              <span key={i} className="text-xs gp-text-teal flex items-center gap-1 gp-panel px-2 py-1">
+                {m.tipo === "video" ? <Film size={11} /> : <Camera size={11} />}
+                {m.nombre.length > 16 ? m.nombre.slice(0, 16) + "…" : m.nombre}
+                <button type="button" onClick={() => quitarMedia(i)} className="gp-text-red ml-1">✕</button>
+              </span>
+            ))}
+          </div>
+        )}
       </Field>
       <button className="gp-btn w-full py-2 text-sm mt-2" disabled={subiendo} onClick={() => onSave(v)}>Guardar</button>
     </div>
