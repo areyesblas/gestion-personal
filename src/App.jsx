@@ -5,7 +5,7 @@ import {
   Users, Activity, Plus, X, Trash2, Pencil, Github, ChevronDown,
   ChevronRight, Bell, Lightbulb, Rocket, MessageCircle, Mail, Globe,
   Target, Contact, BarChart3, FileText, Flame, HeartPulse, Check, Menu, PieChart as PieChartIcon,
-  PiggyBank, Camera, Film, Upload,
+  PiggyBank, Camera, Film, Upload, MapPin, Clock,
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
@@ -482,6 +482,10 @@ function Dashboard({ data, setView }) {
   const activos = data.proyectos.filter((p) => p.estatus === "Activo").length;
   const ideas = data.proyectos.filter((p) => p.estatus === "Idea").length;
   const sinGithub = data.proyectos.filter((p) => !p.githubSubido);
+  const cobrosPendientes = data.finanzas
+    .filter((f) => f.tipo === "Ingreso" && f.estatus === "Pendiente")
+    .sort((a, b) => (a.fechaVencimiento || "9999").localeCompare(b.fechaVencimiento || "9999"));
+  const totalCobrosPendientes = cobrosPendientes.reduce((s, f) => s + (Number(f.monto) || 0), 0);
 
   const monthKeysAmplios = useMemo(() => lastNMonthKeys(120), []); // ventana amplia (10 años) para acumulados "de siempre"
   const ledgerAmplio = useMemo(() => buildMonthlyLedger(data.finanzas, monthKeysAmplios), [data.finanzas, monthKeysAmplios]);
@@ -522,6 +526,30 @@ function Dashboard({ data, setView }) {
         <Stat label="Ingresos del mes" value={fmtMoney(ingresos)} tone="teal" />
         <Stat label="Egresos del mes" value={fmtMoney(egresos)} tone="red" />
       </div>
+
+      {cobrosPendientes.length > 0 && (
+        <div className="gp-panel p-4 mb-6">
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-2"><Wallet size={14} className="gp-text-gold" /><h3 className="text-sm font-medium">Cobros pendientes</h3></div>
+            <span className="gp-serif text-lg gp-text-teal">{fmtMoney(totalCobrosPendientes)}</span>
+          </div>
+          <ul className="space-y-1.5 text-xs">
+            {cobrosPendientes.slice(0, 5).map((f) => {
+              const dd = f.fechaVencimiento ? daysUntil(f.fechaVencimiento) : null;
+              return (
+                <li key={f.id} className="flex justify-between">
+                  <span>{f.concepto || f.categoria || "Cobro"}</span>
+                  <span className="flex items-center gap-2">
+                    <span className="gp-mono">{fmtMoney(f.monto)}</span>
+                    {dd !== null && <Badge tone={dd < 0 ? "red" : dd <= 7 ? "gold" : "muted"}>{dd < 0 ? "vencido" : `${dd}d`}</Badge>}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+          <button onClick={() => setView("finanzas")} className="text-xs gp-text-gold mt-3">Ver todos los cobros →</button>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
         <div className="gp-panel p-4">
@@ -737,11 +765,12 @@ function ProyectoForm({ item, onSave }) {
 /* ---------- Pendientes ---------- */
 function Pendientes({ data, onAdd, onEdit, onRemove }) {
   const [modal, setModal] = useState(null);
-  const empty = { proyectoId: "", descripcion: "", fechaLimite: todayISO(), prioridad: "Media", estatus: "Pendiente", responsableId: "", precio: "" };
+  const empty = { proyectoId: "", descripcion: "", fechaLimite: todayISO(), prioridad: "Media", estatus: "Pendiente", responsableId: "", contactoId: "", precio: "" };
   const ordenados = [...data.pendientes].sort((a, b) => (a.fechaLimite || "").localeCompare(b.fechaLimite || ""));
 
   const nombreProyecto = (id) => data.proyectos.find((p) => p.id === id)?.nombre || "—";
   const nombreResp = (id) => data.equipo.find((e) => e.id === id)?.nombre || "Tú";
+  const nombreCliente = (id) => data.contactos.find((c) => c.id === id)?.nombre || "—";
 
   return (
     <div>
@@ -753,7 +782,7 @@ function Pendientes({ data, onAdd, onEdit, onRemove }) {
 
       <div className="gp-panel overflow-x-auto">
         <table className="gp-table">
-          <thead><tr><th>Pendiente</th><th>Proyecto</th><th>Responsable</th><th>Fecha</th><th>Prioridad</th><th>Estatus</th><th>Precio</th><th></th></tr></thead>
+          <thead><tr><th>Pendiente</th><th>Proyecto</th><th>Cliente</th><th>Responsable</th><th>Fecha</th><th>Prioridad</th><th>Estatus</th><th>Precio</th><th></th></tr></thead>
           <tbody>
             {ordenados.map((p) => {
               const vencido = p.estatus !== "Hecho" && p.fechaLimite && daysUntil(p.fechaLimite) < 0;
@@ -761,6 +790,7 @@ function Pendientes({ data, onAdd, onEdit, onRemove }) {
                 <tr key={p.id}>
                   <td>{p.descripcion}</td>
                   <td className="gp-text-muted">{nombreProyecto(p.proyectoId)}</td>
+                  <td className="gp-text-muted">{p.contactoId ? nombreCliente(p.contactoId) : "—"}</td>
                   <td className="gp-text-muted">{nombreResp(p.responsableId)}</td>
                   <td className="gp-mono" style={{ color: vencido ? "var(--red)" : undefined }}>{p.fechaLimite}</td>
                   <td><Badge tone={p.prioridad === "Alta" ? "red" : p.prioridad === "Media" ? "gold" : "muted"}>{p.prioridad}</Badge></td>
@@ -774,21 +804,21 @@ function Pendientes({ data, onAdd, onEdit, onRemove }) {
                 </tr>
               );
             })}
-            {ordenados.length === 0 && <tr><td colSpan={8} className="text-center gp-text-muted py-6">Sin pendientes registrados.</td></tr>}
+            {ordenados.length === 0 && <tr><td colSpan={9} className="text-center gp-text-muted py-6">Sin pendientes registrados.</td></tr>}
           </tbody>
         </table>
       </div>
 
       {modal && (
         <Modal title={modal.item.id ? "Editar pendiente" : "Nuevo pendiente"} onClose={() => setModal(null)}>
-          <PendienteForm item={modal.item} proyectos={data.proyectos} equipo={data.equipo} onSave={(v) => { modal.item.id ? onEdit(modal.item.id, v) : onAdd(v); setModal(null); }} />
+          <PendienteForm item={modal.item} proyectos={data.proyectos} equipo={data.equipo} contactos={data.contactos} onSave={(v) => { modal.item.id ? onEdit(modal.item.id, v) : onAdd(v); setModal(null); }} />
         </Modal>
       )}
     </div>
   );
 }
 
-function PendienteForm({ item, proyectos, equipo, onSave }) {
+function PendienteForm({ item, proyectos, equipo, contactos, onSave }) {
   const [v, setV] = useState(item);
   return (
     <div>
@@ -797,6 +827,12 @@ function PendienteForm({ item, proyectos, equipo, onSave }) {
         <select className="gp-input" value={v.proyectoId} onChange={(e) => setV({ ...v, proyectoId: e.target.value })}>
           <option value="">— sin proyecto —</option>
           {proyectos.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+        </select>
+      </Field>
+      <Field label="Cliente (a quién se le entrega)">
+        <select className="gp-input" value={v.contactoId || ""} onChange={(e) => setV({ ...v, contactoId: e.target.value })}>
+          <option value="">— sin cliente —</option>
+          {contactos.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
         </select>
       </Field>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -859,9 +895,19 @@ function buildMonthlyLedger(finanzas, monthKeys) {
 
 function Finanzas({ data, onAdd, onEdit, onRemove }) {
   const [modal, setModal] = useState(null);
-  const empty = { tipo: "Ingreso", proyectoId: "", fecha: todayISO(), monto: "", categoria: "", forma: "Transferencia", estatus: "Cobrado", pautando: false, esRecurrente: false, frecuencia: "Mensual", fechaFin: "" };
-  const ordenados = [...data.finanzas].sort((a, b) => (b.fecha || "").localeCompare(a.fecha || ""));
+  const [vista, setVista] = useState("todos");
+  const empty = { concepto: "", tipo: "Ingreso", proyectoId: "", contactoId: "", fecha: todayISO(), fechaVencimiento: "", monto: "", categoria: "", forma: "Transferencia", estatus: "Cobrado", pautando: false, esRecurrente: false, frecuencia: "Mensual", fechaFin: "" };
   const nombreProyecto = (id) => data.proyectos.find((p) => p.id === id)?.nombre || "—";
+  const nombreCliente = (id) => data.contactos.find((c) => c.id === id)?.nombre || "—";
+
+  const cobrosPendientes = data.finanzas
+    .filter((f) => f.tipo === "Ingreso" && f.estatus === "Pendiente")
+    .sort((a, b) => (a.fechaVencimiento || "9999").localeCompare(b.fechaVencimiento || "9999"));
+  const totalCobrosPendientes = cobrosPendientes.reduce((s, f) => s + (Number(f.monto) || 0), 0);
+
+  const ordenados = vista === "cobros"
+    ? cobrosPendientes
+    : [...data.finanzas].sort((a, b) => (b.fecha || "").localeCompare(a.fecha || ""));
 
   return (
     <div>
@@ -869,17 +915,43 @@ function Finanzas({ data, onAdd, onEdit, onRemove }) {
         <h2 className="gp-serif text-2xl">Ingresos y egresos</h2>
         <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm w-full sm:w-auto"><Plus size={14} /> Nuevo</button>
       </div>
-      <p className="text-sm gp-text-muted mb-6">Incluye pagos recurrentes (luz, agua, compras a meses) con fecha de inicio y fin, o indefinidos.</p>
+      <p className="text-sm gp-text-muted mb-4">Incluye pagos recurrentes (luz, agua, compras a meses) con fecha de inicio y fin, o indefinidos.</p>
+
+      <div className="flex gap-1 mb-4">
+        <button onClick={() => setVista("todos")} className={`text-xs px-3 py-1.5 rounded-full border ${vista === "todos" ? "gp-btn" : "gp-text-muted"}`}>Todos los movimientos</button>
+        <button onClick={() => setVista("cobros")} className={`text-xs px-3 py-1.5 rounded-full border flex items-center gap-1 ${vista === "cobros" ? "gp-btn" : "gp-text-muted"}`}>
+          Cobros pendientes {cobrosPendientes.length > 0 && <Badge tone="gold">{cobrosPendientes.length}</Badge>}
+        </button>
+      </div>
+
+      {vista === "cobros" && (
+        <div className="gp-panel p-4 mb-4 flex items-center justify-between">
+          <div>
+            <p className="text-xs gp-text-muted">Total por cobrar</p>
+            <p className="gp-serif text-xl gp-text-teal">{fmtMoney(totalCobrosPendientes)}</p>
+          </div>
+          <p className="text-xs gp-text-muted text-right">Rentas, shows, sistemas, publicidad — ordenado por fecha de vencimiento, para saber con qué dinero cuentas y cuándo.</p>
+        </div>
+      )}
 
       <div className="gp-panel overflow-x-auto">
         <table className="gp-table">
-          <thead><tr><th>Fecha</th><th>Tipo</th><th>Proyecto</th><th>Categoría</th><th>Forma</th><th>Estatus</th><th>Recurrente</th><th>Monto</th><th></th></tr></thead>
+          <thead><tr><th>Concepto</th><th>Fecha</th>{vista === "cobros" && <th>Vence</th>}<th>Tipo</th><th>Proyecto</th><th>Cliente</th><th>Categoría</th><th>Forma</th><th>Estatus</th><th>Recurrente</th><th>Monto</th><th></th></tr></thead>
           <tbody>
-            {ordenados.map((f) => (
+            {ordenados.map((f) => {
+              const vencido = f.fechaVencimiento && daysUntil(f.fechaVencimiento) < 0;
+              return (
               <tr key={f.id}>
-                <td className="gp-mono">{f.fecha}</td>
+                <td>{f.concepto || "—"}</td>
+                <td className="gp-mono">{f.fecha || "—"}</td>
+                {vista === "cobros" && (
+                  <td className="gp-mono" style={{ color: vencido ? "var(--red)" : undefined }}>
+                    {f.fechaVencimiento ? `${f.fechaVencimiento}${vencido ? " (vencido)" : ""}` : "—"}
+                  </td>
+                )}
                 <td><Badge tone={f.tipo === "Ingreso" ? "teal" : "red"}>{f.tipo}</Badge></td>
                 <td className="gp-text-muted">{nombreProyecto(f.proyectoId)}</td>
+                <td className="gp-text-muted">{f.contactoId ? nombreCliente(f.contactoId) : "—"}</td>
                 <td className="gp-text-muted">{f.categoria}</td>
                 <td className="gp-text-muted">{f.forma}</td>
                 <td><Badge tone={f.estatus === "Cobrado" ? "teal" : "gold"}>{f.estatus}</Badge></td>
@@ -888,38 +960,47 @@ function Finanzas({ data, onAdd, onEdit, onRemove }) {
                     <Badge tone="gold">{f.frecuencia || "Mensual"}{f.fechaFin ? ` · hasta ${f.fechaFin}` : " · indefinido"}</Badge>
                   ) : "—"}
                 </td>
-                <td className={`gp-mono ${f.tipo === "Ingreso" ? "gp-text-teal" : "gp-text-red"}`}>{fmtMoney(f.monto)}</td>
+                <td className={`gp-mono ${f.tipo === "Ingreso" ? "gp-text-teal" : "gp-text-red"}`}>{f.monto ? fmtMoney(f.monto) : "—"}</td>
                 <td><div className="flex gap-1"><IconBtn onClick={() => setModal({ item: f })}><Pencil size={13} /></IconBtn><IconBtn onClick={() => onRemove(f.id)}><Trash2 size={13} /></IconBtn></div></td>
               </tr>
-            ))}
-            {ordenados.length === 0 && <tr><td colSpan={9} className="text-center gp-text-muted py-6">Sin movimientos registrados.</td></tr>}
+            );})}
+            {ordenados.length === 0 && <tr><td colSpan={vista === "cobros" ? 12 : 11} className="text-center gp-text-muted py-6">{vista === "cobros" ? "No tienes cobros pendientes." : "Sin movimientos registrados."}</td></tr>}
           </tbody>
         </table>
       </div>
 
       {modal && (
         <Modal title={modal.item.id ? "Editar movimiento" : "Nuevo movimiento"} onClose={() => setModal(null)}>
-          <FinanzaForm item={modal.item} proyectos={data.proyectos} onSave={(v) => { modal.item.id ? onEdit(modal.item.id, v) : onAdd(v); setModal(null); }} />
+          <FinanzaForm item={modal.item} proyectos={data.proyectos} contactos={data.contactos} onSave={(v) => { modal.item.id ? onEdit(modal.item.id, v) : onAdd(v); setModal(null); }} />
         </Modal>
       )}
     </div>
   );
 }
 
-function FinanzaForm({ item, proyectos, onSave }) {
+function FinanzaForm({ item, proyectos, contactos, onSave }) {
   const [v, setV] = useState(item);
   return (
     <div>
+      <Field label="Concepto"><input className="gp-input" placeholder="ej. Claude, PlanetFitness, Renta Xochinahuac" value={v.concepto || ""} onChange={(e) => setV({ ...v, concepto: e.target.value })} /></Field>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Field label="Tipo"><select className="gp-input" value={v.tipo} onChange={(e) => setV({ ...v, tipo: e.target.value })}>{TIPO_FIN.map((c) => <option key={c}>{c}</option>)}</select></Field>
         <Field label={v.esRecurrente ? "Fecha de inicio" : "Fecha"}><input type="date" className="gp-input" value={v.fecha} onChange={(e) => setV({ ...v, fecha: e.target.value })} /></Field>
       </div>
-      <Field label="Proyecto">
-        <select className="gp-input" value={v.proyectoId} onChange={(e) => setV({ ...v, proyectoId: e.target.value })}>
-          <option value="">— sin proyecto —</option>
-          {proyectos.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
-        </select>
-      </Field>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <Field label="Proyecto">
+          <select className="gp-input" value={v.proyectoId} onChange={(e) => setV({ ...v, proyectoId: e.target.value })}>
+            <option value="">— sin proyecto —</option>
+            {proyectos.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+          </select>
+        </Field>
+        <Field label="Cliente (quién pagó)">
+          <select className="gp-input" value={v.contactoId || ""} onChange={(e) => setV({ ...v, contactoId: e.target.value })}>
+            <option value="">— sin cliente —</option>
+            {contactos.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+          </select>
+        </Field>
+      </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Field label="Categoría"><input className="gp-input" value={v.categoria} onChange={(e) => setV({ ...v, categoria: e.target.value })} placeholder="ej. hosting, venta, renta" /></Field>
         <Field label="Monto"><input type="number" className="gp-input" value={v.monto} onChange={(e) => setV({ ...v, monto: e.target.value })} /></Field>
@@ -928,6 +1009,9 @@ function FinanzaForm({ item, proyectos, onSave }) {
         <Field label="Forma"><select className="gp-input" value={v.forma} onChange={(e) => setV({ ...v, forma: e.target.value })}>{FORMA_PAGO.map((c) => <option key={c}>{c}</option>)}</select></Field>
         <Field label="Estatus"><select className="gp-input" value={v.estatus} onChange={(e) => setV({ ...v, estatus: e.target.value })}><option>Cobrado</option><option>Pendiente</option></select></Field>
       </div>
+      {v.estatus === "Pendiente" && v.tipo === "Ingreso" && (
+        <Field label="Fecha de vencimiento (cuándo esperas cobrarlo)"><input type="date" className="gp-input" value={v.fechaVencimiento || ""} onChange={(e) => setV({ ...v, fechaVencimiento: e.target.value })} /></Field>
+      )}
       <label className="flex items-center gap-2 text-xs gp-text-muted mb-3">
         <input type="checkbox" checked={v.pautando} onChange={(e) => setV({ ...v, pautando: e.target.checked })} /> Este proyecto está pautando publicidad
       </label>
@@ -1291,8 +1375,11 @@ function MetaForm({ item, proyectos, onSave }) {
 /* ---------- Contactos / networking ---------- */
 function Contactos({ data, onAdd, onEdit, onRemove }) {
   const [modal, setModal] = useState(null);
-  const empty = { nombre: "", contexto: "", proyectoId: "", whatsapp: "", correo: "", notas: "" };
+  const [filtroTipo, setFiltroTipo] = useState("Todos");
+  const empty = { nombre: "", tipo: "Cliente", contexto: "", proyectoId: "", whatsapp: "", correo: "", notas: "" };
   const nombreProyecto = (id) => data.proyectos.find((p) => p.id === id)?.nombre || "—";
+  const toneTipo = { Cliente: "teal", Proveedor: "gold", Colaborador: "red", Otro: "" };
+  const visibles = filtroTipo === "Todos" ? data.contactos : data.contactos.filter((c) => (c.tipo || "Otro") === filtroTipo);
 
   return (
     <div>
@@ -1300,14 +1387,23 @@ function Contactos({ data, onAdd, onEdit, onRemove }) {
         <h2 className="gp-serif text-2xl">Contactos</h2>
         <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm w-full sm:w-auto"><Plus size={14} /> Nuevo</button>
       </div>
-      <p className="text-sm gp-text-muted mb-6">Gente que conoces en eventos y clientes potenciales — para que no se pierdan.</p>
+      <p className="text-sm gp-text-muted mb-4">Clientes, proveedores, colaboradores y gente que conoces en eventos — para que no se pierdan.</p>
+
+      <div className="flex flex-wrap gap-1 mb-4">
+        {["Todos", "Cliente", "Proveedor", "Colaborador", "Otro"].map((t) => (
+          <button key={t} onClick={() => setFiltroTipo(t)} className={`text-xs px-2.5 py-1 rounded-full border ${filtroTipo === t ? "gp-btn" : "gp-text-muted"}`}>{t}</button>
+        ))}
+      </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        {data.contactos.map((c) => (
+        {visibles.map((c) => (
           <div key={c.id} className="gp-panel p-4">
             <div className="flex items-start justify-between">
               <div>
-                <p className="text-sm font-medium">{c.nombre}</p>
+                <div className="flex items-center gap-2">
+                  <p className="text-sm font-medium">{c.nombre}</p>
+                  <Badge tone={toneTipo[c.tipo || "Otro"]}>{c.tipo || "Otro"}</Badge>
+                </div>
                 <p className="text-xs gp-text-muted mt-0.5">{c.contexto} {c.proyectoId ? `· ${nombreProyecto(c.proyectoId)}` : ""}</p>
                 <div className="flex gap-3 mt-1 text-xs gp-text-muted">
                   {c.whatsapp && <span className="flex items-center gap-1"><MessageCircle size={12} /> {c.whatsapp}</span>}
@@ -1319,7 +1415,7 @@ function Contactos({ data, onAdd, onEdit, onRemove }) {
             {c.notas && <p className="text-xs mt-2 gp-text-muted">{c.notas}</p>}
           </div>
         ))}
-        {data.contactos.length === 0 && <p className="text-sm gp-text-muted col-span-2">Aún no registras contactos.</p>}
+        {visibles.length === 0 && <p className="text-sm gp-text-muted col-span-2">Aún no registras contactos {filtroTipo !== "Todos" ? `de tipo "${filtroTipo}"` : ""}.</p>}
       </div>
 
       {modal && (
@@ -1335,7 +1431,14 @@ function ContactoForm({ item, proyectos, onSave }) {
   const [v, setV] = useState(item);
   return (
     <div>
-      <Field label="Nombre"><input className="gp-input" value={v.nombre} onChange={(e) => setV({ ...v, nombre: e.target.value })} /></Field>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <Field label="Nombre"><input className="gp-input" value={v.nombre} onChange={(e) => setV({ ...v, nombre: e.target.value })} /></Field>
+        <Field label="Tipo">
+          <select className="gp-input" value={v.tipo || "Otro"} onChange={(e) => setV({ ...v, tipo: e.target.value })}>
+            <option>Cliente</option><option>Proveedor</option><option>Colaborador</option><option>Otro</option>
+          </select>
+        </Field>
+      </div>
       <Field label="Dónde lo conociste"><input className="gp-input" placeholder="ej. Expo Acapulco 2026" value={v.contexto} onChange={(e) => setV({ ...v, contexto: e.target.value })} /></Field>
       <Field label="Proyecto relacionado">
         <select className="gp-input" value={v.proyectoId} onChange={(e) => setV({ ...v, proyectoId: e.target.value })}>
@@ -1918,9 +2021,10 @@ function AgregarFondosForm({ apartado, onSave }) {
 function Eventos({ data, onAdd, onEdit, onRemove }) {
   const [modal, setModal] = useState(null);
   const [expanded, setExpanded] = useState(null);
-  const empty = { nombre: "", fecha: todayISO(), proyectoId: "", ganancia: "", comentarios: "", media: [] };
+  const empty = { nombre: "", fecha: todayISO(), proyectoId: "", contactoId: "", lugar: "", horario: "", costo: "", gastos: "", utilidad: "", comentarios: "", media: [] };
   const ordenados = [...data.eventos].sort((a, b) => (b.fecha || "").localeCompare(a.fecha || ""));
   const nombreProyecto = (id) => data.proyectos.find((p) => p.id === id)?.nombre || "—";
+  const nombreCliente = (id) => data.contactos.find((c) => c.id === id)?.nombre || "—";
 
   return (
     <div>
@@ -1928,10 +2032,12 @@ function Eventos({ data, onAdd, onEdit, onRemove }) {
         <h2 className="gp-serif text-2xl">Eventos</h2>
         <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm w-full sm:w-auto"><Plus size={14} /> Nuevo</button>
       </div>
-      <p className="text-sm gp-text-muted mb-6">Eventos a los que vas, con comentarios, fecha y sus fotos o videos.</p>
+      <p className="text-sm gp-text-muted mb-6">Shows y eventos, con lugar, horario, costo/gastos, utilidad, fotos y comentarios.</p>
 
       <div className="space-y-2">
-        {ordenados.map((e) => (
+        {ordenados.map((e) => {
+          const utilidad = e.utilidad !== "" && e.utilidad != null ? Number(e.utilidad) : (e.costo || e.gastos ? Number(e.costo || 0) - Number(e.gastos || 0) : null);
+          return (
           <div key={e.id} className="gp-panel">
             <div className="p-3 flex items-start gap-3 cursor-pointer" onClick={() => setExpanded(expanded === e.id ? null : e.id)}>
               {expanded === e.id ? <ChevronDown size={15} className="mt-0.5 gp-text-muted" /> : <ChevronRight size={15} className="mt-0.5 gp-text-muted" />}
@@ -1939,9 +2045,12 @@ function Eventos({ data, onAdd, onEdit, onRemove }) {
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="text-sm font-medium">{e.nombre}</span>
                   <span className="gp-mono text-xs gp-text-muted">{e.fecha}</span>
+                  {e.lugar && <span className="text-xs gp-text-muted flex items-center gap-1"><MapPin size={11} /> {e.lugar}</span>}
+                  {e.horario && <span className="text-xs gp-text-muted flex items-center gap-1"><Clock size={11} /> {e.horario}</span>}
                   {e.proyectoId && <Badge tone="muted">{nombreProyecto(e.proyectoId)}</Badge>}
+                  {e.contactoId && <Badge tone="muted">{nombreCliente(e.contactoId)}</Badge>}
                   {e.media?.length > 0 && <Badge tone="gold">{e.media.length} archivo(s)</Badge>}
-                  {e.ganancia ? <Badge tone="teal">{fmtMoney(e.ganancia)}</Badge> : null}
+                  {utilidad !== null && <Badge tone={utilidad >= 0 ? "teal" : "red"}>{fmtMoney(utilidad)}</Badge>}
                 </div>
                 {e.comentarios && <p className="text-xs gp-text-muted mt-1">{e.comentarios}</p>}
               </div>
@@ -1950,41 +2059,59 @@ function Eventos({ data, onAdd, onEdit, onRemove }) {
                 <IconBtn onClick={() => onRemove(e.id)}><Trash2 size={13} /></IconBtn>
               </div>
             </div>
-            {expanded === e.id && e.media?.length > 0 && (
-              <div className="px-4 pb-4 border-t gp-border pt-3 grid grid-cols-2 sm:grid-cols-3 gap-2">
-                {e.media.map((m, i) => (
-                  <a key={i} href={m.url} target="_blank" rel="noopener noreferrer" className="gp-panel-hi rounded overflow-hidden block" style={{ border: "1px solid var(--border)" }}>
-                    {m.tipo === "video" ? (
-                      <video src={m.url} className="w-full h-24 object-cover" muted />
-                    ) : (
-                      <img src={m.url} alt={m.nombre} className="w-full h-24 object-cover" />
-                    )}
-                    <div className="px-2 py-1 flex items-center gap-1 text-xs gp-text-muted">
-                      {m.tipo === "video" ? <Film size={11} /> : <Camera size={11} />}
-                      <span className="truncate">{m.nombre}</span>
-                    </div>
-                  </a>
-                ))}
+            {expanded === e.id && (
+              <div className="px-4 pb-4 border-t gp-border pt-3">
+                {(e.costo || e.gastos) && (
+                  <div className="flex gap-4 text-xs gp-text-muted mb-3">
+                    {e.costo ? <span>Costo: <span className="gp-mono">{fmtMoney(e.costo)}</span></span> : null}
+                    {e.gastos ? <span>Gastos: <span className="gp-mono">{fmtMoney(e.gastos)}</span></span> : null}
+                  </div>
+                )}
+                {e.media?.length > 0 && (
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                    {e.media.map((m, i) => (
+                      <a key={i} href={m.url} target="_blank" rel="noopener noreferrer" className="gp-panel-hi rounded overflow-hidden block" style={{ border: "1px solid var(--border)" }}>
+                        {m.tipo === "video" ? (
+                          <video src={m.url} className="w-full h-24 object-cover" muted />
+                        ) : (
+                          <img src={m.url} alt={m.nombre} className="w-full h-24 object-cover" />
+                        )}
+                        <div className="px-2 py-1 flex items-center gap-1 text-xs gp-text-muted">
+                          {m.tipo === "video" ? <Film size={11} /> : <Camera size={11} />}
+                          <span className="truncate">{m.nombre}</span>
+                        </div>
+                      </a>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
           </div>
-        ))}
+        );})}
         {ordenados.length === 0 && <p className="text-sm gp-text-muted">Sin eventos registrados todavía.</p>}
       </div>
 
       {modal && (
         <Modal title={modal.item.id ? "Editar evento" : "Nuevo evento"} onClose={() => setModal(null)}>
-          <EventoForm item={modal.item} proyectos={data.proyectos} onSave={(v) => { modal.item.id ? onEdit(modal.item.id, v) : onAdd(v); setModal(null); }} />
+          <EventoForm item={modal.item} proyectos={data.proyectos} contactos={data.contactos} onSave={(v) => { modal.item.id ? onEdit(modal.item.id, v) : onAdd(v); setModal(null); }} />
         </Modal>
       )}
     </div>
   );
 }
 
-function EventoForm({ item, proyectos, onSave }) {
+function EventoForm({ item, proyectos, contactos, onSave }) {
   const [v, setV] = useState(item);
   const [subiendo, setSubiendo] = useState(false);
   const [error, setError] = useState("");
+
+  const setCostoGastos = (campo, val) => {
+    const next = { ...v, [campo]: val };
+    const costo = Number(campo === "costo" ? val : next.costo) || 0;
+    const gastos = Number(campo === "gastos" ? val : next.gastos) || 0;
+    if (next.costo !== "" || next.gastos !== "") next.utilidad = costo - gastos;
+    setV(next);
+  };
 
   const handleFiles = async (e) => {
     const files = Array.from(e.target.files || []);
@@ -2015,13 +2142,29 @@ function EventoForm({ item, proyectos, onSave }) {
         <Field label="Evento"><input className="gp-input" value={v.nombre} onChange={(e) => setV({ ...v, nombre: e.target.value })} /></Field>
         <Field label="Fecha"><input type="date" className="gp-input" value={v.fecha} onChange={(e) => setV({ ...v, fecha: e.target.value })} /></Field>
       </div>
-      <Field label="Proyecto relacionado (opcional)">
-        <select className="gp-input" value={v.proyectoId} onChange={(e) => setV({ ...v, proyectoId: e.target.value })}>
-          <option value="">— ninguno —</option>
-          {proyectos.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
-        </select>
-      </Field>
-      <Field label="Ganancia generada (si aplica)"><input type="number" className="gp-input" value={v.ganancia} onChange={(e) => setV({ ...v, ganancia: e.target.value })} /></Field>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <Field label="Lugar"><input className="gp-input" placeholder="ej. Grand Toreo Casino" value={v.lugar || ""} onChange={(e) => setV({ ...v, lugar: e.target.value })} /></Field>
+        <Field label="Horario"><input className="gp-input" placeholder="ej. 7:00pm a 10:00pm" value={v.horario || ""} onChange={(e) => setV({ ...v, horario: e.target.value })} /></Field>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <Field label="Proyecto relacionado (opcional)">
+          <select className="gp-input" value={v.proyectoId} onChange={(e) => setV({ ...v, proyectoId: e.target.value })}>
+            <option value="">— ninguno —</option>
+            {proyectos.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+          </select>
+        </Field>
+        <Field label="Cliente (opcional)">
+          <select className="gp-input" value={v.contactoId || ""} onChange={(e) => setV({ ...v, contactoId: e.target.value })}>
+            <option value="">— ninguno —</option>
+            {contactos.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+          </select>
+        </Field>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <Field label="Costo"><input type="number" className="gp-input" value={v.costo} onChange={(e) => setCostoGastos("costo", e.target.value)} /></Field>
+        <Field label="Gastos (staff, extras)"><input type="number" className="gp-input" value={v.gastos} onChange={(e) => setCostoGastos("gastos", e.target.value)} /></Field>
+        <Field label="Utilidad"><input type="number" className="gp-input" value={v.utilidad} onChange={(e) => setV({ ...v, utilidad: e.target.value })} /></Field>
+      </div>
       <Field label="Comentarios"><textarea className="gp-input" rows={2} value={v.comentarios} onChange={(e) => setV({ ...v, comentarios: e.target.value })} /></Field>
       <Field label="Fotos y videos">
         <input type="file" accept="image/*,video/*" multiple onChange={handleFiles} className="text-xs gp-text-muted" disabled={subiendo} />
@@ -2043,3 +2186,4 @@ function EventoForm({ item, proyectos, onSave }) {
     </div>
   );
 }
+
