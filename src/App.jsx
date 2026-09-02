@@ -49,7 +49,8 @@ const Tokens = () => (
 
 /* ---------- datos base ---------- */
 const CATS = ["Fundación", "Software", "Música", "Renta", "Marketing", "Chatbots", "Personal", "Otro"];
-const ESTATUS_PROYECTO = ["Idea", "En validación", "En desarrollo", "Activo", "Pausado", "Archivado"];
+const ESTATUS_PROYECTO = ["Idea", "En validación", "En desarrollo", "Activo", "Finalizado", "Pausado", "Archivado"];
+const MODO_PROYECTO = ["Finito", "Continuo"];
 const MONETIZACION = ["Dinero", "Especie", "Intercambio", "No genera dinero"];
 const PRIORIDADES = ["Alta", "Media", "Baja"];
 const ESTATUS_TAREA = ["Pendiente", "En progreso", "Hecho"];
@@ -913,7 +914,7 @@ function Proyectos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
   const [notaTexto, setNotaTexto] = useState("");
   const [orden, setOrden] = useState("default");
 
-  const empty = { nombre: "", categoria: CATS[0], estatus: "Idea", monetizacion: MONETIZACION[0], descripcion: "", github: "", githubSubido: false, notas: [], prioridad: "Media", fechaRevision: "" };
+  const empty = { nombre: "", categoria: CATS[0], estatus: "Idea", modo: "Finito", monetizacion: MONETIZACION[0], descripcion: "", github: "", githubSubido: false, notas: [], prioridad: "Media", fechaRevision: "" };
 
   const camposOrden = {
     alfabetico: { get: (p) => p.nombre, tipo: "texto" },
@@ -934,6 +935,16 @@ function Proyectos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
     if (!notaTexto.trim()) return;
     onEdit(proyecto.id, { notas: [...(proyecto.notas || []), { id: uid(), fecha: todayISO(), texto: notaTexto }] });
     setNotaTexto("");
+  };
+
+  const rentabilidad = (proyectoId) => {
+    const movs = data.finanzas.filter((f) => f.proyectoId === proyectoId && f.estatus === "Cobrado");
+    const ingresos = movs.filter((f) => f.tipo === "Ingreso").reduce((s, f) => s + (Number(f.monto) || 0), 0);
+    const egresos = movs.filter((f) => f.tipo === "Egreso").reduce((s, f) => s + (Number(f.monto) || 0), 0);
+    const pagosColab = data.pendientes
+      .filter((t) => t.proyectoId === proyectoId && t.responsableId && t.estatus === "Hecho")
+      .reduce((s, t) => s + (Number(t.precio) || 0), 0);
+    return { ingresos, egresos, pagosColab, neto: ingresos - egresos };
   };
 
   return (
@@ -960,6 +971,7 @@ function Proyectos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="text-sm font-medium">{p.nombre}</span>
                         <Badge tone="muted">{p.categoria}</Badge>
+                        <Badge tone={p.modo === "Continuo" ? "teal" : "muted"}>{p.modo || "Finito"}</Badge>
                         <Badge tone={p.monetizacion === "No genera dinero" ? "muted" : "gold"}>{p.monetizacion}</Badge>
                         {p.prioridad && <Badge tone={p.prioridad === "Alta" ? "red" : p.prioridad === "Media" ? "gold" : "muted"}>{p.prioridad}</Badge>}
                         {!p.githubSubido && <Badge tone="red">falta GitHub</Badge>}
@@ -973,6 +985,17 @@ function Proyectos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
                   </div>
                   {expanded === p.id && (
                     <div className="px-4 pb-4 border-t gp-border pt-3">
+                      {(() => {
+                        const r = rentabilidad(p.id);
+                        return (
+                          <div className="gp-panel-hi p-3 mb-3 grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                            <div><p className="gp-text-muted">Ingresos</p><p className="gp-mono gp-text-teal">{fmtMoney(r.ingresos)}</p></div>
+                            <div><p className="gp-text-muted">Egresos</p><p className="gp-mono gp-text-red">{fmtMoney(r.egresos)}</p></div>
+                            <div><p className="gp-text-muted">Neto</p><p className={`gp-mono ${r.neto >= 0 ? "gp-text-teal" : "gp-text-red"}`}>{fmtMoney(r.neto)}</p></div>
+                            <div><p className="gp-text-muted">Pagado a colaboradores</p><p className="gp-mono gp-text-gold">{fmtMoney(r.pagosColab)}</p></div>
+                          </div>
+                        );
+                      })()}
                       <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs gp-text-muted mb-3">
                         <label className="flex items-center gap-1.5">
                           <input type="checkbox" checked={p.githubSubido} onChange={(e) => onEdit(p.id, { githubSubido: e.target.checked })} />
@@ -1023,7 +1046,13 @@ function ProyectoForm({ item, onSave }) {
         <Field label="Categoría"><select className="gp-input" value={v.categoria} onChange={(e) => setV({ ...v, categoria: e.target.value })}>{CATS.map((c) => <option key={c}>{c}</option>)}</select></Field>
         <Field label="Estatus"><select className="gp-input" value={v.estatus} onChange={(e) => setV({ ...v, estatus: e.target.value })}>{ESTATUS_PROYECTO.map((c) => <option key={c}>{c}</option>)}</select></Field>
       </div>
-      <Field label="Cómo genera valor"><select className="gp-input" value={v.monetizacion} onChange={(e) => setV({ ...v, monetizacion: e.target.value })}>{MONETIZACION.map((c) => <option key={c}>{c}</option>)}</select></Field>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <Field label="Modo">
+          <select className="gp-input" value={v.modo || "Finito"} onChange={(e) => setV({ ...v, modo: e.target.value })}>{MODO_PROYECTO.map((c) => <option key={c}>{c}</option>)}</select>
+        </Field>
+        <Field label="Cómo genera valor"><select className="gp-input" value={v.monetizacion} onChange={(e) => setV({ ...v, monetizacion: e.target.value })}>{MONETIZACION.map((c) => <option key={c}>{c}</option>)}</select></Field>
+      </div>
+      <p className="text-xs gp-text-muted -mt-2 mb-3">{v.modo === "Continuo" ? "Continuo: genera flujo de forma constante (ej. renta, agencia de servicios)." : "Finito: tiene un punto claro de terminado (ej. lanzar un sitio, un show específico)."}</p>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Field label="Prioridad"><select className="gp-input" value={v.prioridad || "Media"} onChange={(e) => setV({ ...v, prioridad: e.target.value })}>{PRIORIDADES.map((c) => <option key={c}>{c}</option>)}</select></Field>
         <Field label="Fecha de revisión (cuándo revisar el avance)"><input type="date" className="gp-input" value={v.fechaRevision || ""} onChange={(e) => setV({ ...v, fechaRevision: e.target.value })} /></Field>
@@ -1037,11 +1066,45 @@ function ProyectoForm({ item, onSave }) {
 }
 
 /* ---------- Pendientes ---------- */
+// Arma el árbol de subtareas (sin límite de profundidad) a partir de la lista plana.
+function buildTareaTree(items) {
+  const byParent = {};
+  for (const it of items) {
+    const key = it.parentId || "_root";
+    (byParent[key] = byParent[key] || []).push(it);
+  }
+  const attach = (key) => (byParent[key] || []).map((it) => ({ ...it, hijos: attach(it.id) }));
+  return attach("_root");
+}
+// Aplana el árbol a una lista con nivel de profundidad, para renderizar con indentación.
+function flattenTareas(tree, nivel = 0) {
+  const out = [];
+  for (const nodo of tree) {
+    out.push({ item: nodo, nivel });
+    out.push(...flattenTareas(nodo.hijos, nivel + 1));
+  }
+  return out;
+}
+// % de avance: si la tarea tiene subtareas, es el promedio del avance de sus hijos (recursivo);
+// si es una tarea final (sin hijos), es binario según su estatus.
+function calcAvanceTarea(nodo) {
+  if (!nodo.hijos || nodo.hijos.length === 0) {
+    return nodo.estatus === "Hecho" ? 100 : nodo.estatus === "En progreso" ? 50 : 0;
+  }
+  const suma = nodo.hijos.reduce((s, h) => s + calcAvanceTarea(h), 0);
+  return suma / nodo.hijos.length;
+}
+// ids de todos los descendientes de una tarea (para no permitir que se vuelva subtarea de sí misma).
+function descendientesDe(id, items) {
+  const hijos = items.filter((t) => t.parentId === id);
+  return hijos.reduce((acc, h) => [...acc, h.id, ...descendientesDe(h.id, items)], []);
+}
+
 function Pendientes({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveComentario }) {
   const [modal, setModal] = useState(null);
   const [comentariosDe, setComentariosDe] = useState(null);
   const [orden, setOrden] = useState("default");
-  const empty = { proyectoId: "", descripcion: "", fechaLimite: todayISO(), fechaRevision: "", prioridad: "Media", estatus: "Pendiente", responsableId: "", contactoId: "", precio: "" };
+  const empty = { proyectoId: "", parentId: "", descripcion: "", fechaLimite: todayISO(), fechaRevision: "", prioridad: "Media", estatus: "Pendiente", responsableId: "", contactoId: "", precio: "", tiempoEstimado: "", tiempoReal: "" };
 
   const camposOrden = {
     entrega: { get: (p) => p.fechaLimite, tipo: "fecha" },
@@ -1059,8 +1122,9 @@ function Pendientes({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCo
   ];
   const base = orden === "default"
     ? [...data.pendientes].sort((a, b) => (a.fechaLimite || "").localeCompare(b.fechaLimite || ""))
-    : data.pendientes;
-  const ordenados = ordenarLista(base, orden, camposOrden);
+    : ordenarLista(data.pendientes, orden, camposOrden);
+  const arbol = buildTareaTree(base);
+  const filas = flattenTareas(arbol);
   const nComentarios = (id) => (data.comentarios || []).filter((c) => c.entidadTipo === "pendientes" && c.entidadId === id).length;
 
   const nombreProyecto = (id) => data.proyectos.find((p) => p.id === id)?.nombre || "—";
@@ -1073,38 +1137,56 @@ function Pendientes({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCo
         <h2 className="gp-serif text-2xl">Pendientes</h2>
         <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm w-full sm:w-auto"><Plus size={14} /> Nuevo</button>
       </div>
-      <p className="text-sm gp-text-muted mb-3">De todos tus proyectos, en un solo lugar.</p>
+      <p className="text-sm gp-text-muted mb-3">De todos tus proyectos, en un solo lugar. Puedes anidar subtareas sin límite con el ➕ de cada fila.</p>
       <div className="mb-4"><OrdenSelector opciones={opcionesOrden} value={orden} onChange={setOrden} /></div>
 
       <div className="gp-panel overflow-x-auto">
         <table className="gp-table">
-          <thead><tr><th>Pendiente</th><th>Proyecto</th><th>Cliente</th><th>Responsable</th><th>Fecha</th><th>Prioridad</th><th>Estatus</th><th>Precio</th><th></th></tr></thead>
+          <thead><tr><th>Pendiente</th><th>Proyecto</th><th>Cliente</th><th>Responsable</th><th>Fecha</th><th>Prioridad</th><th>Avance</th><th>Precio</th><th>Horas</th><th></th></tr></thead>
           <tbody>
-            {ordenados.map((p) => {
+            {filas.map(({ item: p, nivel }) => {
               const vencido = p.estatus !== "Hecho" && p.fechaLimite && daysUntil(p.fechaLimite) < 0;
               const nc = nComentarios(p.id);
+              const tieneHijos = p.hijos && p.hijos.length > 0;
+              const avance = tieneHijos ? Math.round(calcAvanceTarea(p)) : null;
               return (
                 <tr key={p.id}>
-                  <td>{p.descripcion}</td>
+                  <td>
+                    <span style={{ paddingLeft: nivel * 18 }} className="flex items-center gap-1">
+                      {nivel > 0 && <span className="gp-text-muted">└</span>}
+                      {p.descripcion}
+                    </span>
+                  </td>
                   <td className="gp-text-muted">{nombreProyecto(p.proyectoId)}</td>
                   <td className="gp-text-muted">{p.contactoId ? nombreCliente(p.contactoId) : "—"}</td>
                   <td className="gp-text-muted">{nombreResp(p.responsableId)}</td>
                   <td className="gp-mono" style={{ color: vencido ? "var(--red)" : undefined }}>{p.fechaLimite}</td>
                   <td><Badge tone={p.prioridad === "Alta" ? "red" : p.prioridad === "Media" ? "gold" : "muted"}>{p.prioridad}</Badge></td>
                   <td>
-                    <select className="gp-input" style={{ padding: "2px 6px" }} value={p.estatus} onChange={(e) => onEdit(p.id, { estatus: e.target.value })}>
-                      {ESTATUS_TAREA.map((s) => <option key={s}>{s}</option>)}
-                    </select>
+                    {tieneHijos ? (
+                      <div className="flex items-center gap-1.5" style={{ minWidth: 70 }}>
+                        <div className="h-1.5 rounded flex-1" style={{ background: "var(--border)" }}>
+                          <div className="h-1.5 rounded" style={{ width: `${avance}%`, background: avance === 100 ? "var(--teal)" : "var(--gold)" }} />
+                        </div>
+                        <span className="gp-mono" style={{ fontSize: 10 }}>{avance}%</span>
+                      </div>
+                    ) : (
+                      <select className="gp-input" style={{ padding: "2px 6px" }} value={p.estatus} onChange={(e) => onEdit(p.id, { estatus: e.target.value })}>
+                        {ESTATUS_TAREA.map((s) => <option key={s}>{s}</option>)}
+                      </select>
+                    )}
                   </td>
                   <td className="gp-mono">{p.precio ? fmtMoney(p.precio) : "—"}</td>
+                  <td className="gp-mono gp-text-muted">{p.tiempoEstimado ? `${p.tiempoEstimado}h` : "—"}{p.tiempoReal ? ` / ${p.tiempoReal}h` : ""}</td>
                   <td><div className="flex gap-1">
+                    <IconBtn onClick={() => setModal({ item: { ...empty, proyectoId: p.proyectoId, parentId: p.id } })}><Plus size={13} /></IconBtn>
                     <IconBtn onClick={() => setComentariosDe(p)}><MessageCircle size={13} />{nc > 0 && <span className="gp-mono" style={{ fontSize: 9, marginLeft: 2 }}>{nc}</span>}</IconBtn>
                     <IconBtn onClick={() => setModal({ item: p })}><Pencil size={13} /></IconBtn><IconBtn onClick={() => onRemove(p.id)}><Trash2 size={13} /></IconBtn>
                   </div></td>
                 </tr>
               );
             })}
-            {ordenados.length === 0 && <tr><td colSpan={9} className="text-center gp-text-muted py-6">Sin pendientes registrados.</td></tr>}
+            {filas.length === 0 && <tr><td colSpan={10} className="text-center gp-text-muted py-6">Sin pendientes registrados.</td></tr>}
           </tbody>
         </table>
       </div>
@@ -1116,20 +1198,28 @@ function Pendientes({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCo
       )}
 
       {modal && (
-        <Modal title={modal.item.id ? "Editar pendiente" : "Nuevo pendiente"} onClose={() => setModal(null)}>
-          <PendienteForm item={modal.item} proyectos={data.proyectos} equipo={data.equipo} contactos={data.contactos} onSave={(v) => { modal.item.id ? onEdit(modal.item.id, v) : onAdd(v); setModal(null); }} />
+        <Modal title={modal.item.id ? "Editar pendiente" : modal.item.parentId ? "Nueva subtarea" : "Nuevo pendiente"} onClose={() => setModal(null)}>
+          <PendienteForm item={modal.item} proyectos={data.proyectos} equipo={data.equipo} contactos={data.contactos} pendientes={data.pendientes} onSave={(v) => { modal.item.id ? onEdit(modal.item.id, v) : onAdd(v); setModal(null); }} />
         </Modal>
       )}
     </div>
   );
 }
 
-function PendienteForm({ item, proyectos, equipo, contactos, onSave }) {
+function PendienteForm({ item, proyectos, equipo, contactos, pendientes, onSave }) {
   const [v, setV] = useState(item);
   const [error, setError] = useState("");
+  const excluidos = item.id ? [item.id, ...descendientesDe(item.id, pendientes)] : [];
+  const opcionesParent = pendientes.filter((t) => !excluidos.includes(t.id));
   return (
     <div>
       <Field label="Descripción"><input className="gp-input" value={v.descripcion} onChange={(e) => setV({ ...v, descripcion: e.target.value })} /></Field>
+      <Field label="Es subtarea de (opcional)">
+        <select className="gp-input" value={v.parentId || ""} onChange={(e) => setV({ ...v, parentId: e.target.value })}>
+          <option value="">— tarea principal —</option>
+          {opcionesParent.map((t) => <option key={t.id} value={t.id}>{t.descripcion}</option>)}
+        </select>
+      </Field>
       <Field label="Proyecto">
         <select className="gp-input" value={v.proyectoId} onChange={(e) => setV({ ...v, proyectoId: e.target.value })}>
           <option value="">— sin proyecto —</option>
@@ -1153,7 +1243,11 @@ function PendienteForm({ item, proyectos, equipo, contactos, onSave }) {
           {equipo.map((m) => <option key={m.id} value={m.id}>{m.nombre}</option>)}
         </select>
       </Field>
-      <Field label="Precio pactado (si es delegado)"><input type="number" className="gp-input" value={v.precio} onChange={(e) => setV({ ...v, precio: e.target.value })} /></Field>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <Field label="Precio pactado (si es delegado)"><input type="number" className="gp-input" value={v.precio} onChange={(e) => setV({ ...v, precio: e.target.value })} /></Field>
+        <Field label="Tiempo estimado (horas)"><input type="number" className="gp-input" value={v.tiempoEstimado} onChange={(e) => setV({ ...v, tiempoEstimado: e.target.value })} /></Field>
+      </div>
+      <Field label="Tiempo real (horas, cuando termine)"><input type="number" className="gp-input" value={v.tiempoReal} onChange={(e) => setV({ ...v, tiempoReal: e.target.value })} /></Field>
       {error && <p className="text-xs gp-text-red mb-2">{error}</p>}
 
       <button className="gp-btn w-full py-2 text-sm mt-2" onClick={() => { if (!v.descripcion?.toString().trim()) { setError("La descripción del pendiente es obligatoria."); return; } setError(""); onSave(v); }}>Guardar</button>
