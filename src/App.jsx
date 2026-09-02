@@ -1379,6 +1379,8 @@ function calcularSaldo(data) {
 function Finanzas({ data, onAdd, onEdit, onRemove }) {
   const [modal, setModal] = useState(null);
   const [vista, setVista] = useState("todos");
+  const [filtroTipoRecurrente, setFiltroTipoRecurrente] = useState("Todos");
+  const [filtroVigencia, setFiltroVigencia] = useState("Vigentes");
   const [orden, setOrden] = useState("default");
   const [ordenDir, setOrdenDir] = useState("asc");
   const toggleOrden = (key) => { if (orden === key) setOrdenDir((d) => (d === "asc" ? "desc" : "asc")); else { setOrden(key); setOrdenDir("asc"); } };
@@ -1390,6 +1392,13 @@ function Finanzas({ data, onAdd, onEdit, onRemove }) {
     .filter((f) => f.tipo === "Ingreso" && f.estatus === "Pendiente")
     .sort((a, b) => (a.fechaVencimiento || "9999").localeCompare(b.fechaVencimiento || "9999"));
   const totalCobrosPendientes = cobrosPendientes.reduce((s, f) => s + (Number(f.monto) || 0), 0);
+
+  const hoy = todayISO();
+  const esVigente = (f) => !f.fechaFin || f.fechaFin >= hoy;
+  let recurrentes = data.finanzas.filter((f) => f.esRecurrente);
+  if (filtroTipoRecurrente !== "Todos") recurrentes = recurrentes.filter((f) => f.tipo === filtroTipoRecurrente);
+  if (filtroVigencia !== "Todos") recurrentes = recurrentes.filter((f) => (filtroVigencia === "Vigentes" ? esVigente(f) : !esVigente(f)));
+  const totalRecurrentes = recurrentes.reduce((s, f) => s + (Number(f.monto) || 0) * (f.tipo === "Ingreso" ? 1 : -1), 0);
 
   const camposOrden = {
     fecha: { get: (f) => f.fecha, tipo: "fecha" },
@@ -1403,7 +1412,7 @@ function Finanzas({ data, onAdd, onEdit, onRemove }) {
     { key: "alfabetico", label: "alfabético" },
     { key: "monto", label: "monto" },
   ];
-  const base = vista === "cobros" ? cobrosPendientes : [...data.finanzas].sort((a, b) => (b.fecha || "").localeCompare(a.fecha || ""));
+  const base = vista === "cobros" ? cobrosPendientes : vista === "recurrentes" ? recurrentes : [...data.finanzas].sort((a, b) => (b.fecha || "").localeCompare(a.fecha || ""));
   const ordenados = vista === "cobros" ? base : ordenarLista(base, orden, camposOrden, ordenDir);
 
   return (
@@ -1419,7 +1428,11 @@ function Finanzas({ data, onAdd, onEdit, onRemove }) {
         <button onClick={() => setVista("cobros")} className={`text-xs px-3 py-1.5 rounded-full border flex items-center gap-1 ${vista === "cobros" ? "gp-btn" : "gp-text-muted"}`}>
           Cobros pendientes {cobrosPendientes.length > 0 && <Badge tone="gold">{cobrosPendientes.length}</Badge>}
         </button>
+        <button onClick={() => setVista("recurrentes")} className={`text-xs px-3 py-1.5 rounded-full border flex items-center gap-1 ${vista === "recurrentes" ? "gp-btn" : "gp-text-muted"}`}>
+          Pagos recurrentes
+        </button>
         {vista === "todos" && <OrdenSelector opciones={opcionesOrden} value={orden} onChange={setOrden} />}
+        {vista === "recurrentes" && <OrdenSelector opciones={opcionesOrden} value={orden} onChange={setOrden} />}
       </div>
 
       {vista === "cobros" && (
@@ -1432,9 +1445,31 @@ function Finanzas({ data, onAdd, onEdit, onRemove }) {
         </div>
       )}
 
+      {vista === "recurrentes" && (
+        <>
+          <div className="flex flex-wrap items-center gap-2 mb-4">
+            <div className="flex gap-1">
+              {["Todos", "Ingreso", "Egreso"].map((t) => (
+                <button key={t} onClick={() => setFiltroTipoRecurrente(t)} className={`text-xs px-2.5 py-1 rounded-full border ${filtroTipoRecurrente === t ? "gp-btn" : "gp-text-muted"}`}>{t === "Todos" ? "Todos" : t + "s"}</button>
+              ))}
+            </div>
+            <div className="flex gap-1">
+              {["Vigentes", "No vigentes", "Todos"].map((v) => (
+                <button key={v} onClick={() => setFiltroVigencia(v)} className={`text-xs px-2.5 py-1 rounded-full border ${filtroVigencia === v ? "gp-btn" : "gp-text-muted"}`}>{v}</button>
+              ))}
+            </div>
+          </div>
+          <div className="gp-panel p-4 mb-4">
+            <p className="text-xs gp-text-muted">Neto de esta vista ({recurrentes.length} pago{recurrentes.length === 1 ? "" : "s"})</p>
+            <p className={`gp-serif text-xl ${totalRecurrentes >= 0 ? "gp-text-teal" : "gp-text-red"}`}>{fmtMoney(totalRecurrentes)}</p>
+            <p className="text-xs gp-text-muted mt-1">Vigente = sin fecha de fin, o con fecha de fin en el futuro. No vigente = ya pasó su fecha de fin.</p>
+          </div>
+        </>
+      )}
+
       <div className="gp-panel overflow-x-auto">
         <table className="gp-table">
-          <thead><tr><Th label="Concepto" sortKey="alfabetico" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} /><Th label="Fecha" sortKey="fecha" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} /><th>Día de pago</th>{vista === "cobros" && <th>Vence</th>}<th>Tipo</th><th>Proyecto</th><th>Cliente</th><th>Categoría</th><th>Forma</th><th>Estatus</th><th>Recurrente</th><Th label="Monto" sortKey="monto" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} /><th></th></tr></thead>
+          <thead><tr><Th label="Concepto" sortKey="alfabetico" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} /><Th label="Fecha" sortKey="fecha" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} /><th>Día de pago</th>{vista === "cobros" && <th>Vence</th>}{vista === "recurrentes" && <th>Vigencia</th>}<th>Tipo</th><th>Proyecto</th><th>Cliente</th><th>Categoría</th><th>Forma</th><th>Estatus</th><th>Recurrente</th><Th label="Monto" sortKey="monto" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} /><th></th></tr></thead>
           <tbody>
             {ordenados.map((f) => {
               const vencido = f.fechaVencimiento && daysUntil(f.fechaVencimiento) < 0;
@@ -1447,6 +1482,9 @@ function Finanzas({ data, onAdd, onEdit, onRemove }) {
                   <td className="gp-mono" style={{ color: vencido ? "var(--red)" : undefined }}>
                     {f.fechaVencimiento ? `${f.fechaVencimiento}${vencido ? " (vencido)" : ""}` : "—"}
                   </td>
+                )}
+                {vista === "recurrentes" && (
+                  <td><Badge tone={esVigente(f) ? "teal" : "muted"}>{esVigente(f) ? "Vigente" : "No vigente"}</Badge></td>
                 )}
                 <td><Badge tone={f.tipo === "Ingreso" ? "teal" : "red"}>{f.tipo}</Badge></td>
                 <td className="gp-text-muted">{nombreProyecto(f.proyectoId)}</td>
@@ -1463,7 +1501,7 @@ function Finanzas({ data, onAdd, onEdit, onRemove }) {
                 <td><div className="flex gap-1"><IconBtn onClick={() => setModal({ item: f })}><Pencil size={13} /></IconBtn><IconBtn onClick={() => onRemove(f.id)}><Trash2 size={13} /></IconBtn></div></td>
               </tr>
             );})}
-            {ordenados.length === 0 && <tr><td colSpan={vista === "cobros" ? 13 : 12} className="text-center gp-text-muted py-6">{vista === "cobros" ? "No tienes cobros pendientes." : "Sin movimientos registrados."}</td></tr>}
+            {ordenados.length === 0 && <tr><td colSpan={vista === "cobros" ? 13 : 12} className="text-center gp-text-muted py-6">{vista === "cobros" ? "No tienes cobros pendientes." : vista === "recurrentes" ? "No hay pagos recurrentes con este filtro." : "Sin movimientos registrados."}</td></tr>}
           </tbody>
         </table>
       </div>
