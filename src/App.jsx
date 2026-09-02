@@ -2963,6 +2963,45 @@ function Reportes({ data }) {
       .reduce((s, f) => s + Number(f.monto || 0), 0);
   }, [finanzasFiltradas]);
 
+  // ---- Punto 7: estimaciones basadas en histórico (sin IA, solo estadística) ----
+  const estimaciones = useMemo(() => {
+    // utilidad de eventos (con utilidad definida, sin importar el rango de fechas del filtro)
+    const utilidadesEventos = data.eventos.map((e) => e.utilidad).filter((u) => u !== null && u !== undefined && u !== "").map(Number);
+    const promedioEvento = utilidadesEventos.length ? utilidadesEventos.reduce((a, b) => a + b, 0) / utilidadesEventos.length : null;
+    const ordenExtremos = [...utilidadesEventos].sort((a, b) => a - b);
+    const medianaEvento = ordenExtremos.length ? ordenExtremos[Math.floor(ordenExtremos.length / 2)] : null;
+
+    // utilidad de rentas (Escápate YA), identificadas por categoría
+    const rentas = data.finanzas.filter((f) => f.categoria === "Renta Airbnb" && f.monto);
+    const promedioRenta = rentas.length ? rentas.reduce((s, f) => s + Number(f.monto), 0) / rentas.length : null;
+
+    // gasto mensual promedio por categoría (para presupuestar el próximo mes), en el rango filtrado
+    const gastoPorCategoriaMeses = {};
+    for (const e of ledger) {
+      if (e.tipo !== "Egreso") continue;
+      gastoPorCategoriaMeses[e.categoria] = (gastoPorCategoriaMeses[e.categoria] || 0) + e.monto;
+    }
+    const promedioMensualPorCategoria = Object.entries(gastoPorCategoriaMeses)
+      .map(([cat, total]) => ({ categoria: cat, promedio: total / rangoMeses }))
+      .sort((a, b) => b.promedio - a.promedio)
+      .slice(0, 5);
+
+    // precisión de estimación de tiempo en tareas (tiempoEstimado vs tiempoReal, cuando ambos existen)
+    const tareasConAmbos = data.pendientes.filter((t) => t.tiempoEstimado && t.tiempoReal);
+    let precisionTiempo = null;
+    if (tareasConAmbos.length > 0) {
+      const desviaciones = tareasConAmbos.map((t) => (Number(t.tiempoReal) - Number(t.tiempoEstimado)) / Number(t.tiempoEstimado));
+      const promedioDesv = desviaciones.reduce((a, b) => a + b, 0) / desviaciones.length;
+      precisionTiempo = { n: tareasConAmbos.length, sesgoPct: promedioDesv * 100 };
+    }
+
+    // proyección simple del próximo mes (promedio de los últimos meses del rango filtrado)
+    const proyeccionIngreso = serieMensual.length ? serieMensual.reduce((s, m) => s + m.ingresos, 0) / serieMensual.length : 0;
+    const proyeccionEgreso = serieMensual.length ? serieMensual.reduce((s, m) => s + m.egresos, 0) / serieMensual.length : 0;
+
+    return { promedioEvento, medianaEvento, nEventos: utilidadesEventos.length, promedioRenta, nRentas: rentas.length, promedioMensualPorCategoria, precisionTiempo, proyeccionIngreso, proyeccionEgreso };
+  }, [data.eventos, data.finanzas, data.pendientes, ledger, rangoMeses, serieMensual]);
+
   return (
     <div>
       <h2 className="gp-serif text-2xl mb-1">Reportes</h2>
@@ -3048,6 +3087,58 @@ function Reportes({ data }) {
               </Bar>
             </BarChart>
           </ResponsiveContainer>
+        )}
+      </div>
+
+      <div className="gp-panel p-4 mt-4">
+        <div className="flex items-center gap-2 mb-1">
+          <Lightbulb size={15} className="gp-text-gold" />
+          <h3 className="text-sm font-medium">Estimaciones basadas en tu histórico</h3>
+        </div>
+        <p className="text-xs gp-text-muted mb-4">Calculado con estadística simple sobre tus datos ya cargados — sin IA externa, sin costo. Entre más datos reales captures, más afinadas quedan estas cifras.</p>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <p className="text-xs gp-text-muted mb-1">Utilidad esperada por evento/show</p>
+            {estimaciones.nEventos > 0 ? (
+              <p className="text-sm">Promedio: <span className="gp-mono gp-text-teal">{fmtMoney(estimaciones.promedioEvento)}</span> · Mediana: <span className="gp-mono">{fmtMoney(estimaciones.medianaEvento)}</span> <span className="gp-text-muted">({estimaciones.nEventos} eventos con dato)</span></p>
+            ) : <p className="text-xs gp-text-muted">Aún no hay suficientes eventos con utilidad capturada.</p>}
+          </div>
+
+          <div>
+            <p className="text-xs gp-text-muted mb-1">Ingreso esperado por renta (Escápate YA)</p>
+            {estimaciones.nRentas > 0 ? (
+              <p className="text-sm">Promedio: <span className="gp-mono gp-text-teal">{fmtMoney(estimaciones.promedioRenta)}</span> <span className="gp-text-muted">({estimaciones.nRentas} rentas)</span></p>
+            ) : <p className="text-xs gp-text-muted">Aún no hay rentas registradas.</p>}
+          </div>
+
+          <div>
+            <p className="text-xs gp-text-muted mb-1">Proyección para el próximo mes (según el rango que ves arriba)</p>
+            <p className="text-sm">Ingresos: <span className="gp-mono gp-text-teal">{fmtMoney(estimaciones.proyeccionIngreso)}</span> · Egresos: <span className="gp-mono gp-text-red">{fmtMoney(estimaciones.proyeccionEgreso)}</span></p>
+          </div>
+
+          <div>
+            <p className="text-xs gp-text-muted mb-1">Precisión al estimar tiempos en tareas</p>
+            {estimaciones.precisionTiempo ? (
+              <p className="text-sm">
+                En promedio tardas <span className={`gp-mono ${estimaciones.precisionTiempo.sesgoPct > 0 ? "gp-text-red" : "gp-text-teal"}`}>{estimaciones.precisionTiempo.sesgoPct > 0 ? "+" : ""}{estimaciones.precisionTiempo.sesgoPct.toFixed(0)}%</span> de lo que estimas <span className="gp-text-muted">({estimaciones.precisionTiempo.n} tareas con estimado y real)</span>
+              </p>
+            ) : <p className="text-xs gp-text-muted">Captura tiempo estimado y real en tus Pendientes para que esto se active.</p>}
+          </div>
+        </div>
+
+        {estimaciones.promedioMensualPorCategoria.length > 0 && (
+          <div className="mt-4 pt-4 border-t gp-border">
+            <p className="text-xs gp-text-muted mb-2">Gasto mensual promedio por categoría (para presupuestar el mes que sigue)</p>
+            <div className="space-y-1">
+              {estimaciones.promedioMensualPorCategoria.map((c) => (
+                <div key={c.categoria} className="flex justify-between text-xs">
+                  <span className="gp-text-muted">{c.categoria}</span>
+                  <span className="gp-mono">{fmtMoney(c.promedio)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
         )}
       </div>
     </div>
