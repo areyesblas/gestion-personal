@@ -5,7 +5,7 @@ import {
   Users, Activity, Plus, X, Trash2, Pencil, Github, ChevronDown,
   ChevronRight, Bell, Lightbulb, Rocket, MessageCircle, Mail, Globe,
   Target, Contact, BarChart3, FileText, Flame, HeartPulse, Check, Menu, PieChart as PieChartIcon,
-  PiggyBank, Camera, Film, Upload, MapPin, Clock, Mic, Gift, Receipt,
+  PiggyBank, Camera, Film, Upload, MapPin, Clock, Mic, Gift, Receipt, Megaphone,
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
@@ -62,6 +62,8 @@ const PARENTESCOS = ["Papá", "Mamá", "Hermano/a", "Hijo/a", "Esposo/a", "Abuel
 const TIPO_FACTURA = ["Emitida", "Recibida"];
 const ESTATUS_FACTURA = ["Pendiente", "Pagada", "Cancelada"];
 const TASA_IVA = 0.16;
+const PLATAFORMAS_CAMPANA = ["Meta", "Google Ads", "TikTok", "Email", "Orgánico", "Otro"];
+const ESTATUS_CAMPANA = ["Planeada", "Activa", "Pausada", "Finalizada"];
 const FRECUENCIA = ["Semanal", "Quincenal", "Mensual", "Anual"];
 const TIPO_ACTIVIDAD = ["Gym", "Evento", "Capacitación", "Otro"];
 const TIPO_ACTIVO = ["Dominio", "Hosting", "Marca (IMPI)", "Red social", "Otro"];
@@ -238,7 +240,7 @@ const categoriaIMC = (imc) => {
 };
 
 /* ---------- persistencia relacional ---------- */
-const TABLES = ["proyectos", "pendientes", "equipo", "finanzas", "deudas", "actividades", "activos", "metas", "contactos", "redesMetricas", "documentos", "habitos", "salud", "apartados", "eventos", "comentarios", "saldoInicial", "regalos", "facturas"];
+const TABLES = ["proyectos", "pendientes", "equipo", "finanzas", "deudas", "actividades", "activos", "metas", "contactos", "redesMetricas", "documentos", "habitos", "salud", "apartados", "eventos", "comentarios", "saldoInicial", "regalos", "facturas", "campanas"];
 const OLD_STORAGE_KEY = "gestion_personal_data"; // localStorage, versión muy vieja
 const OLD_BLOB_TABLE = "gestion_data"; // tabla única jsonb, versión anterior a este modelo relacional
 
@@ -509,6 +511,7 @@ function AppLoggedIn() {
     ]},
     { label: "Presencia", items: [
       { id: "redes", label: "Redes sociales", icon: BarChart3 },
+      { id: "marketing", label: "Marketing", icon: Megaphone },
     ]},
     { label: "Vida", items: [
       { id: "actividades", label: "Actividades y vida", icon: Activity },
@@ -605,6 +608,9 @@ function AppLoggedIn() {
           )}
           {view === "redes" && (
             <RedesSociales data={data} onAdd={(i) => addItem("redesMetricas", i)} onEdit={(id, p) => editItem("redesMetricas", id, p)} onRemove={(id) => askDelete("redesMetricas", id)} />
+          )}
+          {view === "marketing" && (
+            <Marketing data={data} onAdd={(i) => addItem("campanas", i)} onEdit={(id, p) => editItem("campanas", id, p)} onRemove={(id) => askDelete("campanas", id)} onAddComentario={(i) => addItem("comentarios", i)} onRemoveComentario={(id) => askDelete("comentarios", id)} />
           )}
           {view === "actividades" && (
             <Actividades data={data} onAdd={(i) => addItem("actividades", i)} onEdit={(id, p) => editItem("actividades", id, p)} onRemove={(id) => askDelete("actividades", id)} />
@@ -2446,6 +2452,166 @@ function RedesForm({ item, proyectos, onSave }) {
         <Field label="Alcance / engagement"><input type="number" className="gp-input" value={v.alcance} onChange={(e) => setV({ ...v, alcance: e.target.value })} /></Field>
       </div>
       <button className="gp-btn w-full py-2 text-sm mt-2" onClick={() => onSave(v)}>Guardar</button>
+    </div>
+  );
+}
+
+/* ---------- Marketing (calendario de campañas, presupuesto, métricas, retorno) ---------- */
+function Marketing({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveComentario }) {
+  const [modal, setModal] = useState(null);
+  const [comentariosDe, setComentariosDe] = useState(null);
+  const [filtroProyecto, setFiltroProyecto] = useState("Todos");
+  const [filtroEstatus, setFiltroEstatus] = useState("Todas");
+  const [orden, setOrden] = useState("default");
+  const empty = { proyectoId: "", nombre: "", plataforma: "Meta", fechaInicio: todayISO(), fechaFin: "", presupuesto: "", gastado: "", alcance: "", clics: "", conversiones: "", ingresoGenerado: "", estatus: "Planeada", idExterno: "", notas: "" };
+
+  const nombreProyecto = (id) => data.proyectos.find((p) => p.id === id)?.nombre || "—";
+  const nComentarios = (id) => (data.comentarios || []).filter((c) => c.entidadTipo === "campanas" && c.entidadId === id).length;
+  const retorno = (c) => {
+    const gastado = Number(c.gastado) || 0;
+    const ingreso = Number(c.ingresoGenerado) || 0;
+    if (!gastado) return null;
+    return ((ingreso - gastado) / gastado) * 100;
+  };
+
+  const camposOrden = {
+    inicio: { get: (c) => c.fechaInicio, tipo: "fecha" },
+    registro: { get: (c) => c.createdAt, tipo: "fecha" },
+    alfabetico: { get: (c) => c.nombre, tipo: "texto" },
+    presupuesto: { get: (c) => Number(c.presupuesto) || 0, tipo: "numero" },
+    retorno: { get: (c) => retorno(c) ?? -Infinity, tipo: "numero" },
+  };
+  const opcionesOrden = [
+    { key: "inicio", label: "fecha de inicio (calendario)" },
+    { key: "registro", label: "fecha de registro" },
+    { key: "alfabetico", label: "alfabético" },
+    { key: "presupuesto", label: "presupuesto" },
+    { key: "retorno", label: "retorno (ROI)" },
+  ];
+
+  let filtradas = data.campanas;
+  if (filtroProyecto !== "Todos") filtradas = filtradas.filter((c) => c.proyectoId === filtroProyecto);
+  if (filtroEstatus !== "Todas") filtradas = filtradas.filter((c) => c.estatus === filtroEstatus);
+  const base = orden === "default" ? [...filtradas].sort((a, b) => (a.fechaInicio || "9999").localeCompare(b.fechaInicio || "9999")) : filtradas;
+  const ordenadas = ordenarLista(base, orden, camposOrden);
+
+  const totalPresupuesto = ordenadas.reduce((s, c) => s + (Number(c.presupuesto) || 0), 0);
+  const totalGastado = ordenadas.reduce((s, c) => s + (Number(c.gastado) || 0), 0);
+  const totalIngreso = ordenadas.reduce((s, c) => s + (Number(c.ingresoGenerado) || 0), 0);
+
+  return (
+    <div>
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-1">
+        <h2 className="gp-serif text-2xl">Marketing</h2>
+        <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm w-full sm:w-auto"><Plus size={14} /> Nueva campaña</button>
+      </div>
+      <p className="text-sm gp-text-muted mb-3">Calendario de campañas por proyecto, con presupuesto, métricas y retorno. Listo para conectar a futuro con Meta, Google o Stripe.</p>
+
+      <div className="gp-panel p-4 mb-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div><p className="text-xs gp-text-muted">Presupuesto (en esta vista)</p><p className="gp-serif text-lg">{fmtMoney(totalPresupuesto)}</p></div>
+        <div><p className="text-xs gp-text-muted">Gastado</p><p className="gp-serif text-lg gp-text-red">{fmtMoney(totalGastado)}</p></div>
+        <div><p className="text-xs gp-text-muted">Ingreso atribuido</p><p className="gp-serif text-lg gp-text-teal">{fmtMoney(totalIngreso)}</p></div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2 mb-4">
+        <select className="gp-input text-xs py-1.5" style={{ width: "auto" }} value={filtroProyecto} onChange={(e) => setFiltroProyecto(e.target.value)}>
+          <option value="Todos">Todos los proyectos</option>
+          {data.proyectos.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+        </select>
+        <select className="gp-input text-xs py-1.5" style={{ width: "auto" }} value={filtroEstatus} onChange={(e) => setFiltroEstatus(e.target.value)}>
+          <option value="Todas">Todos los estatus</option>
+          {ESTATUS_CAMPANA.map((s) => <option key={s}>{s}</option>)}
+        </select>
+        <OrdenSelector opciones={opcionesOrden} value={orden} onChange={setOrden} />
+      </div>
+
+      <div className="space-y-2">
+        {ordenadas.map((c) => {
+          const r = retorno(c);
+          const nc = nComentarios(c.id);
+          return (
+            <div key={c.id} className="gp-panel p-4">
+              <div className="flex items-start justify-between">
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-sm font-medium">{c.nombre}</span>
+                    <Badge tone="muted">{c.plataforma}</Badge>
+                    <Badge tone={c.estatus === "Activa" ? "teal" : c.estatus === "Finalizada" ? "muted" : "gold"}>{c.estatus}</Badge>
+                    {r !== null && <Badge tone={r >= 0 ? "teal" : "red"}>ROI {r.toFixed(0)}%</Badge>}
+                  </div>
+                  <p className="text-xs gp-text-muted mt-0.5">
+                    {nombreProyecto(c.proyectoId)} · {c.fechaInicio || "—"}{c.fechaFin ? ` a ${c.fechaFin}` : ""}
+                  </p>
+                </div>
+                <div className="flex gap-1">
+                  <IconBtn onClick={() => setComentariosDe(c)}><MessageCircle size={13} />{nc > 0 && <span className="gp-mono" style={{ fontSize: 9, marginLeft: 2 }}>{nc}</span>}</IconBtn>
+                  <IconBtn onClick={() => setModal({ item: c })}><Pencil size={13} /></IconBtn><IconBtn onClick={() => onRemove(c.id)}><Trash2 size={13} /></IconBtn>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 mt-3 text-xs">
+                <div><p className="gp-text-muted">Presupuesto</p><p className="gp-mono">{fmtMoney(c.presupuesto)}</p></div>
+                <div><p className="gp-text-muted">Gastado</p><p className="gp-mono gp-text-red">{fmtMoney(c.gastado)}</p></div>
+                <div><p className="gp-text-muted">Alcance</p><p className="gp-mono">{c.alcance || "—"}</p></div>
+                <div><p className="gp-text-muted">Clics</p><p className="gp-mono">{c.clics || "—"}</p></div>
+                <div><p className="gp-text-muted">Conversiones</p><p className="gp-mono">{c.conversiones || "—"}</p></div>
+              </div>
+              {c.notas && <p className="text-xs mt-2 gp-text-muted">{c.notas}</p>}
+            </div>
+          );
+        })}
+        {ordenadas.length === 0 && <p className="text-sm gp-text-muted">Sin campañas registradas con este filtro.</p>}
+      </div>
+
+      {comentariosDe && (
+        <Modal title={`Comentarios — ${comentariosDe.nombre}`} onClose={() => setComentariosDe(null)}>
+          <Bitacora data={data} entidadTipo="campanas" entidadId={comentariosDe.id} onAdd={onAddComentario} onRemove={onRemoveComentario} />
+        </Modal>
+      )}
+
+      {modal && (
+        <Modal title={modal.item.id ? "Editar campaña" : "Nueva campaña"} onClose={() => setModal(null)}>
+          <CampanaForm item={modal.item} proyectos={data.proyectos} onSave={(v) => { modal.item.id ? onEdit(modal.item.id, v) : onAdd(v); setModal(null); }} />
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+function CampanaForm({ item, proyectos, onSave }) {
+  const [v, setV] = useState(item);
+  const [error, setError] = useState("");
+  return (
+    <div>
+      <Field label="Nombre de la campaña"><input className="gp-input" placeholder="ej. Lanzamiento otoño, Promo Navidad" value={v.nombre} onChange={(e) => setV({ ...v, nombre: e.target.value })} /></Field>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <Field label="Proyecto">
+          <select className="gp-input" value={v.proyectoId} onChange={(e) => setV({ ...v, proyectoId: e.target.value })}>
+            <option value="">— sin proyecto —</option>
+            {proyectos.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+          </select>
+        </Field>
+        <Field label="Plataforma"><select className="gp-input" value={v.plataforma} onChange={(e) => setV({ ...v, plataforma: e.target.value })}>{PLATAFORMAS_CAMPANA.map((c) => <option key={c}>{c}</option>)}</select></Field>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <Field label="Fecha de inicio"><input type="date" className="gp-input" value={v.fechaInicio} onChange={(e) => setV({ ...v, fechaInicio: e.target.value })} /></Field>
+        <Field label="Fecha de fin (opcional)"><input type="date" className="gp-input" value={v.fechaFin || ""} onChange={(e) => setV({ ...v, fechaFin: e.target.value })} /></Field>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <Field label="Presupuesto"><input type="number" className="gp-input" value={v.presupuesto} onChange={(e) => setV({ ...v, presupuesto: e.target.value })} /></Field>
+        <Field label="Gastado hasta ahora"><input type="number" className="gp-input" value={v.gastado} onChange={(e) => setV({ ...v, gastado: e.target.value })} /></Field>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <Field label="Alcance"><input type="number" className="gp-input" value={v.alcance} onChange={(e) => setV({ ...v, alcance: e.target.value })} /></Field>
+        <Field label="Clics"><input type="number" className="gp-input" value={v.clics} onChange={(e) => setV({ ...v, clics: e.target.value })} /></Field>
+        <Field label="Conversiones"><input type="number" className="gp-input" value={v.conversiones} onChange={(e) => setV({ ...v, conversiones: e.target.value })} /></Field>
+      </div>
+      <Field label="Ingreso generado (para calcular retorno)"><input type="number" className="gp-input" value={v.ingresoGenerado} onChange={(e) => setV({ ...v, ingresoGenerado: e.target.value })} /></Field>
+      <Field label="Estatus"><select className="gp-input" value={v.estatus} onChange={(e) => setV({ ...v, estatus: e.target.value })}>{ESTATUS_CAMPANA.map((c) => <option key={c}>{c}</option>)}</select></Field>
+      <Field label="ID externo (opcional, para cuando conectes Meta/Google/Stripe)"><input className="gp-input" value={v.idExterno || ""} onChange={(e) => setV({ ...v, idExterno: e.target.value })} /></Field>
+      <Field label="Notas"><textarea className="gp-input" rows={2} value={v.notas} onChange={(e) => setV({ ...v, notas: e.target.value })} /></Field>
+      {error && <p className="text-xs gp-text-red mb-2">{error}</p>}
+
+      <button className="gp-btn w-full py-2 text-sm mt-2" onClick={() => { if (!v.nombre?.toString().trim()) { setError("El nombre de la campaña es obligatorio."); return; } setError(""); onSave(v); }}>Guardar</button>
     </div>
   );
 }
