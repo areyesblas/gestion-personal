@@ -5,7 +5,7 @@ import {
   Users, Activity, Plus, X, Trash2, Pencil, Github, ChevronDown,
   ChevronRight, Bell, Lightbulb, Rocket, MessageCircle, Mail, Globe,
   Target, Contact, BarChart3, FileText, Flame, HeartPulse, Check, Menu, PieChart as PieChartIcon,
-  PiggyBank, Camera, Film, Upload, MapPin, Clock, Mic,
+  PiggyBank, Camera, Film, Upload, MapPin, Clock, Mic, Gift,
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
@@ -55,6 +55,9 @@ const PRIORIDADES = ["Alta", "Media", "Baja"];
 const ESTATUS_TAREA = ["Pendiente", "En progreso", "Hecho"];
 const TIPO_FIN = ["Ingreso", "Egreso"];
 const FORMA_PAGO = ["Efectivo", "Transferencia", "Especie", "Intercambio"];
+const OCASIONES_REGALO = ["Cumpleaños", "Navidad", "Aniversario", "Felicitación", "Otro"];
+const ESTATUS_REGALO = ["Por comprar", "Comprado", "Envuelto", "Entregado"];
+const PARENTESCOS = ["Papá", "Mamá", "Hermano/a", "Hijo/a", "Esposo/a", "Abuelo/a", "Tío/a", "Primo/a", "Sobrino/a", "Cuñado/a", "Suegro/a", "Compadre/Comadre", "Amigo cercano", "Conocido"];
 const FRECUENCIA = ["Semanal", "Quincenal", "Mensual", "Anual"];
 const TIPO_ACTIVIDAD = ["Gym", "Evento", "Capacitación", "Otro"];
 const TIPO_ACTIVO = ["Dominio", "Hosting", "Marca (IMPI)", "Red social", "Otro"];
@@ -231,7 +234,7 @@ const categoriaIMC = (imc) => {
 };
 
 /* ---------- persistencia relacional ---------- */
-const TABLES = ["proyectos", "pendientes", "equipo", "finanzas", "deudas", "actividades", "activos", "metas", "contactos", "redesMetricas", "documentos", "habitos", "salud", "apartados", "eventos", "comentarios", "saldoInicial"];
+const TABLES = ["proyectos", "pendientes", "equipo", "finanzas", "deudas", "actividades", "activos", "metas", "contactos", "redesMetricas", "documentos", "habitos", "salud", "apartados", "eventos", "comentarios", "saldoInicial", "regalos"];
 const OLD_STORAGE_KEY = "gestion_personal_data"; // localStorage, versión muy vieja
 const OLD_BLOB_TABLE = "gestion_data"; // tabla única jsonb, versión anterior a este modelo relacional
 
@@ -407,6 +410,7 @@ function AppLoggedIn() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState("dashboard");
+  const [regalosFiltroContacto, setRegalosFiltroContacto] = useState("");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(null); // { key, id, label }
 
@@ -496,6 +500,7 @@ function AppLoggedIn() {
     { label: "Gente", items: [
       { id: "equipo", label: "Equipo", icon: Users },
       { id: "contactos", label: "Contactos", icon: Contact },
+      { id: "regalos", label: "Regalos", icon: Gift },
     ]},
     { label: "Presencia", items: [
       { id: "redes", label: "Redes sociales", icon: BarChart3 },
@@ -585,7 +590,10 @@ function AppLoggedIn() {
             <Equipo data={data} onAdd={(i) => addItem("equipo", i)} onEdit={(id, p) => editItem("equipo", id, p)} onRemove={(id) => askDelete("equipo", id)} />
           )}
           {view === "contactos" && (
-            <Contactos data={data} onAdd={(i) => addItem("contactos", i)} onEdit={(id, p) => editItem("contactos", id, p)} onRemove={(id) => askDelete("contactos", id)} onAddComentario={(i) => addItem("comentarios", i)} onRemoveComentario={(id) => askDelete("comentarios", id)} />
+            <Contactos data={data} onAdd={(i) => addItem("contactos", i)} onEdit={(id, p) => editItem("contactos", id, p)} onRemove={(id) => askDelete("contactos", id)} onAddComentario={(i) => addItem("comentarios", i)} onRemoveComentario={(id) => askDelete("comentarios", id)} onVerRegalos={(c) => { setRegalosFiltroContacto(c.id); setView("regalos"); }} />
+          )}
+          {view === "regalos" && (
+            <Regalos data={data} onAdd={(i) => addItem("regalos", i)} onEdit={(id, p) => editItem("regalos", id, p)} onRemove={(id) => askDelete("regalos", id)} filtroContactoInicial={regalosFiltroContacto} onLimpiarFiltro={() => setRegalosFiltroContacto("")} />
           )}
           {view === "redes" && (
             <RedesSociales data={data} onAdd={(i) => addItem("redesMetricas", i)} onEdit={(id, p) => editItem("redesMetricas", id, p)} onRemove={(id) => askDelete("redesMetricas", id)} />
@@ -1341,7 +1349,20 @@ function FinanzaForm({ item, proyectos, contactos, onSave }) {
       <Field label="Concepto"><input className="gp-input" placeholder="ej. Claude, PlanetFitness, Renta Xochinahuac" value={v.concepto || ""} onChange={(e) => setV({ ...v, concepto: e.target.value })} /></Field>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Field label="Tipo"><select className="gp-input" value={v.tipo} onChange={(e) => setV({ ...v, tipo: e.target.value })}>{TIPO_FIN.map((c) => <option key={c}>{c}</option>)}</select></Field>
-        <Field label={v.esRecurrente ? "Fecha de inicio" : "Fecha"}><input type="date" className="gp-input" value={v.fecha} onChange={(e) => setV({ ...v, fecha: e.target.value })} /></Field>
+        {v.esRecurrente ? (
+          <Field label="Día del mes en que se cobra">
+            <input
+              type="number" min="1" max="31" className="gp-input"
+              value={v.fecha ? Number(v.fecha.slice(8, 10)) : ""}
+              onChange={(e) => {
+                const dia = Math.min(31, Math.max(1, Number(e.target.value) || 1));
+                setV({ ...v, fecha: `${todayISO().slice(0, 7)}-${String(dia).padStart(2, "0")}` });
+              }}
+            />
+          </Field>
+        ) : (
+          <Field label="Fecha"><input type="date" className="gp-input" value={v.fecha} onChange={(e) => setV({ ...v, fecha: e.target.value })} /></Field>
+        )}
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Field label="Proyecto">
@@ -1821,12 +1842,12 @@ function MetaForm({ item, proyectos, onSave }) {
 }
 
 /* ---------- Contactos / networking ---------- */
-function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveComentario }) {
+function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveComentario, onVerRegalos }) {
   const [modal, setModal] = useState(null);
   const [comentariosDe, setComentariosDe] = useState(null);
   const [filtroTipo, setFiltroTipo] = useState("Todos");
   const [orden, setOrden] = useState("default");
-  const empty = { nombre: "", tipo: "Cliente", contexto: "", proyectoId: "", whatsapp: "", correo: "", notas: "" };
+  const empty = { nombre: "", tipo: "Cliente", parentesco: "", contexto: "", proyectoId: "", whatsapp: "", correo: "", notas: "" };
   const nombreProyecto = (id) => data.proyectos.find((p) => p.id === id)?.nombre || "—";
   const toneTipo = { Cliente: "teal", Proveedor: "gold", Colaborador: "red", Otro: "" };
   const camposOrden = {
@@ -1865,6 +1886,7 @@ function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
                 <div className="flex items-center gap-2">
                   <p className="text-sm font-medium">{c.nombre}</p>
                   <Badge tone={toneTipo[c.tipo || "Otro"]}>{c.tipo || "Otro"}</Badge>
+                  {c.parentesco && <Badge tone="muted">{c.parentesco}</Badge>}
                 </div>
                 <p className="text-xs gp-text-muted mt-0.5">{c.contexto} {c.proyectoId ? `· ${nombreProyecto(c.proyectoId)}` : ""}</p>
                 <div className="flex gap-3 mt-1 text-xs gp-text-muted">
@@ -1874,6 +1896,7 @@ function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
               </div>
               <div className="flex gap-1">
                 <IconBtn onClick={() => setComentariosDe(c)}><MessageCircle size={13} /></IconBtn>
+                {onVerRegalos && <IconBtn onClick={() => onVerRegalos(c)}><Gift size={13} /></IconBtn>}
                 <IconBtn onClick={() => setModal({ item: c })}><Pencil size={13} /></IconBtn><IconBtn onClick={() => onRemove(c.id)}><Trash2 size={13} /></IconBtn>
               </div>
             </div>
@@ -1901,6 +1924,7 @@ function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
 function ContactoForm({ item, proyectos, onSave }) {
   const [v, setV] = useState(item);
   const [error, setError] = useState("");
+  const [otroParentesco, setOtroParentesco] = useState(() => !!item.parentesco && !PARENTESCOS.includes(item.parentesco));
   return (
     <div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -1911,6 +1935,23 @@ function ContactoForm({ item, proyectos, onSave }) {
           </select>
         </Field>
       </div>
+      <Field label="Parentesco (opcional)">
+        <select
+          className="gp-input"
+          value={otroParentesco ? "Otro" : (v.parentesco || "")}
+          onChange={(e) => {
+            if (e.target.value === "Otro") { setOtroParentesco(true); setV({ ...v, parentesco: "" }); }
+            else { setOtroParentesco(false); setV({ ...v, parentesco: e.target.value }); }
+          }}
+        >
+          <option value="">— ninguno —</option>
+          {PARENTESCOS.map((p) => <option key={p}>{p}</option>)}
+          <option value="Otro">Otro…</option>
+        </select>
+        {otroParentesco && (
+          <input className="gp-input mt-2" placeholder="Escribe el parentesco" value={v.parentesco || ""} onChange={(e) => setV({ ...v, parentesco: e.target.value })} />
+        )}
+      </Field>
       <Field label="Dónde lo conociste"><input className="gp-input" placeholder="ej. Expo Acapulco 2026" value={v.contexto} onChange={(e) => setV({ ...v, contexto: e.target.value })} /></Field>
       <Field label="Proyecto relacionado">
         <select className="gp-input" value={v.proyectoId} onChange={(e) => setV({ ...v, proyectoId: e.target.value })}>
@@ -1930,7 +1971,136 @@ function ContactoForm({ item, proyectos, onSave }) {
   );
 }
 
-/* ---------- Redes sociales (métricas) ---------- */
+/* ---------- Regalos (histórico de regalos/felicitaciones, incluye control de Navidad) ---------- */
+function Regalos({ data, onAdd, onEdit, onRemove, filtroContactoInicial, onLimpiarFiltro }) {
+  const [modal, setModal] = useState(null);
+  const [filtroContacto, setFiltroContacto] = useState(filtroContactoInicial || "");
+  const [filtroOcasion, setFiltroOcasion] = useState("Todos");
+  const [filtroAnio, setFiltroAnio] = useState("Todos");
+  const [orden, setOrden] = useState("default");
+  const anioActual = new Date().getFullYear();
+  const empty = { contactoId: filtroContactoInicial || "", ocasion: "Cumpleaños", anio: anioActual, fecha: "", descripcion: "", costo: "", estatus: "Por comprar", notas: "" };
+
+  const nombreContacto = (id) => data.contactos.find((c) => c.id === id)?.nombre || "—";
+  const anios = [...new Set(data.regalos.map((r) => r.anio).filter(Boolean))].sort((a, b) => b - a);
+
+  const camposOrden = {
+    fecha: { get: (r) => r.fecha, tipo: "fecha" },
+    registro: { get: (r) => r.createdAt, tipo: "fecha" },
+    alfabetico: { get: (r) => nombreContacto(r.contactoId), tipo: "texto" },
+    costo: { get: (r) => Number(r.costo) || 0, tipo: "numero" },
+  };
+  const opcionesOrden = [
+    { key: "fecha", label: "fecha" },
+    { key: "registro", label: "fecha de registro" },
+    { key: "alfabetico", label: "alfabético (contacto)" },
+    { key: "costo", label: "costo" },
+  ];
+
+  let filtrados = data.regalos;
+  if (filtroContacto) filtrados = filtrados.filter((r) => r.contactoId === filtroContacto);
+  if (filtroOcasion !== "Todos") filtrados = filtrados.filter((r) => r.ocasion === filtroOcasion);
+  if (filtroAnio !== "Todos") filtrados = filtrados.filter((r) => String(r.anio) === String(filtroAnio));
+  const ordenados = ordenarLista(filtrados, orden, camposOrden);
+  const totalGastado = ordenados.reduce((s, r) => s + (Number(r.costo) || 0), 0);
+
+  const verNavidadEsteAnio = () => { setFiltroOcasion("Navidad"); setFiltroAnio(anioActual); setFiltroContacto(""); };
+
+  return (
+    <div>
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-1">
+        <h2 className="gp-serif text-2xl">Regalos</h2>
+        <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm w-full sm:w-auto"><Plus size={14} /> Nuevo</button>
+      </div>
+      <p className="text-sm gp-text-muted mb-3">Histórico de regalos y felicitaciones a tus contactos — incluye tu lista de Navidad por año.</p>
+
+      <div className="flex flex-wrap items-center gap-2 mb-4">
+        <button onClick={verNavidadEsteAnio} className="gp-btn flex items-center gap-1 px-3 py-1.5 text-xs"><Gift size={13} /> Ver Navidad {anioActual}</button>
+        {filtroContacto && (
+          <span className="text-xs px-2.5 py-1 rounded-full border flex items-center gap-1">
+            {nombreContacto(filtroContacto)}
+            <button onClick={() => { setFiltroContacto(""); onLimpiarFiltro?.(); }} className="gp-text-red">✕</button>
+          </span>
+        )}
+        <select className="gp-input text-xs py-1.5" style={{ width: "auto" }} value={filtroOcasion} onChange={(e) => setFiltroOcasion(e.target.value)}>
+          <option value="Todos">Todas las ocasiones</option>
+          {OCASIONES_REGALO.map((o) => <option key={o}>{o}</option>)}
+        </select>
+        <select className="gp-input text-xs py-1.5" style={{ width: "auto" }} value={filtroAnio} onChange={(e) => setFiltroAnio(e.target.value)}>
+          <option value="Todos">Todos los años</option>
+          {anios.map((a) => <option key={a} value={a}>{a}</option>)}
+        </select>
+        <OrdenSelector opciones={opcionesOrden} value={orden} onChange={setOrden} />
+      </div>
+
+      {totalGastado > 0 && (
+        <p className="text-xs gp-text-muted mb-3">Total en esta vista: <span className="gp-mono gp-text-gold">{fmtMoney(totalGastado)}</span></p>
+      )}
+
+      <div className="gp-panel overflow-x-auto">
+        <table className="gp-table">
+          <thead><tr><th>Contacto</th><th>Ocasión</th><th>Año</th><th>Fecha</th><th>Regalo</th><th>Costo</th><th>Estatus</th><th></th></tr></thead>
+          <tbody>
+            {ordenados.map((r) => (
+              <tr key={r.id}>
+                <td>{nombreContacto(r.contactoId)}</td>
+                <td><Badge tone="muted">{r.ocasion}</Badge></td>
+                <td className="gp-mono">{r.anio || "—"}</td>
+                <td className="gp-mono">{r.fecha || "—"}</td>
+                <td className="gp-text-muted">{r.descripcion}</td>
+                <td className="gp-mono">{r.costo ? fmtMoney(r.costo) : "—"}</td>
+                <td>
+                  <select className="gp-input" style={{ padding: "2px 6px" }} value={r.estatus || "Por comprar"} onChange={(e) => onEdit(r.id, { estatus: e.target.value })}>
+                    {ESTATUS_REGALO.map((s) => <option key={s}>{s}</option>)}
+                  </select>
+                </td>
+                <td><div className="flex gap-1"><IconBtn onClick={() => setModal({ item: r })}><Pencil size={13} /></IconBtn><IconBtn onClick={() => onRemove(r.id)}><Trash2 size={13} /></IconBtn></div></td>
+              </tr>
+            ))}
+            {ordenados.length === 0 && <tr><td colSpan={8} className="text-center gp-text-muted py-6">Sin regalos registrados con este filtro.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+
+      {modal && (
+        <Modal title={modal.item.id ? "Editar regalo" : "Nuevo regalo"} onClose={() => setModal(null)}>
+          <RegaloForm item={modal.item} contactos={data.contactos} onSave={(v) => { modal.item.id ? onEdit(modal.item.id, v) : onAdd(v); setModal(null); }} />
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+function RegaloForm({ item, contactos, onSave }) {
+  const [v, setV] = useState(item);
+  const [error, setError] = useState("");
+  return (
+    <div>
+      <Field label="Contacto">
+        <select className="gp-input" value={v.contactoId || ""} onChange={(e) => setV({ ...v, contactoId: e.target.value })}>
+          <option value="">— selecciona —</option>
+          {contactos.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+        </select>
+      </Field>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <Field label="Ocasión"><select className="gp-input" value={v.ocasion} onChange={(e) => setV({ ...v, ocasion: e.target.value })}>{OCASIONES_REGALO.map((o) => <option key={o}>{o}</option>)}</select></Field>
+        <Field label="Año"><input type="number" className="gp-input" value={v.anio} onChange={(e) => setV({ ...v, anio: e.target.value })} /></Field>
+      </div>
+      <Field label="Fecha (opcional)"><input type="date" className="gp-input" value={v.fecha || ""} onChange={(e) => setV({ ...v, fecha: e.target.value })} /></Field>
+      <Field label="Regalo o mensaje"><input className="gp-input" placeholder="ej. Perfume, tarjeta de felicitación, transferencia" value={v.descripcion} onChange={(e) => setV({ ...v, descripcion: e.target.value })} /></Field>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <Field label="Costo (opcional)"><input type="number" className="gp-input" value={v.costo} onChange={(e) => setV({ ...v, costo: e.target.value })} /></Field>
+        <Field label="Estatus"><select className="gp-input" value={v.estatus} onChange={(e) => setV({ ...v, estatus: e.target.value })}>{ESTATUS_REGALO.map((s) => <option key={s}>{s}</option>)}</select></Field>
+      </div>
+      <Field label="Notas"><textarea className="gp-input" rows={2} value={v.notas} onChange={(e) => setV({ ...v, notas: e.target.value })} /></Field>
+      {error && <p className="text-xs gp-text-red mb-2">{error}</p>}
+
+      <button className="gp-btn w-full py-2 text-sm mt-2" onClick={() => { if (!v.contactoId) { setError("Elige a qué contacto es el regalo."); return; } setError(""); onSave(v); }}>Guardar</button>
+    </div>
+  );
+}
+
+
 function RedesSociales({ data, onAdd, onEdit, onRemove }) {
   const [modal, setModal] = useState(null);
   const [orden, setOrden] = useState("default");
