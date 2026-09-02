@@ -5,7 +5,7 @@ import {
   Users, Activity, Plus, X, Trash2, Pencil, Github, ChevronDown,
   ChevronRight, Bell, Lightbulb, Rocket, MessageCircle, Mail, Globe,
   Target, Contact, BarChart3, FileText, Flame, HeartPulse, Check, Menu, PieChart as PieChartIcon,
-  PiggyBank, Camera, Film, Upload, MapPin, Clock, Mic, Gift, Receipt, Megaphone,
+  PiggyBank, Camera, Film, Upload, MapPin, Clock, Mic, Gift, Receipt, Megaphone, ChevronUp,
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
@@ -113,7 +113,7 @@ const diasParaCumple = (fechaNacimiento) => {
 const PRIORIDAD_ORDEN = { Alta: 0, Media: 1, Baja: 2 };
 
 /* Ordena una lista según una clave de criterio ("campo:tipo"), con nulls siempre al final. */
-function ordenarLista(lista, criterio, campos) {
+function ordenarLista(lista, criterio, campos, dir = "asc") {
   if (!criterio || criterio === "default" || !campos[criterio]) return lista;
   const { get, tipo } = campos[criterio];
   const copia = [...lista];
@@ -125,11 +125,28 @@ function ordenarLista(lista, criterio, campos) {
     if (aVacio && bVacio) return 0;
     if (aVacio) return 1;
     if (bVacio) return -1;
-    if (tipo === "texto") return String(va).localeCompare(String(vb), "es");
-    if (tipo === "prioridad") return (PRIORIDAD_ORDEN[va] ?? 9) - (PRIORIDAD_ORDEN[vb] ?? 9);
-    return va < vb ? -1 : va > vb ? 1 : 0;
+    let r;
+    if (tipo === "texto") r = String(va).localeCompare(String(vb), "es");
+    else if (tipo === "prioridad") r = (PRIORIDAD_ORDEN[va] ?? 9) - (PRIORIDAD_ORDEN[vb] ?? 9);
+    else r = va < vb ? -1 : va > vb ? 1 : 0;
+    return dir === "desc" ? -r : r;
   });
   return copia;
+}
+
+/* Encabezado de tabla clicable para ordenar (como en Excel): clic ordena asc, clic de
+   nuevo invierte a desc. sortKey debe existir en el mismo objeto `campos` que usa OrdenSelector. */
+function Th({ label, sortKey, orden, ordenDir, onToggle, children }) {
+  if (!sortKey) return <th>{children || label}</th>;
+  const activo = orden === sortKey;
+  return (
+    <th onClick={() => onToggle(sortKey)} style={{ cursor: "pointer", userSelect: "none" }} title="Clic para ordenar">
+      <span className="inline-flex items-center gap-0.5">
+        {children || label}
+        {activo && (ordenDir === "desc" ? <ChevronDown size={11} /> : <ChevronUp size={11} />)}
+      </span>
+    </th>
+  );
 }
 
 /* Selector de orden reutilizable. `opciones` es [{ key, label }]. */
@@ -1363,6 +1380,8 @@ function Finanzas({ data, onAdd, onEdit, onRemove }) {
   const [modal, setModal] = useState(null);
   const [vista, setVista] = useState("todos");
   const [orden, setOrden] = useState("default");
+  const [ordenDir, setOrdenDir] = useState("asc");
+  const toggleOrden = (key) => { if (orden === key) setOrdenDir((d) => (d === "asc" ? "desc" : "asc")); else { setOrden(key); setOrdenDir("asc"); } };
   const empty = { concepto: "", tipo: "Ingreso", proyectoId: "", contactoId: "", fecha: todayISO(), fechaVencimiento: "", monto: "", categoria: "", forma: "Transferencia", estatus: "Cobrado", pautando: false, esRecurrente: false, frecuencia: "Mensual", fechaFin: "" };
   const nombreProyecto = (id) => data.proyectos.find((p) => p.id === id)?.nombre || "—";
   const nombreCliente = (id) => data.contactos.find((c) => c.id === id)?.nombre || "—";
@@ -1385,7 +1404,7 @@ function Finanzas({ data, onAdd, onEdit, onRemove }) {
     { key: "monto", label: "monto" },
   ];
   const base = vista === "cobros" ? cobrosPendientes : [...data.finanzas].sort((a, b) => (b.fecha || "").localeCompare(a.fecha || ""));
-  const ordenados = vista === "cobros" ? base : ordenarLista(base, orden, camposOrden);
+  const ordenados = vista === "cobros" ? base : ordenarLista(base, orden, camposOrden, ordenDir);
 
   return (
     <div>
@@ -1415,14 +1434,15 @@ function Finanzas({ data, onAdd, onEdit, onRemove }) {
 
       <div className="gp-panel overflow-x-auto">
         <table className="gp-table">
-          <thead><tr><th>Concepto</th><th>Fecha</th>{vista === "cobros" && <th>Vence</th>}<th>Tipo</th><th>Proyecto</th><th>Cliente</th><th>Categoría</th><th>Forma</th><th>Estatus</th><th>Recurrente</th><th>Monto</th><th></th></tr></thead>
+          <thead><tr><Th label="Concepto" sortKey="alfabetico" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} /><Th label="Fecha" sortKey="fecha" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} /><th>Día de pago</th>{vista === "cobros" && <th>Vence</th>}<th>Tipo</th><th>Proyecto</th><th>Cliente</th><th>Categoría</th><th>Forma</th><th>Estatus</th><th>Recurrente</th><Th label="Monto" sortKey="monto" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} /><th></th></tr></thead>
           <tbody>
             {ordenados.map((f) => {
               const vencido = f.fechaVencimiento && daysUntil(f.fechaVencimiento) < 0;
               return (
               <tr key={f.id}>
                 <td>{f.concepto || "—"}</td>
-                <td className="gp-mono">{f.fecha || "—"}</td>
+                <td className="gp-mono">{f.esRecurrente ? "—" : (f.fecha || "—")}</td>
+                <td className="gp-mono">{f.esRecurrente && f.fecha ? Number(f.fecha.slice(8, 10)) : "—"}</td>
                 {vista === "cobros" && (
                   <td className="gp-mono" style={{ color: vencido ? "var(--red)" : undefined }}>
                     {f.fechaVencimiento ? `${f.fechaVencimiento}${vencido ? " (vencido)" : ""}` : "—"}
@@ -1443,7 +1463,7 @@ function Finanzas({ data, onAdd, onEdit, onRemove }) {
                 <td><div className="flex gap-1"><IconBtn onClick={() => setModal({ item: f })}><Pencil size={13} /></IconBtn><IconBtn onClick={() => onRemove(f.id)}><Trash2 size={13} /></IconBtn></div></td>
               </tr>
             );})}
-            {ordenados.length === 0 && <tr><td colSpan={vista === "cobros" ? 12 : 11} className="text-center gp-text-muted py-6">{vista === "cobros" ? "No tienes cobros pendientes." : "Sin movimientos registrados."}</td></tr>}
+            {ordenados.length === 0 && <tr><td colSpan={vista === "cobros" ? 13 : 12} className="text-center gp-text-muted py-6">{vista === "cobros" ? "No tienes cobros pendientes." : "Sin movimientos registrados."}</td></tr>}
           </tbody>
         </table>
       </div>
@@ -1537,6 +1557,8 @@ function Facturas({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCome
   const [filtroTipo, setFiltroTipo] = useState("Todas");
   const [filtroMes, setFiltroMes] = useState(todayISO().slice(0, 7));
   const [orden, setOrden] = useState("default");
+  const [ordenDir, setOrdenDir] = useState("asc");
+  const toggleOrden = (key) => { if (orden === key) setOrdenDir((d) => (d === "asc" ? "desc" : "asc")); else { setOrden(key); setOrdenDir("asc"); } };
   const empty = { tipo: "Recibida", proyectoId: "", contactoId: "", folio: "", fecha: todayISO(), concepto: "", subtotal: "", iva: "", total: "", estatus: "Pendiente", notas: "" };
 
   const nombreProyecto = (id) => data.proyectos.find((p) => p.id === id)?.nombre || "—";
@@ -1560,7 +1582,7 @@ function Facturas({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCome
   if (filtroTipo !== "Todas") filtradas = filtradas.filter((f) => f.tipo === filtroTipo);
   if (filtroMes !== "Todos") filtradas = filtradas.filter((f) => (f.fecha || "").slice(0, 7) === filtroMes);
   const base = orden === "default" ? [...filtradas].sort((a, b) => (b.fecha || "").localeCompare(a.fecha || "")) : filtradas;
-  const ordenadas = ordenarLista(base, orden, camposOrden);
+  const ordenadas = ordenarLista(base, orden, camposOrden, ordenDir);
 
   // IVA: solo cuenta facturas no canceladas, respetando el filtro de mes/tipo actual (menos el de tipo, que ignoramos aquí).
   const paraIva = data.facturas.filter((f) => f.estatus !== "Cancelada" && (filtroMes === "Todos" || (f.fecha || "").slice(0, 7) === filtroMes));
@@ -1603,7 +1625,7 @@ function Facturas({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCome
 
       <div className="gp-panel overflow-x-auto">
         <table className="gp-table">
-          <thead><tr><th>Folio</th><th>Tipo</th><th>Fecha</th><th>Proyecto</th><th>Contacto</th><th>Subtotal</th><th>IVA</th><th>Total</th><th>Estatus</th><th></th></tr></thead>
+          <thead><tr><Th label="Folio" sortKey="alfabetico" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} /><th>Tipo</th><Th label="Fecha" sortKey="fecha" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} /><th>Proyecto</th><th>Contacto</th><th>Subtotal</th><th>IVA</th><Th label="Total" sortKey="total" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} /><th>Estatus</th><th></th></tr></thead>
           <tbody>
             {ordenadas.map((f) => {
               const nc = nComentarios(f.id);
@@ -1702,6 +1724,8 @@ function FacturaForm({ item, proyectos, contactos, onSave }) {
 function Deudas({ data, onAdd, onEdit, onRemove }) {
   const [modal, setModal] = useState(null);
   const [orden, setOrden] = useState("default");
+  const [ordenDir, setOrdenDir] = useState("asc");
+  const toggleOrden = (key) => { if (orden === key) setOrdenDir((d) => (d === "asc" ? "desc" : "asc")); else { setOrden(key); setOrdenDir("asc"); } };
   const empty = { acreedor: "", proyectoId: "", monto: "", fechaVencimiento: todayISO() };
   const camposOrden = {
     vencimiento: { get: (d) => d.fechaVencimiento, tipo: "fecha" },
@@ -1716,7 +1740,7 @@ function Deudas({ data, onAdd, onEdit, onRemove }) {
     { key: "monto", label: "monto" },
   ];
   const base = orden === "default" ? [...data.deudas].sort((a, b) => (a.fechaVencimiento || "").localeCompare(b.fechaVencimiento || "")) : data.deudas;
-  const ordenados = ordenarLista(base, orden, camposOrden);
+  const ordenados = ordenarLista(base, orden, camposOrden, ordenDir);
   const nombreProyecto = (id) => data.proyectos.find((p) => p.id === id)?.nombre || "—";
 
   return (
@@ -1730,7 +1754,7 @@ function Deudas({ data, onAdd, onEdit, onRemove }) {
 
       <div className="gp-panel overflow-x-auto">
         <table className="gp-table">
-          <thead><tr><th>Acreedor</th><th>Proyecto</th><th>Vence</th><th>Estatus</th><th>Monto</th><th></th></tr></thead>
+          <thead><tr><Th label="Acreedor" sortKey="alfabetico" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} /><th>Proyecto</th><Th label="Vence" sortKey="vencimiento" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} /><th>Estatus</th><Th label="Monto" sortKey="monto" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} /><th></th></tr></thead>
           <tbody>
             {ordenados.map((d) => {
               const dd = daysUntil(d.fechaVencimiento);
@@ -1867,6 +1891,8 @@ function EquipoForm({ item, onSave }) {
 function Actividades({ data, onAdd, onEdit, onRemove }) {
   const [modal, setModal] = useState(null);
   const [orden, setOrden] = useState("default");
+  const [ordenDir, setOrdenDir] = useState("asc");
+  const toggleOrden = (key) => { if (orden === key) setOrdenDir((d) => (d === "asc" ? "desc" : "asc")); else { setOrden(key); setOrdenDir("asc"); } };
   const empty = { tipo: "Gym", nombre: "", fecha: todayISO(), proyectoId: "", ganancia: "", notas: "" };
   const camposOrden = {
     fecha: { get: (a) => a.fecha, tipo: "fecha" },
@@ -1879,7 +1905,7 @@ function Actividades({ data, onAdd, onEdit, onRemove }) {
     { key: "alfabetico", label: "alfabético" },
   ];
   const base = orden === "default" ? [...data.actividades].sort((a, b) => (b.fecha || "").localeCompare(a.fecha || "")) : data.actividades;
-  const ordenados = ordenarLista(base, orden, camposOrden);
+  const ordenados = ordenarLista(base, orden, camposOrden, ordenDir);
   const nombreProyecto = (id) => data.proyectos.find((p) => p.id === id)?.nombre || "—";
 
   return (
@@ -1893,7 +1919,7 @@ function Actividades({ data, onAdd, onEdit, onRemove }) {
 
       <div className="gp-panel overflow-x-auto">
         <table className="gp-table">
-          <thead><tr><th>Fecha</th><th>Tipo</th><th>Actividad</th><th>Proyecto</th><th>Ganancia</th><th>Notas</th><th></th></tr></thead>
+          <thead><tr><Th label="Fecha" sortKey="fecha" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} /><th>Tipo</th><Th label="Actividad" sortKey="alfabetico" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} /><th>Proyecto</th><th>Ganancia</th><th>Notas</th><th></th></tr></thead>
           <tbody>
             {ordenados.map((a) => (
               <tr key={a.id}>
@@ -1949,6 +1975,8 @@ function ActividadForm({ item, proyectos, onSave }) {
 function ActivosDigitales({ data, onAdd, onEdit, onRemove }) {
   const [modal, setModal] = useState(null);
   const [orden, setOrden] = useState("default");
+  const [ordenDir, setOrdenDir] = useState("asc");
+  const toggleOrden = (key) => { if (orden === key) setOrdenDir((d) => (d === "asc" ? "desc" : "asc")); else { setOrden(key); setOrdenDir("asc"); } };
   const empty = { tipo: "Dominio", nombre: "", proyectoId: "", fechaVencimiento: todayISO(), costoRenovacion: "", notas: "" };
   const camposOrden = {
     vencimiento: { get: (a) => a.fechaVencimiento, tipo: "fecha" },
@@ -1961,7 +1989,7 @@ function ActivosDigitales({ data, onAdd, onEdit, onRemove }) {
     { key: "alfabetico", label: "alfabético" },
   ];
   const base = orden === "default" ? [...(data.activos || [])].sort((a, b) => (a.fechaVencimiento || "").localeCompare(b.fechaVencimiento || "")) : (data.activos || []);
-  const ordenados = ordenarLista(base, orden, camposOrden);
+  const ordenados = ordenarLista(base, orden, camposOrden, ordenDir);
   const nombreProyecto = (id) => data.proyectos.find((p) => p.id === id)?.nombre || "—";
 
   return (
@@ -1975,7 +2003,7 @@ function ActivosDigitales({ data, onAdd, onEdit, onRemove }) {
 
       <div className="gp-panel overflow-x-auto">
         <table className="gp-table">
-          <thead><tr><th>Activo</th><th>Tipo</th><th>Proyecto</th><th>Vence</th><th>Estatus</th><th>Costo renovación</th><th></th></tr></thead>
+          <thead><tr><Th label="Activo" sortKey="alfabetico" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} /><th>Tipo</th><th>Proyecto</th><Th label="Vence" sortKey="vencimiento" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} /><th>Estatus</th><th>Costo renovación</th><th></th></tr></thead>
           <tbody>
             {ordenados.map((a) => {
               const dd = daysUntil(a.fechaVencimiento);
@@ -2038,6 +2066,8 @@ function ActivoForm({ item, proyectos, onSave }) {
 function Metas({ data, onAdd, onEdit, onRemove }) {
   const [modal, setModal] = useState(null);
   const [orden, setOrden] = useState("default");
+  const [ordenDir, setOrdenDir] = useState("asc");
+  const toggleOrden = (key) => { if (orden === key) setOrdenDir((d) => (d === "asc" ? "desc" : "asc")); else { setOrden(key); setOrdenDir("asc"); } };
   const empty = { proyectoId: "", descripcion: "", fechaObjetivo: todayISO(), fechaRevision: "", prioridad: "Media", estatus: "No iniciada" };
   const camposOrden = {
     objetivo: { get: (m) => m.fechaObjetivo, tipo: "fecha" },
@@ -2054,7 +2084,7 @@ function Metas({ data, onAdd, onEdit, onRemove }) {
     { key: "prioridad", label: "prioridad" },
   ];
   const base = orden === "default" ? [...data.metas].sort((a, b) => (a.fechaObjetivo || "").localeCompare(b.fechaObjetivo || "")) : data.metas;
-  const ordenados = ordenarLista(base, orden, camposOrden);
+  const ordenados = ordenarLista(base, orden, camposOrden, ordenDir);
   const nombreProyecto = (id) => data.proyectos.find((p) => p.id === id)?.nombre || "—";
 
   return (
@@ -2068,7 +2098,7 @@ function Metas({ data, onAdd, onEdit, onRemove }) {
 
       <div className="gp-panel overflow-x-auto">
         <table className="gp-table">
-          <thead><tr><th>Meta</th><th>Proyecto</th><th>Prioridad</th><th>Fecha objetivo</th><th>Estatus</th><th></th></tr></thead>
+          <thead><tr><Th label="Meta" sortKey="alfabetico" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} /><th>Proyecto</th><Th label="Prioridad" sortKey="prioridad" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} /><Th label="Fecha objetivo" sortKey="objetivo" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} /><th>Estatus</th><th></th></tr></thead>
           <tbody>
             {ordenados.map((m) => (
               <tr key={m.id}>
@@ -2268,6 +2298,8 @@ function Regalos({ data, onAdd, onEdit, onRemove, filtroContactoInicial, onLimpi
   const [filtroOcasion, setFiltroOcasion] = useState("Todos");
   const [filtroAnio, setFiltroAnio] = useState("Todos");
   const [orden, setOrden] = useState("default");
+  const [ordenDir, setOrdenDir] = useState("asc");
+  const toggleOrden = (key) => { if (orden === key) setOrdenDir((d) => (d === "asc" ? "desc" : "asc")); else { setOrden(key); setOrdenDir("asc"); } };
   const anioActual = new Date().getFullYear();
   const empty = { contactoId: filtroContactoInicial || "", ocasion: "Cumpleaños", anio: anioActual, fecha: "", descripcion: "", costo: "", estatus: "Por comprar", notas: "" };
 
@@ -2291,7 +2323,7 @@ function Regalos({ data, onAdd, onEdit, onRemove, filtroContactoInicial, onLimpi
   if (filtroContacto) filtrados = filtrados.filter((r) => r.contactoId === filtroContacto);
   if (filtroOcasion !== "Todos") filtrados = filtrados.filter((r) => r.ocasion === filtroOcasion);
   if (filtroAnio !== "Todos") filtrados = filtrados.filter((r) => String(r.anio) === String(filtroAnio));
-  const ordenados = ordenarLista(filtrados, orden, camposOrden);
+  const ordenados = ordenarLista(filtrados, orden, camposOrden, ordenDir);
   const totalGastado = ordenados.reduce((s, r) => s + (Number(r.costo) || 0), 0);
 
   const verNavidadEsteAnio = () => { setFiltroOcasion("Navidad"); setFiltroAnio(anioActual); setFiltroContacto(""); };
@@ -2329,7 +2361,7 @@ function Regalos({ data, onAdd, onEdit, onRemove, filtroContactoInicial, onLimpi
 
       <div className="gp-panel overflow-x-auto">
         <table className="gp-table">
-          <thead><tr><th>Contacto</th><th>Ocasión</th><th>Año</th><th>Fecha</th><th>Regalo</th><th>Costo</th><th>Estatus</th><th></th></tr></thead>
+          <thead><tr><Th label="Contacto" sortKey="alfabetico" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} /><th>Ocasión</th><th>Año</th><Th label="Fecha" sortKey="fecha" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} /><th>Regalo</th><Th label="Costo" sortKey="costo" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} /><th>Estatus</th><th></th></tr></thead>
           <tbody>
             {ordenados.map((r) => (
               <tr key={r.id}>
@@ -2394,6 +2426,8 @@ function RegaloForm({ item, contactos, onSave }) {
 function RedesSociales({ data, onAdd, onEdit, onRemove }) {
   const [modal, setModal] = useState(null);
   const [orden, setOrden] = useState("default");
+  const [ordenDir, setOrdenDir] = useState("asc");
+  const toggleOrden = (key) => { if (orden === key) setOrdenDir((d) => (d === "asc" ? "desc" : "asc")); else { setOrden(key); setOrdenDir("asc"); } };
   const empty = { proyectoId: "", plataforma: PLATAFORMAS[0], fecha: todayISO(), seguidores: "", alcance: "" };
   const camposOrden = {
     fecha: { get: (r) => r.fecha, tipo: "fecha" },
@@ -2408,7 +2442,7 @@ function RedesSociales({ data, onAdd, onEdit, onRemove }) {
     { key: "seguidores", label: "seguidores" },
   ];
   const base = orden === "default" ? [...data.redesMetricas].sort((a, b) => (b.fecha || "").localeCompare(a.fecha || "")) : data.redesMetricas;
-  const ordenados = ordenarLista(base, orden, camposOrden);
+  const ordenados = ordenarLista(base, orden, camposOrden, ordenDir);
   const nombreProyecto = (id) => data.proyectos.find((p) => p.id === id)?.nombre || "—";
 
   return (
@@ -2422,7 +2456,7 @@ function RedesSociales({ data, onAdd, onEdit, onRemove }) {
 
       <div className="gp-panel overflow-x-auto">
         <table className="gp-table">
-          <thead><tr><th>Fecha</th><th>Proyecto</th><th>Plataforma</th><th>Seguidores</th><th>Alcance</th><th></th></tr></thead>
+          <thead><tr><Th label="Fecha" sortKey="fecha" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} /><th>Proyecto</th><Th label="Plataforma" sortKey="alfabetico" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} /><Th label="Seguidores" sortKey="seguidores" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} /><th>Alcance</th><th></th></tr></thead>
           <tbody>
             {ordenados.map((r) => (
               <tr key={r.id}>
@@ -2635,6 +2669,8 @@ function CampanaForm({ item, proyectos, onSave }) {
 function Documentos({ data, onAdd, onEdit, onRemove }) {
   const [modal, setModal] = useState(null);
   const [orden, setOrden] = useState("default");
+  const [ordenDir, setOrdenDir] = useState("asc");
+  const toggleOrden = (key) => { if (orden === key) setOrdenDir((d) => (d === "asc" ? "desc" : "asc")); else { setOrden(key); setOrdenDir("asc"); } };
   const empty = { tipo: "Contrato", nombre: "", proyectoId: "", fechaVencimiento: "", notas: "" };
   const camposOrden = {
     vencimiento: { get: (d) => d.fechaVencimiento, tipo: "fecha" },
@@ -2647,7 +2683,7 @@ function Documentos({ data, onAdd, onEdit, onRemove }) {
     { key: "alfabetico", label: "alfabético" },
   ];
   const base = orden === "default" ? [...data.documentos].sort((a, b) => (a.fechaVencimiento || "").localeCompare(b.fechaVencimiento || "")) : data.documentos;
-  const ordenados = ordenarLista(base, orden, camposOrden);
+  const ordenados = ordenarLista(base, orden, camposOrden, ordenDir);
   const nombreProyecto = (id) => data.proyectos.find((p) => p.id === id)?.nombre || "—";
 
   return (
@@ -2661,7 +2697,7 @@ function Documentos({ data, onAdd, onEdit, onRemove }) {
 
       <div className="gp-panel overflow-x-auto">
         <table className="gp-table">
-          <thead><tr><th>Documento</th><th>Tipo</th><th>Proyecto</th><th>Vencimiento</th><th>Notas</th><th></th></tr></thead>
+          <thead><tr><Th label="Documento" sortKey="alfabetico" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} /><th>Tipo</th><th>Proyecto</th><Th label="Vencimiento" sortKey="vencimiento" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} /><th>Notas</th><th></th></tr></thead>
           <tbody>
             {ordenados.map((d) => (
               <tr key={d.id}>
@@ -2786,6 +2822,8 @@ function Salud({ data, onAdd, onEdit, onRemove, onUpdatePerfil }) {
   const [modal, setModal] = useState(null);
   const [altura, setAltura] = useState(data.perfilSalud?.alturaCm || "");
   const [orden, setOrden] = useState("default");
+  const [ordenDir, setOrdenDir] = useState("asc");
+  const toggleOrden = (key) => { if (orden === key) setOrdenDir((d) => (d === "asc" ? "desc" : "asc")); else { setOrden(key); setOrdenDir("asc"); } };
   const empty = { fecha: todayISO(), peso: "", glucosa: "", colesterol: "", trigliceridos: "", notas: "", estudio: null };
   const camposOrden = {
     fecha: { get: (s) => s.fecha, tipo: "fecha" },
@@ -2798,7 +2836,7 @@ function Salud({ data, onAdd, onEdit, onRemove, onUpdatePerfil }) {
     { key: "peso", label: "peso" },
   ];
   const base = orden === "default" ? [...data.salud].sort((a, b) => (b.fecha || "").localeCompare(a.fecha || "")) : data.salud;
-  const ordenados = ordenarLista(base, orden, camposOrden);
+  const ordenados = ordenarLista(base, orden, camposOrden, ordenDir);
   const alturaCm = data.perfilSalud?.alturaCm;
 
   const toneCategoria = (cat) => (cat === "Normal" ? "teal" : cat === "Bajo peso" ? "gold" : cat === "Sobrepeso" ? "gold" : cat === "Obesidad" ? "red" : "muted");
@@ -2823,7 +2861,7 @@ function Salud({ data, onAdd, onEdit, onRemove, onUpdatePerfil }) {
 
       <div className="gp-panel overflow-x-auto">
         <table className="gp-table">
-          <thead><tr><th>Fecha</th><th>Peso (kg)</th><th>IMC</th><th>Categoría</th><th>Glucosa</th><th>Colesterol</th><th>Triglicéridos</th><th>Estudio</th><th>Notas</th><th></th></tr></thead>
+          <thead><tr><Th label="Fecha" sortKey="fecha" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} /><Th label="Peso (kg)" sortKey="peso" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} /><th>IMC</th><th>Categoría</th><th>Glucosa</th><th>Colesterol</th><th>Triglicéridos</th><th>Estudio</th><th>Notas</th><th></th></tr></thead>
           <tbody>
             {ordenados.map((s) => {
               const imc = calcIMC(s.peso, alturaCm);
