@@ -91,6 +91,45 @@ const uid = () => Math.random().toString(36).slice(2, 10);
 const fmtMoney = (n) => (Number(n) || 0).toLocaleString("es-MX", { style: "currency", currency: "MXN" });
 const todayISO = () => new Date().toISOString().slice(0, 10);
 const daysUntil = (dateStr) => Math.ceil((new Date(dateStr) - new Date(todayISO())) / 86400000);
+
+const PRIORIDAD_ORDEN = { Alta: 0, Media: 1, Baja: 2 };
+
+/* Ordena una lista según una clave de criterio ("campo:tipo"), con nulls siempre al final. */
+function ordenarLista(lista, criterio, campos) {
+  if (!criterio || criterio === "default" || !campos[criterio]) return lista;
+  const { get, tipo } = campos[criterio];
+  const copia = [...lista];
+  copia.sort((a, b) => {
+    const va = get(a);
+    const vb = get(b);
+    const aVacio = va === null || va === undefined || va === "";
+    const bVacio = vb === null || vb === undefined || vb === "";
+    if (aVacio && bVacio) return 0;
+    if (aVacio) return 1;
+    if (bVacio) return -1;
+    if (tipo === "texto") return String(va).localeCompare(String(vb), "es");
+    if (tipo === "prioridad") return (PRIORIDAD_ORDEN[va] ?? 9) - (PRIORIDAD_ORDEN[vb] ?? 9);
+    return va < vb ? -1 : va > vb ? 1 : 0;
+  });
+  return copia;
+}
+
+/* Selector de orden reutilizable. `opciones` es [{ key, label }]. */
+function OrdenSelector({ opciones, value, onChange }) {
+  if (!opciones || opciones.length === 0) return null;
+  return (
+    <select
+      className="gp-input text-xs py-1.5"
+      style={{ width: "auto" }}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      aria-label="Ordenar por"
+    >
+      <option value="default">Orden: más reciente</option>
+      {opciones.map((o) => <option key={o.key} value={o.key}>Orden: {o.label}</option>)}
+    </select>
+  );
+}
 const calcIMC = (pesoKg, alturaCm) => {
   const p = Number(pesoKg), a = Number(alturaCm);
   if (!p || !a) return null;
@@ -117,14 +156,16 @@ const tableName = (key) => camelToSnake(key);
 function rowToJs(row) {
   const out = {};
   for (const [k, v] of Object.entries(row)) {
-    if (k === "created_at") continue;
     out[snakeToCamel(k)] = v;
   }
   return out;
 }
 function jsToRow(obj) {
   const out = {};
-  for (const [k, v] of Object.entries(obj)) out[camelToSnake(k)] = v;
+  for (const [k, v] of Object.entries(obj)) {
+    if (k === "createdAt") continue; // el servidor lo controla (default now()), nunca se reescribe desde el cliente
+    out[camelToSnake(k)] = v;
+  }
   return out;
 }
 // la tabla "salud" guarda el PDF adjunto como dos columnas planas en vez de un objeto anidado
@@ -704,10 +745,24 @@ function Proyectos({ data, onAdd, onEdit, onRemove }) {
   const [modal, setModal] = useState(null);
   const [expanded, setExpanded] = useState(null);
   const [notaTexto, setNotaTexto] = useState("");
+  const [orden, setOrden] = useState("default");
 
-  const empty = { nombre: "", categoria: CATS[0], estatus: "Idea", monetizacion: MONETIZACION[0], descripcion: "", github: "", githubSubido: false, notas: [] };
+  const empty = { nombre: "", categoria: CATS[0], estatus: "Idea", monetizacion: MONETIZACION[0], descripcion: "", github: "", githubSubido: false, notas: [], prioridad: "Media", fechaRevision: "" };
 
-  const grouped = ESTATUS_PROYECTO.map((e) => ({ estatus: e, items: data.proyectos.filter((p) => p.estatus === e) }));
+  const camposOrden = {
+    alfabetico: { get: (p) => p.nombre, tipo: "texto" },
+    registro: { get: (p) => p.createdAt, tipo: "fecha" },
+    prioridad: { get: (p) => p.prioridad, tipo: "prioridad" },
+    revision: { get: (p) => p.fechaRevision, tipo: "fecha" },
+  };
+  const opcionesOrden = [
+    { key: "alfabetico", label: "alfabético" },
+    { key: "registro", label: "fecha de registro" },
+    { key: "prioridad", label: "prioridad" },
+    { key: "revision", label: "fecha de revisión" },
+  ];
+
+  const grouped = ESTATUS_PROYECTO.map((e) => ({ estatus: e, items: ordenarLista(data.proyectos.filter((p) => p.estatus === e), orden, camposOrden) }));
 
   const addNota = (proyecto) => {
     if (!notaTexto.trim()) return;
@@ -721,7 +776,8 @@ function Proyectos({ data, onAdd, onEdit, onRemove }) {
         <h2 className="gp-serif text-2xl">Proyectos e ideas</h2>
         <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm w-full sm:w-auto"><Plus size={14} /> Nuevo</button>
       </div>
-      <p className="text-sm gp-text-muted mb-6">De idea a proyecto activo — edita el estatus cuando avance.</p>
+      <p className="text-sm gp-text-muted mb-3">De idea a proyecto activo — edita el estatus cuando avance.</p>
+      <div className="mb-4"><OrdenSelector opciones={opcionesOrden} value={orden} onChange={setOrden} /></div>
 
       <div className="space-y-6">
         {grouped.filter((g) => g.items.length).map((g) => (
@@ -739,6 +795,7 @@ function Proyectos({ data, onAdd, onEdit, onRemove }) {
                         <span className="text-sm font-medium">{p.nombre}</span>
                         <Badge tone="muted">{p.categoria}</Badge>
                         <Badge tone={p.monetizacion === "No genera dinero" ? "muted" : "gold"}>{p.monetizacion}</Badge>
+                        {p.prioridad && <Badge tone={p.prioridad === "Alta" ? "red" : p.prioridad === "Media" ? "gold" : "muted"}>{p.prioridad}</Badge>}
                         {!p.githubSubido && <Badge tone="red">falta GitHub</Badge>}
                       </div>
                       <p className="text-xs gp-text-muted mt-1">{p.descripcion}</p>
@@ -798,6 +855,10 @@ function ProyectoForm({ item, onSave }) {
         <Field label="Estatus"><select className="gp-input" value={v.estatus} onChange={(e) => setV({ ...v, estatus: e.target.value })}>{ESTATUS_PROYECTO.map((c) => <option key={c}>{c}</option>)}</select></Field>
       </div>
       <Field label="Cómo genera valor"><select className="gp-input" value={v.monetizacion} onChange={(e) => setV({ ...v, monetizacion: e.target.value })}>{MONETIZACION.map((c) => <option key={c}>{c}</option>)}</select></Field>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <Field label="Prioridad"><select className="gp-input" value={v.prioridad || "Media"} onChange={(e) => setV({ ...v, prioridad: e.target.value })}>{PRIORIDADES.map((c) => <option key={c}>{c}</option>)}</select></Field>
+        <Field label="Fecha de revisión (cuándo revisar el avance)"><input type="date" className="gp-input" value={v.fechaRevision || ""} onChange={(e) => setV({ ...v, fechaRevision: e.target.value })} /></Field>
+      </div>
       <Field label="Descripción"><textarea className="gp-input" rows={3} value={v.descripcion} onChange={(e) => setV({ ...v, descripcion: e.target.value })} /></Field>
       {error && <p className="text-xs gp-text-red mb-2">{error}</p>}
 
@@ -809,8 +870,27 @@ function ProyectoForm({ item, onSave }) {
 /* ---------- Pendientes ---------- */
 function Pendientes({ data, onAdd, onEdit, onRemove }) {
   const [modal, setModal] = useState(null);
-  const empty = { proyectoId: "", descripcion: "", fechaLimite: todayISO(), prioridad: "Media", estatus: "Pendiente", responsableId: "", contactoId: "", precio: "" };
-  const ordenados = [...data.pendientes].sort((a, b) => (a.fechaLimite || "").localeCompare(b.fechaLimite || ""));
+  const [orden, setOrden] = useState("default");
+  const empty = { proyectoId: "", descripcion: "", fechaLimite: todayISO(), fechaRevision: "", prioridad: "Media", estatus: "Pendiente", responsableId: "", contactoId: "", precio: "" };
+
+  const camposOrden = {
+    entrega: { get: (p) => p.fechaLimite, tipo: "fecha" },
+    registro: { get: (p) => p.createdAt, tipo: "fecha" },
+    revision: { get: (p) => p.fechaRevision, tipo: "fecha" },
+    alfabetico: { get: (p) => p.descripcion, tipo: "texto" },
+    prioridad: { get: (p) => p.prioridad, tipo: "prioridad" },
+  };
+  const opcionesOrden = [
+    { key: "entrega", label: "fecha de entrega" },
+    { key: "registro", label: "fecha de registro" },
+    { key: "revision", label: "fecha de revisión" },
+    { key: "alfabetico", label: "alfabético" },
+    { key: "prioridad", label: "prioridad" },
+  ];
+  const base = orden === "default"
+    ? [...data.pendientes].sort((a, b) => (a.fechaLimite || "").localeCompare(b.fechaLimite || ""))
+    : data.pendientes;
+  const ordenados = ordenarLista(base, orden, camposOrden);
 
   const nombreProyecto = (id) => data.proyectos.find((p) => p.id === id)?.nombre || "—";
   const nombreResp = (id) => data.equipo.find((e) => e.id === id)?.nombre || "Tú";
@@ -822,7 +902,8 @@ function Pendientes({ data, onAdd, onEdit, onRemove }) {
         <h2 className="gp-serif text-2xl">Pendientes</h2>
         <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm w-full sm:w-auto"><Plus size={14} /> Nuevo</button>
       </div>
-      <p className="text-sm gp-text-muted mb-6">De todos tus proyectos, en un solo lugar.</p>
+      <p className="text-sm gp-text-muted mb-3">De todos tus proyectos, en un solo lugar.</p>
+      <div className="mb-4"><OrdenSelector opciones={opcionesOrden} value={orden} onChange={setOrden} /></div>
 
       <div className="gp-panel overflow-x-auto">
         <table className="gp-table">
@@ -884,6 +965,7 @@ function PendienteForm({ item, proyectos, equipo, contactos, onSave }) {
         <Field label="Fecha límite"><input type="date" className="gp-input" value={v.fechaLimite} onChange={(e) => setV({ ...v, fechaLimite: e.target.value })} /></Field>
         <Field label="Prioridad"><select className="gp-input" value={v.prioridad} onChange={(e) => setV({ ...v, prioridad: e.target.value })}>{PRIORIDADES.map((c) => <option key={c}>{c}</option>)}</select></Field>
       </div>
+      <Field label="Fecha de revisión (opcional, cuándo revisar el avance)"><input type="date" className="gp-input" value={v.fechaRevision || ""} onChange={(e) => setV({ ...v, fechaRevision: e.target.value })} /></Field>
       <Field label="Responsable">
         <select className="gp-input" value={v.responsableId} onChange={(e) => setV({ ...v, responsableId: e.target.value })}>
           <option value="">Tú</option>
@@ -943,6 +1025,7 @@ function buildMonthlyLedger(finanzas, monthKeys) {
 function Finanzas({ data, onAdd, onEdit, onRemove }) {
   const [modal, setModal] = useState(null);
   const [vista, setVista] = useState("todos");
+  const [orden, setOrden] = useState("default");
   const empty = { concepto: "", tipo: "Ingreso", proyectoId: "", contactoId: "", fecha: todayISO(), fechaVencimiento: "", monto: "", categoria: "", forma: "Transferencia", estatus: "Cobrado", pautando: false, esRecurrente: false, frecuencia: "Mensual", fechaFin: "" };
   const nombreProyecto = (id) => data.proyectos.find((p) => p.id === id)?.nombre || "—";
   const nombreCliente = (id) => data.contactos.find((c) => c.id === id)?.nombre || "—";
@@ -952,9 +1035,20 @@ function Finanzas({ data, onAdd, onEdit, onRemove }) {
     .sort((a, b) => (a.fechaVencimiento || "9999").localeCompare(b.fechaVencimiento || "9999"));
   const totalCobrosPendientes = cobrosPendientes.reduce((s, f) => s + (Number(f.monto) || 0), 0);
 
-  const ordenados = vista === "cobros"
-    ? cobrosPendientes
-    : [...data.finanzas].sort((a, b) => (b.fecha || "").localeCompare(a.fecha || ""));
+  const camposOrden = {
+    fecha: { get: (f) => f.fecha, tipo: "fecha" },
+    registro: { get: (f) => f.createdAt, tipo: "fecha" },
+    alfabetico: { get: (f) => f.concepto, tipo: "texto" },
+    monto: { get: (f) => Number(f.monto) || 0, tipo: "numero" },
+  };
+  const opcionesOrden = [
+    { key: "fecha", label: "fecha del movimiento" },
+    { key: "registro", label: "fecha de registro" },
+    { key: "alfabetico", label: "alfabético" },
+    { key: "monto", label: "monto" },
+  ];
+  const base = vista === "cobros" ? cobrosPendientes : [...data.finanzas].sort((a, b) => (b.fecha || "").localeCompare(a.fecha || ""));
+  const ordenados = vista === "cobros" ? base : ordenarLista(base, orden, camposOrden);
 
   return (
     <div>
@@ -964,11 +1058,12 @@ function Finanzas({ data, onAdd, onEdit, onRemove }) {
       </div>
       <p className="text-sm gp-text-muted mb-4">Incluye pagos recurrentes (luz, agua, compras a meses) con fecha de inicio y fin, o indefinidos.</p>
 
-      <div className="flex gap-1 mb-4">
+      <div className="flex flex-wrap items-center gap-2 mb-4">
         <button onClick={() => setVista("todos")} className={`text-xs px-3 py-1.5 rounded-full border ${vista === "todos" ? "gp-btn" : "gp-text-muted"}`}>Todos los movimientos</button>
         <button onClick={() => setVista("cobros")} className={`text-xs px-3 py-1.5 rounded-full border flex items-center gap-1 ${vista === "cobros" ? "gp-btn" : "gp-text-muted"}`}>
           Cobros pendientes {cobrosPendientes.length > 0 && <Badge tone="gold">{cobrosPendientes.length}</Badge>}
         </button>
+        {vista === "todos" && <OrdenSelector opciones={opcionesOrden} value={orden} onChange={setOrden} />}
       </div>
 
       {vista === "cobros" && (
@@ -1088,8 +1183,22 @@ function FinanzaForm({ item, proyectos, contactos, onSave }) {
 /* ---------- Deudas ---------- */
 function Deudas({ data, onAdd, onEdit, onRemove }) {
   const [modal, setModal] = useState(null);
+  const [orden, setOrden] = useState("default");
   const empty = { acreedor: "", proyectoId: "", monto: "", fechaVencimiento: todayISO() };
-  const ordenados = [...data.deudas].sort((a, b) => (a.fechaVencimiento || "").localeCompare(b.fechaVencimiento || ""));
+  const camposOrden = {
+    vencimiento: { get: (d) => d.fechaVencimiento, tipo: "fecha" },
+    registro: { get: (d) => d.createdAt, tipo: "fecha" },
+    alfabetico: { get: (d) => d.acreedor, tipo: "texto" },
+    monto: { get: (d) => Number(d.monto) || 0, tipo: "numero" },
+  };
+  const opcionesOrden = [
+    { key: "vencimiento", label: "fecha de vencimiento" },
+    { key: "registro", label: "fecha de registro" },
+    { key: "alfabetico", label: "alfabético" },
+    { key: "monto", label: "monto" },
+  ];
+  const base = orden === "default" ? [...data.deudas].sort((a, b) => (a.fechaVencimiento || "").localeCompare(b.fechaVencimiento || "")) : data.deudas;
+  const ordenados = ordenarLista(base, orden, camposOrden);
   const nombreProyecto = (id) => data.proyectos.find((p) => p.id === id)?.nombre || "—";
 
   return (
@@ -1098,7 +1207,8 @@ function Deudas({ data, onAdd, onEdit, onRemove }) {
         <h2 className="gp-serif text-2xl">Deudas</h2>
         <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm w-full sm:w-auto"><Plus size={14} /> Nueva</button>
       </div>
-      <p className="text-sm gp-text-muted mb-6">Atrasadas, próximas a vencer y al corriente, todo calculado por fecha.</p>
+      <p className="text-sm gp-text-muted mb-3">Atrasadas, próximas a vencer y al corriente, todo calculado por fecha.</p>
+      <div className="mb-4"><OrdenSelector opciones={opcionesOrden} value={orden} onChange={setOrden} /></div>
 
       <div className="gp-panel overflow-x-auto">
         <table className="gp-table">
@@ -1159,8 +1269,18 @@ function DeudaForm({ item, proyectos, onSave }) {
 /* ---------- Equipo ---------- */
 function Equipo({ data, onAdd, onEdit, onRemove }) {
   const [modal, setModal] = useState(null);
+  const [orden, setOrden] = useState("default");
   const empty = { nombre: "", whatsapp: "", correo: "", comentarios: "" };
   const tareasDe = (id) => data.pendientes.filter((p) => p.responsableId === id);
+  const camposOrden = {
+    registro: { get: (m) => m.createdAt, tipo: "fecha" },
+    alfabetico: { get: (m) => m.nombre, tipo: "texto" },
+  };
+  const opcionesOrden = [
+    { key: "registro", label: "fecha de registro" },
+    { key: "alfabetico", label: "alfabético" },
+  ];
+  const listaEquipo = ordenarLista(data.equipo, orden, camposOrden);
 
   return (
     <div>
@@ -1168,10 +1288,11 @@ function Equipo({ data, onAdd, onEdit, onRemove }) {
         <h2 className="gp-serif text-2xl">Equipo</h2>
         <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm w-full sm:w-auto"><Plus size={14} /> Nuevo</button>
       </div>
-      <p className="text-sm gp-text-muted mb-6">Colaboradores a los que delegas, con sus tareas y tu evaluación.</p>
+      <p className="text-sm gp-text-muted mb-3">Colaboradores a los que delegas, con sus tareas y tu evaluación.</p>
+      <div className="mb-4"><OrdenSelector opciones={opcionesOrden} value={orden} onChange={setOrden} /></div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        {data.equipo.map((m) => {
+        {listaEquipo.map((m) => {
           const tareas = tareasDe(m.id);
           const totalPagado = tareas.reduce((s, t) => s + Number(t.precio || 0), 0);
           return (
@@ -1227,8 +1348,20 @@ function EquipoForm({ item, onSave }) {
 /* ---------- Actividades ---------- */
 function Actividades({ data, onAdd, onEdit, onRemove }) {
   const [modal, setModal] = useState(null);
+  const [orden, setOrden] = useState("default");
   const empty = { tipo: "Gym", nombre: "", fecha: todayISO(), proyectoId: "", ganancia: "", notas: "" };
-  const ordenados = [...data.actividades].sort((a, b) => (b.fecha || "").localeCompare(a.fecha || ""));
+  const camposOrden = {
+    fecha: { get: (a) => a.fecha, tipo: "fecha" },
+    registro: { get: (a) => a.createdAt, tipo: "fecha" },
+    alfabetico: { get: (a) => a.nombre, tipo: "texto" },
+  };
+  const opcionesOrden = [
+    { key: "fecha", label: "fecha" },
+    { key: "registro", label: "fecha de registro" },
+    { key: "alfabetico", label: "alfabético" },
+  ];
+  const base = orden === "default" ? [...data.actividades].sort((a, b) => (b.fecha || "").localeCompare(a.fecha || "")) : data.actividades;
+  const ordenados = ordenarLista(base, orden, camposOrden);
   const nombreProyecto = (id) => data.proyectos.find((p) => p.id === id)?.nombre || "—";
 
   return (
@@ -1237,7 +1370,8 @@ function Actividades({ data, onAdd, onEdit, onRemove }) {
         <h2 className="gp-serif text-2xl">Actividades y vida</h2>
         <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm w-full sm:w-auto"><Plus size={14} /> Registrar</button>
       </div>
-      <p className="text-sm gp-text-muted mb-6">Gym, eventos, capacitación (PLC's, Vibe Coding/SDD, inglés) — un registro rápido de todo lo que construye tu semana.</p>
+      <p className="text-sm gp-text-muted mb-3">Gym, eventos, capacitación (PLC's, Vibe Coding/SDD, inglés) — un registro rápido de todo lo que construye tu semana.</p>
+      <div className="mb-4"><OrdenSelector opciones={opcionesOrden} value={orden} onChange={setOrden} /></div>
 
       <div className="gp-panel overflow-x-auto">
         <table className="gp-table">
@@ -1296,8 +1430,20 @@ function ActividadForm({ item, proyectos, onSave }) {
 /* ---------- Activos digitales ---------- */
 function ActivosDigitales({ data, onAdd, onEdit, onRemove }) {
   const [modal, setModal] = useState(null);
+  const [orden, setOrden] = useState("default");
   const empty = { tipo: "Dominio", nombre: "", proyectoId: "", fechaVencimiento: todayISO(), costoRenovacion: "", notas: "" };
-  const ordenados = [...(data.activos || [])].sort((a, b) => (a.fechaVencimiento || "").localeCompare(b.fechaVencimiento || ""));
+  const camposOrden = {
+    vencimiento: { get: (a) => a.fechaVencimiento, tipo: "fecha" },
+    registro: { get: (a) => a.createdAt, tipo: "fecha" },
+    alfabetico: { get: (a) => a.nombre, tipo: "texto" },
+  };
+  const opcionesOrden = [
+    { key: "vencimiento", label: "fecha de vencimiento" },
+    { key: "registro", label: "fecha de registro" },
+    { key: "alfabetico", label: "alfabético" },
+  ];
+  const base = orden === "default" ? [...(data.activos || [])].sort((a, b) => (a.fechaVencimiento || "").localeCompare(b.fechaVencimiento || "")) : (data.activos || []);
+  const ordenados = ordenarLista(base, orden, camposOrden);
   const nombreProyecto = (id) => data.proyectos.find((p) => p.id === id)?.nombre || "—";
 
   return (
@@ -1306,7 +1452,8 @@ function ActivosDigitales({ data, onAdd, onEdit, onRemove }) {
         <h2 className="gp-serif text-2xl">Activos digitales</h2>
         <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm w-full sm:w-auto"><Plus size={14} /> Nuevo</button>
       </div>
-      <p className="text-sm gp-text-muted mb-6">Dominios, hosting, marcas ante IMPI y redes — para que ningún vencimiento te tome por sorpresa.</p>
+      <p className="text-sm gp-text-muted mb-3">Dominios, hosting, marcas ante IMPI y redes — para que ningún vencimiento te tome por sorpresa.</p>
+      <div className="mb-4"><OrdenSelector opciones={opcionesOrden} value={orden} onChange={setOrden} /></div>
 
       <div className="gp-panel overflow-x-auto">
         <table className="gp-table">
@@ -1372,8 +1519,24 @@ function ActivoForm({ item, proyectos, onSave }) {
 /* ---------- Metas por proyecto ---------- */
 function Metas({ data, onAdd, onEdit, onRemove }) {
   const [modal, setModal] = useState(null);
-  const empty = { proyectoId: "", descripcion: "", fechaObjetivo: todayISO(), estatus: "No iniciada" };
-  const ordenados = [...data.metas].sort((a, b) => (a.fechaObjetivo || "").localeCompare(b.fechaObjetivo || ""));
+  const [orden, setOrden] = useState("default");
+  const empty = { proyectoId: "", descripcion: "", fechaObjetivo: todayISO(), fechaRevision: "", prioridad: "Media", estatus: "No iniciada" };
+  const camposOrden = {
+    objetivo: { get: (m) => m.fechaObjetivo, tipo: "fecha" },
+    registro: { get: (m) => m.createdAt, tipo: "fecha" },
+    revision: { get: (m) => m.fechaRevision, tipo: "fecha" },
+    alfabetico: { get: (m) => m.descripcion, tipo: "texto" },
+    prioridad: { get: (m) => m.prioridad, tipo: "prioridad" },
+  };
+  const opcionesOrden = [
+    { key: "objetivo", label: "fecha objetivo" },
+    { key: "registro", label: "fecha de registro" },
+    { key: "revision", label: "fecha de revisión" },
+    { key: "alfabetico", label: "alfabético" },
+    { key: "prioridad", label: "prioridad" },
+  ];
+  const base = orden === "default" ? [...data.metas].sort((a, b) => (a.fechaObjetivo || "").localeCompare(b.fechaObjetivo || "")) : data.metas;
+  const ordenados = ordenarLista(base, orden, camposOrden);
   const nombreProyecto = (id) => data.proyectos.find((p) => p.id === id)?.nombre || "—";
 
   return (
@@ -1382,16 +1545,18 @@ function Metas({ data, onAdd, onEdit, onRemove }) {
         <h2 className="gp-serif text-2xl">Metas por proyecto</h2>
         <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm w-full sm:w-auto"><Plus size={14} /> Nueva</button>
       </div>
-      <p className="text-sm gp-text-muted mb-6">Qué define el éxito de cada proyecto, para que la bitácora tenga rumbo.</p>
+      <p className="text-sm gp-text-muted mb-3">Qué define el éxito de cada proyecto, para que la bitácora tenga rumbo.</p>
+      <div className="mb-4"><OrdenSelector opciones={opcionesOrden} value={orden} onChange={setOrden} /></div>
 
       <div className="gp-panel overflow-x-auto">
         <table className="gp-table">
-          <thead><tr><th>Meta</th><th>Proyecto</th><th>Fecha objetivo</th><th>Estatus</th><th></th></tr></thead>
+          <thead><tr><th>Meta</th><th>Proyecto</th><th>Prioridad</th><th>Fecha objetivo</th><th>Estatus</th><th></th></tr></thead>
           <tbody>
             {ordenados.map((m) => (
               <tr key={m.id}>
                 <td>{m.descripcion}</td>
                 <td className="gp-text-muted">{nombreProyecto(m.proyectoId)}</td>
+                <td><Badge tone={m.prioridad === "Alta" ? "red" : m.prioridad === "Media" ? "gold" : "muted"}>{m.prioridad || "Media"}</Badge></td>
                 <td className="gp-mono">{m.fechaObjetivo}</td>
                 <td>
                   <select className="gp-input" style={{ padding: "2px 6px" }} value={m.estatus} onChange={(e) => onEdit(m.id, { estatus: e.target.value })}>
@@ -1401,7 +1566,7 @@ function Metas({ data, onAdd, onEdit, onRemove }) {
                 <td><div className="flex gap-1"><IconBtn onClick={() => setModal({ item: m })}><Pencil size={13} /></IconBtn><IconBtn onClick={() => onRemove(m.id)}><Trash2 size={13} /></IconBtn></div></td>
               </tr>
             ))}
-            {ordenados.length === 0 && <tr><td colSpan={5} className="text-center gp-text-muted py-6">Sin metas registradas.</td></tr>}
+            {ordenados.length === 0 && <tr><td colSpan={6} className="text-center gp-text-muted py-6">Sin metas registradas.</td></tr>}
           </tbody>
         </table>
       </div>
@@ -1431,6 +1596,10 @@ function MetaForm({ item, proyectos, onSave }) {
         <Field label="Fecha objetivo"><input type="date" className="gp-input" value={v.fechaObjetivo} onChange={(e) => setV({ ...v, fechaObjetivo: e.target.value })} /></Field>
         <Field label="Estatus"><select className="gp-input" value={v.estatus} onChange={(e) => setV({ ...v, estatus: e.target.value })}>{ESTATUS_META.map((c) => <option key={c}>{c}</option>)}</select></Field>
       </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <Field label="Prioridad"><select className="gp-input" value={v.prioridad || "Media"} onChange={(e) => setV({ ...v, prioridad: e.target.value })}>{PRIORIDADES.map((c) => <option key={c}>{c}</option>)}</select></Field>
+        <Field label="Fecha de revisión (opcional)"><input type="date" className="gp-input" value={v.fechaRevision || ""} onChange={(e) => setV({ ...v, fechaRevision: e.target.value })} /></Field>
+      </div>
       {error && <p className="text-xs gp-text-red mb-2">{error}</p>}
 
       <button className="gp-btn w-full py-2 text-sm mt-2" onClick={() => { if (!v.descripcion?.toString().trim()) { setError("La meta es obligatoria."); return; } setError(""); onSave(v); }}>Guardar</button>
@@ -1442,10 +1611,20 @@ function MetaForm({ item, proyectos, onSave }) {
 function Contactos({ data, onAdd, onEdit, onRemove }) {
   const [modal, setModal] = useState(null);
   const [filtroTipo, setFiltroTipo] = useState("Todos");
+  const [orden, setOrden] = useState("default");
   const empty = { nombre: "", tipo: "Cliente", contexto: "", proyectoId: "", whatsapp: "", correo: "", notas: "" };
   const nombreProyecto = (id) => data.proyectos.find((p) => p.id === id)?.nombre || "—";
   const toneTipo = { Cliente: "teal", Proveedor: "gold", Colaborador: "red", Otro: "" };
-  const visibles = filtroTipo === "Todos" ? data.contactos : data.contactos.filter((c) => (c.tipo || "Otro") === filtroTipo);
+  const camposOrden = {
+    alfabetico: { get: (c) => c.nombre, tipo: "texto" },
+    registro: { get: (c) => c.createdAt, tipo: "fecha" },
+  };
+  const opcionesOrden = [
+    { key: "alfabetico", label: "alfabético" },
+    { key: "registro", label: "fecha de registro" },
+  ];
+  const filtrados = filtroTipo === "Todos" ? data.contactos : data.contactos.filter((c) => (c.tipo || "Otro") === filtroTipo);
+  const visibles = ordenarLista(filtrados, orden, camposOrden);
 
   return (
     <div>
@@ -1455,10 +1634,13 @@ function Contactos({ data, onAdd, onEdit, onRemove }) {
       </div>
       <p className="text-sm gp-text-muted mb-4">Clientes, proveedores, colaboradores y gente que conoces en eventos — para que no se pierdan.</p>
 
-      <div className="flex flex-wrap gap-1 mb-4">
-        {["Todos", "Cliente", "Proveedor", "Colaborador", "Otro"].map((t) => (
-          <button key={t} onClick={() => setFiltroTipo(t)} className={`text-xs px-2.5 py-1 rounded-full border ${filtroTipo === t ? "gp-btn" : "gp-text-muted"}`}>{t}</button>
-        ))}
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
+        <div className="flex flex-wrap gap-1">
+          {["Todos", "Cliente", "Proveedor", "Colaborador", "Otro"].map((t) => (
+            <button key={t} onClick={() => setFiltroTipo(t)} className={`text-xs px-2.5 py-1 rounded-full border ${filtroTipo === t ? "gp-btn" : "gp-text-muted"}`}>{t}</button>
+          ))}
+        </div>
+        <OrdenSelector opciones={opcionesOrden} value={orden} onChange={setOrden} />
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -1528,8 +1710,22 @@ function ContactoForm({ item, proyectos, onSave }) {
 /* ---------- Redes sociales (métricas) ---------- */
 function RedesSociales({ data, onAdd, onEdit, onRemove }) {
   const [modal, setModal] = useState(null);
+  const [orden, setOrden] = useState("default");
   const empty = { proyectoId: "", plataforma: PLATAFORMAS[0], fecha: todayISO(), seguidores: "", alcance: "" };
-  const ordenados = [...data.redesMetricas].sort((a, b) => (b.fecha || "").localeCompare(a.fecha || ""));
+  const camposOrden = {
+    fecha: { get: (r) => r.fecha, tipo: "fecha" },
+    registro: { get: (r) => r.createdAt, tipo: "fecha" },
+    alfabetico: { get: (r) => r.plataforma, tipo: "texto" },
+    seguidores: { get: (r) => Number(r.seguidores) || 0, tipo: "numero" },
+  };
+  const opcionesOrden = [
+    { key: "fecha", label: "fecha" },
+    { key: "registro", label: "fecha de registro" },
+    { key: "alfabetico", label: "alfabético (plataforma)" },
+    { key: "seguidores", label: "seguidores" },
+  ];
+  const base = orden === "default" ? [...data.redesMetricas].sort((a, b) => (b.fecha || "").localeCompare(a.fecha || "")) : data.redesMetricas;
+  const ordenados = ordenarLista(base, orden, camposOrden);
   const nombreProyecto = (id) => data.proyectos.find((p) => p.id === id)?.nombre || "—";
 
   return (
@@ -1538,7 +1734,8 @@ function RedesSociales({ data, onAdd, onEdit, onRemove }) {
         <h2 className="gp-serif text-2xl">Redes sociales</h2>
         <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm w-full sm:w-auto"><Plus size={14} /> Registrar</button>
       </div>
-      <p className="text-sm gp-text-muted mb-6">Seguidores y alcance por proyecto y plataforma, para cruzarlo con ingresos.</p>
+      <p className="text-sm gp-text-muted mb-3">Seguidores y alcance por proyecto y plataforma, para cruzarlo con ingresos.</p>
+      <div className="mb-4"><OrdenSelector opciones={opcionesOrden} value={orden} onChange={setOrden} /></div>
 
       <div className="gp-panel overflow-x-auto">
         <table className="gp-table">
@@ -1594,8 +1791,20 @@ function RedesForm({ item, proyectos, onSave }) {
 /* ---------- Legal y contratos ---------- */
 function Documentos({ data, onAdd, onEdit, onRemove }) {
   const [modal, setModal] = useState(null);
+  const [orden, setOrden] = useState("default");
   const empty = { tipo: "Contrato", nombre: "", proyectoId: "", fechaVencimiento: "", notas: "" };
-  const ordenados = [...data.documentos].sort((a, b) => (a.fechaVencimiento || "").localeCompare(b.fechaVencimiento || ""));
+  const camposOrden = {
+    vencimiento: { get: (d) => d.fechaVencimiento, tipo: "fecha" },
+    registro: { get: (d) => d.createdAt, tipo: "fecha" },
+    alfabetico: { get: (d) => d.nombre, tipo: "texto" },
+  };
+  const opcionesOrden = [
+    { key: "vencimiento", label: "fecha de vencimiento" },
+    { key: "registro", label: "fecha de registro" },
+    { key: "alfabetico", label: "alfabético" },
+  ];
+  const base = orden === "default" ? [...data.documentos].sort((a, b) => (a.fechaVencimiento || "").localeCompare(b.fechaVencimiento || "")) : data.documentos;
+  const ordenados = ordenarLista(base, orden, camposOrden);
   const nombreProyecto = (id) => data.proyectos.find((p) => p.id === id)?.nombre || "—";
 
   return (
@@ -1604,7 +1813,8 @@ function Documentos({ data, onAdd, onEdit, onRemove }) {
         <h2 className="gp-serif text-2xl">Legal y contratos</h2>
         <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm w-full sm:w-auto"><Plus size={14} /> Nuevo</button>
       </div>
-      <p className="text-sm gp-text-muted mb-6">Contratos, registros de marca ante IMPI y demás documentos, por proyecto.</p>
+      <p className="text-sm gp-text-muted mb-3">Contratos, registros de marca ante IMPI y demás documentos, por proyecto.</p>
+      <div className="mb-4"><OrdenSelector opciones={opcionesOrden} value={orden} onChange={setOrden} /></div>
 
       <div className="gp-panel overflow-x-auto">
         <table className="gp-table">
@@ -1661,6 +1871,7 @@ function DocumentoForm({ item, proyectos, onSave }) {
 /* ---------- Hábitos ---------- */
 function Habitos({ data, onAdd, onEdit, onRemove }) {
   const [nuevo, setNuevo] = useState("");
+  const [orden, setOrden] = useState("default");
   const hoy = todayISO();
 
   const toggleHoy = (h) => {
@@ -1678,10 +1889,23 @@ function Habitos({ data, onAdd, onEdit, onRemove }) {
     return n;
   };
 
+  const camposOrden = {
+    alfabetico: { get: (h) => h.nombre, tipo: "texto" },
+    registro: { get: (h) => h.createdAt, tipo: "fecha" },
+    racha: { get: (h) => racha(h), tipo: "numero" },
+  };
+  const opcionesOrden = [
+    { key: "alfabetico", label: "alfabético" },
+    { key: "registro", label: "fecha de registro" },
+    { key: "racha", label: "racha actual" },
+  ];
+  const listaHabitos = ordenarLista(data.habitos, orden, camposOrden);
+
   return (
     <div>
       <h2 className="gp-serif text-2xl mb-1">Hábitos</h2>
-      <p className="text-sm gp-text-muted mb-6">Marca el día con un clic. La racha se calcula sola.</p>
+      <p className="text-sm gp-text-muted mb-3">Marca el día con un clic. La racha se calcula sola.</p>
+      <div className="mb-5"><OrdenSelector opciones={opcionesOrden} value={orden} onChange={setOrden} /></div>
 
       <div className="flex flex-col sm:flex-row gap-2 mb-5">
         <input className="gp-input flex-1 sm:max-w-xs" placeholder="ej. Leer 20 min, Practicar inglés" value={nuevo} onChange={(e) => setNuevo(e.target.value)} onKeyDown={(e) => e.key === "Enter" && nuevo.trim() && (onAdd({ nombre: nuevo, fechas: [] }), setNuevo(""))} />
@@ -1689,7 +1913,7 @@ function Habitos({ data, onAdd, onEdit, onRemove }) {
       </div>
 
       <div className="space-y-2">
-        {data.habitos.map((h) => {
+        {listaHabitos.map((h) => {
           const hechoHoy = (h.fechas || []).includes(hoy);
           return (
             <div key={h.id} className="gp-panel p-3 flex items-center justify-between">
@@ -1718,8 +1942,20 @@ function Habitos({ data, onAdd, onEdit, onRemove }) {
 function Salud({ data, onAdd, onEdit, onRemove, onUpdatePerfil }) {
   const [modal, setModal] = useState(null);
   const [altura, setAltura] = useState(data.perfilSalud?.alturaCm || "");
+  const [orden, setOrden] = useState("default");
   const empty = { fecha: todayISO(), peso: "", glucosa: "", colesterol: "", trigliceridos: "", notas: "", estudio: null };
-  const ordenados = [...data.salud].sort((a, b) => (b.fecha || "").localeCompare(a.fecha || ""));
+  const camposOrden = {
+    fecha: { get: (s) => s.fecha, tipo: "fecha" },
+    registro: { get: (s) => s.createdAt, tipo: "fecha" },
+    peso: { get: (s) => Number(s.peso) || null, tipo: "numero" },
+  };
+  const opcionesOrden = [
+    { key: "fecha", label: "fecha" },
+    { key: "registro", label: "fecha de registro" },
+    { key: "peso", label: "peso" },
+  ];
+  const base = orden === "default" ? [...data.salud].sort((a, b) => (b.fecha || "").localeCompare(a.fecha || "")) : data.salud;
+  const ordenados = ordenarLista(base, orden, camposOrden);
   const alturaCm = data.perfilSalud?.alturaCm;
 
   const toneCategoria = (cat) => (cat === "Normal" ? "teal" : cat === "Bajo peso" ? "gold" : cat === "Sobrepeso" ? "gold" : cat === "Obesidad" ? "red" : "muted");
@@ -1732,7 +1968,7 @@ function Salud({ data, onAdd, onEdit, onRemove, onUpdatePerfil }) {
       </div>
       <p className="text-sm gp-text-muted mb-4">Peso, glucosa, colesterol, triglicéridos y tus estudios en PDF, todo en un mismo historial.</p>
 
-      <div className="gp-panel p-3 mb-5 flex flex-wrap items-center gap-3">
+      <div className="gp-panel p-3 mb-4 flex flex-wrap items-center gap-3">
         <span className="text-xs gp-text-muted">Tu estatura (para calcular IMC):</span>
         <input type="number" className="gp-input" style={{ maxWidth: 100 }} value={altura}
           onChange={(e) => setAltura(e.target.value)}
@@ -1740,6 +1976,7 @@ function Salud({ data, onAdd, onEdit, onRemove, onUpdatePerfil }) {
         <span className="text-xs gp-text-muted">cm</span>
         {!alturaCm && <span className="text-xs gp-text-gold">Captúrala para ver tu categoría de peso.</span>}
       </div>
+      <div className="mb-5"><OrdenSelector opciones={opcionesOrden} value={orden} onChange={setOrden} /></div>
 
       <div className="gp-panel overflow-x-auto">
         <table className="gp-table">
@@ -1994,8 +2231,23 @@ function Apartados({ data, onAdd, onEdit, onRemove, onMoverFondos }) {
   const [modal, setModal] = useState(null);
   const [fondoModal, setFondoModal] = useState(null); // { apartado }
   const [moverModal, setMoverModal] = useState(null); // { apartado }
+  const [orden, setOrden] = useState("default");
   const empty = { nombre: "", proyectoId: "", montoObjetivo: "", montoActual: "0", fechaObjetivo: "", notas: "" };
   const nombreProyecto = (id) => data.proyectos.find((p) => p.id === id)?.nombre || "—";
+  const pctAvance = (a) => { const obj = Number(a.montoObjetivo) || 0; const act = Number(a.montoActual) || 0; return obj ? Math.min(100, (act / obj) * 100) : 0; };
+  const camposOrden = {
+    objetivo: { get: (a) => a.fechaObjetivo, tipo: "fecha" },
+    registro: { get: (a) => a.createdAt, tipo: "fecha" },
+    alfabetico: { get: (a) => a.nombre, tipo: "texto" },
+    avance: { get: (a) => pctAvance(a), tipo: "numero" },
+  };
+  const opcionesOrden = [
+    { key: "objetivo", label: "fecha objetivo" },
+    { key: "registro", label: "fecha de registro" },
+    { key: "alfabetico", label: "alfabético" },
+    { key: "avance", label: "% de avance" },
+  ];
+  const listaApartados = ordenarLista(data.apartados, orden, camposOrden);
 
   return (
     <div>
@@ -2003,10 +2255,11 @@ function Apartados({ data, onAdd, onEdit, onRemove, onMoverFondos }) {
         <h2 className="gp-serif text-2xl">Apartados</h2>
         <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm w-full sm:w-auto"><Plus size={14} /> Nuevo</button>
       </div>
-      <p className="text-sm gp-text-muted mb-6">Dinero apartado para un proyecto o una meta específica, como un viaje.</p>
+      <p className="text-sm gp-text-muted mb-3">Dinero apartado para un proyecto o una meta específica, como un viaje.</p>
+      <div className="mb-4"><OrdenSelector opciones={opcionesOrden} value={orden} onChange={setOrden} /></div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        {data.apartados.map((a) => {
+        {listaApartados.map((a) => {
           const objetivo = Number(a.montoObjetivo) || 0;
           const actual = Number(a.montoActual) || 0;
           const pct = objetivo ? Math.min(100, (actual / objetivo) * 100) : 0;
@@ -2143,8 +2396,22 @@ function MoverFondosForm({ apartado, proyectos, onSave }) {
 function Eventos({ data, onAdd, onEdit, onRemove }) {
   const [modal, setModal] = useState(null);
   const [expanded, setExpanded] = useState(null);
+  const [orden, setOrden] = useState("default");
   const empty = { nombre: "", fecha: todayISO(), proyectoId: "", contactoId: "", lugar: "", horario: "", costo: "", gastos: "", utilidad: "", comentarios: "", media: [] };
-  const ordenados = [...data.eventos].sort((a, b) => (b.fecha || "").localeCompare(a.fecha || ""));
+  const camposOrden = {
+    fecha: { get: (e) => e.fecha, tipo: "fecha" },
+    registro: { get: (e) => e.createdAt, tipo: "fecha" },
+    alfabetico: { get: (e) => e.nombre, tipo: "texto" },
+    utilidad: { get: (e) => (e.utilidad !== "" && e.utilidad != null ? Number(e.utilidad) : null), tipo: "numero" },
+  };
+  const opcionesOrden = [
+    { key: "fecha", label: "fecha" },
+    { key: "registro", label: "fecha de registro" },
+    { key: "alfabetico", label: "alfabético" },
+    { key: "utilidad", label: "utilidad" },
+  ];
+  const base = orden === "default" ? [...data.eventos].sort((a, b) => (b.fecha || "").localeCompare(a.fecha || "")) : data.eventos;
+  const ordenados = ordenarLista(base, orden, camposOrden);
   const nombreProyecto = (id) => data.proyectos.find((p) => p.id === id)?.nombre || "—";
   const nombreCliente = (id) => data.contactos.find((c) => c.id === id)?.nombre || "—";
 
@@ -2154,7 +2421,8 @@ function Eventos({ data, onAdd, onEdit, onRemove }) {
         <h2 className="gp-serif text-2xl">Eventos</h2>
         <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm w-full sm:w-auto"><Plus size={14} /> Nuevo</button>
       </div>
-      <p className="text-sm gp-text-muted mb-6">Shows y eventos, con lugar, horario, costo/gastos, utilidad, fotos y comentarios.</p>
+      <p className="text-sm gp-text-muted mb-3">Shows y eventos, con lugar, horario, costo/gastos, utilidad, fotos y comentarios.</p>
+      <div className="mb-4"><OrdenSelector opciones={opcionesOrden} value={orden} onChange={setOrden} /></div>
 
       <div className="space-y-2">
         {ordenados.map((e) => {
