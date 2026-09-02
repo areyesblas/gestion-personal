@@ -100,6 +100,15 @@ const uid = () => Math.random().toString(36).slice(2, 10);
 const fmtMoney = (n) => (Number(n) || 0).toLocaleString("es-MX", { style: "currency", currency: "MXN" });
 const todayISO = () => new Date().toISOString().slice(0, 10);
 const daysUntil = (dateStr) => Math.ceil((new Date(dateStr) - new Date(todayISO())) / 86400000);
+// Días que faltan para el próximo cumpleaños (a partir de una fecha de nacimiento cualquiera).
+const diasParaCumple = (fechaNacimiento) => {
+  if (!fechaNacimiento) return null;
+  const hoy = new Date(todayISO());
+  const nac = new Date(fechaNacimiento);
+  let proximo = new Date(hoy.getFullYear(), nac.getMonth(), nac.getDate());
+  if (proximo < hoy) proximo = new Date(hoy.getFullYear() + 1, nac.getMonth(), nac.getDate());
+  return Math.round((proximo - hoy) / 86400000);
+};
 
 const PRIORIDAD_ORDEN = { Alta: 0, Media: 1, Baja: 2 };
 
@@ -2122,7 +2131,7 @@ function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
   const [comentariosDe, setComentariosDe] = useState(null);
   const [filtroTipo, setFiltroTipo] = useState("Todos");
   const [orden, setOrden] = useState("default");
-  const empty = { nombre: "", tipo: "Cliente", parentesco: "", contexto: "", proyectoId: "", whatsapp: "", correo: "", notas: "" };
+  const empty = { nombre: "", tipo: "Cliente", parentesco: "", fechaNacimiento: "", contexto: "", proyectoId: "", whatsapp: "", correo: "", notas: "" };
   const nombreProyecto = (id) => data.proyectos.find((p) => p.id === id)?.nombre || "—";
   const toneTipo = { Cliente: "teal", Proveedor: "gold", Colaborador: "red", Otro: "" };
   const camposOrden = {
@@ -2162,6 +2171,11 @@ function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
                   <p className="text-sm font-medium">{c.nombre}</p>
                   <Badge tone={toneTipo[c.tipo || "Otro"]}>{c.tipo || "Otro"}</Badge>
                   {c.parentesco && <Badge tone="muted">{c.parentesco}</Badge>}
+                  {(() => {
+                    const dc = diasParaCumple(c.fechaNacimiento);
+                    if (dc === null || dc > 30) return null;
+                    return <Badge tone="gold">🎂 {dc === 0 ? "¡hoy!" : `en ${dc}d`}</Badge>;
+                  })()}
                 </div>
                 <p className="text-xs gp-text-muted mt-0.5">{c.contexto} {c.proyectoId ? `· ${nombreProyecto(c.proyectoId)}` : ""}</p>
                 <div className="flex gap-3 mt-1 text-xs gp-text-muted">
@@ -2227,6 +2241,7 @@ function ContactoForm({ item, proyectos, onSave }) {
           <input className="gp-input mt-2" placeholder="Escribe el parentesco" value={v.parentesco || ""} onChange={(e) => setV({ ...v, parentesco: e.target.value })} />
         )}
       </Field>
+      <Field label="Fecha de nacimiento (opcional, para recordar su cumpleaños)"><input type="date" className="gp-input" value={v.fechaNacimiento || ""} onChange={(e) => setV({ ...v, fechaNacimiento: e.target.value })} /></Field>
       <Field label="Dónde lo conociste"><input className="gp-input" placeholder="ej. Expo Acapulco 2026" value={v.contexto} onChange={(e) => setV({ ...v, contexto: e.target.value })} /></Field>
       <Field label="Proyecto relacionado">
         <select className="gp-input" value={v.proyectoId} onChange={(e) => setV({ ...v, proyectoId: e.target.value })}>
