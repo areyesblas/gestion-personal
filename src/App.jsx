@@ -231,7 +231,7 @@ const categoriaIMC = (imc) => {
 };
 
 /* ---------- persistencia relacional ---------- */
-const TABLES = ["proyectos", "pendientes", "equipo", "finanzas", "deudas", "actividades", "activos", "metas", "contactos", "redesMetricas", "documentos", "habitos", "salud", "apartados", "eventos", "comentarios"];
+const TABLES = ["proyectos", "pendientes", "equipo", "finanzas", "deudas", "actividades", "activos", "metas", "contactos", "redesMetricas", "documentos", "habitos", "salud", "apartados", "eventos", "comentarios", "saldoInicial"];
 const OLD_STORAGE_KEY = "gestion_personal_data"; // localStorage, versión muy vieja
 const OLD_BLOB_TABLE = "gestion_data"; // tabla única jsonb, versión anterior a este modelo relacional
 
@@ -558,7 +558,7 @@ function AppLoggedIn() {
 
         {/* contenido */}
         <div className="flex-1 p-4 pt-16 md:p-6 md:pt-6 overflow-y-auto gp-scroll w-full" style={{ maxHeight: "100vh" }}>
-          {view === "dashboard" && <Dashboard data={data} setView={setView} />}
+          {view === "dashboard" && <Dashboard data={data} setView={setView} onAddSaldo={(i) => addItem("saldoInicial", i)} />}
           {view === "proyectos" && (
             <Proyectos data={data} onAdd={(i) => addItem("proyectos", i)} onEdit={(id, p) => editItem("proyectos", id, p)} onRemove={(id) => askDelete("proyectos", id)} onAddComentario={(i) => addItem("comentarios", i)} onRemoveComentario={(id) => askDelete("comentarios", id)} />
           )}
@@ -634,7 +634,9 @@ function AppLoggedIn() {
 }
 
 /* ---------- Dashboard ---------- */
-function Dashboard({ data, setView }) {
+function Dashboard({ data, setView, onAddSaldo }) {
+  const [saldoModal, setSaldoModal] = useState(false);
+  const saldo = calcularSaldo(data);
   const mesActual = todayISO().slice(0, 7);
   const ledgerMesActual = useMemo(() => buildMonthlyLedger(data.finanzas, [mesActual]), [data.finanzas, mesActual]);
   const ingresos = ledgerMesActual.filter((f) => f.tipo === "Ingreso").reduce((s, f) => s + f.monto, 0);
@@ -694,6 +696,33 @@ function Dashboard({ data, setView }) {
         <Stat label="Ingresos del mes" value={fmtMoney(ingresos)} tone="teal" />
         <Stat label="Egresos del mes" value={fmtMoney(egresos)} tone="red" />
       </div>
+
+      <div className="gp-panel p-4 mb-6">
+        <div className="flex items-center justify-between mb-1">
+          <div className="flex items-center gap-2"><Wallet size={14} className="gp-text-teal" /><h3 className="text-sm font-medium">Saldo actual</h3></div>
+          <button onClick={() => setSaldoModal(true)} className="text-xs gp-text-gold">
+            {saldo ? "Redefinir punto de partida" : "Definir saldo inicial"}
+          </button>
+        </div>
+        {saldo ? (
+          <>
+            <div className="grid grid-cols-3 gap-3 mt-3">
+              <div><p className="text-xs gp-text-muted">Efectivo</p><p className="gp-serif text-lg">{fmtMoney(saldo.efectivo)}</p></div>
+              <div><p className="text-xs gp-text-muted">Cuenta</p><p className="gp-serif text-lg">{fmtMoney(saldo.cuenta)}</p></div>
+              <div><p className="text-xs gp-text-muted">Total</p><p className="gp-serif text-lg gp-text-teal">{fmtMoney(saldo.total)}</p></div>
+            </div>
+            <p className="text-xs gp-text-muted mt-2">Calculado desde tu punto de partida del {saldo.fecha} más tus movimientos reales (no incluye cobros pendientes).</p>
+          </>
+        ) : (
+          <p className="text-xs gp-text-muted mt-2">Define cuánto dinero tienes ahorita (efectivo y en cuenta) para que el sistema empiece a sumar y restar desde ahí, en vez de asumir que parte de cero.</p>
+        )}
+      </div>
+
+      {saldoModal && (
+        <Modal title="Punto de partida de saldo" onClose={() => setSaldoModal(false)}>
+          <SaldoInicialForm ultimo={saldo} onSave={(v) => { onAddSaldo(v); setSaldoModal(false); }} />
+        </Modal>
+      )}
 
       {cobrosPendientes.length > 0 && (
         <div className="gp-panel p-4 mb-6">
@@ -813,6 +842,49 @@ function Dashboard({ data, setView }) {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+function SaldoInicialForm({ ultimo, onSave }) {
+  const [v, setV] = useState({ fecha: todayISO(), efectivo: "", cuenta: "", notas: "" });
+  const [error, setError] = useState("");
+  const checkpoints = ultimo?.checkpoints || [];
+
+  return (
+    <div>
+      <p className="text-xs gp-text-muted mb-3">Cuánto dinero tienes ahorita, para que el sistema empiece a contar desde aquí (no borra tu historial, solo marca un punto de partida nuevo).</p>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <Field label="Efectivo"><input type="number" className="gp-input" value={v.efectivo} onChange={(e) => setV({ ...v, efectivo: e.target.value })} /></Field>
+        <Field label="En cuenta"><input type="number" className="gp-input" value={v.cuenta} onChange={(e) => setV({ ...v, cuenta: e.target.value })} /></Field>
+      </div>
+      <Field label="A partir de qué fecha"><input type="date" className="gp-input" value={v.fecha} onChange={(e) => setV({ ...v, fecha: e.target.value })} /></Field>
+      <Field label="Notas (opcional)"><input className="gp-input" placeholder="ej. corte después de viaje a Acapulco" value={v.notas} onChange={(e) => setV({ ...v, notas: e.target.value })} /></Field>
+      {error && <p className="text-xs gp-text-red mb-2">{error}</p>}
+      <button
+        className="gp-btn w-full py-2 text-sm mt-2"
+        onClick={() => {
+          if (v.efectivo === "" && v.cuenta === "") { setError("Captura al menos uno: efectivo o cuenta."); return; }
+          setError("");
+          onSave(v);
+        }}
+      >
+        Guardar punto de partida
+      </button>
+
+      {checkpoints.length > 0 && (
+        <div className="mt-5 pt-4 border-t gp-border">
+          <p className="text-xs font-medium mb-2 gp-text-muted">Puntos de partida anteriores</p>
+          <div className="space-y-1.5 max-h-32 overflow-y-auto gp-scroll">
+            {checkpoints.map((c) => (
+              <div key={c.id} className="text-xs flex justify-between gp-text-muted">
+                <span className="gp-mono">{c.fecha}</span>
+                <span>{fmtMoney(c.efectivo)} efectivo · {fmtMoney(c.cuenta)} cuenta</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1121,6 +1193,46 @@ function buildMonthlyLedger(finanzas, monthKeys) {
     }
   }
   return entries;
+}
+
+// Cuenta cuántas veces ocurre un pago recurrente entre dos fechas (aproximado por frecuencia).
+function contarOcurrenciasRecurrente(f, desde, hasta) {
+  const inicio = new Date(Math.max(new Date(f.fecha), new Date(desde)));
+  const fin = f.fechaFin ? new Date(Math.min(new Date(f.fechaFin), new Date(hasta))) : new Date(hasta);
+  if (inicio > fin) return 0;
+  const dias = Math.floor((fin - inicio) / 86400000) + 1;
+  if (f.frecuencia === "Semanal") return Math.floor(dias / 7) + 1;
+  if (f.frecuencia === "Quincenal") return Math.floor(dias / 15) + 1;
+  if (f.frecuencia === "Anual") return Math.floor(dias / 365) + 1;
+  return Math.floor(dias / 30.44) + 1; // Mensual (default)
+}
+
+// Calcula el saldo real (efectivo + cuenta) a partir del último "punto de partida" definido,
+// sumando/restando los movimientos reales (Cobrado, no Pendiente) desde esa fecha.
+function calcularSaldo(data) {
+  const checkpoints = [...(data.saldoInicial || [])].sort((a, b) => (b.fecha || "").localeCompare(a.fecha || ""));
+  const activo = checkpoints[0];
+  if (!activo) return null;
+  const hoy = todayISO();
+  let efectivo = Number(activo.efectivo) || 0;
+  let cuenta = Number(activo.cuenta) || 0;
+
+  for (const f of data.finanzas) {
+    if (f.estatus === "Pendiente") continue; // aún no es dinero real
+    if (f.forma !== "Efectivo" && f.forma !== "Transferencia") continue; // Especie/Intercambio no mueven dinero real
+    const signo = f.tipo === "Ingreso" ? 1 : -1;
+
+    if (!f.esRecurrente) {
+      if (!f.fecha || f.fecha < activo.fecha || f.fecha > hoy) continue;
+      const monto = (Number(f.monto) || 0) * signo;
+      if (f.forma === "Efectivo") efectivo += monto; else cuenta += monto;
+    } else {
+      const n = contarOcurrenciasRecurrente(f, activo.fecha, hoy);
+      const monto = (Number(f.monto) || 0) * signo * n;
+      if (f.forma === "Efectivo") efectivo += monto; else cuenta += monto;
+    }
+  }
+  return { fecha: activo.fecha, efectivo, cuenta, total: efectivo + cuenta, checkpoints };
 }
 
 function Finanzas({ data, onAdd, onEdit, onRemove }) {
