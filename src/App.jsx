@@ -5,7 +5,7 @@ import {
   Users, Activity, Plus, X, Trash2, Pencil, Github, ChevronDown,
   ChevronRight, Bell, Lightbulb, Rocket, MessageCircle, Mail, Globe,
   Target, Contact, BarChart3, FileText, Flame, HeartPulse, Check, Menu, PieChart as PieChartIcon,
-  PiggyBank, Camera, Film, Upload, MapPin, Clock,
+  PiggyBank, Camera, Film, Upload, MapPin, Clock, Mic,
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
@@ -130,6 +130,92 @@ function OrdenSelector({ opciones, value, onChange }) {
     </select>
   );
 }
+
+/* Bitácora universal: comentarios + adjuntos (fotos/audio/video/documentos) para cualquier entidad. */
+function Bitacora({ data, entidadTipo, entidadId, onAdd, onRemove }) {
+  const [texto, setTexto] = useState("");
+  const [subiendo, setSubiendo] = useState(false);
+  const [adjuntosNuevos, setAdjuntosNuevos] = useState([]);
+  const [error, setError] = useState("");
+
+  const comentarios = (data.comentarios || [])
+    .filter((c) => c.entidadTipo === entidadTipo && c.entidadId === entidadId)
+    .sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
+
+  const iconoTipo = (t) => t === "video" ? <Film size={11} /> : t === "audio" ? <Mic size={11} /> : t === "imagen" ? <Camera size={11} /> : <FileText size={11} />;
+
+  const handleFiles = async (e) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+    setError("");
+    setSubiendo(true);
+    const nuevos = [];
+    for (const file of files) {
+      if (file.size > 25 * 1024 * 1024) { setError(`"${file.name}" pesa más de 25 MB, se omitió.`); continue; }
+      const path = `${entidadTipo}/${entidadId}/${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
+      const { error: upErr } = await supabase.storage.from("adjuntos").upload(path, file);
+      if (upErr) { setError(`No se pudo subir "${file.name}": ${upErr.message}`); continue; }
+      const { data: pub } = supabase.storage.from("adjuntos").getPublicUrl(path);
+      const tipo = file.type.startsWith("image/") ? "imagen" : file.type.startsWith("video/") ? "video" : file.type.startsWith("audio/") ? "audio" : "documento";
+      nuevos.push({ tipo, nombre: file.name, url: pub.publicUrl });
+    }
+    setAdjuntosNuevos((prev) => [...prev, ...nuevos]);
+    setSubiendo(false);
+  };
+
+  const enviar = () => {
+    if (!texto.trim() && adjuntosNuevos.length === 0) return;
+    onAdd({ entidadTipo, entidadId, texto: texto.trim(), adjuntos: adjuntosNuevos });
+    setTexto("");
+    setAdjuntosNuevos([]);
+  };
+
+  return (
+    <div>
+      <p className="text-xs font-medium mb-2 gp-text-muted">Comentarios y adjuntos</p>
+      <div className="space-y-1.5 mb-2 max-h-56 overflow-y-auto gp-scroll">
+        {comentarios.map((c) => (
+          <div key={c.id} className="text-xs gp-panel p-2">
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex-1">
+                {c.texto && <p>{c.texto}</p>}
+                {c.adjuntos?.length > 0 && (
+                  <div className="flex flex-wrap gap-2 mt-1">
+                    {c.adjuntos.map((a, i) => (
+                      <a key={i} href={a.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 gp-text-gold">
+                        {iconoTipo(a.tipo)} {a.nombre.length > 16 ? a.nombre.slice(0, 16) + "…" : a.nombre}
+                      </a>
+                    ))}
+                  </div>
+                )}
+                <p className="gp-mono gp-text-muted mt-1" style={{ fontSize: "10px" }}>{c.createdAt ? new Date(c.createdAt).toLocaleString("es-MX") : ""}</p>
+              </div>
+              <button onClick={() => onRemove(c.id)} className="gp-text-red shrink-0">✕</button>
+            </div>
+          </div>
+        ))}
+        {comentarios.length === 0 && <p className="text-xs gp-text-muted">Sin comentarios todavía.</p>}
+      </div>
+      <textarea className="gp-input" rows={2} placeholder="Escribe un comentario…" value={texto} onChange={(e) => setTexto(e.target.value)} />
+      <div className="flex items-center justify-between mt-2 gap-2 flex-wrap">
+        <input type="file" accept="image/*,video/*,audio/*,.pdf,.doc,.docx" multiple onChange={handleFiles} className="text-xs gp-text-muted" disabled={subiendo} style={{ maxWidth: 190 }} />
+        <button className="gp-btn-ghost px-3 py-1.5 text-xs" disabled={subiendo} onClick={enviar}>Agregar</button>
+      </div>
+      {subiendo && <p className="text-xs gp-text-muted mt-1">Subiendo…</p>}
+      {error && <p className="text-xs gp-text-red mt-1">{error}</p>}
+      {adjuntosNuevos.length > 0 && (
+        <div className="flex flex-wrap gap-1 mt-2">
+          {adjuntosNuevos.map((a, i) => (
+            <span key={i} className="text-xs gp-text-teal flex items-center gap-1 gp-panel px-2 py-1">
+              {iconoTipo(a.tipo)} {a.nombre.length > 16 ? a.nombre.slice(0, 16) + "…" : a.nombre}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 const calcIMC = (pesoKg, alturaCm) => {
   const p = Number(pesoKg), a = Number(alturaCm);
   if (!p || !a) return null;
@@ -145,7 +231,7 @@ const categoriaIMC = (imc) => {
 };
 
 /* ---------- persistencia relacional ---------- */
-const TABLES = ["proyectos", "pendientes", "equipo", "finanzas", "deudas", "actividades", "activos", "metas", "contactos", "redesMetricas", "documentos", "habitos", "salud", "pagosRecurrentes", "apartados", "eventos"];
+const TABLES = ["proyectos", "pendientes", "equipo", "finanzas", "deudas", "actividades", "activos", "metas", "contactos", "redesMetricas", "documentos", "habitos", "salud", "apartados", "eventos", "comentarios"];
 const OLD_STORAGE_KEY = "gestion_personal_data"; // localStorage, versión muy vieja
 const OLD_BLOB_TABLE = "gestion_data"; // tabla única jsonb, versión anterior a este modelo relacional
 
@@ -474,13 +560,13 @@ function AppLoggedIn() {
         <div className="flex-1 p-4 pt-16 md:p-6 md:pt-6 overflow-y-auto gp-scroll w-full" style={{ maxHeight: "100vh" }}>
           {view === "dashboard" && <Dashboard data={data} setView={setView} />}
           {view === "proyectos" && (
-            <Proyectos data={data} onAdd={(i) => addItem("proyectos", i)} onEdit={(id, p) => editItem("proyectos", id, p)} onRemove={(id) => askDelete("proyectos", id)} />
+            <Proyectos data={data} onAdd={(i) => addItem("proyectos", i)} onEdit={(id, p) => editItem("proyectos", id, p)} onRemove={(id) => askDelete("proyectos", id)} onAddComentario={(i) => addItem("comentarios", i)} onRemoveComentario={(id) => askDelete("comentarios", id)} />
           )}
           {view === "metas" && (
             <Metas data={data} onAdd={(i) => addItem("metas", i)} onEdit={(id, p) => editItem("metas", id, p)} onRemove={(id) => askDelete("metas", id)} />
           )}
           {view === "pendientes" && (
-            <Pendientes data={data} onAdd={(i) => addItem("pendientes", i)} onEdit={(id, p) => editItem("pendientes", id, p)} onRemove={(id) => askDelete("pendientes", id)} />
+            <Pendientes data={data} onAdd={(i) => addItem("pendientes", i)} onEdit={(id, p) => editItem("pendientes", id, p)} onRemove={(id) => askDelete("pendientes", id)} onAddComentario={(i) => addItem("comentarios", i)} onRemoveComentario={(id) => askDelete("comentarios", id)} />
           )}
           {view === "finanzas" && (
             <Finanzas data={data} onAdd={(i) => addItem("finanzas", i)} onEdit={(id, p) => editItem("finanzas", id, p)} onRemove={(id) => askDelete("finanzas", id)} />
@@ -499,7 +585,7 @@ function AppLoggedIn() {
             <Equipo data={data} onAdd={(i) => addItem("equipo", i)} onEdit={(id, p) => editItem("equipo", id, p)} onRemove={(id) => askDelete("equipo", id)} />
           )}
           {view === "contactos" && (
-            <Contactos data={data} onAdd={(i) => addItem("contactos", i)} onEdit={(id, p) => editItem("contactos", id, p)} onRemove={(id) => askDelete("contactos", id)} />
+            <Contactos data={data} onAdd={(i) => addItem("contactos", i)} onEdit={(id, p) => editItem("contactos", id, p)} onRemove={(id) => askDelete("contactos", id)} onAddComentario={(i) => addItem("comentarios", i)} onRemoveComentario={(id) => askDelete("comentarios", id)} />
           )}
           {view === "redes" && (
             <RedesSociales data={data} onAdd={(i) => addItem("redesMetricas", i)} onEdit={(id, p) => editItem("redesMetricas", id, p)} onRemove={(id) => askDelete("redesMetricas", id)} />
@@ -508,7 +594,7 @@ function AppLoggedIn() {
             <Actividades data={data} onAdd={(i) => addItem("actividades", i)} onEdit={(id, p) => editItem("actividades", id, p)} onRemove={(id) => askDelete("actividades", id)} />
           )}
           {view === "eventos" && (
-            <Eventos data={data} onAdd={(i) => addItem("eventos", i)} onEdit={(id, p) => editItem("eventos", id, p)} onRemove={(id) => askDelete("eventos", id)} />
+            <Eventos data={data} onAdd={(i) => addItem("eventos", i)} onEdit={(id, p) => editItem("eventos", id, p)} onRemove={(id) => askDelete("eventos", id)} onAddComentario={(i) => addItem("comentarios", i)} onRemoveComentario={(id) => askDelete("comentarios", id)} />
           )}
           {view === "habitos" && (
             <Habitos data={data} onAdd={(i) => addItem("habitos", i)} onEdit={(id, p) => editItem("habitos", id, p)} onRemove={(id) => askDelete("habitos", id)} />
@@ -741,7 +827,7 @@ function Stat({ label, value, tone }) {
 }
 
 /* ---------- Proyectos ---------- */
-function Proyectos({ data, onAdd, onEdit, onRemove }) {
+function Proyectos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveComentario }) {
   const [modal, setModal] = useState(null);
   const [expanded, setExpanded] = useState(null);
   const [notaTexto, setNotaTexto] = useState("");
@@ -814,16 +900,19 @@ function Proyectos({ data, onAdd, onEdit, onRemove }) {
                         </label>
                         <input placeholder="link del repo (opcional)" value={p.github || ""} onChange={(e) => onEdit(p.id, { github: e.target.value })} className="gp-input flex-1" style={{ minWidth: 160, maxWidth: 280 }} />
                       </div>
-                      <p className="text-xs font-medium mb-2 gp-text-muted">Bitácora de avances</p>
+                      <p className="text-xs font-medium mb-2 gp-text-muted">Bitácora de avances (texto rápido)</p>
                       <div className="space-y-1.5 mb-2 max-h-40 overflow-y-auto gp-scroll">
                         {(p.notas || []).slice().reverse().map((n) => (
                           <div key={n.id} className="text-xs flex gap-2"><span className="gp-mono gp-text-muted shrink-0">{n.fecha}</span><span>{n.texto}</span></div>
                         ))}
                         {(!p.notas || p.notas.length === 0) && <p className="text-xs gp-text-muted">Sin comentarios todavía.</p>}
                       </div>
-                      <div className="flex gap-2">
+                      <div className="flex gap-2 mb-4">
                         <input className="gp-input" placeholder="Agregar avance o comentario…" value={expanded === p.id ? notaTexto : ""} onChange={(e) => setNotaTexto(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addNota(p)} />
                         <button className="gp-btn-ghost px-3 text-xs" onClick={() => addNota(p)}>Agregar</button>
+                      </div>
+                      <div className="border-t gp-border pt-3">
+                        <Bitacora data={data} entidadTipo="proyectos" entidadId={p.id} onAdd={onAddComentario} onRemove={onRemoveComentario} />
                       </div>
                     </div>
                   )}
@@ -868,8 +957,9 @@ function ProyectoForm({ item, onSave }) {
 }
 
 /* ---------- Pendientes ---------- */
-function Pendientes({ data, onAdd, onEdit, onRemove }) {
+function Pendientes({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveComentario }) {
   const [modal, setModal] = useState(null);
+  const [comentariosDe, setComentariosDe] = useState(null);
   const [orden, setOrden] = useState("default");
   const empty = { proyectoId: "", descripcion: "", fechaLimite: todayISO(), fechaRevision: "", prioridad: "Media", estatus: "Pendiente", responsableId: "", contactoId: "", precio: "" };
 
@@ -891,6 +981,7 @@ function Pendientes({ data, onAdd, onEdit, onRemove }) {
     ? [...data.pendientes].sort((a, b) => (a.fechaLimite || "").localeCompare(b.fechaLimite || ""))
     : data.pendientes;
   const ordenados = ordenarLista(base, orden, camposOrden);
+  const nComentarios = (id) => (data.comentarios || []).filter((c) => c.entidadTipo === "pendientes" && c.entidadId === id).length;
 
   const nombreProyecto = (id) => data.proyectos.find((p) => p.id === id)?.nombre || "—";
   const nombreResp = (id) => data.equipo.find((e) => e.id === id)?.nombre || "Tú";
@@ -911,6 +1002,7 @@ function Pendientes({ data, onAdd, onEdit, onRemove }) {
           <tbody>
             {ordenados.map((p) => {
               const vencido = p.estatus !== "Hecho" && p.fechaLimite && daysUntil(p.fechaLimite) < 0;
+              const nc = nComentarios(p.id);
               return (
                 <tr key={p.id}>
                   <td>{p.descripcion}</td>
@@ -925,7 +1017,10 @@ function Pendientes({ data, onAdd, onEdit, onRemove }) {
                     </select>
                   </td>
                   <td className="gp-mono">{p.precio ? fmtMoney(p.precio) : "—"}</td>
-                  <td><div className="flex gap-1"><IconBtn onClick={() => setModal({ item: p })}><Pencil size={13} /></IconBtn><IconBtn onClick={() => onRemove(p.id)}><Trash2 size={13} /></IconBtn></div></td>
+                  <td><div className="flex gap-1">
+                    <IconBtn onClick={() => setComentariosDe(p)}><MessageCircle size={13} />{nc > 0 && <span className="gp-mono" style={{ fontSize: 9, marginLeft: 2 }}>{nc}</span>}</IconBtn>
+                    <IconBtn onClick={() => setModal({ item: p })}><Pencil size={13} /></IconBtn><IconBtn onClick={() => onRemove(p.id)}><Trash2 size={13} /></IconBtn>
+                  </div></td>
                 </tr>
               );
             })}
@@ -933,6 +1028,12 @@ function Pendientes({ data, onAdd, onEdit, onRemove }) {
           </tbody>
         </table>
       </div>
+
+      {comentariosDe && (
+        <Modal title={`Comentarios — ${comentariosDe.descripcion}`} onClose={() => setComentariosDe(null)}>
+          <Bitacora data={data} entidadTipo="pendientes" entidadId={comentariosDe.id} onAdd={onAddComentario} onRemove={onRemoveComentario} />
+        </Modal>
+      )}
 
       {modal && (
         <Modal title={modal.item.id ? "Editar pendiente" : "Nuevo pendiente"} onClose={() => setModal(null)}>
@@ -1608,8 +1709,9 @@ function MetaForm({ item, proyectos, onSave }) {
 }
 
 /* ---------- Contactos / networking ---------- */
-function Contactos({ data, onAdd, onEdit, onRemove }) {
+function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveComentario }) {
   const [modal, setModal] = useState(null);
+  const [comentariosDe, setComentariosDe] = useState(null);
   const [filtroTipo, setFiltroTipo] = useState("Todos");
   const [orden, setOrden] = useState("default");
   const empty = { nombre: "", tipo: "Cliente", contexto: "", proyectoId: "", whatsapp: "", correo: "", notas: "" };
@@ -1658,13 +1760,22 @@ function Contactos({ data, onAdd, onEdit, onRemove }) {
                   {c.correo && <span className="flex items-center gap-1"><Mail size={12} /> {c.correo}</span>}
                 </div>
               </div>
-              <div className="flex gap-1"><IconBtn onClick={() => setModal({ item: c })}><Pencil size={13} /></IconBtn><IconBtn onClick={() => onRemove(c.id)}><Trash2 size={13} /></IconBtn></div>
+              <div className="flex gap-1">
+                <IconBtn onClick={() => setComentariosDe(c)}><MessageCircle size={13} /></IconBtn>
+                <IconBtn onClick={() => setModal({ item: c })}><Pencil size={13} /></IconBtn><IconBtn onClick={() => onRemove(c.id)}><Trash2 size={13} /></IconBtn>
+              </div>
             </div>
             {c.notas && <p className="text-xs mt-2 gp-text-muted">{c.notas}</p>}
           </div>
         ))}
         {visibles.length === 0 && <p className="text-sm gp-text-muted col-span-2">Aún no registras contactos {filtroTipo !== "Todos" ? `de tipo "${filtroTipo}"` : ""}.</p>}
       </div>
+
+      {comentariosDe && (
+        <Modal title={`Comentarios — ${comentariosDe.nombre}`} onClose={() => setComentariosDe(null)}>
+          <Bitacora data={data} entidadTipo="contactos" entidadId={comentariosDe.id} onAdd={onAddComentario} onRemove={onRemoveComentario} />
+        </Modal>
+      )}
 
       {modal && (
         <Modal title={modal.item.id ? "Editar contacto" : "Nuevo contacto"} onClose={() => setModal(null)}>
@@ -2393,7 +2504,7 @@ function MoverFondosForm({ apartado, proyectos, onSave }) {
 }
 
 /* ---------- Eventos (con fotos y videos) ---------- */
-function Eventos({ data, onAdd, onEdit, onRemove }) {
+function Eventos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveComentario }) {
   const [modal, setModal] = useState(null);
   const [expanded, setExpanded] = useState(null);
   const [orden, setOrden] = useState("default");
@@ -2458,7 +2569,7 @@ function Eventos({ data, onAdd, onEdit, onRemove }) {
                   </div>
                 )}
                 {e.media?.length > 0 && (
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-3">
                     {e.media.map((m, i) => (
                       <a key={i} href={m.url} target="_blank" rel="noopener noreferrer" className="gp-panel-hi rounded overflow-hidden block" style={{ border: "1px solid var(--border)" }}>
                         {m.tipo === "video" ? (
@@ -2474,6 +2585,9 @@ function Eventos({ data, onAdd, onEdit, onRemove }) {
                     ))}
                   </div>
                 )}
+                <div className="border-t gp-border pt-3">
+                  <Bitacora data={data} entidadTipo="eventos" entidadId={e.id} onAdd={onAddComentario} onRemove={onRemoveComentario} />
+                </div>
               </div>
             )}
           </div>
