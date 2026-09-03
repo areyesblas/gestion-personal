@@ -5,7 +5,7 @@ import {
   Users, Activity, Plus, X, Trash2, Pencil, Github, ChevronDown,
   ChevronRight, Bell, Lightbulb, Rocket, MessageCircle, Mail, Globe,
   Target, Contact, BarChart3, FileText, Flame, HeartPulse, Check, Menu, PieChart as PieChartIcon,
-  PiggyBank, Camera, Film, Upload, MapPin, Clock, Mic, Gift, Receipt, Megaphone, ChevronUp,
+  PiggyBank, Camera, Film, Upload, MapPin, Clock, Mic, Gift, Receipt, Megaphone, ChevronUp, Gem,
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
@@ -64,6 +64,7 @@ const ESTATUS_FACTURA = ["Pendiente", "Pagada", "Cancelada"];
 const TASA_IVA = 0.16;
 const PLATAFORMAS_CAMPANA = ["Meta", "Google Ads", "TikTok", "Email", "Orgánico", "Otro"];
 const ESTATUS_CAMPANA = ["Planeada", "Activa", "Pausada", "Finalizada"];
+const CATEGORIAS_PATRIMONIO = ["Inmueble", "Auto", "Joyería", "Equipo de audio", "Electrónica", "Muebles", "Otro"];
 const FRECUENCIA = ["Semanal", "Quincenal", "Mensual", "Anual"];
 const TIPO_ACTIVIDAD = ["Gym", "Evento", "Capacitación", "Otro"];
 const TIPO_ACTIVO = ["Dominio", "Hosting", "Marca (IMPI)", "Red social", "Otro"];
@@ -266,7 +267,7 @@ const categoriaIMC = (imc) => {
 };
 
 /* ---------- persistencia relacional ---------- */
-const TABLES = ["proyectos", "pendientes", "equipo", "finanzas", "deudas", "actividades", "activos", "metas", "contactos", "redesMetricas", "documentos", "habitos", "salud", "apartados", "eventos", "comentarios", "saldoInicial", "regalos", "facturas", "campanas"];
+const TABLES = ["proyectos", "pendientes", "equipo", "finanzas", "deudas", "actividades", "activos", "metas", "contactos", "redesMetricas", "documentos", "habitos", "salud", "apartados", "eventos", "comentarios", "saldoInicial", "regalos", "facturas", "campanas", "patrimonio", "patrimonioValuaciones"];
 const OLD_STORAGE_KEY = "gestion_personal_data"; // localStorage, versión muy vieja
 const OLD_BLOB_TABLE = "gestion_data"; // tabla única jsonb, versión anterior a este modelo relacional
 
@@ -527,6 +528,7 @@ function AppLoggedIn() {
       { id: "reportes", label: "Reportes", icon: PieChartIcon },
       { id: "deudas", label: "Deudas", icon: AlertTriangle },
       { id: "apartados", label: "Apartados", icon: PiggyBank },
+      { id: "patrimonio", label: "Patrimonio", icon: Gem },
       { id: "activos", label: "Activos digitales", icon: Globe },
       { id: "documentos", label: "Legal y contratos", icon: FileText },
     ]},
@@ -619,6 +621,9 @@ function AppLoggedIn() {
           )}
           {view === "apartados" && (
             <Apartados data={data} onAdd={(i) => addItem("apartados", i)} onEdit={(id, p) => editItem("apartados", id, p)} onRemove={(id) => askDelete("apartados", id)} onMoverFondos={moverFondosApartado} />
+          )}
+          {view === "patrimonio" && (
+            <Patrimonio data={data} onAdd={(i) => addItem("patrimonio", i)} onEdit={(id, p) => editItem("patrimonio", id, p)} onRemove={(id) => askDelete("patrimonio", id)} onAddValuacion={(i) => addItem("patrimonioValuaciones", i)} onRemoveValuacion={(id) => askDelete("patrimonioValuaciones", id)} onAddComentario={(i) => addItem("comentarios", i)} onRemoveComentario={(id) => askDelete("comentarios", id)} />
           )}
           {view === "documentos" && (
             <Documentos data={data} onAdd={(i) => addItem("documentos", i)} onEdit={(id, p) => editItem("documentos", id, p)} onRemove={(id) => askDelete("documentos", id)} />
@@ -2699,6 +2704,186 @@ function CampanaForm({ item, proyectos, onSave }) {
       {error && <p className="text-xs gp-text-red mb-2">{error}</p>}
 
       <button className="gp-btn w-full py-2 text-sm mt-2" onClick={() => { if (!v.nombre?.toString().trim()) { setError("El nombre de la campaña es obligatorio."); return; } setError(""); onSave(v); }}>Guardar</button>
+    </div>
+  );
+}
+
+/* ---------- Patrimonio (bienes con historial de valuaciones) ---------- */
+function Patrimonio({ data, onAdd, onEdit, onRemove, onAddValuacion, onRemoveValuacion, onAddComentario, onRemoveComentario }) {
+  const [modal, setModal] = useState(null);
+  const [valuacionModal, setValuacionModal] = useState(null); // { bien }
+  const [historialDe, setHistorialDe] = useState(null); // { bien }
+  const [comentariosDe, setComentariosDe] = useState(null);
+  const [filtroCategoria, setFiltroCategoria] = useState("Todas");
+  const [orden, setOrden] = useState("default");
+  const [ordenDir, setOrdenDir] = useState("asc");
+  const toggleOrden = (key) => { if (orden === key) setOrdenDir((d) => (d === "asc" ? "desc" : "asc")); else { setOrden(key); setOrdenDir("asc"); } };
+  const empty = { nombre: "", categoria: "Inmueble", fechaAdquisicion: todayISO(), valorAdquisicion: "", notas: "" };
+
+  const valuacionesDe = (id) => (data.patrimonioValuaciones || []).filter((v) => v.patrimonioId === id).sort((a, b) => (b.fecha || "").localeCompare(a.fecha || ""));
+  const valorActual = (bien) => {
+    const vals = valuacionesDe(bien.id);
+    return vals.length ? Number(vals[0].valor) : Number(bien.valorAdquisicion) || 0;
+  };
+  const nComentarios = (id) => (data.comentarios || []).filter((c) => c.entidadTipo === "patrimonio" && c.entidadId === id).length;
+
+  const camposOrden = {
+    alfabetico: { get: (b) => b.nombre, tipo: "texto" },
+    registro: { get: (b) => b.createdAt, tipo: "fecha" },
+    adquisicion: { get: (b) => b.fechaAdquisicion, tipo: "fecha" },
+    valor: { get: (b) => valorActual(b), tipo: "numero" },
+  };
+  const opcionesOrden = [
+    { key: "alfabetico", label: "alfabético" },
+    { key: "registro", label: "fecha de registro" },
+    { key: "adquisicion", label: "fecha de adquisición" },
+    { key: "valor", label: "valor actual" },
+  ];
+
+  let bienes = data.patrimonio;
+  if (filtroCategoria !== "Todas") bienes = bienes.filter((b) => b.categoria === filtroCategoria);
+  const ordenados = ordenarLista(bienes, orden, camposOrden, ordenDir);
+  const totalPatrimonio = ordenados.reduce((s, b) => s + valorActual(b), 0);
+  const totalAdquisicion = ordenados.reduce((s, b) => s + (Number(b.valorAdquisicion) || 0), 0);
+
+  return (
+    <div>
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-1">
+        <h2 className="gp-serif text-2xl">Patrimonio</h2>
+        <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm w-full sm:w-auto"><Plus size={14} /> Nuevo bien</button>
+      </div>
+      <p className="text-sm gp-text-muted mb-3">Inmuebles, autos, joyería, equipo — con historial de valuaciones para registrar plusvalía o minusvalía a lo largo del tiempo.</p>
+
+      <div className="gp-panel p-4 mb-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div><p className="text-xs gp-text-muted">Valor de adquisición (total)</p><p className="gp-serif text-lg">{fmtMoney(totalAdquisicion)}</p></div>
+        <div><p className="text-xs gp-text-muted">Valor actual estimado</p><p className="gp-serif text-lg gp-text-teal">{fmtMoney(totalPatrimonio)}</p></div>
+        <div>
+          <p className="text-xs gp-text-muted">Plusvalía / minusvalía</p>
+          <p className={`gp-serif text-lg ${totalPatrimonio - totalAdquisicion >= 0 ? "gp-text-teal" : "gp-text-red"}`}>{fmtMoney(totalPatrimonio - totalAdquisicion)}</p>
+        </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2 mb-4">
+        <select className="gp-input text-xs py-1.5" style={{ width: "auto" }} value={filtroCategoria} onChange={(e) => setFiltroCategoria(e.target.value)}>
+          <option value="Todas">Todas las categorías</option>
+          {CATEGORIAS_PATRIMONIO.map((c) => <option key={c}>{c}</option>)}
+        </select>
+        <OrdenSelector opciones={opcionesOrden} value={orden} onChange={setOrden} />
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        {ordenados.map((b) => {
+          const actual = valorActual(b);
+          const adquisicion = Number(b.valorAdquisicion) || 0;
+          const diferencia = actual - adquisicion;
+          const pct = adquisicion ? (diferencia / adquisicion) * 100 : 0;
+          const nc = nComentarios(b.id);
+          return (
+            <div key={b.id} className="gp-panel p-4">
+              <div className="flex items-start justify-between">
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <p className="text-sm font-medium">{b.nombre}</p>
+                    <Badge tone="muted">{b.categoria}</Badge>
+                  </div>
+                  <p className="text-xs gp-text-muted mt-0.5">Adquirido {b.fechaAdquisicion || "—"} por {fmtMoney(adquisicion)}</p>
+                </div>
+                <div className="flex gap-1">
+                  <IconBtn onClick={() => setComentariosDe(b)}><MessageCircle size={13} />{nc > 0 && <span className="gp-mono" style={{ fontSize: 9, marginLeft: 2 }}>{nc}</span>}</IconBtn>
+                  <IconBtn onClick={() => setModal({ item: b })}><Pencil size={13} /></IconBtn><IconBtn onClick={() => onRemove(b.id)}><Trash2 size={13} /></IconBtn>
+                </div>
+              </div>
+              <div className="mt-3 flex items-end justify-between">
+                <div>
+                  <p className="text-xs gp-text-muted">Valor actual</p>
+                  <p className="gp-serif text-lg">{fmtMoney(actual)}</p>
+                </div>
+                {adquisicion > 0 && (
+                  <Badge tone={diferencia >= 0 ? "teal" : "red"}>{diferencia >= 0 ? "+" : ""}{fmtMoney(diferencia)} ({pct >= 0 ? "+" : ""}{pct.toFixed(0)}%)</Badge>
+                )}
+              </div>
+              {b.notas && <p className="text-xs mt-2 gp-text-muted">{b.notas}</p>}
+              <div className="flex gap-2 mt-3">
+                <button onClick={() => setValuacionModal({ bien: b })} className="gp-btn-ghost flex-1 py-1.5 text-xs">Registrar valuación</button>
+                <button onClick={() => setHistorialDe({ bien: b })} className="gp-btn-ghost flex-1 py-1.5 text-xs">Ver historial ({valuacionesDe(b.id).length})</button>
+              </div>
+            </div>
+          );
+        })}
+        {ordenados.length === 0 && <p className="text-sm gp-text-muted col-span-2">Aún no registras bienes patrimoniales.</p>}
+      </div>
+
+      {comentariosDe && (
+        <Modal title={`Comentarios — ${comentariosDe.nombre}`} onClose={() => setComentariosDe(null)}>
+          <Bitacora data={data} entidadTipo="patrimonio" entidadId={comentariosDe.id} onAdd={onAddComentario} onRemove={onRemoveComentario} />
+        </Modal>
+      )}
+
+      {valuacionModal && (
+        <Modal title={`Registrar valuación — ${valuacionModal.bien.nombre}`} onClose={() => setValuacionModal(null)}>
+          <ValuacionForm onSave={(v) => { onAddValuacion({ ...v, patrimonioId: valuacionModal.bien.id }); setValuacionModal(null); }} />
+        </Modal>
+      )}
+
+      {historialDe && (
+        <Modal title={`Historial de valuaciones — ${historialDe.bien.nombre}`} onClose={() => setHistorialDe(null)}>
+          <div className="space-y-2">
+            <p className="text-xs gp-text-muted mb-2">Valor de adquisición: {fmtMoney(historialDe.bien.valorAdquisicion)} ({historialDe.bien.fechaAdquisicion || "sin fecha"})</p>
+            {valuacionesDe(historialDe.bien.id).map((v) => (
+              <div key={v.id} className="gp-panel p-3 flex items-center justify-between text-sm">
+                <div>
+                  <p className="gp-mono">{v.fecha}</p>
+                  {v.notas && <p className="text-xs gp-text-muted">{v.notas}</p>}
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="gp-mono">{fmtMoney(v.valor)}</span>
+                  <IconBtn onClick={() => onRemoveValuacion(v.id)}><Trash2 size={13} /></IconBtn>
+                </div>
+              </div>
+            ))}
+            {valuacionesDe(historialDe.bien.id).length === 0 && <p className="text-xs gp-text-muted">Sin valuaciones registradas todavía — el valor actual es el de adquisición.</p>}
+          </div>
+        </Modal>
+      )}
+
+      {modal && (
+        <Modal title={modal.item.id ? "Editar bien" : "Nuevo bien"} onClose={() => setModal(null)}>
+          <PatrimonioForm item={modal.item} onSave={(v) => { modal.item.id ? onEdit(modal.item.id, v) : onAdd(v); setModal(null); }} />
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+function PatrimonioForm({ item, onSave }) {
+  const [v, setV] = useState(item);
+  const [error, setError] = useState("");
+  return (
+    <div>
+      <Field label="Nombre"><input className="gp-input" placeholder="ej. Depa Subancuy, Honda Civic, Reloj X" value={v.nombre} onChange={(e) => setV({ ...v, nombre: e.target.value })} /></Field>
+      <Field label="Categoría"><select className="gp-input" value={v.categoria} onChange={(e) => setV({ ...v, categoria: e.target.value })}>{CATEGORIAS_PATRIMONIO.map((c) => <option key={c}>{c}</option>)}</select></Field>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <Field label="Fecha de adquisición"><input type="date" className="gp-input" value={v.fechaAdquisicion || ""} onChange={(e) => setV({ ...v, fechaAdquisicion: e.target.value })} /></Field>
+        <Field label="Valor de adquisición"><input type="number" className="gp-input" value={v.valorAdquisicion} onChange={(e) => setV({ ...v, valorAdquisicion: e.target.value })} /></Field>
+      </div>
+      <Field label="Notas"><textarea className="gp-input" rows={2} value={v.notas} onChange={(e) => setV({ ...v, notas: e.target.value })} /></Field>
+      {error && <p className="text-xs gp-text-red mb-2">{error}</p>}
+
+      <button className="gp-btn w-full py-2 text-sm mt-2" onClick={() => { if (!v.nombre?.toString().trim()) { setError("El nombre es obligatorio."); return; } setError(""); onSave(v); }}>Guardar</button>
+    </div>
+  );
+}
+
+function ValuacionForm({ onSave }) {
+  const [v, setV] = useState({ fecha: todayISO(), valor: "", notas: "" });
+  const [error, setError] = useState("");
+  return (
+    <div>
+      <Field label="Fecha de la valuación"><input type="date" className="gp-input" value={v.fecha} onChange={(e) => setV({ ...v, fecha: e.target.value })} /></Field>
+      <Field label="Valor estimado"><input type="number" className="gp-input" value={v.valor} onChange={(e) => setV({ ...v, valor: e.target.value })} /></Field>
+      <Field label="Notas (opcional)"><input className="gp-input" placeholder="ej. avalúo bancario, cotización de agente" value={v.notas} onChange={(e) => setV({ ...v, notas: e.target.value })} /></Field>
+      {error && <p className="text-xs gp-text-red mb-2">{error}</p>}
+      <button className="gp-btn w-full py-2 text-sm mt-2" onClick={() => { if (!v.valor) { setError("Captura el valor estimado."); return; } setError(""); onSave(v); }}>Guardar valuación</button>
     </div>
   );
 }
