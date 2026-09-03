@@ -275,6 +275,46 @@ const camelToSnake = (s) => s.replace(/[A-Z]/g, (c) => "_" + c.toLowerCase());
 const snakeToCamel = (s) => s.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
 const tableName = (key) => camelToSnake(key);
 
+const ETIQUETA_TABLA = {
+  proyectos: "Proyecto", pendientes: "Pendiente", equipo: "Equipo", finanzas: "Movimiento financiero",
+  deudas: "Deuda", actividades: "Actividad", activos: "Activo digital", metas: "Meta",
+  contactos: "Contacto", redesMetricas: "Métrica de red social", documentos: "Documento",
+  habitos: "Hábito", salud: "Registro de salud", apartados: "Apartado", eventos: "Evento",
+  comentarios: "Comentario", saldoInicial: "Saldo inicial", regalos: "Regalo",
+  facturas: "Factura", campanas: "Campaña", patrimonio: "Bien patrimonial",
+  patrimonioValuaciones: "Valuación de patrimonio",
+};
+
+function labelFor(key, item) {
+  switch (key) {
+    case "proyectos": case "equipo": case "actividades": case "activos": case "contactos":
+    case "documentos": case "apartados": case "eventos": case "campanas": case "patrimonio":
+    case "habitos":
+      return item.nombre || "(sin nombre)";
+    case "pendientes": case "metas": case "regalos":
+      return item.descripcion || "(sin descripción)";
+    case "finanzas":
+      return item.concepto || item.categoria || "(sin concepto)";
+    case "deudas":
+      return item.acreedor || "(sin acreedor)";
+    case "redesMetricas":
+      return item.plataforma || "(sin plataforma)";
+    case "salud":
+      return `Registro del ${item.fecha || "—"}`;
+    case "comentarios":
+      return (item.texto || "Adjunto").slice(0, 60);
+    case "saldoInicial":
+      return `Punto de partida del ${item.fecha || "—"}`;
+    case "facturas":
+      return item.folio || item.concepto || "(sin folio)";
+    case "patrimonioValuaciones":
+      return `Valuación del ${item.fecha || "—"}`;
+    default:
+      return item.id;
+  }
+}
+
+
 function rowToJs(row) {
   const out = {};
   for (const [k, v] of Object.entries(row)) {
@@ -306,9 +346,17 @@ const toRow = (key, obj) => (key === "salud" ? saludToRow(obj) : jsToRow(obj));
 const fromRow = (key, row) => (key === "salud" ? rowToSalud(row) : rowToJs(row));
 
 async function fetchTable(key) {
-  const { data, error } = await supabase.from(tableName(key)).select("*").order("created_at", { ascending: true });
+  const { data, error } = await supabase.from(tableName(key)).select("*").is("deleted_at", null).order("created_at", { ascending: true });
   if (error) { console.error(`Error al leer ${tableName(key)}:`, error); return []; }
   return data.map((row) => fromRow(key, row));
+}
+async function fetchPapelera() {
+  const entries = await Promise.all(TABLES.map(async (key) => {
+    const { data, error } = await supabase.from(tableName(key)).select("*").not("deleted_at", "is", null).order("deleted_at", { ascending: false });
+    if (error) { console.error(`Error al leer papelera de ${tableName(key)}:`, error); return [key, []]; }
+    return [key, data.map((row) => fromRow(key, row))];
+  }));
+  return Object.fromEntries(entries);
 }
 
 async function loadAllTables() {
@@ -373,14 +421,43 @@ function Field({ label, children }) {
 }
 
 function Modal({ title, onClose, children }) {
+  const [tocado, setTocado] = useState(false);
+  const [confirmando, setConfirmando] = useState(false);
+
+  const intentarCerrar = () => {
+    if (tocado) setConfirmando(true);
+    else onClose();
+  };
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,.55)" }} onClick={onClose}>
-      <div className="gp-panel w-full max-w-lg max-h-[85vh] overflow-y-auto gp-scroll p-5" onClick={(e) => e.stopPropagation()}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,.55)" }} onClick={intentarCerrar}>
+      <div
+        className="gp-panel w-full max-w-lg max-h-[85vh] overflow-y-auto gp-scroll p-5"
+        onClick={(e) => e.stopPropagation()}
+        onInputCapture={() => setTocado(true)}
+        onChangeCapture={() => setTocado(true)}
+      >
         <div className="flex items-center justify-between mb-4">
           <h3 className="gp-serif text-lg">{title}</h3>
-          <IconBtn onClick={onClose}><X size={16} /></IconBtn>
+          <IconBtn onClick={intentarCerrar}><X size={16} /></IconBtn>
         </div>
         {children}
+
+        {confirmando && (
+          <div className="fixed inset-0 z-[70] flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,.5)" }} onClick={(e) => e.stopPropagation()}>
+            <div className="gp-panel w-full max-w-xs p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <AlertTriangle size={15} className="gp-text-gold" />
+                <p className="text-sm font-medium">¿Descartar cambios?</p>
+              </div>
+              <p className="text-xs gp-text-muted mb-4">Hiciste cambios que no has guardado. Si sales ahora, se pierden.</p>
+              <div className="flex gap-2">
+                <button onClick={() => setConfirmando(false)} className="gp-btn-ghost flex-1 py-1.5 text-xs">Seguir editando</button>
+                <button onClick={onClose} className="flex-1 py-1.5 text-xs rounded" style={{ background: "var(--red)", color: "#fff" }}>Descartar</button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -477,9 +554,21 @@ function AppLoggedIn() {
     setData((prev) => ({ ...prev, [key]: prev[key].map((i) => (i.id === id ? { ...i, ...patch } : i)) }));
   };
   const removeItem = async (key, id) => {
-    const { error } = await supabase.from(tableName(key)).delete().eq("id", id);
+    const { error } = await supabase.from(tableName(key)).update({ deleted_at: new Date().toISOString() }).eq("id", id);
     if (error) { console.error(`Error al borrar en ${tableName(key)}:`, error); alert("No se pudo borrar."); return; }
     setData((prev) => ({ ...prev, [key]: prev[key].filter((i) => i.id !== id) }));
+  };
+  const restoreItem = async (key, id) => {
+    const { error } = await supabase.from(tableName(key)).update({ deleted_at: null }).eq("id", id);
+    if (error) { console.error(`Error al restaurar en ${tableName(key)}:`, error); alert("No se pudo restaurar."); return false; }
+    const fresh = await fetchTable(key);
+    setData((prev) => ({ ...prev, [key]: fresh }));
+    return true;
+  };
+  const permanentDelete = async (key, id) => {
+    const { error } = await supabase.from(tableName(key)).delete().eq("id", id);
+    if (error) { console.error(`Error al borrar definitivamente en ${tableName(key)}:`, error); alert("No se pudo borrar definitivamente."); return false; }
+    return true;
   };
   const askDelete = (key, id) => setConfirmDelete({ key, id });
   const updatePerfilSalud = async (patch) => {
@@ -595,11 +684,18 @@ function AppLoggedIn() {
               </div>
             </div>
           ))}
+          <div className="mt-auto pt-2 border-t gp-border">
+            <button onClick={() => { setView("papelera"); setMobileNavOpen(false); }}
+              className={`gp-navitem flex items-center gap-2 px-3 py-2.5 md:py-2 text-sm text-left w-full ${view === "papelera" ? "gp-navitem-active" : ""}`}>
+              <Trash2 size={15} /> Papelera
+            </button>
+          </div>
         </div>
 
         {/* contenido */}
         <div className="flex-1 p-4 pt-16 md:p-6 md:pt-6 overflow-y-auto gp-scroll w-full" style={{ maxHeight: "100vh" }}>
           {view === "dashboard" && <Dashboard data={data} setView={setView} onAddSaldo={(i) => addItem("saldoInicial", i)} />}
+          {view === "papelera" && <Papelera onRestore={restoreItem} onPermanentDelete={permanentDelete} />}
           {view === "proyectos" && (
             <Proyectos data={data} onAdd={(i) => addItem("proyectos", i)} onEdit={(id, p) => editItem("proyectos", id, p)} onRemove={(id) => askDelete("proyectos", id)} onAddComentario={(i) => addItem("comentarios", i)} onRemoveComentario={(id) => askDelete("comentarios", id)} />
           )}
@@ -687,6 +783,93 @@ function AppLoggedIn() {
 }
 
 /* ---------- Dashboard ---------- */
+/* ---------- Papelera (recuperar o borrar definitivamente) ---------- */
+function Papelera({ onRestore, onPermanentDelete }) {
+  const [items, setItems] = useState(null); // null = cargando
+  const [busyId, setBusyId] = useState(null);
+  const [confirmarBorrar, setConfirmarBorrar] = useState(null); // { key, id, label }
+
+  const cargar = async () => {
+    setItems(null);
+    const resultado = await fetchPapelera();
+    const plano = [];
+    for (const key of TABLES) {
+      for (const item of resultado[key] || []) {
+        plano.push({ key, item });
+      }
+    }
+    plano.sort((a, b) => (b.item.deletedAt || "").localeCompare(a.item.deletedAt || ""));
+    setItems(plano);
+  };
+
+  useEffect(() => { cargar(); }, []);
+
+  const restaurar = async (key, id) => {
+    setBusyId(id);
+    const ok = await onRestore(key, id);
+    if (ok) setItems((prev) => prev.filter((x) => x.item.id !== id));
+    setBusyId(null);
+  };
+
+  const borrarDefinitivo = async () => {
+    const { key, id } = confirmarBorrar;
+    setBusyId(id);
+    const ok = await onPermanentDelete(key, id);
+    if (ok) setItems((prev) => prev.filter((x) => x.item.id !== id));
+    setBusyId(null);
+    setConfirmarBorrar(null);
+  };
+
+  return (
+    <div>
+      <h2 className="gp-serif text-2xl mb-1">Papelera</h2>
+      <p className="text-sm gp-text-muted mb-6">Todo lo que has eliminado, de cualquier módulo. Puedes recuperarlo o borrarlo definitivamente.</p>
+
+      {items === null && <p className="text-sm gp-text-muted">Cargando…</p>}
+
+      {items !== null && items.length === 0 && (
+        <p className="text-sm gp-text-muted">La papelera está vacía.</p>
+      )}
+
+      {items !== null && items.length > 0 && (
+        <div className="space-y-2">
+          {items.map(({ key, item }) => (
+            <div key={`${key}-${item.id}`} className="gp-panel p-3 flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <Badge tone="muted">{ETIQUETA_TABLA[key] || key}</Badge>
+                  <span className="text-sm truncate">{labelFor(key, item)}</span>
+                </div>
+                <p className="text-xs gp-text-muted mt-1">Eliminado el {item.deletedAt ? new Date(item.deletedAt).toLocaleString("es-MX") : "—"}</p>
+              </div>
+              <div className="flex gap-2 shrink-0">
+                <button disabled={busyId === item.id} onClick={() => restaurar(key, item.id)} className="gp-btn-ghost px-3 py-1.5 text-xs">Restaurar</button>
+                <button disabled={busyId === item.id} onClick={() => setConfirmarBorrar({ key, id: item.id, label: labelFor(key, item) })} className="px-3 py-1.5 text-xs rounded" style={{ background: "var(--red)", color: "#fff" }}>Borrar definitivo</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {confirmarBorrar && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,.6)" }} onClick={() => setConfirmarBorrar(null)}>
+          <div className="gp-panel w-full max-w-sm p-5" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-2 mb-2">
+              <AlertTriangle size={16} className="gp-text-red" />
+              <h3 className="gp-serif text-lg">¿Borrar para siempre?</h3>
+            </div>
+            <p className="text-sm gp-text-muted mb-5">"{confirmarBorrar.label}" se va a borrar por completo. Esto ya no se puede deshacer, ni siquiera desde la papelera.</p>
+            <div className="flex gap-2">
+              <button onClick={() => setConfirmarBorrar(null)} className="gp-btn-ghost flex-1 py-2 text-sm">Cancelar</button>
+              <button onClick={borrarDefinitivo} className="flex-1 py-2 text-sm rounded" style={{ background: "var(--red)", color: "#fff" }}>Borrar para siempre</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Dashboard({ data, setView, onAddSaldo }) {
   const [saldoModal, setSaldoModal] = useState(false);
   const saldo = calcularSaldo(data);
