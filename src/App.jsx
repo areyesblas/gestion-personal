@@ -15,11 +15,11 @@ import {
 /* ---------- estilos y tokens ---------- */
 const Tokens = () => (
   <style>{`
-    @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');
-    .gp-root{ --bg:#12141c; --panel:#1a1d27; --panel-hi:#20232f; --border:#2b2f3d;
-      --text:#e7e8ed; --muted:#8d92a3; --gold:#c9a227; --teal:#4fa88f; --red:#d1554a;
+    @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');
+    .gp-root{ --bg:#0B2341; --panel:#12304F; --panel-hi:#1A3D63; --border:#234A70;
+      --text:#EAF1FA; --muted:#93A7C4; --gold:#F59E0B; --teal:#22C55E; --red:#EF4444;
       background:var(--bg); color:var(--text); font-family:'IBM Plex Sans',sans-serif; }
-    .gp-serif{ font-family:'Fraunces',serif; }
+    .gp-serif{ font-family:'Poppins',sans-serif; font-weight:600; }
     .gp-mono{ font-family:'IBM Plex Mono',monospace; }
     .gp-panel{ background:var(--panel); border:1px solid var(--border); border-radius:6px; }
     .gp-panel-hi:hover{ background:var(--panel-hi); }
@@ -97,7 +97,7 @@ const seed = () => ({
   perfilSalud: { alturaCm: "" },
 });
 
-const uid = () => Math.random().toString(36).slice(2, 10);
+const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2, 10) + Date.now().toString(36));
 const fmtMoney = (n) => (Number(n) || 0).toLocaleString("es-MX", { style: "currency", currency: "MXN" });
 const todayISO = () => new Date().toISOString().slice(0, 10);
 const daysUntil = (dateStr) => Math.ceil((new Date(dateStr) - new Date(todayISO())) / 86400000);
@@ -345,30 +345,30 @@ function rowToSalud(row) {
 const toRow = (key, obj) => (key === "salud" ? saludToRow(obj) : jsToRow(obj));
 const fromRow = (key, row) => (key === "salud" ? rowToSalud(row) : rowToJs(row));
 
-async function fetchTable(key) {
-  const { data, error } = await supabase.from(tableName(key)).select("*").is("deleted_at", null).order("created_at", { ascending: true });
+async function fetchTable(key, ownerId) {
+  const { data, error } = await supabase.from(tableName(key)).select("*").eq("user_id", ownerId).is("deleted_at", null).order("created_at", { ascending: true });
   if (error) { console.error(`Error al leer ${tableName(key)}:`, error); return []; }
   return data.map((row) => fromRow(key, row));
 }
-async function fetchPapelera() {
+async function fetchPapelera(ownerId) {
   const entries = await Promise.all(TABLES.map(async (key) => {
-    const { data, error } = await supabase.from(tableName(key)).select("*").not("deleted_at", "is", null).order("deleted_at", { ascending: false });
+    const { data, error } = await supabase.from(tableName(key)).select("*").eq("user_id", ownerId).not("deleted_at", "is", null).order("deleted_at", { ascending: false });
     if (error) { console.error(`Error al leer papelera de ${tableName(key)}:`, error); return [key, []]; }
     return [key, data.map((row) => fromRow(key, row))];
   }));
   return Object.fromEntries(entries);
 }
 
-async function loadAllTables() {
-  const entries = await Promise.all(TABLES.map(async (key) => [key, await fetchTable(key)]));
+async function loadAllTables(ownerId) {
+  const entries = await Promise.all(TABLES.map(async (key) => [key, await fetchTable(key, ownerId)]));
   const result = Object.fromEntries(entries);
-  const { data: perfilRow } = await supabase.from("perfil_salud").select("*").eq("id", "main").maybeSingle();
+  const { data: perfilRow } = await supabase.from("perfil_salud").select("*").eq("user_id", ownerId).limit(1).maybeSingle();
   result.perfilSalud = { alturaCm: perfilRow?.altura_cm ?? "" };
   return result;
 }
 
 // migración única desde la versión anterior (un solo blob jsonb), solo si las tablas nuevas están vacías
-async function migrateFromOldBlobIfNeeded(current) {
+async function migrateFromOldBlobIfNeeded(current, ownerId) {
   const allEmpty = TABLES.every((k) => current[k].length === 0);
   if (!allEmpty) return current;
   try {
@@ -382,9 +382,9 @@ async function migrateFromOldBlobIfNeeded(current) {
       }
     }
     if (blob.perfilSalud?.alturaCm) {
-      await supabase.from("perfil_salud").upsert({ id: "main", altura_cm: blob.perfilSalud.alturaCm });
+      await supabase.from("perfil_salud").upsert({ altura_cm: blob.perfilSalud.alturaCm }, { onConflict: "user_id" });
     }
-    return await loadAllTables();
+    return await loadAllTables(ownerId);
   } catch (e) {
     console.error("No se pudo migrar desde la versión anterior:", e);
     return current;
@@ -465,30 +465,63 @@ function Modal({ title, onClose, children }) {
 
 /* ---------- login ---------- */
 function LoginScreen() {
+  const [modo, setModo] = useState("entrar"); // "entrar" | "crear"
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [avisoRegistro, setAvisoRegistro] = useState("");
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError("");
+    setAvisoRegistro("");
     setLoading(true);
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
+
+    if (modo === "entrar") {
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      setLoading(false);
+      if (error) setError("Correo o contraseña incorrectos.");
+      return;
+    }
+
+    // crear cuenta
+    if (password.length < 6) {
+      setLoading(false);
+      setError("La contraseña necesita al menos 6 caracteres.");
+      return;
+    }
+    const { data, error } = await supabase.auth.signUp({ email, password });
     setLoading(false);
-    if (error) setError("Correo o contraseña incorrectos.");
+    if (error) { setError(error.message === "User already registered" ? "Ese correo ya tiene una cuenta." : "No se pudo crear la cuenta."); return; }
+    if (data.session) return; // quedó logueado directo (confirmación de correo desactivada)
+    if (data.user && data.user.identities && data.user.identities.length === 0) {
+      // Supabase no manda error explícito para no revelar qué correos existen — esta es la señal real.
+      setError("Ese correo ya tiene una cuenta. Intenta iniciar sesión.");
+      return;
+    }
+    setAvisoRegistro("Cuenta creada. Revisa tu correo para confirmarla antes de entrar.");
   };
 
   return (
     <div className="gp-root flex items-center justify-center" style={{ minHeight: "100vh" }}>
       <Tokens />
       <form onSubmit={handleSubmit} className="gp-panel p-6 w-full max-w-sm">
-        <p className="gp-serif text-xl mb-1">Centro de mando</p>
-        <p className="text-xs gp-text-muted mb-5">Inicia sesión para entrar a tu sistema.</p>
+        <img src="/logo-arkeyone.png" alt="ArkeyOne" style={{ height: 44 }} className="mb-3" />
+        <p className="text-xs gp-text-muted mb-4">{modo === "entrar" ? "Inicia sesión para entrar a tu sistema." : "Crea tu cuenta."}</p>
+
+        <div className="flex gap-1 mb-4">
+          <button type="button" onClick={() => { setModo("entrar"); setError(""); setAvisoRegistro(""); }} className={`text-xs px-3 py-1.5 rounded-full border flex-1 ${modo === "entrar" ? "gp-btn" : "gp-text-muted"}`}>Iniciar sesión</button>
+          <button type="button" onClick={() => { setModo("crear"); setError(""); setAvisoRegistro(""); }} className={`text-xs px-3 py-1.5 rounded-full border flex-1 ${modo === "crear" ? "gp-btn" : "gp-text-muted"}`}>Crear cuenta</button>
+        </div>
+
         <Field label="Correo"><input type="email" required className="gp-input" value={email} onChange={(e) => setEmail(e.target.value)} /></Field>
         <Field label="Contraseña"><input type="password" required className="gp-input" value={password} onChange={(e) => setPassword(e.target.value)} /></Field>
         {error && <p className="text-xs gp-text-red mb-3">{error}</p>}
-        <button type="submit" disabled={loading} className="gp-btn w-full py-2 text-sm mt-1">{loading ? "Entrando…" : "Entrar"}</button>
+        {avisoRegistro && <p className="text-xs gp-text-teal mb-3">{avisoRegistro}</p>}
+        <button type="submit" disabled={loading} className="gp-btn w-full py-2 text-sm mt-1">
+          {loading ? "Un momento…" : modo === "entrar" ? "Entrar" : "Crear cuenta"}
+        </button>
       </form>
     </div>
   );
@@ -513,37 +546,62 @@ export default function App() {
     );
   }
   if (!session) return <LoginScreen />;
-  return <AppLoggedIn />;
+  return <AppLoggedIn session={session} />;
 }
 
-function AppLoggedIn() {
+const VIEW_TO_MODULO = {
+  proyectos: "proyectos", metas: "metas", pendientes: "pendientes",
+  finanzas: "finanzas", facturas: "facturas", deudas: "deudas", apartados: "apartados",
+  patrimonio: "patrimonio", activos: "activos", documentos: "documentos",
+  equipo: "equipo", contactos: "contactos", regalos: "regalos",
+  redes: "redes_metricas", marketing: "campanas",
+  actividades: "actividades", eventos: "eventos", habitos: "habitos", salud: "salud",
+};
+
+function AppLoggedIn({ session }) {
+  const misId = session.user.id;
+  const miEmail = session.user.email;
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState("dashboard");
   const [regalosFiltroContacto, setRegalosFiltroContacto] = useState("");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(null); // { key, id, label }
+  const [activeOwnerId, setActiveOwnerId] = useState(misId);
+  const [activeOwnerEmail, setActiveOwnerEmail] = useState(miEmail);
+  const [modulosPermitidos, setModulosPermitidos] = useState(null); // null = soy el dueño, acceso total
+  const [misColaboraciones, setMisColaboraciones] = useState([]);
 
   useEffect(() => {
     (async () => {
-      let result = await loadAllTables();
-      result = await migrateFromOldBlobIfNeeded(result);
-      const allEmpty = TABLES.every((k) => result[k].length === 0);
-      if (allEmpty) {
-        // instalación nueva: siembra los proyectos conocidos
-        for (const p of seed().proyectos) {
-          const { error } = await supabase.from("proyectos").insert(jsToRow(p));
-          if (error) console.error("Error al sembrar proyecto:", error);
-        }
-        result = await loadAllTables();
-      }
+      await supabase.rpc("vincular_invitaciones");
+      const { data: colabs } = await supabase.from("colaboradores").select("*").eq("colaborador_user_id", misId).eq("estatus", "Activo");
+      setMisColaboraciones((colabs || []).map((c) => ({ propietarioId: c.propietario_id, propietarioEmail: c.propietario_email, modulos: c.modulos })));
+
+      let result = await loadAllTables(misId);
+      result = await migrateFromOldBlobIfNeeded(result, misId);
+      // Nota: ya no se siembran proyectos de ejemplo en cuentas nuevas — esto era correcto
+      // cuando la app era solo para Angel, pero con registro abierto (SaaS) sembrarle a un
+      // desconocido los proyectos personales de Angel no tiene sentido, y además los ids
+      // fijos ("p1".."p7") chocarían con los que ya existen en la cuenta de Angel.
       setData(result);
       setLoading(false);
     })();
   }, []);
 
+  const cambiarCuenta = async (ownerId, ownerEmail, modulos) => {
+    setLoading(true);
+    setActiveOwnerId(ownerId);
+    setActiveOwnerEmail(ownerEmail);
+    setModulosPermitidos(modulos); // null = tu propia cuenta
+    const result = await loadAllTables(ownerId);
+    setData(result);
+    setView(modulos ? Object.keys(VIEW_TO_MODULO).find((v) => modulos.includes(VIEW_TO_MODULO[v])) || "dashboard" : "dashboard");
+    setLoading(false);
+  };
+
   const addItem = async (key, item) => {
-    const newItem = { ...item, id: uid() };
+    const newItem = { ...item, id: uid(), userId: activeOwnerId };
     const { error } = await supabase.from(tableName(key)).insert(toRow(key, newItem));
     if (error) { console.error(`Error al guardar en ${tableName(key)}:`, error); alert("No se pudo guardar. Revisa tu conexión a internet."); return; }
     setData((prev) => ({ ...prev, [key]: [...prev[key], newItem] }));
@@ -561,7 +619,7 @@ function AppLoggedIn() {
   const restoreItem = async (key, id) => {
     const { error } = await supabase.from(tableName(key)).update({ deleted_at: null }).eq("id", id);
     if (error) { console.error(`Error al restaurar en ${tableName(key)}:`, error); alert("No se pudo restaurar."); return false; }
-    const fresh = await fetchTable(key);
+    const fresh = await fetchTable(key, activeOwnerId);
     setData((prev) => ({ ...prev, [key]: fresh }));
     return true;
   };
@@ -572,7 +630,7 @@ function AppLoggedIn() {
   };
   const askDelete = (key, id) => setConfirmDelete({ key, id });
   const updatePerfilSalud = async (patch) => {
-    const { error } = await supabase.from("perfil_salud").upsert({ id: "main", altura_cm: patch.alturaCm || null });
+    const { error } = await supabase.from("perfil_salud").upsert({ altura_cm: patch.alturaCm || null }, { onConflict: "user_id" });
     if (error) { console.error("Error al guardar tu estatura:", error); return; }
     setData((prev) => ({ ...prev, perfilSalud: { ...(prev.perfilSalud || {}), ...patch } }));
   };
@@ -638,6 +696,12 @@ function AppLoggedIn() {
     ]},
   ];
 
+  const navGroupsFiltrados = modulosPermitidos === null
+    ? navGroups
+    : navGroups
+        .map((g) => ({ ...g, items: g.items.filter((it) => VIEW_TO_MODULO[it.id] && modulosPermitidos.includes(VIEW_TO_MODULO[it.id])) }))
+        .filter((g) => g.items.length > 0);
+
   return (
     <div className="gp-root overflow-hidden" style={{ minHeight: "100vh" }}>
       <Tokens />
@@ -647,7 +711,7 @@ function AppLoggedIn() {
           <button onClick={() => setMobileNavOpen(true)} className="p-2 -ml-2 gp-btn-ghost rounded" aria-label="Abrir menú">
             <Menu size={20} />
           </button>
-          <p className="gp-serif text-base">Centro de mando</p>
+          <img src="/icono-arkeyone.png" alt="ArkeyOne" style={{ height: 28 }} />
           <button onClick={() => supabase.auth.signOut()} className="text-xs gp-text-muted px-2 py-1">Salir</button>
         </div>
 
@@ -663,15 +727,39 @@ function AppLoggedIn() {
         >
           <div className="px-2 flex items-start justify-between">
             <div>
-              <p className="gp-serif text-lg leading-tight">Centro de mando</p>
-              <p className="text-xs gp-text-muted">Angel Rey</p>
+              <img src="/logo-arkeyone.png" alt="ArkeyOne" style={{ height: 32 }} className="mb-1" />
+              <p className="text-xs gp-text-muted truncate" style={{ maxWidth: 160 }}>
+                {activeOwnerId === misId ? miEmail : `Viendo: ${activeOwnerEmail}`}
+              </p>
             </div>
             <div className="flex items-center gap-2">
               <button onClick={() => supabase.auth.signOut()} title="Cerrar sesión" className="text-xs gp-text-muted gp-btn-ghost px-2 py-1 rounded hidden md:inline-block">Salir</button>
               <button onClick={() => setMobileNavOpen(false)} className="md:hidden p-1 gp-btn-ghost rounded" aria-label="Cerrar menú"><X size={16} /></button>
             </div>
           </div>
-          {navGroups.map((g) => (
+
+          {misColaboraciones.length > 0 && (
+            <div className="px-2">
+              <select
+                className="gp-input text-xs w-full"
+                value={activeOwnerId}
+                onChange={(e) => {
+                  if (e.target.value === misId) cambiarCuenta(misId, miEmail, null);
+                  else {
+                    const c = misColaboraciones.find((x) => x.propietarioId === e.target.value);
+                    cambiarCuenta(c.propietarioId, c.propietarioEmail, c.modulos);
+                  }
+                }}
+              >
+                <option value={misId}>Mi cuenta</option>
+                {misColaboraciones.map((c) => (
+                  <option key={c.propietarioId} value={c.propietarioId}>Cuenta de {c.propietarioEmail}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {navGroupsFiltrados.map((g) => (
             <div key={g.label}>
               <p className="text-xs gp-text-muted px-3 mb-1">{g.label}</p>
               <div className="flex flex-col gap-0.5">
@@ -684,18 +772,25 @@ function AppLoggedIn() {
               </div>
             </div>
           ))}
-          <div className="mt-auto pt-2 border-t gp-border">
-            <button onClick={() => { setView("papelera"); setMobileNavOpen(false); }}
-              className={`gp-navitem flex items-center gap-2 px-3 py-2.5 md:py-2 text-sm text-left w-full ${view === "papelera" ? "gp-navitem-active" : ""}`}>
-              <Trash2 size={15} /> Papelera
-            </button>
-          </div>
+          {activeOwnerId === misId && (
+            <div className="mt-auto pt-2 border-t gp-border flex flex-col gap-0.5">
+              <button onClick={() => { setView("colaboradores"); setMobileNavOpen(false); }}
+                className={`gp-navitem flex items-center gap-2 px-3 py-2.5 md:py-2 text-sm text-left w-full ${view === "colaboradores" ? "gp-navitem-active" : ""}`}>
+                <Users size={15} /> Colaboradores
+              </button>
+              <button onClick={() => { setView("papelera"); setMobileNavOpen(false); }}
+                className={`gp-navitem flex items-center gap-2 px-3 py-2.5 md:py-2 text-sm text-left w-full ${view === "papelera" ? "gp-navitem-active" : ""}`}>
+                <Trash2 size={15} /> Papelera
+              </button>
+            </div>
+          )}
         </div>
 
         {/* contenido */}
         <div className="flex-1 p-4 pt-16 md:p-6 md:pt-6 overflow-y-auto gp-scroll w-full" style={{ maxHeight: "100vh" }}>
           {view === "dashboard" && <Dashboard data={data} setView={setView} onAddSaldo={(i) => addItem("saldoInicial", i)} />}
-          {view === "papelera" && <Papelera onRestore={restoreItem} onPermanentDelete={permanentDelete} />}
+          {view === "papelera" && <Papelera onRestore={restoreItem} onPermanentDelete={permanentDelete} ownerId={activeOwnerId} />}
+          {view === "colaboradores" && <Colaboradores misId={misId} miEmail={miEmail} />}
           {view === "proyectos" && (
             <Proyectos data={data} onAdd={(i) => addItem("proyectos", i)} onEdit={(id, p) => editItem("proyectos", id, p)} onRemove={(id) => askDelete("proyectos", id)} onAddComentario={(i) => addItem("comentarios", i)} onRemoveComentario={(id) => askDelete("comentarios", id)} />
           )}
@@ -784,14 +879,166 @@ function AppLoggedIn() {
 
 /* ---------- Dashboard ---------- */
 /* ---------- Papelera (recuperar o borrar definitivamente) ---------- */
-function Papelera({ onRestore, onPermanentDelete }) {
+/* ---------- Colaboradores (invitar gente a tu cuenta, con permisos por módulo) ---------- */
+function Colaboradores({ misId, miEmail }) {
+  const [lista, setLista] = useState(null);
+  const [modal, setModal] = useState(false);
+  const [busy, setBusy] = useState(null);
+  const [revocarConfirm, setRevocarConfirm] = useState(null);
+
+  const cargar = async () => {
+    setLista(null);
+    const { data, error } = await supabase.from("colaboradores").select("*").eq("propietario_id", misId).order("created_at", { ascending: false });
+    if (error) { console.error("Error al cargar colaboradores:", error); setLista([]); return; }
+    setLista(data);
+  };
+  useEffect(() => { cargar(); }, []);
+
+  const invitar = async ({ correo, modulos }) => {
+    setBusy("nuevo");
+    const modulosSnake = modulos.map((k) => tableName(k));
+    // "comentarios" siempre viene incluido si se dio acceso a cualquier módulo, para que vean la bitácora.
+    if (modulosSnake.length && !modulosSnake.includes("comentarios")) modulosSnake.push("comentarios");
+    // las valuaciones de patrimonio van junto con el módulo de patrimonio.
+    if (modulos.includes("patrimonio") && !modulosSnake.includes("patrimonio_valuaciones")) modulosSnake.push("patrimonio_valuaciones");
+    const { error } = await supabase.from("colaboradores").insert({
+      propietario_id: misId, propietario_email: miEmail,
+      colaborador_email: correo.trim().toLowerCase(), modulos: modulosSnake, estatus: "Pendiente",
+    });
+    setBusy(null);
+    if (error) { alert("No se pudo invitar: " + error.message); return; }
+    setModal(false);
+    cargar();
+  };
+
+  const revocar = async (id) => {
+    setBusy(id);
+    const { error } = await supabase.from("colaboradores").update({ estatus: "Revocado" }).eq("id", id);
+    setBusy(null);
+    if (error) { alert("No se pudo revocar."); return; }
+    setRevocarConfirm(null);
+    cargar();
+  };
+
+  const reactivar = async (id) => {
+    setBusy(id);
+    const { error } = await supabase.from("colaboradores").update({ estatus: "Activo" }).eq("id", id);
+    setBusy(null);
+    if (error) { alert("No se pudo reactivar."); return; }
+    cargar();
+  };
+
+  const toneEstatus = { Activo: "teal", Pendiente: "gold", Revocado: "red" };
+
+  return (
+    <div>
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-1">
+        <h2 className="gp-serif text-2xl">Colaboradores</h2>
+        <button onClick={() => setModal(true)} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm w-full sm:w-auto"><Plus size={14} /> Invitar</button>
+      </div>
+      <p className="text-sm gp-text-muted mb-6">Invita por correo a alguien (tu contador, un asistente) y elige exactamente qué módulos puede ver y editar dentro de tu cuenta.</p>
+
+      {lista === null && <p className="text-sm gp-text-muted">Cargando…</p>}
+      {lista !== null && lista.length === 0 && <p className="text-sm gp-text-muted">Aún no has invitado a nadie.</p>}
+
+      {lista !== null && lista.length > 0 && (
+        <div className="space-y-2">
+          {lista.map((c) => (
+            <div key={c.id} className="gp-panel p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-sm font-medium truncate">{c.colaborador_email}</span>
+                    <Badge tone={toneEstatus[c.estatus]}>{c.estatus}</Badge>
+                  </div>
+                  <div className="flex flex-wrap gap-1 mt-2">
+                    {(c.modulos || []).filter((m) => m !== "comentarios").map((m) => {
+                      const key = Object.keys(ETIQUETA_TABLA).find((k) => tableName(k) === m);
+                      return <Badge key={m} tone="muted">{key ? ETIQUETA_TABLA[key] : m}</Badge>;
+                    })}
+                  </div>
+                </div>
+                <div className="flex gap-1 shrink-0">
+                  {c.estatus === "Revocado" ? (
+                    <button disabled={busy === c.id} onClick={() => reactivar(c.id)} className="gp-btn-ghost px-3 py-1.5 text-xs">Reactivar</button>
+                  ) : (
+                    <button disabled={busy === c.id} onClick={() => setRevocarConfirm(c)} className="px-3 py-1.5 text-xs rounded" style={{ background: "var(--red)", color: "#fff" }}>Revocar</button>
+                  )}
+                </div>
+              </div>
+              {c.estatus === "Pendiente" && <p className="text-xs gp-text-muted mt-2">Se activa solo, en cuanto esa persona cree su cuenta o inicie sesión con ese correo.</p>}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {revocarConfirm && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,.6)" }} onClick={() => setRevocarConfirm(null)}>
+          <div className="gp-panel w-full max-w-sm p-5" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-2 mb-2"><AlertTriangle size={16} className="gp-text-red" /><h3 className="gp-serif text-lg">¿Revocar acceso?</h3></div>
+            <p className="text-sm gp-text-muted mb-5">{revocarConfirm.colaborador_email} ya no va a poder ver ni editar nada de tu cuenta. Puedes reactivarlo después si quieres.</p>
+            <div className="flex gap-2">
+              <button onClick={() => setRevocarConfirm(null)} className="gp-btn-ghost flex-1 py-2 text-sm">Cancelar</button>
+              <button onClick={() => revocar(revocarConfirm.id)} className="flex-1 py-2 text-sm rounded" style={{ background: "var(--red)", color: "#fff" }}>Revocar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {modal && (
+        <Modal title="Invitar colaborador" onClose={() => setModal(false)}>
+          <InvitarForm busy={busy === "nuevo"} onSave={invitar} />
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+function InvitarForm({ onSave, busy }) {
+  const [correo, setCorreo] = useState("");
+  const [modulos, setModulos] = useState([]);
+  const [error, setError] = useState("");
+
+  const toggle = (key) => setModulos((prev) => prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]);
+
+  return (
+    <div>
+      <Field label="Correo de la persona"><input type="email" className="gp-input" value={correo} onChange={(e) => setCorreo(e.target.value)} /></Field>
+      <p className="text-xs gp-text-muted mb-2">¿Qué puede ver y editar?</p>
+      <div className="grid grid-cols-2 gap-1.5 mb-4 max-h-56 overflow-y-auto gp-scroll">
+        {TABLES.filter((k) => k !== "comentarios" && k !== "patrimonioValuaciones").map((k) => (
+          <label key={k} className="flex items-center gap-1.5 text-xs">
+            <input type="checkbox" checked={modulos.includes(k)} onChange={() => toggle(k)} />
+            {ETIQUETA_TABLA[k] || k}
+          </label>
+        ))}
+      </div>
+      {error && <p className="text-xs gp-text-red mb-2">{error}</p>}
+      <button
+        className="gp-btn w-full py-2 text-sm mt-1 disabled:opacity-50"
+        disabled={busy}
+        onClick={() => {
+          if (!correo.trim() || !correo.includes("@")) { setError("Captura un correo válido."); return; }
+          if (modulos.length === 0) { setError("Elige al menos un módulo."); return; }
+          setError("");
+          onSave({ correo, modulos });
+        }}
+      >
+        {busy ? "Invitando…" : "Invitar"}
+      </button>
+    </div>
+  );
+}
+
+
+function Papelera({ onRestore, onPermanentDelete, ownerId }) {
   const [items, setItems] = useState(null); // null = cargando
   const [busyId, setBusyId] = useState(null);
   const [confirmarBorrar, setConfirmarBorrar] = useState(null); // { key, id, label }
 
   const cargar = async () => {
     setItems(null);
-    const resultado = await fetchPapelera();
+    const resultado = await fetchPapelera(ownerId);
     const plano = [];
     for (const key of TABLES) {
       for (const item of resultado[key] || []) {
