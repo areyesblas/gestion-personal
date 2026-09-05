@@ -326,7 +326,8 @@ function jsToRow(obj) {
   const out = {};
   for (const [k, v] of Object.entries(obj)) {
     if (k === "createdAt") continue; // el servidor lo controla (default now()), nunca se reescribe desde el cliente
-    out[camelToSnake(k)] = v;
+    // "" no es un valor válido para columnas numéricas/fecha en Postgres — se manda null en su lugar.
+    out[camelToSnake(k)] = v === "" ? null : v;
   }
   return out;
 }
@@ -464,10 +465,46 @@ function Modal({ title, onClose, children }) {
 }
 
 /* ---------- login ---------- */
+// Evalúa la fortaleza de una contraseña (0 a 4) y qué requisitos le faltan.
+function evaluarPassword(pw) {
+  const criterios = {
+    largo: pw.length >= 8,
+    mayuscula: /[A-Z]/.test(pw),
+    minuscula: /[a-z]/.test(pw),
+    numero: /[0-9]/.test(pw),
+    especial: /[^A-Za-z0-9]/.test(pw),
+  };
+  const cumplidos = Object.values(criterios).filter(Boolean).length;
+  const cumpleMinimo = criterios.largo && criterios.mayuscula && criterios.minuscula && criterios.numero;
+  return { criterios, cumplidos, cumpleMinimo };
+}
+
+function MedidorPassword({ password }) {
+  const { criterios, cumplidos } = evaluarPassword(password);
+  if (!password) return null;
+  const nivel = cumplidos <= 2 ? "Débil" : cumplidos <= 4 ? "Media" : "Fuerte";
+  const color = cumplidos <= 2 ? "var(--red)" : cumplidos <= 4 ? "var(--gold)" : "var(--teal)";
+  return (
+    <div className="mb-3">
+      <div className="flex gap-1 mb-1">
+        {[0, 1, 2, 3, 4].map((i) => (
+          <div key={i} className="h-1 rounded flex-1" style={{ background: i < cumplidos ? color : "var(--border)" }} />
+        ))}
+      </div>
+      <p className="text-xs" style={{ color }}>{nivel}</p>
+      <p className="text-xs gp-text-muted mt-1">
+        Mínimo 8 caracteres, con mayúscula, minúscula y número
+        {criterios.especial ? " (y un carácter especial — bien)" : ""}.
+      </p>
+    </div>
+  );
+}
+
 function LoginScreen() {
   const [modo, setModo] = useState("entrar"); // "entrar" | "crear"
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [avisoRegistro, setAvisoRegistro] = useState("");
@@ -486,9 +523,15 @@ function LoginScreen() {
     }
 
     // crear cuenta
-    if (password.length < 6) {
+    const { cumpleMinimo } = evaluarPassword(password);
+    if (!cumpleMinimo) {
       setLoading(false);
-      setError("La contraseña necesita al menos 6 caracteres.");
+      setError("La contraseña necesita mínimo 8 caracteres, con mayúscula, minúscula y número.");
+      return;
+    }
+    if (password !== confirmPassword) {
+      setLoading(false);
+      setError("Las contraseñas no coinciden.");
       return;
     }
     const { data, error } = await supabase.auth.signUp({ email, password });
@@ -517,6 +560,10 @@ function LoginScreen() {
 
         <Field label="Correo"><input type="email" required className="gp-input" value={email} onChange={(e) => setEmail(e.target.value)} /></Field>
         <Field label="Contraseña"><input type="password" required className="gp-input" value={password} onChange={(e) => setPassword(e.target.value)} /></Field>
+        {modo === "crear" && <MedidorPassword password={password} />}
+        {modo === "crear" && (
+          <Field label="Confirmar contraseña"><input type="password" required className="gp-input" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} /></Field>
+        )}
         {error && <p className="text-xs gp-text-red mb-3">{error}</p>}
         {avisoRegistro && <p className="text-xs gp-text-teal mb-3">{avisoRegistro}</p>}
         <button type="submit" disabled={loading} className="gp-btn w-full py-2 text-sm mt-1">
