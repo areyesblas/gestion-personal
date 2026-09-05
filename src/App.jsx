@@ -501,7 +501,7 @@ function MedidorPassword({ password }) {
 }
 
 function LoginScreen() {
-  const [modo, setModo] = useState("entrar"); // "entrar" | "crear"
+  const [modo, setModo] = useState("entrar"); // "entrar" | "crear" | "recuperar"
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -519,6 +519,14 @@ function LoginScreen() {
       const { error } = await supabase.auth.signInWithPassword({ email, password });
       setLoading(false);
       if (error) setError("Correo o contraseña incorrectos.");
+      return;
+    }
+
+    if (modo === "recuperar") {
+      const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin });
+      setLoading(false);
+      if (error) { setError("No se pudo enviar el correo. Intenta de nuevo."); return; }
+      setAvisoRegistro("Si ese correo tiene una cuenta, te acabamos de mandar un enlace para restablecer tu contraseña. Revisa tu bandeja (y spam).");
       return;
     }
 
@@ -551,25 +559,82 @@ function LoginScreen() {
       <Tokens />
       <form onSubmit={handleSubmit} className="gp-panel p-6 w-full max-w-sm">
         <img src="/logo-arkeyone.png" alt="ArkeyOne" style={{ height: 44 }} className="mb-3" />
-        <p className="text-xs gp-text-muted mb-4">{modo === "entrar" ? "Inicia sesión para entrar a tu sistema." : "Crea tu cuenta."}</p>
+        <p className="text-xs gp-text-muted mb-4">
+          {modo === "entrar" ? "Inicia sesión para entrar a tu sistema." : modo === "crear" ? "Crea tu cuenta." : "Te mandamos un enlace para poner una contraseña nueva."}
+        </p>
 
-        <div className="flex gap-1 mb-4">
-          <button type="button" onClick={() => { setModo("entrar"); setError(""); setAvisoRegistro(""); }} className={`text-xs px-3 py-1.5 rounded-full border flex-1 ${modo === "entrar" ? "gp-btn" : "gp-text-muted"}`}>Iniciar sesión</button>
-          <button type="button" onClick={() => { setModo("crear"); setError(""); setAvisoRegistro(""); }} className={`text-xs px-3 py-1.5 rounded-full border flex-1 ${modo === "crear" ? "gp-btn" : "gp-text-muted"}`}>Crear cuenta</button>
-        </div>
+        {modo !== "recuperar" && (
+          <div className="flex gap-1 mb-4">
+            <button type="button" onClick={() => { setModo("entrar"); setError(""); setAvisoRegistro(""); }} className={`text-xs px-3 py-1.5 rounded-full border flex-1 ${modo === "entrar" ? "gp-btn" : "gp-text-muted"}`}>Iniciar sesión</button>
+            <button type="button" onClick={() => { setModo("crear"); setError(""); setAvisoRegistro(""); }} className={`text-xs px-3 py-1.5 rounded-full border flex-1 ${modo === "crear" ? "gp-btn" : "gp-text-muted"}`}>Crear cuenta</button>
+          </div>
+        )}
 
         <Field label="Correo"><input type="email" required className="gp-input" value={email} onChange={(e) => setEmail(e.target.value)} /></Field>
-        <Field label="Contraseña"><input type="password" required className="gp-input" value={password} onChange={(e) => setPassword(e.target.value)} /></Field>
+        {modo !== "recuperar" && (
+          <Field label="Contraseña"><input type="password" required className="gp-input" value={password} onChange={(e) => setPassword(e.target.value)} /></Field>
+        )}
         {modo === "crear" && <MedidorPassword password={password} />}
         {modo === "crear" && (
           <Field label="Confirmar contraseña"><input type="password" required className="gp-input" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} /></Field>
         )}
+        {modo === "entrar" && (
+          <button type="button" onClick={() => { setModo("recuperar"); setError(""); setAvisoRegistro(""); }} className="text-xs gp-text-gold mb-3 -mt-1">¿Olvidaste tu contraseña?</button>
+        )}
         {error && <p className="text-xs gp-text-red mb-3">{error}</p>}
         {avisoRegistro && <p className="text-xs gp-text-teal mb-3">{avisoRegistro}</p>}
         <button type="submit" disabled={loading} className="gp-btn w-full py-2 text-sm mt-1">
-          {loading ? "Un momento…" : modo === "entrar" ? "Entrar" : "Crear cuenta"}
+          {loading ? "Un momento…" : modo === "entrar" ? "Entrar" : modo === "crear" ? "Crear cuenta" : "Enviar enlace de recuperación"}
         </button>
+        {modo === "recuperar" && (
+          <button type="button" onClick={() => { setModo("entrar"); setError(""); setAvisoRegistro(""); }} className="text-xs gp-text-muted w-full text-center mt-3">← Regresar a iniciar sesión</button>
+        )}
       </form>
+    </div>
+  );
+}
+
+function NuevaPasswordScreen({ onListo }) {
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [listo, setListo] = useState(false);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError("");
+    const { cumpleMinimo } = evaluarPassword(password);
+    if (!cumpleMinimo) { setError("La contraseña necesita mínimo 8 caracteres, con mayúscula, minúscula y número."); return; }
+    if (password !== confirmPassword) { setError("Las contraseñas no coinciden."); return; }
+    setLoading(true);
+    const { error } = await supabase.auth.updateUser({ password });
+    setLoading(false);
+    if (error) { setError("No se pudo actualizar la contraseña. Intenta de nuevo."); return; }
+    setListo(true);
+  };
+
+  return (
+    <div className="gp-root flex items-center justify-center" style={{ minHeight: "100vh" }}>
+      <Tokens />
+      <div className="gp-panel p-6 w-full max-w-sm">
+        <img src="/logo-arkeyone.png" alt="ArkeyOne" style={{ height: 44 }} className="mb-3" />
+        {listo ? (
+          <>
+            <p className="text-sm mb-4">Tu contraseña ya se actualizó. Ya puedes seguir usando tu cuenta con la nueva.</p>
+            <button onClick={onListo} className="gp-btn w-full py-2 text-sm">Continuar</button>
+          </>
+        ) : (
+          <form onSubmit={handleSubmit}>
+            <p className="text-xs gp-text-muted mb-4">Pon tu contraseña nueva.</p>
+            <Field label="Contraseña nueva"><input type="password" required className="gp-input" value={password} onChange={(e) => setPassword(e.target.value)} /></Field>
+            <MedidorPassword password={password} />
+            <Field label="Confirmar contraseña"><input type="password" required className="gp-input" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} /></Field>
+            {error && <p className="text-xs gp-text-red mb-3">{error}</p>}
+            <button type="submit" disabled={loading} className="gp-btn w-full py-2 text-sm mt-1">{loading ? "Un momento…" : "Guardar contraseña nueva"}</button>
+          </form>
+        )}
+      </div>
     </div>
   );
 }
@@ -577,10 +642,14 @@ function LoginScreen() {
 /* ---------- app (portero de sesión) ---------- */
 export default function App() {
   const [session, setSession] = useState(undefined); // undefined = cargando, null = sin sesión
+  const [recuperando, setRecuperando] = useState(false);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, newSession) => setSession(newSession));
+    const { data: listener } = supabase.auth.onAuthStateChange((event, newSession) => {
+      if (event === "PASSWORD_RECOVERY") setRecuperando(true);
+      setSession(newSession);
+    });
     return () => listener.subscription.unsubscribe();
   }, []);
 
@@ -592,6 +661,7 @@ export default function App() {
       </div>
     );
   }
+  if (recuperando) return <NuevaPasswordScreen onListo={() => setRecuperando(false)} />;
   if (!session) return <LoginScreen />;
   return <AppLoggedIn session={session} />;
 }
