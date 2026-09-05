@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { supabase } from "./supabaseClient";
+import * as XLSX from "xlsx";
 import {
   LayoutDashboard, FolderKanban, CheckSquare, Wallet, AlertTriangle,
   Users, Activity, Plus, X, Trash2, Pencil, Github, ChevronDown,
   ChevronRight, Bell, Lightbulb, Rocket, MessageCircle, Mail, Globe,
   Target, Contact, BarChart3, FileText, Flame, HeartPulse, Check, Menu, PieChart as PieChartIcon,
-  PiggyBank, Camera, Film, Upload, MapPin, Clock, Mic, Gift, Receipt, Megaphone, ChevronUp, Gem,
+  PiggyBank, Camera, Film, Upload, MapPin, Clock, Mic, Gift, Receipt, Megaphone, ChevronUp, Gem, Download,
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
@@ -284,6 +285,38 @@ const ETIQUETA_TABLA = {
   facturas: "Factura", campanas: "Campaña", patrimonio: "Bien patrimonial",
   patrimonioValuaciones: "Valuación de patrimonio",
 };
+
+// Exporta toda la información visible del usuario a un archivo Excel, un módulo por hoja.
+// Respeta lo que cada quien puede ver: si eres colaborador con acceso limitado, `data` ya
+// viene filtrado por la base de datos, así que el archivo solo trae lo que sí te toca ver.
+function exportarExcel(data, nombreCuenta) {
+  const wb = XLSX.utils.book_new();
+  const camposInternos = ["id", "userId", "deletedAt"];
+
+  for (const key of TABLES) {
+    const filas = data[key] || [];
+    if (filas.length === 0) continue;
+    const limpias = filas.map((item) => {
+      const out = {};
+      for (const [k, v] of Object.entries(item)) {
+        if (camposInternos.includes(k)) continue;
+        out[k] = typeof v === "object" && v !== null ? JSON.stringify(v) : v;
+      }
+      return out;
+    });
+    const hoja = XLSX.utils.json_to_sheet(limpias);
+    const nombreHoja = (ETIQUETA_TABLA[key] || key).slice(0, 31);
+    XLSX.utils.book_append_sheet(wb, hoja, nombreHoja);
+  }
+
+  if (wb.SheetNames.length === 0) {
+    alert("Todavía no tienes datos para exportar.");
+    return;
+  }
+  const fecha = todayISO();
+  XLSX.writeFile(wb, `arkeyone_${nombreCuenta || "mis-datos"}_${fecha}.xlsx`);
+}
+
 
 function labelFor(key, item) {
   switch (key) {
@@ -889,18 +922,24 @@ function AppLoggedIn({ session }) {
               </div>
             </div>
           ))}
-          {activeOwnerId === misId && (
-            <div className="mt-auto pt-2 border-t gp-border flex flex-col gap-0.5">
-              <button onClick={() => { setView("colaboradores"); setMobileNavOpen(false); }}
-                className={`gp-navitem flex items-center gap-2 px-3 py-2.5 md:py-2 text-sm text-left w-full ${view === "colaboradores" ? "gp-navitem-active" : ""}`}>
-                <Users size={15} /> Colaboradores
-              </button>
-              <button onClick={() => { setView("papelera"); setMobileNavOpen(false); }}
-                className={`gp-navitem flex items-center gap-2 px-3 py-2.5 md:py-2 text-sm text-left w-full ${view === "papelera" ? "gp-navitem-active" : ""}`}>
-                <Trash2 size={15} /> Papelera
-              </button>
-            </div>
-          )}
+          <div className="mt-auto pt-2 border-t gp-border flex flex-col gap-0.5">
+            <button onClick={() => exportarExcel(data, activeOwnerId === misId ? "mi-cuenta" : activeOwnerEmail?.split("@")[0])}
+              className="gp-navitem flex items-center gap-2 px-3 py-2.5 md:py-2 text-sm text-left w-full">
+              <Download size={15} /> Exportar mis datos
+            </button>
+            {activeOwnerId === misId && (
+              <>
+                <button onClick={() => { setView("colaboradores"); setMobileNavOpen(false); }}
+                  className={`gp-navitem flex items-center gap-2 px-3 py-2.5 md:py-2 text-sm text-left w-full ${view === "colaboradores" ? "gp-navitem-active" : ""}`}>
+                  <Users size={15} /> Colaboradores
+                </button>
+                <button onClick={() => { setView("papelera"); setMobileNavOpen(false); }}
+                  className={`gp-navitem flex items-center gap-2 px-3 py-2.5 md:py-2 text-sm text-left w-full ${view === "papelera" ? "gp-navitem-active" : ""}`}>
+                  <Trash2 size={15} /> Papelera
+                </button>
+              </>
+            )}
+          </div>
         </div>
 
         {/* contenido */}
