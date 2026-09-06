@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import { supabase } from "./supabaseClient";
 import * as XLSX from "xlsx";
 import {
@@ -933,6 +933,30 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
     });
   };
   const [confirmDelete, setConfirmDelete] = useState(null); // { key, id, label }
+
+  // Cierre de sesión automático por inactividad (hay datos sensibles: dinero, salud, documentos).
+  // 30 min sin actividad = cierra sesión sola; avisa 1 min antes por si el usuario sigue ahí.
+  const INACTIVIDAD_AVISO_MS = 29 * 60 * 1000;
+  const INACTIVIDAD_CIERRE_MS = 30 * 60 * 1000;
+  const [avisoInactividad, setAvisoInactividad] = useState(false);
+  useEffect(() => {
+    let timerAviso, timerCierre;
+    const reiniciarTimers = () => {
+      clearTimeout(timerAviso);
+      clearTimeout(timerCierre);
+      setAvisoInactividad(false);
+      timerAviso = setTimeout(() => setAvisoInactividad(true), INACTIVIDAD_AVISO_MS);
+      timerCierre = setTimeout(() => { supabase.auth.signOut(); }, INACTIVIDAD_CIERRE_MS);
+    };
+    const eventos = ["mousemove", "keydown", "mousedown", "click", "scroll", "touchstart"];
+    eventos.forEach((ev) => window.addEventListener(ev, reiniciarTimers));
+    reiniciarTimers();
+    return () => {
+      clearTimeout(timerAviso);
+      clearTimeout(timerCierre);
+      eventos.forEach((ev) => window.removeEventListener(ev, reiniciarTimers));
+    };
+  }, []);
   const [activeOwnerId, setActiveOwnerId] = useState(misId);
   const [activeOwnerEmail, setActiveOwnerEmail] = useState(miEmail);
   const [modulosPermitidos, setModulosPermitidos] = useState(null); // null = soy el dueño, acceso total
@@ -1298,6 +1322,17 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
             </div>
             <p className="text-sm gp-text-muted mb-5">Tu archivo se descargó correctamente. Revisa la carpeta de Descargas de tu navegador.</p>
             <button onClick={() => setExportPaso(null)} className="gp-btn w-full py-2 text-sm">Entendido</button>
+          </div>
+        </div>
+      )}
+
+      {avisoInactividad && (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,.65)" }}>
+          <div className="gp-panel w-full max-w-sm p-5 text-center">
+            <AlertTriangle size={22} className="gp-text-gold mx-auto mb-2" />
+            <h3 className="gp-serif text-lg mb-2">¿Sigues ahí?</h3>
+            <p className="text-sm gp-text-muted mb-5">Por seguridad, como tu información es sensible, la sesión se va a cerrar en 1 minuto por inactividad.</p>
+            <button onClick={() => setAvisoInactividad(false)} className="gp-btn w-full py-2 text-sm">Seguir conectado</button>
           </div>
         </div>
       )}
