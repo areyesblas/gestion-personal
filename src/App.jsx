@@ -1970,10 +1970,89 @@ function descendientesDe(id, items) {
   return hijos.reduce((acc, h) => [...acc, h.id, ...descendientesDe(h.id, items)], []);
 }
 
+// Vista mind-map: dibuja el proyecto en el centro y sus pendientes/subtareas ramificándose a la derecha.
+function MindMapPendientes({ proyecto, tareas, onNodoClick }) {
+  const NODE_W = 190, NODE_H = 36, GAP_Y = 12, GAP_X = 60;
+  const raices = buildTareaTree(tareas.filter((t) => t.proyectoId === proyecto.id));
+  const root = { id: "_root", descripcion: proyecto.nombre, estatus: null, hijos: raices };
+
+  let leafIndex = 0;
+  const posiciones = [];
+  const walk = (nodo, nivel) => {
+    let y;
+    if (!nodo.hijos || nodo.hijos.length === 0) {
+      y = leafIndex * (NODE_H + GAP_Y);
+      leafIndex++;
+    } else {
+      const ys = nodo.hijos.map((h) => walk(h, nivel + 1));
+      y = (ys[0] + ys[ys.length - 1]) / 2;
+    }
+    posiciones.push({ nodo, nivel, y });
+    return y;
+  };
+  walk(root, 0);
+
+  const posById = {};
+  posiciones.forEach((p) => (posById[p.nodo.id] = p));
+  const edges = [];
+  const conectar = (nodo) => {
+    (nodo.hijos || []).forEach((h) => {
+      edges.push({ from: posById[nodo.id], to: posById[h.id] });
+      conectar(h);
+    });
+  };
+  conectar(root);
+
+  if (posiciones.length === 1) {
+    return <p className="text-sm gp-text-muted py-8 text-center">Este proyecto todavía no tiene pendientes registrados.</p>;
+  }
+
+  const maxNivel = Math.max(...posiciones.map((p) => p.nivel));
+  const maxY = Math.max(...posiciones.map((p) => p.y));
+  const width = (maxNivel + 1) * (NODE_W + GAP_X) + 20;
+  const height = maxY + NODE_H + 20;
+  const colorEstatus = (estatus) => (estatus === "Hecho" ? "var(--teal)" : estatus === "En progreso" ? "var(--gold)" : "var(--border)");
+
+  return (
+    <div className="overflow-auto gp-scroll gp-panel p-4" style={{ maxHeight: 560 }}>
+      <svg width={width} height={height} style={{ minWidth: width, display: "block" }}>
+        {edges.map((e, i) => {
+          const x1 = e.from.nivel * (NODE_W + GAP_X) + NODE_W;
+          const y1 = e.from.y + NODE_H / 2;
+          const x2 = e.to.nivel * (NODE_W + GAP_X);
+          const y2 = e.to.y + NODE_H / 2;
+          const mx = (x1 + x2) / 2;
+          return <path key={i} d={`M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}`} stroke="var(--border)" strokeWidth={1.5} fill="none" />;
+        })}
+        {posiciones.map((p) => {
+          const x = p.nivel * (NODE_W + GAP_X);
+          const esRaiz = p.nodo.id === "_root";
+          const texto = (p.nodo.descripcion || "").length > 26 ? p.nodo.descripcion.slice(0, 25) + "…" : p.nodo.descripcion;
+          return (
+            <g key={p.nodo.id} transform={`translate(${x},${p.y})`} style={{ cursor: esRaiz ? "default" : "pointer" }} onClick={() => !esRaiz && onNodoClick && onNodoClick(p.nodo)}>
+              <rect width={NODE_W} height={NODE_H} rx={8}
+                fill={esRaiz ? "var(--gold)" : "var(--panel-hi)"}
+                stroke={esRaiz ? "var(--gold)" : colorEstatus(p.nodo.estatus)}
+                strokeWidth={esRaiz ? 0 : 2} />
+              <text x={10} y={NODE_H / 2 + 4} fontSize={12} fontFamily="'IBM Plex Sans',sans-serif"
+                fontWeight={esRaiz ? 600 : 400}
+                fill={esRaiz ? "#161822" : "var(--text)"}>
+                {texto}
+              </text>
+            </g>
+          );
+        })}
+      </svg>
+    </div>
+  );
+}
+
 function Pendientes({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveComentario }) {
   const [modal, setModal] = useState(null);
   const [comentariosDe, setComentariosDe] = useState(null);
   const [orden, setOrden] = useState("default");
+  const [vista, setVista] = useState("lista"); // "lista" | "mindmap"
+  const [proyectoMindMap, setProyectoMindMap] = useState("");
   const empty = { proyectoId: "", parentId: "", descripcion: "", fechaLimite: todayISO(), fechaRevision: "", prioridad: "Media", estatus: "Pendiente", responsableId: "", contactoId: "", precio: "", tiempoEstimado: "", tiempoReal: "" };
 
   const camposOrden = {
@@ -2008,8 +2087,31 @@ function Pendientes({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCo
         <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm w-full sm:w-auto"><Plus size={14} /> Nuevo</button>
       </div>
       <p className="text-sm gp-text-muted mb-3">De todos tus proyectos, en un solo lugar. Puedes anidar subtareas sin límite con el ➕ de cada fila.</p>
-      <div className="mb-4"><OrdenSelector opciones={opcionesOrden} value={orden} onChange={setOrden} /></div>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-4">
+        <div className="flex gap-1 gp-panel p-1 w-fit">
+          <button onClick={() => setVista("lista")} className={`px-3 py-1 text-xs rounded ${vista === "lista" ? "gp-btn" : "gp-text-muted"}`}>Lista</button>
+          <button onClick={() => setVista("mindmap")} className={`px-3 py-1 text-xs rounded ${vista === "mindmap" ? "gp-btn" : "gp-text-muted"}`}>Mind-map</button>
+        </div>
+        {vista === "lista" && <OrdenSelector opciones={opcionesOrden} value={orden} onChange={setOrden} />}
+        {vista === "mindmap" && (
+          <select className="gp-input" style={{ maxWidth: 260 }} value={proyectoMindMap} onChange={(e) => setProyectoMindMap(e.target.value)}>
+            <option value="">— elige un proyecto —</option>
+            {data.proyectos.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+          </select>
+        )}
+      </div>
 
+      {vista === "mindmap" ? (
+        proyectoMindMap ? (
+          <MindMapPendientes
+            proyecto={data.proyectos.find((p) => p.id === proyectoMindMap)}
+            tareas={data.pendientes}
+            onNodoClick={(nodo) => setModal({ item: nodo })}
+          />
+        ) : (
+          <p className="text-sm gp-text-muted py-8 text-center">Elige un proyecto arriba para ver su mind-map de pendientes.</p>
+        )
+      ) : (
       <div className="gp-panel overflow-x-auto">
         <table className="gp-table">
           <thead><tr><th>Pendiente</th><th>Proyecto</th><th>Cliente</th><th>Responsable</th><th>Fecha</th><th>Prioridad</th><th>Avance</th><th>Precio</th><th>Horas</th><th></th></tr></thead>
@@ -2060,6 +2162,7 @@ function Pendientes({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCo
           </tbody>
         </table>
       </div>
+      )}
 
       {comentariosDe && (
         <Modal title={`Comentarios — ${comentariosDe.descripcion}`} onClose={() => setComentariosDe(null)}>
