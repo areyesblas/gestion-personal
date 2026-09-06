@@ -20,8 +20,8 @@ const Tokens = ({ tema = "oscuro" }) => (
     .gp-root{ --bg:#0B2341; --panel:#12304F; --panel-hi:#1A3D63; --border:#234A70;
       --text:#EAF1FA; --muted:#93A7C4; --gold:#F59E0B; --teal:#22C55E; --red:#EF4444;
       background:var(--bg); color:var(--text); font-family:'IBM Plex Sans',sans-serif; }
-    .gp-root.claro{ --bg:#F5F7FA; --panel:#FFFFFF; --panel-hi:#EEF2F6; --border:#D8E0E9;
-      --text:#0B2341; --muted:#64748B; --gold:#F59E0B; --teal:#16A34A; --red:#DC2626; }
+    .gp-root.claro{ --bg:#E8F1FB; --panel:#F7FBFF; --panel-hi:#DCEAFA; --border:#C3D9EE;
+      --text:#0B2341; --muted:#5B7A9E; --gold:#F59E0B; --teal:#16A34A; --red:#DC2626; }
     .gp-serif{ font-family:'Poppins',sans-serif; font-weight:600; }
     .gp-mono{ font-family:'IBM Plex Mono',monospace; }
     .gp-panel{ background:var(--panel); border:1px solid var(--border); border-radius:6px; }
@@ -50,16 +50,18 @@ const Tokens = ({ tema = "oscuro" }) => (
   `}</style>
 );
 
-// Recuerda tu tema (claro/oscuro) entre visitas, guardado en este navegador.
+// Recuerda tu tema (Azul Claro / Azul Oscuro) entre visitas, guardado en este navegador
+// y, una vez que inicias sesión, también en tu cuenta (para que te siga en otros dispositivos).
 function useTema() {
-  const [tema, setTema] = useState(() => {
+  const [tema, setTemaState] = useState(() => {
     try { return localStorage.getItem("arkeyone-tema") || "oscuro"; } catch { return "oscuro"; }
   });
-  useEffect(() => {
-    try { localStorage.setItem("arkeyone-tema", tema); } catch {}
-  }, [tema]);
-  const toggleTema = () => setTema((t) => (t === "oscuro" ? "claro" : "oscuro"));
-  return [tema, toggleTema];
+  const setTema = (valor) => {
+    setTemaState(valor);
+    try { localStorage.setItem("arkeyone-tema", valor); } catch {}
+  };
+  const toggleTema = () => setTema(tema === "oscuro" ? "claro" : "oscuro");
+  return [tema, toggleTema, setTema];
 }
 
 
@@ -711,7 +713,7 @@ function LoginScreen({ tema, toggleTema }) {
     <div className={`gp-root flex items-center justify-center ${tema === "claro" ? "claro" : ""}`} style={{ minHeight: "100vh" }}>
       <Tokens tema={tema} />
       <form onSubmit={handleSubmit} className="gp-panel p-6 w-full max-w-sm relative">
-        <button type="button" onClick={toggleTema} className="absolute top-4 right-4 gp-btn-ghost p-1.5 rounded" aria-label="Cambiar tema" title="Cambiar tema">
+        <button type="button" onClick={toggleTema} className="absolute top-4 right-4 gp-btn-ghost p-1.5 rounded" aria-label="Cambiar tema" title={tema === "claro" ? "Cambiar a Azul Oscuro" : "Cambiar a Azul Claro"}>
           {tema === "claro" ? <Moon size={14} /> : <Sun size={14} />}
         </button>
         <img src="/logo-arkeyone.png" alt="ArkeyOne" style={{ height: 44 }} className="mb-3" />
@@ -799,7 +801,7 @@ function NuevaPasswordScreen({ onListo, tema }) {
 export default function App() {
   const [session, setSession] = useState(undefined); // undefined = cargando, null = sin sesión
   const [recuperando, setRecuperando] = useState(false);
-  const [tema, toggleTema] = useTema();
+  const [tema, toggleTema, setTema] = useTema();
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
@@ -812,7 +814,7 @@ export default function App() {
 
   if (session === undefined) {
     return (
-      <div className={`gp-root min-h-[500px] flex items-center justify-center rounded-lg ${tema === "claro" ? "claro" : ""}`}>
+      <div className={`gp-root min-h-screen flex items-center justify-center ${tema === "claro" ? "claro" : ""}`}>
         <Tokens tema={tema} />
         <p className="gp-text-muted text-sm">Cargando…</p>
       </div>
@@ -820,7 +822,7 @@ export default function App() {
   }
   if (recuperando) return <NuevaPasswordScreen onListo={() => setRecuperando(false)} tema={tema} toggleTema={toggleTema} />;
   if (!session) return <LoginScreen tema={tema} toggleTema={toggleTema} />;
-  return <AppLoggedIn session={session} tema={tema} toggleTema={toggleTema} />;
+  return <AppLoggedIn session={session} tema={tema} toggleTema={toggleTema} setTema={setTema} />;
 }
 
 const VIEW_TO_MODULO = {
@@ -832,7 +834,7 @@ const VIEW_TO_MODULO = {
   actividades: "actividades", eventos: "eventos", habitos: "habitos", salud: "salud",
 };
 
-function AppLoggedIn({ session, tema, toggleTema }) {
+function AppLoggedIn({ session, tema, toggleTema, setTema }) {
   const misId = session.user.id;
   const miEmail = session.user.email;
   const [data, setData] = useState(null);
@@ -852,6 +854,9 @@ function AppLoggedIn({ session, tema, toggleTema }) {
       const { data: colabs } = await supabase.from("colaboradores").select("*").eq("colaborador_user_id", misId).eq("estatus", "Activo");
       setMisColaboraciones((colabs || []).map((c) => ({ propietarioId: c.propietario_id, propietarioEmail: c.propietario_email, modulos: c.modulos })));
 
+      const { data: pref } = await supabase.from("preferencias").select("tema").eq("user_id", misId).maybeSingle();
+      if (pref?.tema && pref.tema !== tema) setTema(pref.tema);
+
       let result = await loadAllTables(misId);
       result = await migrateFromOldBlobIfNeeded(result, misId);
       // Nota: ya no se siembran proyectos de ejemplo en cuentas nuevas — esto era correcto
@@ -862,6 +867,11 @@ function AppLoggedIn({ session, tema, toggleTema }) {
       setLoading(false);
     })();
   }, []);
+
+  const cambiarTema = async (nuevoValor) => {
+    setTema(nuevoValor);
+    await supabase.from("preferencias").upsert({ user_id: misId, tema: nuevoValor }, { onConflict: "user_id" });
+  };
 
   const cambiarCuenta = async (ownerId, ownerEmail, modulos) => {
     setLoading(true);
@@ -929,8 +939,8 @@ function AppLoggedIn({ session, tema, toggleTema }) {
 
   if (loading || !data) {
     return (
-      <div className="gp-root min-h-[500px] flex items-center justify-center rounded-lg">
-        <Tokens />
+      <div className={`gp-root min-h-screen flex items-center justify-center ${tema === "claro" ? "claro" : ""}`}>
+        <Tokens tema={tema} />
         <p className="gp-text-muted text-sm">Cargando tu sistema…</p>
       </div>
     );
@@ -1047,8 +1057,8 @@ function AppLoggedIn({ session, tema, toggleTema }) {
             </div>
           ))}
           <div className="mt-auto pt-2 border-t gp-border flex flex-col gap-0.5">
-            <button onClick={toggleTema} className="gp-navitem flex items-center gap-2 px-3 py-2.5 md:py-2 text-sm text-left w-full">
-              {tema === "claro" ? <Moon size={15} /> : <Sun size={15} />} {tema === "claro" ? "Tema oscuro" : "Tema claro"}
+            <button onClick={() => cambiarTema(tema === "claro" ? "oscuro" : "claro")} className="gp-navitem flex items-center gap-2 px-3 py-2.5 md:py-2 text-sm text-left w-full">
+              {tema === "claro" ? <Moon size={15} /> : <Sun size={15} />} {tema === "claro" ? "Tema Azul Oscuro" : "Tema Azul Claro"}
             </button>
             <button onClick={() => exportarExcel(data, activeOwnerId === misId ? "mi-cuenta" : activeOwnerEmail?.split("@")[0])}
               className="gp-navitem flex items-center gap-2 px-3 py-2.5 md:py-2 text-sm text-left w-full">
