@@ -919,6 +919,17 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
   const [view, setView] = useState("dashboard");
   const [regalosFiltroContacto, setRegalosFiltroContacto] = useState("");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  // Qué grupos del menú lateral están cerrados (colapsados). Se recuerda en este navegador.
+  const [gruposCerrados, setGruposCerrados] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("arkeyone_nav_grupos_cerrados") || "{}"); } catch { return {}; }
+  });
+  const toggleGrupo = (label) => {
+    setGruposCerrados((prev) => {
+      const next = { ...prev, [label]: !prev[label] };
+      localStorage.setItem("arkeyone_nav_grupos_cerrados", JSON.stringify(next));
+      return next;
+    });
+  };
   const [confirmDelete, setConfirmDelete] = useState(null); // { key, id, label }
   const [activeOwnerId, setActiveOwnerId] = useState(misId);
   const [activeOwnerEmail, setActiveOwnerEmail] = useState(miEmail);
@@ -1120,19 +1131,34 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
             </div>
           )}
 
-          {navGroupsFiltrados.map((g) => (
-            <div key={g.label}>
-              <p className="text-xs gp-text-muted px-3 mb-1">{g.label}</p>
-              <div className="flex flex-col gap-0.5">
-                {g.items.map((n) => (
-                  <button key={n.id} onClick={() => { setView(n.id); setMobileNavOpen(false); }}
-                    className={`gp-navitem flex items-center gap-2 px-3 py-2.5 md:py-2 text-sm text-left ${view === n.id ? "gp-navitem-active" : ""}`}>
-                    <n.icon size={15} /> {n.label}
-                  </button>
-                ))}
+          {navGroupsFiltrados.map((g) => {
+            const cerrado = !!gruposCerrados[g.label];
+            // Si el módulo activo está dentro de un grupo cerrado, igual mostramos el grupo abierto
+            // para no "perder de vista" en dónde estás.
+            const contieneActivo = g.items.some((n) => n.id === view);
+            const mostrarAbierto = !cerrado || contieneActivo;
+            return (
+              <div key={g.label}>
+                <button
+                  onClick={() => toggleGrupo(g.label)}
+                  className="w-full flex items-center justify-between px-3 mb-1 text-xs gp-text-muted gp-btn-ghost rounded py-1"
+                >
+                  <span>{g.label}</span>
+                  {mostrarAbierto ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                </button>
+                {mostrarAbierto && (
+                  <div className="flex flex-col gap-0.5">
+                    {g.items.map((n) => (
+                      <button key={n.id} onClick={() => { setView(n.id); setMobileNavOpen(false); }}
+                        className={`gp-navitem flex items-center gap-2 px-3 py-2.5 md:py-2 text-sm text-left ${view === n.id ? "gp-navitem-active" : ""}`}>
+                        <n.icon size={15} /> {n.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
-            </div>
-          ))}
+            );
+          })}
           <div className="mt-auto pt-2 border-t gp-border flex flex-col gap-0.5">
             <button onClick={() => cambiarTema(tema === "claro" ? "oscuro" : "claro")} className="gp-navitem flex items-center gap-2 px-3 py-2.5 md:py-2 text-sm text-left w-full">
               {tema === "claro" ? <Moon size={15} /> : <Sun size={15} />} {tema === "claro" ? "Tema Azul Oscuro" : "Tema Azul Claro"}
