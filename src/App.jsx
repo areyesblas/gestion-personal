@@ -919,13 +919,15 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
   const [view, setView] = useState("dashboard");
   const [regalosFiltroContacto, setRegalosFiltroContacto] = useState("");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
-  // Qué grupos del menú lateral están cerrados (colapsados). Se recuerda en este navegador.
+  // Qué grupos del menú lateral están cerrados (colapsados). Por default arrancan TODOS cerrados;
+  // si el usuario abre alguno, se recuerda esa preferencia en este navegador.
   const [gruposCerrados, setGruposCerrados] = useState(() => {
     try { return JSON.parse(localStorage.getItem("arkeyone_nav_grupos_cerrados") || "{}"); } catch { return {}; }
   });
+  const grupoEstaCerrado = (label) => (Object.prototype.hasOwnProperty.call(gruposCerrados, label) ? gruposCerrados[label] : true);
   const toggleGrupo = (label) => {
     setGruposCerrados((prev) => {
-      const next = { ...prev, [label]: !prev[label] };
+      const next = { ...prev, [label]: !grupoEstaCerrado(label) };
       localStorage.setItem("arkeyone_nav_grupos_cerrados", JSON.stringify(next));
       return next;
     });
@@ -1132,11 +1134,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
           )}
 
           {navGroupsFiltrados.map((g) => {
-            const cerrado = !!gruposCerrados[g.label];
-            // Si el módulo activo está dentro de un grupo cerrado, igual mostramos el grupo abierto
-            // para no "perder de vista" en dónde estás.
-            const contieneActivo = g.items.some((n) => n.id === view);
-            const mostrarAbierto = !cerrado || contieneActivo;
+            const cerrado = grupoEstaCerrado(g.label);
             return (
               <div key={g.label}>
                 <button
@@ -1144,9 +1142,9 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
                   className="w-full flex items-center justify-between px-3 mb-1 text-xs gp-text-muted gp-btn-ghost rounded py-1"
                 >
                   <span>{g.label}</span>
-                  {mostrarAbierto ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                  {!cerrado ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
                 </button>
-                {mostrarAbierto && (
+                {!cerrado && (
                   <div className="flex flex-col gap-0.5">
                     {g.items.map((n) => (
                       <button key={n.id} onClick={() => { setView(n.id); setMobileNavOpen(false); }}
