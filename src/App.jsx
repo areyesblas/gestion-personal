@@ -963,6 +963,12 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
     await supabase.from("preferencias").upsert({ user_id: misId, tema: nuevoValor }, { onConflict: "user_id" });
   };
 
+  const [exportPaso, setExportPaso] = useState(null); // null | "confirmar" | "listo"
+  const confirmarExportar = () => {
+    exportarExcel(data, activeOwnerId === misId ? "mi-cuenta" : activeOwnerEmail?.split("@")[0]);
+    setExportPaso("listo");
+  };
+
   const cambiarCuenta = async (ownerId, ownerEmail, modulos) => {
     setLoading(true);
     setActiveOwnerId(ownerId);
@@ -1161,7 +1167,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
             <button onClick={() => cambiarTema(tema === "claro" ? "oscuro" : "claro")} className="gp-navitem flex items-center gap-2 px-3 py-2.5 md:py-2 text-sm text-left w-full">
               {tema === "claro" ? <Moon size={15} /> : <Sun size={15} />} {tema === "claro" ? "Tema Azul Oscuro" : "Tema Azul Claro"}
             </button>
-            <button onClick={() => exportarExcel(data, activeOwnerId === misId ? "mi-cuenta" : activeOwnerEmail?.split("@")[0])}
+            <button onClick={() => setExportPaso("confirmar")}
               className="gp-navitem flex items-center gap-2 px-3 py-2.5 md:py-2 text-sm text-left w-full">
               <Download size={15} /> Exportar mis datos
             </button>
@@ -1264,6 +1270,34 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
                 Eliminar
               </button>
             </div>
+          </div>
+        </div>
+      )}
+      {exportPaso === "confirmar" && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,.6)" }} onClick={() => setExportPaso(null)}>
+          <div className="gp-panel w-full max-w-sm p-5" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-2 mb-2">
+              <Download size={16} className="gp-text-gold" />
+              <h3 className="gp-serif text-lg">¿Exportar tus datos?</h3>
+            </div>
+            <p className="text-sm gp-text-muted mb-5">Se va a descargar un archivo de Excel (.xlsx) con toda la información de {activeOwnerId === misId ? "tu cuenta" : `la cuenta de ${activeOwnerEmail}`}.</p>
+            <div className="flex gap-2">
+              <button onClick={() => setExportPaso(null)} className="gp-btn-ghost flex-1 py-2 text-sm">Cancelar</button>
+              <button onClick={confirmarExportar} className="gp-btn flex-1 py-2 text-sm">Exportar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {exportPaso === "listo" && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,.6)" }} onClick={() => setExportPaso(null)}>
+          <div className="gp-panel w-full max-w-sm p-5" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-2 mb-2">
+              <Check size={16} className="gp-text-teal" />
+              <h3 className="gp-serif text-lg">Exportación completa</h3>
+            </div>
+            <p className="text-sm gp-text-muted mb-5">Tu archivo se descargó correctamente. Revisa la carpeta de Descargas de tu navegador.</p>
+            <button onClick={() => setExportPaso(null)} className="gp-btn w-full py-2 text-sm">Entendido</button>
           </div>
         </div>
       )}
