@@ -471,6 +471,43 @@ function Field({ label, children }) {
   );
 }
 
+// Campo de captura de dinero: mientras escribes, va formateando con $ y comas (como una app de banco).
+// Por dentro sigue guardando un número plano (ej. "1234.5") para no romper nada de la base de datos;
+// solo lo que se VE en pantalla lleva el formato.
+function MoneyInput({ value, onChange, className = "gp-input", placeholder, autoFocus, style }) {
+  const digitsFromValue = (val) => {
+    if (val === "" || val === null || val === undefined) return "";
+    const n = Math.round((Number(val) || 0) * 100);
+    return Number.isFinite(n) ? String(n) : "";
+  };
+  const [digits, setDigits] = useState(() => digitsFromValue(value));
+
+  // Si el valor cambia desde afuera (ej. al abrir el modal con datos ya existentes), lo reflejamos.
+  useEffect(() => { setDigits(digitsFromValue(value)); }, [value]);
+
+  const formatted = digits === "" ? "" : ((Number(digits) || 0) / 100).toLocaleString("es-MX", { style: "currency", currency: "MXN" });
+
+  const handleChange = (e) => {
+    const soloDigitos = e.target.value.replace(/[^\d]/g, "");
+    const limpio = soloDigitos.replace(/^0+(?=\d)/, "");
+    setDigits(limpio);
+    onChange(limpio === "" ? "" : (Number(limpio) / 100).toString());
+  };
+
+  return (
+    <input
+      type="text"
+      inputMode="decimal"
+      autoFocus={autoFocus}
+      className={className}
+      style={style}
+      placeholder={placeholder}
+      value={formatted}
+      onChange={handleChange}
+    />
+  );
+}
+
 function Modal({ title, onClose, children }) {
   const [tocado, setTocado] = useState(false);
   const [confirmando, setConfirmando] = useState(false);
@@ -1671,8 +1708,8 @@ function SaldoInicialForm({ ultimo, onSave }) {
     <div>
       <p className="text-xs gp-text-muted mb-3">Cuánto dinero tienes ahorita, para que el sistema empiece a contar desde aquí (no borra tu historial, solo marca un punto de partida nuevo).</p>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <Field label="Efectivo"><input type="number" className="gp-input" value={v.efectivo} onChange={(e) => setV({ ...v, efectivo: e.target.value })} /></Field>
-        <Field label="En cuenta"><input type="number" className="gp-input" value={v.cuenta} onChange={(e) => setV({ ...v, cuenta: e.target.value })} /></Field>
+        <Field label="Efectivo"><MoneyInput className="gp-input" value={v.efectivo} onChange={(val) => setV({ ...v, efectivo: val })} /></Field>
+        <Field label="En cuenta"><MoneyInput className="gp-input" value={v.cuenta} onChange={(val) => setV({ ...v, cuenta: val })} /></Field>
       </div>
       <Field label="A partir de qué fecha"><input type="date" className="gp-input" value={v.fecha} onChange={(e) => setV({ ...v, fecha: e.target.value })} /></Field>
       <Field label="Notas (opcional)"><input className="gp-input" placeholder="ej. corte después de viaje a Acapulco" value={v.notas} onChange={(e) => setV({ ...v, notas: e.target.value })} /></Field>
@@ -2051,7 +2088,7 @@ function PendienteForm({ item, proyectos, equipo, contactos, pendientes, onSave 
         </select>
       </Field>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <Field label="Precio pactado (si es delegado)"><input type="number" className="gp-input" value={v.precio} onChange={(e) => setV({ ...v, precio: e.target.value })} /></Field>
+        <Field label="Precio pactado (si es delegado)"><MoneyInput className="gp-input" value={v.precio} onChange={(val) => setV({ ...v, precio: val })} /></Field>
         <Field label="Tiempo estimado (horas)"><input type="number" className="gp-input" value={v.tiempoEstimado} onChange={(e) => setV({ ...v, tiempoEstimado: e.target.value })} /></Field>
       </div>
       <Field label="Tiempo real (horas, cuando termine)"><input type="number" className="gp-input" value={v.tiempoReal} onChange={(e) => setV({ ...v, tiempoReal: e.target.value })} /></Field>
@@ -2322,7 +2359,7 @@ function FinanzaForm({ item, proyectos, contactos, onSave }) {
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Field label="Categoría"><input className="gp-input" value={v.categoria} onChange={(e) => setV({ ...v, categoria: e.target.value })} placeholder="ej. hosting, venta, renta" /></Field>
-        <Field label="Monto"><input type="number" className="gp-input" value={v.monto} onChange={(e) => setV({ ...v, monto: e.target.value })} /></Field>
+        <Field label="Monto"><MoneyInput className="gp-input" value={v.monto} onChange={(val) => setV({ ...v, monto: val })} /></Field>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Field label="Forma"><select className="gp-input" value={v.forma} onChange={(e) => setV({ ...v, forma: e.target.value })}>{FORMA_PAGO.map((c) => <option key={c}>{c}</option>)}</select></Field>
@@ -2513,9 +2550,9 @@ function FacturaForm({ item, proyectos, contactos, onSave }) {
       </div>
       <Field label="Concepto"><input className="gp-input" placeholder="ej. Servicio de desarrollo, renta de equipo" value={v.concepto} onChange={(e) => setV({ ...v, concepto: e.target.value })} /></Field>
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        <Field label="Subtotal"><input type="number" className="gp-input" value={v.subtotal} onChange={(e) => setSubtotal(e.target.value)} /></Field>
-        <Field label="IVA (16% automático, editable)"><input type="number" className="gp-input" value={v.iva} onChange={(e) => setV({ ...v, iva: e.target.value, total: String((Number(v.subtotal) || 0) + (Number(e.target.value) || 0)) })} /></Field>
-        <Field label="Total"><input type="number" className="gp-input" value={v.total} onChange={(e) => setV({ ...v, total: e.target.value })} /></Field>
+        <Field label="Subtotal"><MoneyInput className="gp-input" value={v.subtotal} onChange={(val) => setSubtotal(val)} /></Field>
+        <Field label="IVA (16% automático, editable)"><MoneyInput className="gp-input" value={v.iva} onChange={(val) => setV({ ...v, iva: val, total: String((Number(v.subtotal) || 0) + (Number(val) || 0)) })} /></Field>
+        <Field label="Total"><MoneyInput className="gp-input" value={v.total} onChange={(val) => setV({ ...v, total: val })} /></Field>
       </div>
       <Field label="Notas"><textarea className="gp-input" rows={2} value={v.notas} onChange={(e) => setV({ ...v, notas: e.target.value })} /></Field>
       <p className="text-xs gp-text-muted mb-3">Esta información es de referencia para tu control interno — no sustituye a un contador ni a tu declaración fiscal real.</p>
@@ -2604,7 +2641,7 @@ function DeudaForm({ item, proyectos, onSave }) {
         </select>
       </Field>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <Field label="Monto"><input type="number" className="gp-input" value={v.monto} onChange={(e) => setV({ ...v, monto: e.target.value })} /></Field>
+        <Field label="Monto"><MoneyInput className="gp-input" value={v.monto} onChange={(val) => setV({ ...v, monto: val })} /></Field>
         <Field label="Fecha de vencimiento"><input type="date" className="gp-input" value={v.fechaVencimiento} onChange={(e) => setV({ ...v, fechaVencimiento: e.target.value })} /></Field>
       </div>
       {error && <p className="text-xs gp-text-red mb-2">{error}</p>}
@@ -2768,7 +2805,7 @@ function ActividadForm({ item, proyectos, onSave }) {
           {proyectos.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
         </select>
       </Field>
-      <Field label="Ganancia generada (si aplica)"><input type="number" className="gp-input" value={v.ganancia} onChange={(e) => setV({ ...v, ganancia: e.target.value })} /></Field>
+      <Field label="Ganancia generada (si aplica)"><MoneyInput className="gp-input" value={v.ganancia} onChange={(val) => setV({ ...v, ganancia: val })} /></Field>
       <Field label="Notas"><textarea className="gp-input" rows={2} value={v.notas} onChange={(e) => setV({ ...v, notas: e.target.value })} /></Field>
       {error && <p className="text-xs gp-text-red mb-2">{error}</p>}
 
@@ -2858,7 +2895,7 @@ function ActivoForm({ item, proyectos, onSave }) {
       </Field>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Field label="Fecha de vencimiento"><input type="date" className="gp-input" value={v.fechaVencimiento} onChange={(e) => setV({ ...v, fechaVencimiento: e.target.value })} /></Field>
-        <Field label="Costo de renovación"><input type="number" className="gp-input" value={v.costoRenovacion} onChange={(e) => setV({ ...v, costoRenovacion: e.target.value })} /></Field>
+        <Field label="Costo de renovación"><MoneyInput className="gp-input" value={v.costoRenovacion} onChange={(val) => setV({ ...v, costoRenovacion: val })} /></Field>
       </div>
       <Field label="Notas"><textarea className="gp-input" rows={2} value={v.notas} onChange={(e) => setV({ ...v, notas: e.target.value })} /></Field>
       {error && <p className="text-xs gp-text-red mb-2">{error}</p>}
@@ -3217,7 +3254,7 @@ function RegaloForm({ item, contactos, onSave }) {
       <Field label="Fecha (opcional)"><input type="date" className="gp-input" value={v.fecha || ""} onChange={(e) => setV({ ...v, fecha: e.target.value })} /></Field>
       <Field label="Regalo o mensaje"><input className="gp-input" placeholder="ej. Perfume, tarjeta de felicitación, transferencia" value={v.descripcion} onChange={(e) => setV({ ...v, descripcion: e.target.value })} /></Field>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <Field label="Costo (opcional)"><input type="number" className="gp-input" value={v.costo} onChange={(e) => setV({ ...v, costo: e.target.value })} /></Field>
+        <Field label="Costo (opcional)"><MoneyInput className="gp-input" value={v.costo} onChange={(val) => setV({ ...v, costo: val })} /></Field>
         <Field label="Estatus"><select className="gp-input" value={v.estatus} onChange={(e) => setV({ ...v, estatus: e.target.value })}>{ESTATUS_REGALO.map((s) => <option key={s}>{s}</option>)}</select></Field>
       </div>
       <Field label="Notas"><textarea className="gp-input" rows={2} value={v.notas} onChange={(e) => setV({ ...v, notas: e.target.value })} /></Field>
@@ -3452,15 +3489,15 @@ function CampanaForm({ item, proyectos, onSave }) {
         <Field label="Fecha de fin (opcional)"><input type="date" className="gp-input" value={v.fechaFin || ""} onChange={(e) => setV({ ...v, fechaFin: e.target.value })} /></Field>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <Field label="Presupuesto"><input type="number" className="gp-input" value={v.presupuesto} onChange={(e) => setV({ ...v, presupuesto: e.target.value })} /></Field>
-        <Field label="Gastado hasta ahora"><input type="number" className="gp-input" value={v.gastado} onChange={(e) => setV({ ...v, gastado: e.target.value })} /></Field>
+        <Field label="Presupuesto"><MoneyInput className="gp-input" value={v.presupuesto} onChange={(val) => setV({ ...v, presupuesto: val })} /></Field>
+        <Field label="Gastado hasta ahora"><MoneyInput className="gp-input" value={v.gastado} onChange={(val) => setV({ ...v, gastado: val })} /></Field>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <Field label="Alcance"><input type="number" className="gp-input" value={v.alcance} onChange={(e) => setV({ ...v, alcance: e.target.value })} /></Field>
         <Field label="Clics"><input type="number" className="gp-input" value={v.clics} onChange={(e) => setV({ ...v, clics: e.target.value })} /></Field>
         <Field label="Conversiones"><input type="number" className="gp-input" value={v.conversiones} onChange={(e) => setV({ ...v, conversiones: e.target.value })} /></Field>
       </div>
-      <Field label="Ingreso generado (para calcular retorno)"><input type="number" className="gp-input" value={v.ingresoGenerado} onChange={(e) => setV({ ...v, ingresoGenerado: e.target.value })} /></Field>
+      <Field label="Ingreso generado (para calcular retorno)"><MoneyInput className="gp-input" value={v.ingresoGenerado} onChange={(val) => setV({ ...v, ingresoGenerado: val })} /></Field>
       <Field label="Estatus"><select className="gp-input" value={v.estatus} onChange={(e) => setV({ ...v, estatus: e.target.value })}>{ESTATUS_CAMPANA.map((c) => <option key={c}>{c}</option>)}</select></Field>
       <Field label="ID externo (opcional, para cuando conectes Meta/Google/Stripe)"><input className="gp-input" value={v.idExterno || ""} onChange={(e) => setV({ ...v, idExterno: e.target.value })} /></Field>
       <Field label="Notas"><textarea className="gp-input" rows={2} value={v.notas} onChange={(e) => setV({ ...v, notas: e.target.value })} /></Field>
@@ -3627,7 +3664,7 @@ function PatrimonioForm({ item, onSave }) {
       <Field label="Categoría"><select className="gp-input" value={v.categoria} onChange={(e) => setV({ ...v, categoria: e.target.value })}>{CATEGORIAS_PATRIMONIO.map((c) => <option key={c}>{c}</option>)}</select></Field>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Field label="Fecha de adquisición"><input type="date" className="gp-input" value={v.fechaAdquisicion || ""} onChange={(e) => setV({ ...v, fechaAdquisicion: e.target.value })} /></Field>
-        <Field label="Valor de adquisición"><input type="number" className="gp-input" value={v.valorAdquisicion} onChange={(e) => setV({ ...v, valorAdquisicion: e.target.value })} /></Field>
+        <Field label="Valor de adquisición"><MoneyInput className="gp-input" value={v.valorAdquisicion} onChange={(val) => setV({ ...v, valorAdquisicion: val })} /></Field>
       </div>
       <Field label="Notas"><textarea className="gp-input" rows={2} value={v.notas} onChange={(e) => setV({ ...v, notas: e.target.value })} /></Field>
       {error && <p className="text-xs gp-text-red mb-2">{error}</p>}
@@ -3643,7 +3680,7 @@ function ValuacionForm({ onSave }) {
   return (
     <div>
       <Field label="Fecha de la valuación"><input type="date" className="gp-input" value={v.fecha} onChange={(e) => setV({ ...v, fecha: e.target.value })} /></Field>
-      <Field label="Valor estimado"><input type="number" className="gp-input" value={v.valor} onChange={(e) => setV({ ...v, valor: e.target.value })} /></Field>
+      <Field label="Valor estimado"><MoneyInput className="gp-input" value={v.valor} onChange={(val) => setV({ ...v, valor: val })} /></Field>
       <Field label="Notas (opcional)"><input className="gp-input" placeholder="ej. avalúo bancario, cotización de agente" value={v.notas} onChange={(e) => setV({ ...v, notas: e.target.value })} /></Field>
       {error && <p className="text-xs gp-text-red mb-2">{error}</p>}
       <button className="gp-btn w-full py-2 text-sm mt-2" onClick={() => { if (!v.valor) { setError("Captura el valor estimado."); return; } setError(""); onSave(v); }}>Guardar valuación</button>
@@ -4294,8 +4331,8 @@ function ApartadoForm({ item, proyectos, onSave }) {
         </select>
       </Field>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <Field label="Monto objetivo"><input type="number" className="gp-input" value={v.montoObjetivo} onChange={(e) => setV({ ...v, montoObjetivo: e.target.value })} /></Field>
-        <Field label="Ya tienes ahorrado"><input type="number" className="gp-input" value={v.montoActual} onChange={(e) => setV({ ...v, montoActual: e.target.value })} /></Field>
+        <Field label="Monto objetivo"><MoneyInput className="gp-input" value={v.montoObjetivo} onChange={(val) => setV({ ...v, montoObjetivo: val })} /></Field>
+        <Field label="Ya tienes ahorrado"><MoneyInput className="gp-input" value={v.montoActual} onChange={(val) => setV({ ...v, montoActual: val })} /></Field>
       </div>
       <Field label="Fecha objetivo (opcional)"><input type="date" className="gp-input" value={v.fechaObjetivo} onChange={(e) => setV({ ...v, fechaObjetivo: e.target.value })} /></Field>
       <Field label="Notas"><textarea className="gp-input" rows={2} value={v.notas} onChange={(e) => setV({ ...v, notas: e.target.value })} /></Field>
@@ -4312,7 +4349,7 @@ function AgregarFondosForm({ apartado, onSave }) {
   return (
     <div>
       <p className="text-xs gp-text-muted mb-3">Llevas {fmtMoney(actual)} de {fmtMoney(apartado.montoObjetivo)}.</p>
-      <Field label="Cuánto vas a agregar"><input type="number" autoFocus className="gp-input" value={monto} onChange={(e) => setMonto(e.target.value)} /></Field>
+      <Field label="Cuánto vas a agregar"><MoneyInput autoFocus className="gp-input" value={monto} onChange={(val) => setMonto(val)} /></Field>
       <button className="gp-btn w-full py-2 text-sm mt-2" onClick={() => onSave(String(actual + (Number(monto) || 0)))}>Agregar</button>
     </div>
   );
@@ -4329,7 +4366,7 @@ function MoverFondosForm({ apartado, proyectos, onSave }) {
   return (
     <div>
       <p className="text-xs gp-text-muted mb-3">Disponible en este apartado: <span className="gp-mono gp-text-gold">{fmtMoney(actual)}</span></p>
-      <Field label="Cuánto vas a mover"><input type="number" autoFocus className="gp-input" value={monto} onChange={(e) => setMonto(e.target.value)} /></Field>
+      <Field label="Cuánto vas a mover"><MoneyInput autoFocus className="gp-input" value={monto} onChange={(val) => setMonto(val)} /></Field>
       {excede && <p className="text-xs gp-text-red mb-2">Ese monto es mayor al disponible en el apartado.</p>}
       <Field label="Destino (proyecto o rubro)">
         <select className="gp-input" value={proyectoId} onChange={(e) => setProyectoId(e.target.value)}>
@@ -4512,9 +4549,9 @@ function EventoForm({ item, proyectos, contactos, onSave }) {
         </Field>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        <Field label="Costo"><input type="number" className="gp-input" value={v.costo} onChange={(e) => setCostoGastos("costo", e.target.value)} /></Field>
-        <Field label="Gastos (staff, extras)"><input type="number" className="gp-input" value={v.gastos} onChange={(e) => setCostoGastos("gastos", e.target.value)} /></Field>
-        <Field label="Utilidad"><input type="number" className="gp-input" value={v.utilidad} onChange={(e) => setV({ ...v, utilidad: e.target.value })} /></Field>
+        <Field label="Costo"><MoneyInput className="gp-input" value={v.costo} onChange={(val) => setCostoGastos("costo", val)} /></Field>
+        <Field label="Gastos (staff, extras)"><MoneyInput className="gp-input" value={v.gastos} onChange={(val) => setCostoGastos("gastos", val)} /></Field>
+        <Field label="Utilidad"><MoneyInput className="gp-input" value={v.utilidad} onChange={(val) => setV({ ...v, utilidad: val })} /></Field>
       </div>
       <Field label="Comentarios"><textarea className="gp-input" rows={2} value={v.comentarios} onChange={(e) => setV({ ...v, comentarios: e.target.value })} /></Field>
       <Field label="Fotos y videos">
