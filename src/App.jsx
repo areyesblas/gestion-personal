@@ -6,7 +6,7 @@ import {
   Users, Activity, Plus, X, Trash2, Pencil, Github, ChevronDown,
   ChevronRight, Bell, Lightbulb, Rocket, MessageCircle, Mail, Globe,
   Target, Contact, BarChart3, FileText, Flame, HeartPulse, Check, Menu, PieChart as PieChartIcon,
-  PiggyBank, Camera, Film, Upload, MapPin, Clock, Mic, Gift, Receipt, Megaphone, ChevronUp, Gem, Download,
+  PiggyBank, Camera, Film, Upload, MapPin, Clock, Mic, Gift, Receipt, Megaphone, ChevronUp, Gem, Download, Sun, Moon,
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
@@ -14,12 +14,14 @@ import {
 } from "recharts";
 
 /* ---------- estilos y tokens ---------- */
-const Tokens = () => (
+const Tokens = ({ tema = "oscuro" }) => (
   <style>{`
     @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');
     .gp-root{ --bg:#0B2341; --panel:#12304F; --panel-hi:#1A3D63; --border:#234A70;
       --text:#EAF1FA; --muted:#93A7C4; --gold:#F59E0B; --teal:#22C55E; --red:#EF4444;
       background:var(--bg); color:var(--text); font-family:'IBM Plex Sans',sans-serif; }
+    .gp-root.claro{ --bg:#F5F7FA; --panel:#FFFFFF; --panel-hi:#EEF2F6; --border:#D8E0E9;
+      --text:#0B2341; --muted:#64748B; --gold:#F59E0B; --teal:#16A34A; --red:#DC2626; }
     .gp-serif{ font-family:'Poppins',sans-serif; font-weight:600; }
     .gp-mono{ font-family:'IBM Plex Mono',monospace; }
     .gp-panel{ background:var(--panel); border:1px solid var(--border); border-radius:6px; }
@@ -47,6 +49,19 @@ const Tokens = () => (
     .gp-scroll::-webkit-scrollbar-thumb{ background:var(--border); border-radius:3px; }
   `}</style>
 );
+
+// Recuerda tu tema (claro/oscuro) entre visitas, guardado en este navegador.
+function useTema() {
+  const [tema, setTema] = useState(() => {
+    try { return localStorage.getItem("arkeyone-tema") || "oscuro"; } catch { return "oscuro"; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem("arkeyone-tema", tema); } catch {}
+  }, [tema]);
+  const toggleTema = () => setTema((t) => (t === "oscuro" ? "claro" : "oscuro"));
+  return [tema, toggleTema];
+}
+
 
 /* ---------- datos base ---------- */
 const CATS = ["Fundación", "Software", "Música", "Renta", "Marketing", "Chatbots", "Personal", "Otro"];
@@ -533,7 +548,112 @@ function MedidorPassword({ password }) {
   );
 }
 
-function LoginScreen() {
+const AVISO_PRIVACIDAD = `
+**Última actualización:** ${todayISO()}
+
+**Responsable:** ArkeyOne (operado por ARKeyData) es responsable del tratamiento de tus datos personales conforme a la Ley Federal de Protección de Datos Personales en Posesión de los Particulares (México).
+
+**Contacto:** privacidad@arkeyone.com
+
+**1. Datos que recabamos**
+Recabamos los datos que tú mismo capturas al usar el sistema: información de proyectos, finanzas, contactos, salud, y demás módulos que decidas utilizar. También recabamos tu correo electrónico y contraseña (encriptada) para tu cuenta, y datos técnicos básicos (fecha de registro, último acceso).
+
+**2. Para qué usamos tus datos**
+- Darte acceso a tu cuenta y a la información que tú mismo capturaste.
+- Enviarte correos operativos (confirmación de cuenta, recuperación de contraseña, alertas que actives).
+- Mejorar el funcionamiento del sistema.
+No vendemos ni compartimos tu información con terceros para fines de publicidad.
+
+**3. Aislamiento y confidencialidad**
+Tu información está técnicamente aislada de la de cualquier otro usuario mediante reglas de seguridad a nivel de base de datos (Row Level Security). Ni otros usuarios, ni — salvo causa justificada de soporte técnico, con tu conocimiento — el equipo de ArkeyOne, acceden de forma rutinaria a tu información de negocio (finanzas, contactos, salud, etc.).
+
+**4. Terceros que nos ayudan a operar**
+Usamos los siguientes proveedores para operar el servicio, cada uno con sus propias políticas de privacidad:
+- **Supabase** (base de datos y autenticación)
+- **Resend** (envío de correos)
+- **Netlify** (hospedaje del sitio)
+
+**5. Tus derechos (ARCO)**
+Tienes derecho a Acceder, Rectificar, Cancelar y Oponerte al tratamiento de tus datos personales. Puedes exportar toda tu información en cualquier momento desde el botón "Exportar mis datos" dentro del sistema, o solicitar la eliminación completa de tu cuenta escribiendo a privacidad@arkeyone.com.
+
+**6. Menores de edad**
+Este servicio no está dirigido a menores de 18 años.
+
+**7. Cambios a este aviso**
+Podemos actualizar este aviso de privacidad. Te notificaremos cambios importantes por correo o dentro del sistema.
+`.trim();
+
+const TERMINOS_CONDICIONES = `
+**Última actualización:** ${todayISO()}
+
+**1. Aceptación**
+Al crear una cuenta en ArkeyOne, aceptas estos Términos y Condiciones y el Aviso de Privacidad.
+
+**2. Qué es ArkeyOne**
+ArkeyOne es un sistema de gestión personal y de negocio (proyectos, finanzas, contactos, salud, y más) que organiza tu información en un solo lugar.
+
+**3. Tu cuenta**
+Eres responsable de la confidencialidad de tu contraseña y de toda actividad realizada desde tu cuenta. Debes proporcionar información veraz al registrarte.
+
+**4. Uso permitido**
+No debes usar ArkeyOne para actividades ilegales, para almacenar contenido que viole derechos de terceros, ni para intentar vulnerar la seguridad del sistema.
+
+**5. Tu información**
+La información que capturas es tuya. Puedes exportarla en cualquier momento (botón "Exportar mis datos") y solicitar la eliminación de tu cuenta cuando quieras.
+
+**6. Colaboradores**
+Si invitas a otras personas a tu cuenta con permisos específicos, eres responsable de las acciones que realicen dentro de los módulos a los que les diste acceso.
+
+**7. Disponibilidad del servicio**
+Hacemos nuestro mejor esfuerzo por mantener el servicio disponible, pero no garantizamos disponibilidad ininterrumpida. No somos responsables por pérdidas derivadas de interrupciones del servicio ajenas a nuestro control (fallas de terceros, caso fortuito, fuerza mayor).
+
+**8. Planes y pagos**
+Actualmente ArkeyOne se ofrece de forma gratuita durante su etapa de prueba. Si en el futuro se introducen planes de pago, se te notificará con anticipación y podrás decidir si continuar.
+
+**9. Cancelación**
+Puedes cancelar tu cuenta en cualquier momento. Nos reservamos el derecho de suspender cuentas que violen estos términos.
+
+**10. Limitación de responsabilidad**
+ArkeyOne se ofrece "tal cual". No somos responsables por decisiones de negocio, financieras o de salud que tomes con base en la información capturada en el sistema — el sistema es una herramienta de organización, no un sustituto de asesoría profesional (contable, legal, médica o financiera).
+
+**11. Ley aplicable**
+Estos términos se rigen por las leyes de los Estados Unidos Mexicanos.
+
+**12. Contacto**
+Dudas o solicitudes: contacto@arkeyone.com
+`.trim();
+
+// Convierte el texto en negritas **así** a <strong>, y separa párrafos — sin dependencias externas.
+function renderLegalText(texto) {
+  return texto.split("\n\n").map((parrafo, i) => {
+    const partes = parrafo.split(/(\*\*[^*]+\*\*)/g);
+    return (
+      <p key={i} className="text-sm mb-4 leading-relaxed">
+        {partes.map((parte, j) =>
+          parte.startsWith("**") && parte.endsWith("**")
+            ? <strong key={j}>{parte.slice(2, -2)}</strong>
+            : parte
+        )}
+      </p>
+    );
+  });
+}
+
+function DocumentoLegal({ titulo, texto, onVolver, tema }) {
+  return (
+    <div className={`gp-root ${tema === "claro" ? "claro" : ""}`} style={{ minHeight: "100vh" }}>
+      <Tokens tema={tema} />
+      <div className="max-w-2xl mx-auto p-6">
+        <button onClick={onVolver} className="text-xs gp-text-gold mb-4">← Regresar</button>
+        <h1 className="gp-serif text-2xl mb-6">{titulo}</h1>
+        {renderLegalText(texto)}
+      </div>
+    </div>
+  );
+}
+
+
+function LoginScreen({ tema, toggleTema }) {
   const [modo, setModo] = useState("entrar"); // "entrar" | "crear" | "recuperar"
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -588,9 +708,12 @@ function LoginScreen() {
   };
 
   return (
-    <div className="gp-root flex items-center justify-center" style={{ minHeight: "100vh" }}>
-      <Tokens />
-      <form onSubmit={handleSubmit} className="gp-panel p-6 w-full max-w-sm">
+    <div className={`gp-root flex items-center justify-center ${tema === "claro" ? "claro" : ""}`} style={{ minHeight: "100vh" }}>
+      <Tokens tema={tema} />
+      <form onSubmit={handleSubmit} className="gp-panel p-6 w-full max-w-sm relative">
+        <button type="button" onClick={toggleTema} className="absolute top-4 right-4 gp-btn-ghost p-1.5 rounded" aria-label="Cambiar tema" title="Cambiar tema">
+          {tema === "claro" ? <Moon size={14} /> : <Sun size={14} />}
+        </button>
         <img src="/logo-arkeyone.png" alt="ArkeyOne" style={{ height: 44 }} className="mb-3" />
         <p className="text-xs gp-text-muted mb-4">
           {modo === "entrar" ? "Inicia sesión para entrar a tu sistema." : modo === "crear" ? "Crea tu cuenta." : "Te mandamos un enlace para poner una contraseña nueva."}
@@ -627,7 +750,7 @@ function LoginScreen() {
   );
 }
 
-function NuevaPasswordScreen({ onListo }) {
+function NuevaPasswordScreen({ onListo, tema }) {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState("");
@@ -648,8 +771,8 @@ function NuevaPasswordScreen({ onListo }) {
   };
 
   return (
-    <div className="gp-root flex items-center justify-center" style={{ minHeight: "100vh" }}>
-      <Tokens />
+    <div className={`gp-root flex items-center justify-center ${tema === "claro" ? "claro" : ""}`} style={{ minHeight: "100vh" }}>
+      <Tokens tema={tema} />
       <div className="gp-panel p-6 w-full max-w-sm">
         <img src="/logo-arkeyone.png" alt="ArkeyOne" style={{ height: 44 }} className="mb-3" />
         {listo ? (
@@ -676,6 +799,7 @@ function NuevaPasswordScreen({ onListo }) {
 export default function App() {
   const [session, setSession] = useState(undefined); // undefined = cargando, null = sin sesión
   const [recuperando, setRecuperando] = useState(false);
+  const [tema, toggleTema] = useTema();
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
@@ -688,15 +812,15 @@ export default function App() {
 
   if (session === undefined) {
     return (
-      <div className="gp-root min-h-[500px] flex items-center justify-center rounded-lg">
-        <Tokens />
+      <div className={`gp-root min-h-[500px] flex items-center justify-center rounded-lg ${tema === "claro" ? "claro" : ""}`}>
+        <Tokens tema={tema} />
         <p className="gp-text-muted text-sm">Cargando…</p>
       </div>
     );
   }
-  if (recuperando) return <NuevaPasswordScreen onListo={() => setRecuperando(false)} />;
-  if (!session) return <LoginScreen />;
-  return <AppLoggedIn session={session} />;
+  if (recuperando) return <NuevaPasswordScreen onListo={() => setRecuperando(false)} tema={tema} toggleTema={toggleTema} />;
+  if (!session) return <LoginScreen tema={tema} toggleTema={toggleTema} />;
+  return <AppLoggedIn session={session} tema={tema} toggleTema={toggleTema} />;
 }
 
 const VIEW_TO_MODULO = {
@@ -708,7 +832,7 @@ const VIEW_TO_MODULO = {
   actividades: "actividades", eventos: "eventos", habitos: "habitos", salud: "salud",
 };
 
-function AppLoggedIn({ session }) {
+function AppLoggedIn({ session, tema, toggleTema }) {
   const misId = session.user.id;
   const miEmail = session.user.email;
   const [data, setData] = useState(null);
@@ -853,8 +977,8 @@ function AppLoggedIn({ session }) {
         .filter((g) => g.items.length > 0);
 
   return (
-    <div className="gp-root overflow-hidden" style={{ minHeight: "100vh" }}>
-      <Tokens />
+    <div className={`gp-root overflow-hidden ${tema === "claro" ? "claro" : ""}`} style={{ minHeight: "100vh" }}>
+      <Tokens tema={tema} />
       <div className="flex relative" style={{ minHeight: "100vh" }}>
         {/* barra superior solo en móvil */}
         <div className="md:hidden fixed top-0 left-0 right-0 z-30 flex items-center justify-between px-4 py-3 border-b gp-border" style={{ background: "var(--bg)" }}>
@@ -923,6 +1047,9 @@ function AppLoggedIn({ session }) {
             </div>
           ))}
           <div className="mt-auto pt-2 border-t gp-border flex flex-col gap-0.5">
+            <button onClick={toggleTema} className="gp-navitem flex items-center gap-2 px-3 py-2.5 md:py-2 text-sm text-left w-full">
+              {tema === "claro" ? <Moon size={15} /> : <Sun size={15} />} {tema === "claro" ? "Tema oscuro" : "Tema claro"}
+            </button>
             <button onClick={() => exportarExcel(data, activeOwnerId === misId ? "mi-cuenta" : activeOwnerEmail?.split("@")[0])}
               className="gp-navitem flex items-center gap-2 px-3 py-2.5 md:py-2 text-sm text-left w-full">
               <Download size={15} /> Exportar mis datos
