@@ -6,7 +6,7 @@ import {
   Users, Activity, Plus, X, Trash2, Pencil, Github, ChevronDown,
   ChevronRight, Bell, Lightbulb, Rocket, MessageCircle, Mail, Globe,
   Target, Contact, BarChart3, FileText, Flame, HeartPulse, Check, Menu, PieChart as PieChartIcon,
-  PiggyBank, Camera, Film, Upload, MapPin, Clock, Mic, Gift, Receipt, Megaphone, ChevronUp, Gem, Download, Sun, Moon,
+  PiggyBank, Camera, Film, Upload, MapPin, Clock, Mic, Gift, Receipt, Megaphone, ChevronUp, Gem, Download, Sun, Moon, Shield,
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
@@ -804,6 +804,11 @@ function NuevaPasswordScreen({ onListo, tema }) {
     if (password !== confirmPassword) { setError("Las contraseñas no coinciden."); return; }
     setLoading(true);
     const { error } = await supabase.auth.updateUser({ password });
+    if (!error) {
+      // Por seguridad: al cambiar la contraseña, cierra la sesión en cualquier otro dispositivo/navegador
+      // donde hayas quedado conectado (solo deja activa la sesión desde la que acabas de cambiarla).
+      await supabase.auth.signOut({ scope: "others" });
+    }
     setLoading(false);
     if (error) { setError("No se pudo actualizar la contraseña. Intenta de nuevo."); return; }
     setListo(true);
@@ -862,21 +867,100 @@ function SplashScreen({ tema, fadingOut }) {
   );
 }
 
+// Pantalla que pide el código de 6 dígitos cuando el usuario ya tiene activada la verificación en dos pasos.
+function MfaChallengeScreen({ factorId, onVerificado, tema }) {
+  const [codigo, setCodigo] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const verificar = async (e) => {
+    e.preventDefault();
+    setError("");
+    setLoading(true);
+    const { data: challenge, error: errChallenge } = await supabase.auth.mfa.challenge({ factorId });
+    if (errChallenge) { setError("No se pudo iniciar la verificación. Intenta de nuevo."); setLoading(false); return; }
+    const { error: errVerify } = await supabase.auth.mfa.verify({ factorId, challengeId: challenge.id, code: codigo });
+    setLoading(false);
+    if (errVerify) { setError("Código incorrecto. Revisa tu app de autenticación."); return; }
+    onVerificado();
+  };
+
+  return (
+    <div className={`gp-root flex items-center justify-center ${tema === "claro" ? "claro" : ""}`} style={{ minHeight: "100vh" }}>
+      <Tokens tema={tema} />
+      <div className="gp-panel p-6 w-full max-w-sm">
+        <img src="/logo-arkeyone.png" alt="ArkeyOne" style={{ height: 40 }} className="mb-4" />
+        <h2 className="gp-serif text-lg mb-1">Verificación en dos pasos</h2>
+        <p className="text-sm gp-text-muted mb-4">Abre tu app de autenticación (Google Authenticator, Authy, etc.) e ingresa el código de 6 dígitos.</p>
+        <form onSubmit={verificar}>
+          <input
+            className="gp-input text-center text-lg mb-3" style={{ letterSpacing: "0.4em" }}
+            maxLength={6} inputMode="numeric" autoFocus
+            value={codigo} onChange={(e) => setCodigo(e.target.value.replace(/\D/g, "").slice(0, 6))}
+            placeholder="000000"
+          />
+          {error && <p className="text-xs gp-text-red mb-3">{error}</p>}
+          <button type="submit" disabled={loading || codigo.length !== 6} className="gp-btn w-full py-2 text-sm">
+            {loading ? "Verificando…" : "Verificar"}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [session, setSession] = useState(undefined); // undefined = cargando, null = sin sesión
   const [recuperando, setRecuperando] = useState(false);
   const [tema, toggleTema, setTema] = useTema();
   const [showSplash, setShowSplash] = useState(true);
   const [splashFadingOut, setSplashFadingOut] = useState(false);
+  // Verificación en dos pasos (MFA): null = todavía sin revisar, { pendiente, factorId }
+  const [mfaEstado, setMfaEstado] = useState(null);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => setSession(data.session));
+    supabase.auth.getSession().then(({ data }) => {
+      setSession(data.session);
+      // Máximo absoluto de sesión: 8 horas desde que iniciaste sesión, aunque sigas activo.
+      if (data.session && !localStorage.getItem("arkeyone_login_at")) {
+        localStorage.setItem("arkeyone_login_at", String(Date.now()));
+      }
+    });
     const { data: listener } = supabase.auth.onAuthStateChange((event, newSession) => {
       if (event === "PASSWORD_RECOVERY") setRecuperando(true);
+      if (event === "SIGNED_IN") localStorage.setItem("arkeyone_login_at", String(Date.now()));
+      if (event === "SIGNED_OUT") localStorage.removeItem("arkeyone_login_at");
       setSession(newSession);
     });
     return () => listener.subscription.unsubscribe();
   }, []);
+
+  // Máximo absoluto de sesión: revisa cada minuto si ya pasaron 8 horas desde el login, y si es así, cierra sesión.
+  useEffect(() => {
+    const SESION_MAX_MS = 8 * 60 * 60 * 1000;
+    const chequear = () => {
+      const inicio = Number(localStorage.getItem("arkeyone_login_at"));
+      if (inicio && Date.now() - inicio > SESION_MAX_MS) supabase.auth.signOut();
+    };
+    const id = setInterval(chequear, 60 * 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  // Si el usuario tiene verificación en dos pasos activada, hay que pedirle el código antes de dejarlo pasar.
+  useEffect(() => {
+    if (!session) { setMfaEstado(null); return; }
+    (async () => {
+      const { data, error } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+      if (error || !data) { setMfaEstado({ pendiente: false }); return; }
+      if (data.nextLevel === "aal2" && data.currentLevel !== "aal2") {
+        const { data: factoresData } = await supabase.auth.mfa.listFactors();
+        const verificado = factoresData?.totp?.find((f) => f.status === "verified");
+        setMfaEstado({ pendiente: true, factorId: verificado?.id });
+      } else {
+        setMfaEstado({ pendiente: false });
+      }
+    })();
+  }, [session]);
 
   // El splash dura ~5 seg fijos, sin importar qué tan rápido cargue la sesión (que corre en paralelo arriba).
   useEffect(() => {
@@ -899,6 +983,15 @@ export default function App() {
   }
   if (recuperando) return <NuevaPasswordScreen onListo={() => setRecuperando(false)} tema={tema} toggleTema={toggleTema} />;
   if (!session) return <LoginScreen tema={tema} toggleTema={toggleTema} />;
+  if (mfaEstado === null) {
+    return (
+      <div className={`gp-root min-h-screen flex items-center justify-center ${tema === "claro" ? "claro" : ""}`}>
+        <Tokens tema={tema} />
+        <p className="gp-text-muted text-sm">Cargando…</p>
+      </div>
+    );
+  }
+  if (mfaEstado.pendiente) return <MfaChallengeScreen factorId={mfaEstado.factorId} onVerificado={() => setMfaEstado({ pendiente: false })} tema={tema} />;
   return <AppLoggedIn session={session} tema={tema} toggleTema={toggleTema} setTema={setTema} />;
 }
 
@@ -910,6 +1003,91 @@ const VIEW_TO_MODULO = {
   redes: "redes_metricas", marketing: "campanas",
   actividades: "actividades", eventos: "eventos", habitos: "habitos", salud: "salud",
 };
+
+// Modal para activar/desactivar la verificación en dos pasos (MFA) de la cuenta.
+function SeguridadMfaModal({ onClose }) {
+  const [factores, setFactores] = useState(null); // null = cargando
+  const [enrolando, setEnrolando] = useState(null); // { id, qr, secret }
+  const [codigo, setCodigo] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const cargar = async () => {
+    const { data } = await supabase.auth.mfa.listFactors();
+    setFactores((data?.totp || []).filter((f) => f.status === "verified"));
+  };
+  useEffect(() => { cargar(); }, []);
+
+  const activar = async () => {
+    setError(""); setLoading(true);
+    const { data, error } = await supabase.auth.mfa.enroll({ factorType: "totp" });
+    setLoading(false);
+    if (error) { setError("No se pudo iniciar. Intenta de nuevo."); return; }
+    setEnrolando({ id: data.id, qr: data.totp.qr_code, secret: data.totp.secret });
+  };
+
+  const confirmar = async (e) => {
+    e.preventDefault();
+    setError(""); setLoading(true);
+    const { data: challenge, error: errCh } = await supabase.auth.mfa.challenge({ factorId: enrolando.id });
+    if (errCh) { setError("No se pudo verificar. Intenta de nuevo."); setLoading(false); return; }
+    const { error: errVer } = await supabase.auth.mfa.verify({ factorId: enrolando.id, challengeId: challenge.id, code: codigo });
+    setLoading(false);
+    if (errVer) { setError("Código incorrecto. Revisa tu app de autenticación."); return; }
+    setEnrolando(null); setCodigo("");
+    cargar();
+  };
+
+  const desactivar = async (factorId) => {
+    setLoading(true);
+    await supabase.auth.mfa.unenroll({ factorId });
+    setLoading(false);
+    cargar();
+  };
+
+  return (
+    <Modal title="Verificación en dos pasos" onClose={onClose}>
+      {factores === null ? (
+        <p className="text-sm gp-text-muted">Cargando…</p>
+      ) : enrolando ? (
+        <form onSubmit={confirmar}>
+          <p className="text-sm gp-text-muted mb-3">Escanea este código con tu app de autenticación (Google Authenticator, Authy, etc.):</p>
+          <div className="flex justify-center mb-3" style={{ background: "#fff", borderRadius: 8, padding: 12 }}>
+            <img src={enrolando.qr} alt="Código QR" style={{ width: 180, height: 180 }} />
+          </div>
+          <p className="text-xs gp-text-muted mb-3">¿No puedes escanear? Ingresa esta clave manualmente: <span className="gp-mono">{enrolando.secret}</span></p>
+          <Field label="Código de 6 dígitos">
+            <input className="gp-input text-center" style={{ letterSpacing: "0.4em" }} maxLength={6} inputMode="numeric"
+              value={codigo} onChange={(e) => setCodigo(e.target.value.replace(/\D/g, "").slice(0, 6))} autoFocus />
+          </Field>
+          {error && <p className="text-xs gp-text-red mb-3">{error}</p>}
+          <div className="flex gap-2">
+            <button type="button" onClick={() => { setEnrolando(null); setCodigo(""); }} className="gp-btn-ghost flex-1 py-2 text-sm">Cancelar</button>
+            <button type="submit" disabled={loading || codigo.length !== 6} className="gp-btn flex-1 py-2 text-sm">Activar</button>
+          </div>
+        </form>
+      ) : factores.length > 0 ? (
+        <div>
+          <div className="flex items-center gap-2 mb-4 text-sm gp-text-teal"><Check size={16} /> Verificación en dos pasos activada</div>
+          {factores.map((f) => (
+            <div key={f.id} className="flex items-center justify-between p-3 rounded mb-2" style={{ background: "var(--panel-hi)" }}>
+              <span className="text-sm">App de autenticación</span>
+              <button onClick={() => desactivar(f.id)} disabled={loading} className="text-xs gp-text-red">Desactivar</button>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div>
+          <p className="text-sm gp-text-muted mb-4">Agrega una capa extra de seguridad: además de tu contraseña, vas a necesitar un código de tu teléfono para entrar. Muy recomendado si administras información sensible como la tuya.</p>
+          {error && <p className="text-xs gp-text-red mb-3">{error}</p>}
+          <button onClick={activar} disabled={loading} className="gp-btn w-full py-2 text-sm">
+            {loading ? "Un momento…" : "Activar verificación en dos pasos"}
+          </button>
+        </div>
+      )}
+    </Modal>
+  );
+}
 
 function AppLoggedIn({ session, tema, toggleTema, setTema }) {
   const misId = session.user.id;
@@ -988,6 +1166,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
   };
 
   const [exportPaso, setExportPaso] = useState(null); // null | "confirmar" | "listo"
+  const [mfaModalAbierto, setMfaModalAbierto] = useState(false);
   const confirmarExportar = () => {
     exportarExcel(data, activeOwnerId === misId ? "mi-cuenta" : activeOwnerEmail?.split("@")[0]);
     setExportPaso("listo");
@@ -1195,6 +1374,10 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
               className="gp-navitem flex items-center gap-2 px-3 py-2.5 md:py-2 text-sm text-left w-full">
               <Download size={15} /> Exportar mis datos
             </button>
+            <button onClick={() => setMfaModalAbierto(true)}
+              className="gp-navitem flex items-center gap-2 px-3 py-2.5 md:py-2 text-sm text-left w-full">
+              <Shield size={15} /> Verificación en dos pasos
+            </button>
             {activeOwnerId === misId && (
               <>
                 <button onClick={() => { setView("colaboradores"); setMobileNavOpen(false); }}
@@ -1336,6 +1519,8 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
           </div>
         </div>
       )}
+
+      {mfaModalAbierto && <SeguridadMfaModal onClose={() => setMfaModalAbierto(false)} />}
     </div>
   );
 }
