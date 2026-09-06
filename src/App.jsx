@@ -798,10 +798,39 @@ function NuevaPasswordScreen({ onListo, tema }) {
 }
 
 /* ---------- app (portero de sesión) ---------- */
+// Pantalla de bienvenida (~5 seg) que se ve al abrir la app, antes de mostrar login o el sistema.
+// Es puramente visual — la sesión se carga en paralelo mientras esto se muestra.
+function SplashScreen({ tema, fadingOut }) {
+  return (
+    <div
+      className={`gp-root fixed inset-0 z-[100] flex items-center justify-center ${tema === "claro" ? "claro" : ""}`}
+      style={{ transition: "opacity .4s ease", opacity: fadingOut ? 0 : 1 }}
+    >
+      <Tokens tema={tema} />
+      <style>{`
+        @keyframes splashLogoIn { from { opacity:0; transform:scale(.9) translateY(6px);} to { opacity:1; transform:scale(1) translateY(0);} }
+        @keyframes splashTaglineIn { from { opacity:0; transform:translateY(4px);} to { opacity:1; transform:translateY(0);} }
+        @keyframes splashBarFill { from { width:0%;} to { width:100%;} }
+        .splash-logo{ animation: splashLogoIn .6s cubic-bezier(.16,1,.3,1) both; }
+        .splash-tagline{ animation: splashTaglineIn .5s ease .5s both; }
+        .splash-bar-track{ width:140px; height:3px; border-radius:999px; background:var(--border); overflow:hidden; margin-top:22px; }
+        .splash-bar-fill{ height:100%; background:var(--gold); animation: splashBarFill 4.2s cubic-bezier(.4,0,.2,1) .5s both; border-radius:999px; }
+      `}</style>
+      <div className="flex flex-col items-center">
+        <img src="/logo-arkeyone.png" alt="ArkeyOne" className="splash-logo" style={{ height: 56 }} />
+        <p className="splash-tagline text-xs gp-text-muted mt-3 tracking-wide">Alinea tu vida, impúlsala</p>
+        <div className="splash-bar-track"><div className="splash-bar-fill" /></div>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [session, setSession] = useState(undefined); // undefined = cargando, null = sin sesión
   const [recuperando, setRecuperando] = useState(false);
   const [tema, toggleTema, setTema] = useTema();
+  const [showSplash, setShowSplash] = useState(true);
+  const [splashFadingOut, setSplashFadingOut] = useState(false);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
@@ -811,6 +840,17 @@ export default function App() {
     });
     return () => listener.subscription.unsubscribe();
   }, []);
+
+  // El splash dura ~5 seg fijos, sin importar qué tan rápido cargue la sesión (que corre en paralelo arriba).
+  useEffect(() => {
+    const fadeTimer = setTimeout(() => setSplashFadingOut(true), 4600);
+    const hideTimer = setTimeout(() => setShowSplash(false), 5000);
+    return () => { clearTimeout(fadeTimer); clearTimeout(hideTimer); };
+  }, []);
+
+  if (showSplash) {
+    return <SplashScreen tema={tema} fadingOut={splashFadingOut} />;
+  }
 
   if (session === undefined) {
     return (
