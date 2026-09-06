@@ -2003,8 +2003,9 @@ function descendientesDe(id, items) {
 }
 
 // Vista mind-map: dibuja el proyecto en el centro y sus pendientes/subtareas ramificándose a la derecha.
-function MindMapPendientes({ proyecto, tareas, onNodoClick }) {
+function MindMapPendientes({ proyecto, tareas, onNodoClick, onAgregar }) {
   const NODE_W = 190, NODE_H = 36, GAP_Y = 12, GAP_X = 60;
+  const BTN_R = 9; // radio del botoncito "+"
   const raices = buildTareaTree(tareas.filter((t) => t.proyectoId === proyecto.id));
   const root = { id: "_root", descripcion: proyecto.nombre, estatus: null, hijos: raices };
 
@@ -2036,7 +2037,12 @@ function MindMapPendientes({ proyecto, tareas, onNodoClick }) {
   conectar(root);
 
   if (posiciones.length === 1) {
-    return <p className="text-sm gp-text-muted py-8 text-center">Este proyecto todavía no tiene pendientes registrados.</p>;
+    return (
+      <div className="text-center py-10">
+        <p className="text-sm gp-text-muted mb-3">Este proyecto todavía no tiene pendientes registrados.</p>
+        <button onClick={() => onAgregar && onAgregar(root)} className="gp-btn px-4 py-2 text-sm inline-flex items-center gap-1"><Plus size={14} /> Agregar el primero</button>
+      </div>
+    );
   }
 
   const maxNivel = Math.max(...posiciones.map((p) => p.nivel));
@@ -2046,35 +2052,49 @@ function MindMapPendientes({ proyecto, tareas, onNodoClick }) {
   const colorEstatus = (estatus) => (estatus === "Hecho" ? "var(--teal)" : estatus === "En progreso" ? "var(--gold)" : "var(--border)");
 
   return (
-    <div className="overflow-auto gp-scroll gp-panel p-4" style={{ maxHeight: 560 }}>
-      <svg width={width} height={height} style={{ minWidth: width, display: "block" }}>
-        {edges.map((e, i) => {
-          const x1 = e.from.nivel * (NODE_W + GAP_X) + NODE_W;
-          const y1 = e.from.y + NODE_H / 2;
-          const x2 = e.to.nivel * (NODE_W + GAP_X);
-          const y2 = e.to.y + NODE_H / 2;
-          const mx = (x1 + x2) / 2;
-          return <path key={i} d={`M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}`} stroke="var(--border)" strokeWidth={1.5} fill="none" />;
-        })}
-        {posiciones.map((p) => {
-          const x = p.nivel * (NODE_W + GAP_X);
-          const esRaiz = p.nodo.id === "_root";
-          const texto = (p.nodo.descripcion || "").length > 26 ? p.nodo.descripcion.slice(0, 25) + "…" : p.nodo.descripcion;
-          return (
-            <g key={p.nodo.id} transform={`translate(${x},${p.y})`} style={{ cursor: esRaiz ? "default" : "pointer" }} onClick={() => !esRaiz && onNodoClick && onNodoClick(p.nodo)}>
-              <rect width={NODE_W} height={NODE_H} rx={8}
-                fill={esRaiz ? "var(--gold)" : "var(--panel-hi)"}
-                stroke={esRaiz ? "var(--gold)" : colorEstatus(p.nodo.estatus)}
-                strokeWidth={esRaiz ? 0 : 2} />
-              <text x={10} y={NODE_H / 2 + 4} fontSize={12} fontFamily="'IBM Plex Sans',sans-serif"
-                fontWeight={esRaiz ? 600 : 400}
-                fill={esRaiz ? "#161822" : "var(--text)"}>
-                {texto}
-              </text>
-            </g>
-          );
-        })}
-      </svg>
+    <div>
+      <p className="text-xs gp-text-muted mb-2">Clic en un pendiente para editarlo · clic en <span className="gp-text-gold">➕</span> para agregarle una subtarea.</p>
+      <div className="overflow-auto gp-scroll gp-panel p-4" style={{ maxHeight: 560 }}>
+        <svg width={width} height={height} style={{ minWidth: width, display: "block" }}>
+          {edges.map((e, i) => {
+            const x1 = e.from.nivel * (NODE_W + GAP_X) + NODE_W;
+            const y1 = e.from.y + NODE_H / 2;
+            const x2 = e.to.nivel * (NODE_W + GAP_X);
+            const y2 = e.to.y + NODE_H / 2;
+            const mx = (x1 + x2) / 2;
+            return <path key={i} d={`M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}`} stroke="var(--border)" strokeWidth={1.5} fill="none" />;
+          })}
+          {posiciones.map((p) => {
+            const x = p.nivel * (NODE_W + GAP_X);
+            const esRaiz = p.nodo.id === "_root";
+            const texto = (p.nodo.descripcion || "").length > 26 ? p.nodo.descripcion.slice(0, 25) + "…" : p.nodo.descripcion;
+            return (
+              <g key={p.nodo.id}>
+                <g transform={`translate(${x},${p.y})`} style={{ cursor: esRaiz ? "default" : "pointer" }} onClick={() => !esRaiz && onNodoClick && onNodoClick(p.nodo)}>
+                  <rect width={NODE_W} height={NODE_H} rx={8}
+                    fill={esRaiz ? "var(--gold)" : "var(--panel-hi)"}
+                    stroke={esRaiz ? "var(--gold)" : colorEstatus(p.nodo.estatus)}
+                    strokeWidth={esRaiz ? 0 : 2} />
+                  <text x={10} y={NODE_H / 2 + 4} fontSize={12} fontFamily="'IBM Plex Sans',sans-serif"
+                    fontWeight={esRaiz ? 600 : 400}
+                    fill={esRaiz ? "#161822" : "var(--text)"}>
+                    {texto}
+                  </text>
+                </g>
+                {/* botón "+" para agregar una subtarea colgando de este nodo */}
+                <g
+                  transform={`translate(${x + NODE_W + (GAP_X / 2)},${p.y + NODE_H / 2})`}
+                  style={{ cursor: "pointer" }}
+                  onClick={() => onAgregar && onAgregar(p.nodo)}
+                >
+                  <circle r={BTN_R} fill="var(--gold)" />
+                  <text x={0} y={4} fontSize={13} textAnchor="middle" fontWeight={700} fill="#161822">+</text>
+                </g>
+              </g>
+            );
+          })}
+        </svg>
+      </div>
     </div>
   );
 }
@@ -2111,6 +2131,9 @@ function Pendientes({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCo
   const nombreProyecto = (id) => data.proyectos.find((p) => p.id === id)?.nombre || "—";
   const nombreResp = (id) => data.equipo.find((e) => e.id === id)?.nombre || "Tú";
   const nombreCliente = (id) => data.contactos.find((c) => c.id === id)?.nombre || "—";
+  // Los objetos armados por buildTareaTree traen un campo "hijos" que es solo para dibujar el árbol
+  // en pantalla — hay que quitarlo antes de mandar el ítem a editar, porque no es una columna real.
+  const paraEditar = (t) => { const { hijos, ...limpio } = t; return limpio; };
 
   return (
     <div>
@@ -2138,7 +2161,8 @@ function Pendientes({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCo
           <MindMapPendientes
             proyecto={data.proyectos.find((p) => p.id === proyectoMindMap)}
             tareas={data.pendientes}
-            onNodoClick={(nodo) => setModal({ item: nodo })}
+            onNodoClick={(nodo) => setModal({ item: paraEditar(nodo) })}
+            onAgregar={(nodo) => setModal({ item: { ...empty, proyectoId: proyectoMindMap, parentId: nodo.id === "_root" ? "" : nodo.id } })}
           />
         ) : (
           <p className="text-sm gp-text-muted py-8 text-center">Elige un proyecto arriba para ver su mind-map de pendientes.</p>
@@ -2185,7 +2209,7 @@ function Pendientes({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCo
                   <td><div className="flex gap-1">
                     <IconBtn onClick={() => setModal({ item: { ...empty, proyectoId: p.proyectoId, parentId: p.id } })}><Plus size={13} /></IconBtn>
                     <IconBtn onClick={() => setComentariosDe(p)}><MessageCircle size={13} />{nc > 0 && <span className="gp-mono" style={{ fontSize: 9, marginLeft: 2 }}>{nc}</span>}</IconBtn>
-                    <IconBtn onClick={() => setModal({ item: p })}><Pencil size={13} /></IconBtn><IconBtn onClick={() => onRemove(p.id)}><Trash2 size={13} /></IconBtn>
+                    <IconBtn onClick={() => setModal({ item: paraEditar(p) })}><Pencil size={13} /></IconBtn><IconBtn onClick={() => onRemove(p.id)}><Trash2 size={13} /></IconBtn>
                   </div></td>
                 </tr>
               );
