@@ -1487,7 +1487,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
           {view === "dashboard" && <Dashboard data={data} setView={irAVista} onAddSaldo={(i) => addItem("saldoInicial", i)} />}
           {view === "papelera" && <Papelera onRestore={restoreItem} onPermanentDelete={permanentDelete} ownerId={activeOwnerId} />}
           {view === "colaboradores" && <Colaboradores misId={misId} miEmail={miEmail} />}
-          {view === "admin" && <AdminUsuarios adminUid={ADMIN_UID} />}
+          {view === "admin" && <AdminUsuarios adminUid={ADMIN_UID} adminEmail={miEmail} />}
           {view === "proyectos" && (
             <Proyectos data={data} onAdd={(i) => addItem("proyectos", i)} onEdit={(id, p) => editItem("proyectos", id, p)} onRemove={(id) => askDelete("proyectos", id)} onAddComentario={(i) => addItem("comentarios", i)} onRemoveComentario={(id) => askDelete("comentarios", id)} />
           )}
@@ -1647,11 +1647,13 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
 // Panel de administración: lista todos los usuarios registrados en ArkeyOne y permite
 // bloquearlos (les impide entrar, pero conserva su información) o eliminarlos por completo
 // (borra su cuenta y todos sus datos, sin poder deshacerse). Solo tú puedes ver esta pantalla.
-function AdminUsuarios({ adminUid }) {
+function AdminUsuarios({ adminUid, adminEmail }) {
   const [usuarios, setUsuarios] = useState(null); // null = cargando
   const [error, setError] = useState("");
   const [accionEnCurso, setAccionEnCurso] = useState(null); // id del usuario sobre el que se está actuando
   const [confirmar, setConfirmar] = useState(null); // { usuario, tipo: "bloquear" | "reactivar" | "eliminar" }
+  const [confirmarPassword, setConfirmarPassword] = useState("");
+  const [confirmarError, setConfirmarError] = useState("");
 
   const llamar = async (action, userId) => {
     const { data: sesion } = await supabase.auth.getSession();
@@ -1672,10 +1674,20 @@ function AdminUsuarios({ adminUid }) {
   useEffect(() => { cargar(); }, []);
 
   const ejecutarAccion = async (usuario, tipo) => {
-    setAccionEnCurso(usuario.id);
+    if (tipo === "eliminar") {
+      if (!confirmarPassword) { setConfirmarError("Escribe tu contraseña para confirmar."); return; }
+      setAccionEnCurso(usuario.id);
+      // Reautenticación obligatoria antes de un borrado irreversible de cuenta y todos sus datos.
+      const { error: errAuth } = await supabase.auth.signInWithPassword({ email: adminEmail, password: confirmarPassword });
+      if (errAuth) { setAccionEnCurso(null); setConfirmarError("Contraseña incorrecta."); return; }
+    } else {
+      setAccionEnCurso(usuario.id);
+    }
     const resultado = await llamar(tipo, usuario.id);
     setAccionEnCurso(null);
     setConfirmar(null);
+    setConfirmarPassword("");
+    setConfirmarError("");
     if (resultado.error) { alert(resultado.error); return; }
     cargar();
   };
@@ -1713,7 +1725,7 @@ function AdminUsuarios({ adminUid }) {
                         ) : (
                           <button disabled={accionEnCurso === u.id} onClick={() => setConfirmar({ usuario: u, tipo: "bloquear" })} className="text-xs gp-text-gold">Bloquear</button>
                         )}
-                        <button disabled={accionEnCurso === u.id} onClick={() => setConfirmar({ usuario: u, tipo: "eliminar" })} className="text-xs gp-text-red">Eliminar</button>
+                        <button disabled={accionEnCurso === u.id} onClick={() => { setConfirmar({ usuario: u, tipo: "eliminar" }); setConfirmarPassword(""); setConfirmarError(""); }} className="text-xs gp-text-red">Eliminar</button>
                       </div>
                     )}
                   </td>
@@ -1740,16 +1752,34 @@ function AdminUsuarios({ adminUid }) {
               {confirmar.tipo === "reactivar" && `${confirmar.usuario.email} va a poder volver a entrar normalmente.`}
               {confirmar.tipo === "eliminar" && `Se borra la cuenta de ${confirmar.usuario.email} y absolutamente toda su información (proyectos, finanzas, todo). Esto NO se puede deshacer.`}
             </p>
+            {confirmar.tipo === "eliminar" && (
+              <div className="mb-4">
+                <p className="text-xs gp-text-muted mb-1">Por seguridad, escribe tu contraseña para confirmar:</p>
+                <input
+                  type="password"
+                  autoFocus
+                  value={confirmarPassword}
+                  onChange={(e) => { setConfirmarPassword(e.target.value); setConfirmarError(""); }}
+                  onKeyDown={(e) => { if (e.key === "Enter") ejecutarAccion(confirmar.usuario, confirmar.tipo); }}
+                  placeholder="Tu contraseña"
+                  className="gp-input w-full"
+                />
+                {confirmarError && <p className="text-xs text-red-400 mt-1">{confirmarError}</p>}
+              </div>
+            )}
             <div className="flex gap-2">
-              <button onClick={() => setConfirmar(null)} className="gp-btn-ghost flex-1 py-2 text-sm">Cancelar</button>
+              <button onClick={() => { setConfirmar(null); setConfirmarPassword(""); setConfirmarError(""); }} className="gp-btn-ghost flex-1 py-2 text-sm">Cancelar</button>
               <button
                 onClick={() => ejecutarAccion(confirmar.usuario, confirmar.tipo)}
-                className="flex-1 py-2 text-sm rounded"
+                disabled={accionEnCurso === confirmar.usuario.id}
+                className="flex-1 py-2 text-sm rounded disabled:opacity-50"
                 style={{ background: confirmar.tipo === "eliminar" ? "var(--red)" : "var(--gold)", color: confirmar.tipo === "eliminar" ? "#fff" : "#161822" }}
               >
-                {confirmar.tipo === "bloquear" && "Bloquear"}
-                {confirmar.tipo === "reactivar" && "Reactivar"}
-                {confirmar.tipo === "eliminar" && "Eliminar todo"}
+                {accionEnCurso === confirmar.usuario.id ? "Verificando…" : <>
+                  {confirmar.tipo === "bloquear" && "Bloquear"}
+                  {confirmar.tipo === "reactivar" && "Reactivar"}
+                  {confirmar.tipo === "eliminar" && "Eliminar todo"}
+                </>}
               </button>
             </div>
           </div>
