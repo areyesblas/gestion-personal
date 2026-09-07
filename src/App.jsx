@@ -753,7 +753,7 @@ function LoginScreen({ tema, toggleTema }) {
         <button type="button" onClick={toggleTema} className="absolute top-4 right-4 gp-btn-ghost p-1.5 rounded" aria-label="Cambiar tema" title={tema === "claro" ? "Cambiar a Azul Oscuro" : "Cambiar a Azul Claro"}>
           {tema === "claro" ? <Moon size={14} /> : <Sun size={14} />}
         </button>
-        <img src="/logo-arkeyone.png" alt="ArkeyOne" style={{ height: 60 }} className="mb-3" />
+        <img src="/logo-arkeyone.png" alt="ArkeyOne" style={{ height: 108 }} className="mb-3" />
         <p className="text-xs gp-text-muted mb-4">
           {modo === "entrar" ? "Inicia sesión para entrar a tu sistema." : modo === "crear" ? "Crea tu cuenta." : "Te mandamos un enlace para poner una contraseña nueva."}
         </p>
@@ -818,7 +818,7 @@ function NuevaPasswordScreen({ onListo, tema }) {
     <div className={`gp-root flex items-center justify-center ${tema === "claro" ? "claro" : ""}`} style={{ minHeight: "100vh" }}>
       <Tokens tema={tema} />
       <div className="gp-panel p-6 w-full max-w-sm">
-        <img src="/logo-arkeyone.png" alt="ArkeyOne" style={{ height: 60 }} className="mb-3" />
+        <img src="/logo-arkeyone.png" alt="ArkeyOne" style={{ height: 108 }} className="mb-3" />
         {listo ? (
           <>
             <p className="text-sm mb-4">Tu contraseña ya se actualizó. Ya puedes seguir usando tu cuenta con la nueva.</p>
@@ -859,7 +859,7 @@ function SplashScreen({ tema, fadingOut }) {
         .splash-bar-fill{ height:100%; background:var(--gold); animation: splashBarFill 4.2s cubic-bezier(.4,0,.2,1) .5s both; border-radius:999px; }
       `}</style>
       <div className="flex flex-col items-center">
-        <img src="/logo-arkeyone.png" alt="ArkeyOne" className="splash-logo" style={{ height: 84 }} />
+        <img src="/logo-arkeyone.png" alt="ArkeyOne" className="splash-logo" style={{ height: 200 }} />
         <p className="splash-tagline text-xs gp-text-muted mt-3 tracking-wide">La llave que ordena tu mundo</p>
         <div className="splash-bar-track"><div className="splash-bar-fill" /></div>
       </div>
@@ -889,7 +889,7 @@ function MfaChallengeScreen({ factorId, onVerificado, tema }) {
     <div className={`gp-root flex items-center justify-center ${tema === "claro" ? "claro" : ""}`} style={{ minHeight: "100vh" }}>
       <Tokens tema={tema} />
       <div className="gp-panel p-6 w-full max-w-sm">
-        <img src="/logo-arkeyone.png" alt="ArkeyOne" style={{ height: 56 }} className="mb-4" />
+        <img src="/logo-arkeyone.png" alt="ArkeyOne" style={{ height: 92 }} className="mb-4" />
         <h2 className="gp-serif text-lg mb-1">Verificación en dos pasos</h2>
         <p className="text-sm gp-text-muted mb-4">Abre tu app de autenticación (Google Authenticator, Authy, etc.) e ingresa el código de 6 dígitos.</p>
         <form onSubmit={verificar}>
@@ -1325,7 +1325,10 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
         >
           <div className="px-2 flex items-start justify-between">
             <div>
-              <img src="/logo-arkeyone.png" alt="ArkeyOne" style={{ height: 44 }} className="mb-1" />
+              <div className="flex items-center gap-2 mb-1">
+                <img src="/icono-arkeyone.png" alt="" style={{ height: 34 }} />
+                <span className="gp-serif text-lg font-semibold" style={{ letterSpacing: "0.3px" }}>ArkeyOne</span>
+              </div>
               <p className="text-xs gp-text-muted truncate" style={{ maxWidth: 160 }}>
                 {activeOwnerId === misId ? miEmail : `Viendo: ${activeOwnerEmail}`}
               </p>
