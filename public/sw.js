@@ -90,18 +90,28 @@ self.addEventListener("push", (event) => {
     icon: "/icons/icon-192.png",
     badge: "/icons/icon-192.png",
     tag: datos.tag || undefined, // notificaciones con el mismo tag se reemplazan en vez de amontonarse
-    data: { url: datos.url || "/" },
+    data: { url: datos.url || "/", recordatorioId: datos.recordatorioId || null },
     vibrate: [80, 40, 80],
+    // Botones de acción rápida (ej. medicamentos: "Tomado" / "Posponer"). Chrome/Android los
+    // soportan; iOS Safari los ignora silenciosamente y solo deja abrir la notificación al tocarla
+    // — por eso el "url" de arriba siempre debe llevar a una pantalla útil por sí sola.
+    actions: Array.isArray(datos.actions) ? datos.actions.slice(0, 2) : undefined,
   };
 
   event.waitUntil(self.registration.showNotification(titulo, opciones));
 });
 
-// Al tocar la notificación: si ya hay una pestaña/ventana de ARKEYONE abierta, la enfoca
-// y le manda la URL a donde ir (deep link); si no hay ninguna, abre una nueva.
+// Al tocar la notificación (o uno de sus botones de acción): si ya hay una pestaña/ventana de
+// ARKEYONE abierta, la enfoca y le manda a dónde ir; si no hay ninguna, abre una nueva.
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
-  const url = event.notification.data?.url || "/";
+  const recordatorioId = event.notification.data?.recordatorioId;
+  let url = event.notification.data?.url || "/";
+
+  // event.action viene vacío ("") si tocaron el cuerpo de la notificación (no un botón).
+  if (event.action && recordatorioId) {
+    url = `/?accion=${encodeURIComponent(event.action)}&recordatorio=${encodeURIComponent(recordatorioId)}`;
+  }
 
   event.waitUntil(
     (async () => {

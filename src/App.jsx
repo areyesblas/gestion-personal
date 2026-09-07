@@ -6,7 +6,7 @@ import {
   Users, Activity, Plus, X, Trash2, Pencil, Github, ChevronDown,
   ChevronRight, Bell, Lightbulb, Rocket, MessageCircle, Mail, Globe,
   Target, Contact, BarChart3, FileText, Flame, HeartPulse, Check, Menu, PieChart as PieChartIcon,
-  PiggyBank, Camera, Film, Upload, MapPin, Clock, Mic, Gift, Receipt, Megaphone, ChevronUp, Gem, Download, Sun, Moon, Shield, LogOut, ChevronLeft, Lock,
+  PiggyBank, Camera, Film, Upload, MapPin, Clock, Mic, Gift, Receipt, Megaphone, ChevronUp, Gem, Download, Sun, Moon, Shield, LogOut, ChevronLeft, Lock, Pill,
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
@@ -294,7 +294,7 @@ const categoriaIMC = (imc) => {
 };
 
 /* ---------- persistencia relacional ---------- */
-const TABLES = ["proyectos", "pendientes", "equipo", "finanzas", "deudas", "actividades", "activos", "metas", "contactos", "redesMetricas", "documentos", "habitos", "salud", "apartados", "eventos", "comentarios", "saldoInicial", "regalos", "facturas", "campanas", "patrimonio", "patrimonioValuaciones"];
+const TABLES = ["proyectos", "pendientes", "equipo", "finanzas", "deudas", "actividades", "activos", "metas", "contactos", "redesMetricas", "documentos", "habitos", "salud", "apartados", "eventos", "comentarios", "saldoInicial", "regalos", "facturas", "campanas", "patrimonio", "patrimonioValuaciones", "medicamentos"];
 const OLD_STORAGE_KEY = "gestion_personal_data"; // localStorage, versión muy vieja
 const OLD_BLOB_TABLE = "gestion_data"; // tabla única jsonb, versión anterior a este modelo relacional
 
@@ -309,7 +309,7 @@ const ETIQUETA_TABLA = {
   habitos: "Hábito", salud: "Registro de salud", apartados: "Apartado", eventos: "Evento",
   comentarios: "Comentario", saldoInicial: "Saldo inicial", regalos: "Regalo",
   facturas: "Factura", campanas: "Campaña", patrimonio: "Bien patrimonial",
-  patrimonioValuaciones: "Valuación de patrimonio",
+  patrimonioValuaciones: "Valuación de patrimonio", medicamentos: "Medicamento",
 };
 
 // Exporta toda la información visible del usuario a un archivo Excel, un módulo por hoja.
@@ -1097,6 +1097,7 @@ const VIEW_TO_MODULO = {
   equipo: "equipo", contactos: "contactos", regalos: "regalos",
   redes: "redes_metricas", marketing: "campanas",
   actividades: "actividades", eventos: "eventos", habitos: "habitos", salud: "salud",
+  medicamentos: "medicamentos",
 };
 // Mapeo inverso: de nombre de tabla/módulo a id de vista, para los deep links de Push
 // (una notificación de una deuda trae recurso_tabla="deudas" y con esto sabemos a qué
@@ -1257,7 +1258,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
   // reautenticación o actividad. Si se cumple el plazo, se pide contraseña de nuevo antes de
   // entrar/seguir en el módulo — independiente del cierre general de sesión a los 30 min.
   const SENSIBLE_MS = 15 * 60 * 1000;
-  const VISTAS_SENSIBLES = ["finanzas", "facturas", "reportes", "deudas", "apartados", "patrimonio", "activos", "documentos", "salud"];
+  const VISTAS_SENSIBLES = ["finanzas", "facturas", "reportes", "deudas", "apartados", "patrimonio", "activos", "documentos", "salud", "medicamentos"];
   const [sensibleDesbloqueadoHasta, setSensibleDesbloqueadoHasta] = useState(0);
   const [reauthPendiente, setReauthPendiente] = useState(null); // id de la vista esperando reautenticación
   const [reauthPassword, setReauthPassword] = useState("");
@@ -1422,12 +1423,30 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
     await supabase.from("notifications").update({ leido: true }).eq("user_id", misId).eq("leido", false);
   };
 
+  // Procesa el botón de acción rápida de una notificación de medicamento (Tomado / Posponer).
+  const ACCION_MINUTOS = { posponer10: 10, posponer30: 30, posponer60: 60 };
+  const procesarAccionRecordatorio = async (accion, recordatorioId) => {
+    if (accion === "tomado") {
+      await supabase.from("recordatorios").update({ estado: "completado" }).eq("id", recordatorioId).eq("user_id", misId);
+    } else if (ACCION_MINUTOS[accion]) {
+      const pospuestoHasta = new Date(Date.now() + ACCION_MINUTOS[accion] * 60000).toISOString();
+      await supabase.from("recordatorios").update({ estado: "pospuesto", pospuesto_hasta: pospuestoHasta }).eq("id", recordatorioId).eq("user_id", misId);
+    }
+    irAVista("salud");
+    cargarNotificaciones();
+  };
+
   // Deep links: si llegan de un push tocado con la app cerrada (abre /?modulo=deudas), o de
   // un push tocado con la app ya abierta (el Service Worker manda el mensaje a esta pestaña).
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const modulo = params.get("modulo");
-    if (modulo) {
+    const accion = params.get("accion");
+    const recordatorioId = params.get("recordatorio");
+    if (accion && recordatorioId) {
+      procesarAccionRecordatorio(accion, recordatorioId);
+      window.history.replaceState({}, "", window.location.pathname);
+    } else if (modulo) {
       irADeepLink(modulo);
       window.history.replaceState({}, "", window.location.pathname);
     }
@@ -1435,8 +1454,11 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
       if (event.data?.tipo === "arkeyone-deep-link") {
         try {
           const url = new URL(event.data.url, window.location.origin);
+          const a = url.searchParams.get("accion");
+          const rid = url.searchParams.get("recordatorio");
           const m = url.searchParams.get("modulo");
-          if (m) irADeepLink(m);
+          if (a && rid) procesarAccionRecordatorio(a, rid);
+          else if (m) irADeepLink(m);
         } catch {}
       }
     };
@@ -1557,6 +1579,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
       { id: "eventos", label: "Eventos", icon: Camera },
       { id: "habitos", label: "Hábitos", icon: Flame },
       { id: "salud", label: "Salud", icon: HeartPulse },
+      { id: "medicamentos", label: "Medicamentos", icon: Pill },
     ]},
   ];
 
@@ -1775,6 +1798,9 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
           )}
           {view === "salud" && (
             <Salud data={data} onAdd={(i) => addItem("salud", i)} onEdit={(id, p) => editItem("salud", id, p)} onRemove={(id) => askDelete("salud", id)} onUpdatePerfil={updatePerfilSalud} />
+          )}
+          {view === "medicamentos" && (
+            <Medicamentos data={data} onAdd={(i) => addItem("medicamentos", i)} onEdit={(id, p) => editItem("medicamentos", id, p)} onRemove={(id) => askDelete("medicamentos", id)} />
           )}
           {view === "activos" && (
             <ActivosDigitales data={data} onAdd={(i) => addItem("activos", i)} onEdit={(id, p) => editItem("activos", id, p)} onRemove={(id) => askDelete("activos", id)} />
@@ -4840,6 +4866,124 @@ function Habitos({ data, onAdd, onEdit, onRemove }) {
         })}
         {data.habitos.length === 0 && <p className="text-sm gp-text-muted">Aún no tienes hábitos registrados.</p>}
       </div>
+    </div>
+  );
+}
+
+/* ---------- Medicamentos ---------- */
+const DIAS_SEMANA_LABELS = ["D", "L", "M", "M", "J", "V", "S"]; // 0=domingo … 6=sábado
+
+function MedicamentoForm({ inicial, onSave, onCancel }) {
+  const [form, setForm] = useState(inicial || {
+    nombre: "", dosis: "", paraQuien: "Yo", horarios: ["08:00"], diasSemana: [0, 1, 2, 3, 4, 5, 6],
+    fechaInicio: todayISO(), fechaFin: "", instrucciones: "", activo: true,
+  });
+  const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+
+  const toggleDia = (d) => set("diasSemana", form.diasSemana.includes(d) ? form.diasSemana.filter((x) => x !== d) : [...form.diasSemana, d].sort());
+  const cambiarHorario = (i, valor) => set("horarios", form.horarios.map((h, idx) => (idx === i ? valor : h)));
+  const agregarHorario = () => set("horarios", [...form.horarios, "08:00"]);
+  const quitarHorario = (i) => set("horarios", form.horarios.filter((_, idx) => idx !== i));
+
+  return (
+    <div>
+      <Field label="Nombre del medicamento"><input className="gp-input" value={form.nombre} onChange={(e) => set("nombre", e.target.value)} /></Field>
+      <Field label="Dosis"><input className="gp-input" placeholder="ej. 1 tableta, 5ml" value={form.dosis} onChange={(e) => set("dosis", e.target.value)} /></Field>
+      <Field label="¿Para quién es?"><input className="gp-input" placeholder="ej. Yo, Mamá, Papá" value={form.paraQuien} onChange={(e) => set("paraQuien", e.target.value)} /></Field>
+
+      <p className="text-xs gp-text-muted mb-1">Horarios de toma</p>
+      <div className="space-y-1.5 mb-3">
+        {form.horarios.map((h, i) => (
+          <div key={i} className="flex items-center gap-2">
+            <input type="time" className="gp-input" style={{ width: 140 }} value={h} onChange={(e) => cambiarHorario(i, e.target.value)} />
+            {form.horarios.length > 1 && <IconBtn onClick={() => quitarHorario(i)}><Trash2 size={13} /></IconBtn>}
+          </div>
+        ))}
+        <button type="button" onClick={agregarHorario} className="text-xs gp-text-gold">+ Agregar otro horario</button>
+      </div>
+
+      <p className="text-xs gp-text-muted mb-1">Días</p>
+      <div className="flex gap-1.5 mb-3">
+        {DIAS_SEMANA_LABELS.map((label, d) => (
+          <button
+            key={d} type="button" onClick={() => toggleDia(d)}
+            className="w-8 h-8 rounded-full text-xs"
+            style={{ background: form.diasSemana.includes(d) ? "var(--gold)" : "transparent", color: form.diasSemana.includes(d) ? "#161822" : "var(--muted)", border: "1px solid var(--border)" }}
+          >{label}</button>
+        ))}
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        <Field label="Empieza"><input type="date" className="gp-input" value={form.fechaInicio} onChange={(e) => set("fechaInicio", e.target.value)} /></Field>
+        <Field label="Termina (opcional)"><input type="date" className="gp-input" value={form.fechaFin} onChange={(e) => set("fechaFin", e.target.value)} /></Field>
+      </div>
+      <Field label="Instrucciones (opcional)"><input className="gp-input" placeholder="ej. Tomar con alimentos" value={form.instrucciones} onChange={(e) => set("instrucciones", e.target.value)} /></Field>
+
+      <div className="flex gap-2 mt-3">
+        <button className="gp-btn-ghost flex-1 py-2 text-sm" onClick={onCancel}>Cancelar</button>
+        <button
+          className="gp-btn flex-1 py-2 text-sm"
+          onClick={() => { if (form.nombre.trim() && form.horarios.length) onSave({ ...form, diasSemana: form.diasSemana.length ? form.diasSemana : [0, 1, 2, 3, 4, 5, 6] }); }}
+        >Guardar</button>
+      </div>
+    </div>
+  );
+}
+
+function Medicamentos({ data, onAdd, onEdit, onRemove }) {
+  const [modal, setModal] = useState(null); // null | "nuevo" | medicamento a editar
+
+  const lista = [...(data.medicamentos || [])].sort((a, b) => (a.activo === b.activo ? 0 : a.activo ? -1 : 1));
+
+  return (
+    <div>
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-1">
+        <h2 className="gp-serif text-2xl">Medicamentos</h2>
+        <button onClick={() => setModal("nuevo")} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm w-full sm:w-auto"><Plus size={14} /> Agregar</button>
+      </div>
+      <p className="text-sm gp-text-muted mb-6">Configura horarios y ARKEYONE te avisa por notificación push, con botones de "Tomado" y "Posponer".</p>
+
+      <div className="space-y-2">
+        {lista.map((m) => (
+          <div key={m.id} className="gp-panel p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-sm font-medium">{m.nombre}</span>
+                  {m.dosis && <Badge tone="muted">{m.dosis}</Badge>}
+                  <Badge tone="gold">{m.paraQuien}</Badge>
+                  {!m.activo && <Badge tone="red">Pausado</Badge>}
+                </div>
+                <div className="flex flex-wrap gap-1 mt-2">
+                  {(m.horarios || []).map((h, i) => <Badge key={i} tone="teal">{String(h).slice(0, 5)}</Badge>)}
+                </div>
+                <p className="text-xs gp-text-muted mt-1.5">
+                  {(m.diasSemana || []).length === 7 ? "Todos los días" : (m.diasSemana || []).map((d) => DIAS_SEMANA_LABELS[d]).join(" ")}
+                  {m.instrucciones ? ` · ${m.instrucciones}` : ""}
+                </p>
+              </div>
+              <div className="flex gap-1 shrink-0">
+                <IconBtn onClick={() => onEdit(m.id, { activo: !m.activo })} title={m.activo ? "Pausar" : "Reactivar"}>
+                  {m.activo ? <X size={13} /> : <Check size={13} />}
+                </IconBtn>
+                <IconBtn onClick={() => setModal(m)} title="Editar"><Pencil size={13} /></IconBtn>
+                <IconBtn onClick={() => onRemove(m.id)} title="Eliminar"><Trash2 size={13} /></IconBtn>
+              </div>
+            </div>
+          </div>
+        ))}
+        {lista.length === 0 && <p className="text-sm gp-text-muted">Aún no tienes medicamentos registrados.</p>}
+      </div>
+
+      {modal && (
+        <Modal title={modal === "nuevo" ? "Nuevo medicamento" : "Editar medicamento"} onClose={() => setModal(null)}>
+          <MedicamentoForm
+            inicial={modal === "nuevo" ? null : modal}
+            onCancel={() => setModal(null)}
+            onSave={(vals) => { modal === "nuevo" ? onAdd(vals) : onEdit(modal.id, vals); setModal(null); }}
+          />
+        </Modal>
+      )}
     </div>
   );
 }
