@@ -1,0 +1,21 @@
+{
+  "name": "ARKEYONE — La llave que alinea tu mundo",
+  "short_name": "ARKEYONE",
+  "description": "Tu sistema operativo personal: proyectos, finanzas, salud, hábitos, contactos y más, todo conectado y en un solo lugar.",
+  "id": "/",
+  "start_url": "/?fuente=pwa",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#0B2341",
+  "theme_color": "#0B2341",
+  "lang": "es-MX",
+  "dir": "ltr",
+  "categories": ["productivity", "lifestyle", "finance"],
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-maskable-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "/icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

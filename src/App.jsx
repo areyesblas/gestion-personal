@@ -909,6 +909,80 @@ function MfaChallengeScreen({ factorId, onVerificado, tema }) {
   );
 }
 
+// Indicador de conexión (app "Online-First"): si se pierde internet, se avisa claro arriba
+// de la pantalla; al recuperarla, avisa brevemente y el usuario sabe que ya puede confiar
+// en que lo que ve está actualizado otra vez.
+function IndicadorConexion() {
+  const [enLinea, setEnLinea] = useState(navigator.onLine);
+  const [mostrarRecuperado, setMostrarRecuperado] = useState(false);
+
+  useEffect(() => {
+    const alConectar = () => { setEnLinea(true); setMostrarRecuperado(true); setTimeout(() => setMostrarRecuperado(false), 3000); };
+    const alDesconectar = () => setEnLinea(false);
+    window.addEventListener("online", alConectar);
+    window.addEventListener("offline", alDesconectar);
+    return () => {
+      window.removeEventListener("online", alConectar);
+      window.removeEventListener("offline", alDesconectar);
+    };
+  }, []);
+
+  if (enLinea && !mostrarRecuperado) return null;
+  return (
+    <div
+      className="fixed top-0 left-0 right-0 z-[100] text-center text-xs py-1.5 px-3"
+      style={{ background: enLinea ? "#1a7a4c" : "#8a2f2f", color: "#fff" }}
+    >
+      {enLinea ? "Conexión recuperada — la información ya está actualizada." : "Sin conexión a internet. Lo que ves puede no estar actualizado; reconéctate para seguir trabajando."}
+    </div>
+  );
+}
+
+// Botón flotante para instalar ARKEYONE como app (PWA). Chrome/Edge/Android disparan el
+// evento beforeinstallprompt cuando el sitio cumple los requisitos (manifest + service
+// worker); lo capturamos para ofrecer un botón propio en vez de depender del navegador.
+// iOS Safari no dispara este evento (Apple no lo soporta) — ahí se instala manualmente
+// desde "Compartir → Agregar a pantalla de inicio", por eso mostramos una pista distinta.
+function AvisoInstalarPWA() {
+  const [promptEvent, setPromptEvent] = useState(null);
+  const [instalado, setInstalado] = useState(
+    () => window.matchMedia?.("(display-mode: standalone)").matches || window.navigator.standalone === true
+  );
+  const [cerrado, setCerrado] = useState(() => localStorage.getItem("arkeyone_pwa_aviso_cerrado") === "1");
+
+  useEffect(() => {
+    const capturar = (e) => { e.preventDefault(); setPromptEvent(e); };
+    const alInstalar = () => setInstalado(true);
+    window.addEventListener("beforeinstallprompt", capturar);
+    window.addEventListener("appinstalled", alInstalar);
+    return () => {
+      window.removeEventListener("beforeinstallprompt", capturar);
+      window.removeEventListener("appinstalled", alInstalar);
+    };
+  }, []);
+
+  const cerrar = () => { setCerrado(true); localStorage.setItem("arkeyone_pwa_aviso_cerrado", "1"); };
+
+  if (instalado || cerrado || !promptEvent) return null;
+
+  return (
+    <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[100] flex items-center gap-3 px-4 py-3 rounded-lg shadow-lg" style={{ background: "#132a4a", border: "1px solid #2a4a72", maxWidth: "92vw" }}>
+      <img src="/icons/icon-192.png" alt="" style={{ width: 32, height: 32, borderRadius: 8 }} />
+      <div className="text-xs text-white">
+        <p className="font-medium">Instala ARKEYONE</p>
+        <p className="opacity-70">Ábrelo como app, más rápido y sin la barra del navegador.</p>
+      </div>
+      <button
+        onClick={async () => { promptEvent.prompt(); await promptEvent.userChoice; setPromptEvent(null); }}
+        className="gp-btn text-xs px-3 py-1.5 whitespace-nowrap"
+      >
+        Instalar
+      </button>
+      <button onClick={cerrar} className="text-white opacity-60 hover:opacity-100" aria-label="Cerrar"><X size={16} /></button>
+    </div>
+  );
+}
+
 export default function App() {
   const [session, setSession] = useState(undefined); // undefined = cargando, null = sin sesión
   const [recuperando, setRecuperando] = useState(false);
@@ -973,26 +1047,38 @@ export default function App() {
     return <SplashScreen tema={tema} fadingOut={splashFadingOut} />;
   }
 
+  let pantalla;
   if (session === undefined) {
-    return (
+    pantalla = (
       <div className={`gp-root min-h-screen flex items-center justify-center ${tema === "claro" ? "claro" : ""}`}>
         <Tokens tema={tema} />
         <p className="gp-text-muted text-sm">Cargando…</p>
       </div>
     );
-  }
-  if (recuperando) return <NuevaPasswordScreen onListo={() => setRecuperando(false)} tema={tema} toggleTema={toggleTema} />;
-  if (!session) return <LoginScreen tema={tema} toggleTema={toggleTema} />;
-  if (mfaEstado === null) {
-    return (
+  } else if (recuperando) {
+    pantalla = <NuevaPasswordScreen onListo={() => setRecuperando(false)} tema={tema} toggleTema={toggleTema} />;
+  } else if (!session) {
+    pantalla = <LoginScreen tema={tema} toggleTema={toggleTema} />;
+  } else if (mfaEstado === null) {
+    pantalla = (
       <div className={`gp-root min-h-screen flex items-center justify-center ${tema === "claro" ? "claro" : ""}`}>
         <Tokens tema={tema} />
         <p className="gp-text-muted text-sm">Cargando…</p>
       </div>
     );
+  } else if (mfaEstado.pendiente) {
+    pantalla = <MfaChallengeScreen factorId={mfaEstado.factorId} onVerificado={() => setMfaEstado({ pendiente: false })} tema={tema} />;
+  } else {
+    pantalla = <AppLoggedIn session={session} tema={tema} toggleTema={toggleTema} setTema={setTema} />;
   }
-  if (mfaEstado.pendiente) return <MfaChallengeScreen factorId={mfaEstado.factorId} onVerificado={() => setMfaEstado({ pendiente: false })} tema={tema} />;
-  return <AppLoggedIn session={session} tema={tema} toggleTema={toggleTema} setTema={setTema} />;
+
+  return (
+    <>
+      <IndicadorConexion />
+      <AvisoInstalarPWA />
+      {pantalla}
+    </>
+  );
 }
 
 const VIEW_TO_MODULO = {
