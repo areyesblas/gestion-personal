@@ -43,6 +43,7 @@ const Tokens = ({ tema = "oscuro" }) => (
     .gp-navitem{ color:var(--muted); border-radius:4px; }
     .gp-navitem:hover{ background:var(--panel-hi); color:var(--text); }
     .gp-navitem-active{ background:var(--panel-hi); color:var(--text); border-left:2px solid var(--gold); }
+    .gp-navitem-drop{ box-shadow: inset 0 2px 0 var(--gold); }
     .gp-dot-teal{ background:var(--teal); } .gp-dot-red{ background:var(--red); } .gp-dot-gold{ background:var(--gold); }
     .gp-text-muted{ color:var(--muted); }
     .gp-text-gold{ color:var(--gold); } .gp-text-teal{ color:var(--teal); } .gp-text-red{ color:var(--red); }
@@ -1206,6 +1207,8 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState("dashboard");
   const [regalosFiltroContacto, setRegalosFiltroContacto] = useState("");
+  const [proyectoDetalleId, setProyectoDetalleId] = useState(null);
+  const irADetalleProyecto = (proyectoId) => { setProyectoDetalleId(proyectoId); irAVista("proyecto-detalle"); };
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   // El menú lateral se puede colapsar a solo íconos en escritorio; queda "fijo" como lo dejes (se recuerda en este navegador).
   const [sidebarColapsado, setSidebarColapsado] = useState(() => localStorage.getItem("arkeyone_sidebar_colapsado") === "1");
@@ -1230,6 +1233,41 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
     });
   };
   const [confirmDelete, setConfirmDelete] = useState(null); // { key, id, label }
+
+  // Orden personalizado de los ítems dentro de cada grupo del menú lateral (arrastrar para reordenar).
+  // Los grupos (encabezados) y la sección fija de abajo NO se reordenan, solo los ítems hijos de cada grupo.
+  // Se guarda por usuario (clave incluye el UID) en este navegador.
+  const ORDEN_NAV_KEY = `arkeyone_nav_orden_${misId}`;
+  const [ordenNav, setOrdenNav] = useState(() => {
+    try { return JSON.parse(localStorage.getItem(ORDEN_NAV_KEY) || "{}"); } catch { return {}; }
+  });
+  const [dragNav, setDragNav] = useState(null); // { grupo, id }
+  const [dragNavSobre, setDragNavSobre] = useState(null); // id sobre el que está pasando el arrastre
+  const ordenarItemsGrupo = (grupoLabel, items) => {
+    const ordenGuardado = ordenNav[grupoLabel];
+    if (!ordenGuardado || !ordenGuardado.length) return items;
+    const porId = Object.fromEntries(items.map((it) => [it.id, it]));
+    const enOrden = ordenGuardado.map((id) => porId[id]).filter(Boolean);
+    const faltantes = items.filter((it) => !ordenGuardado.includes(it.id));
+    return [...enOrden, ...faltantes];
+  };
+  const guardarOrdenGrupo = (grupoLabel, idsEnOrden) => {
+    setOrdenNav((prev) => {
+      const next = { ...prev, [grupoLabel]: idsEnOrden };
+      localStorage.setItem(ORDEN_NAV_KEY, JSON.stringify(next));
+      return next;
+    });
+  };
+  const moverItemNav = (grupoLabel, itemsOrdenados, idArrastrado, idDestino) => {
+    if (idArrastrado === idDestino) return;
+    const ids = itemsOrdenados.map((it) => it.id);
+    const desde = ids.indexOf(idArrastrado);
+    const hasta = ids.indexOf(idDestino);
+    if (desde === -1 || hasta === -1) return;
+    ids.splice(desde, 1);
+    ids.splice(hasta, 0, idArrastrado);
+    guardarOrdenGrupo(grupoLabel, ids);
+  };
 
   // Cierre de sesión automático por inactividad (hay datos sensibles: dinero, salud, documentos).
   // 30 min sin actividad = cierra sesión sola; avisa 2 min antes por si el usuario sigue ahí.
@@ -1677,6 +1715,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
           {navGroupsFiltrados.map((g) => {
             const cerrado = grupoEstaCerrado(g.label);
             const mostrarItems = sidebarColapsado || !cerrado;
+            const itemsOrdenados = ordenarItemsGrupo(g.label, g.items);
             return (
               <div key={g.label}>
                 <button
@@ -1688,9 +1727,23 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
                 </button>
                 {mostrarItems && (
                   <div className="flex flex-col gap-0.5">
-                    {g.items.map((n) => (
-                      <button key={n.id} onClick={() => { irAVista(n.id); setMobileNavOpen(false); }} title={n.label}
-                        className={`gp-navitem flex items-center gap-2 px-3 py-2.5 md:py-2 text-sm text-left ${sidebarColapsado ? "md:justify-center md:px-2" : ""} ${view === n.id ? "gp-navitem-active" : ""}`}>
+                    {itemsOrdenados.map((n) => (
+                      <button
+                        key={n.id}
+                        onClick={() => { irAVista(n.id); setMobileNavOpen(false); }}
+                        title={n.label}
+                        draggable={!sidebarColapsado && itemsOrdenados.length > 1}
+                        onDragStart={(e) => { e.dataTransfer.effectAllowed = "move"; setDragNav({ grupo: g.label, id: n.id }); }}
+                        onDragEnter={() => { if (dragNav && dragNav.grupo === g.label) setDragNavSobre(n.id); }}
+                        onDragOver={(e) => { if (dragNav && dragNav.grupo === g.label) e.preventDefault(); }}
+                        onDrop={(e) => {
+                          e.preventDefault();
+                          if (dragNav && dragNav.grupo === g.label) moverItemNav(g.label, itemsOrdenados, dragNav.id, n.id);
+                          setDragNav(null); setDragNavSobre(null);
+                        }}
+                        onDragEnd={() => { setDragNav(null); setDragNavSobre(null); }}
+                        className={`gp-navitem flex items-center gap-2 px-3 py-2.5 md:py-2 text-sm text-left ${sidebarColapsado ? "md:justify-center md:px-2" : ""} ${view === n.id ? "gp-navitem-active" : ""} ${dragNav && dragNav.id === n.id ? "opacity-40" : ""} ${dragNavSobre === n.id && dragNav && dragNav.id !== n.id ? "gp-navitem-drop" : ""}`}
+                      >
                         <n.icon size={15} /> <span className={sidebarColapsado ? "md:hidden" : ""}>{n.label}</span>
                       </button>
                     ))}
@@ -1760,7 +1813,19 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
           {view === "colaboradores" && <Colaboradores misId={misId} miEmail={miEmail} />}
           {view === "admin" && <AdminUsuarios adminUid={ADMIN_UID} adminEmail={miEmail} />}
           {view === "proyectos" && (
-            <Proyectos data={data} onAdd={(i) => addItem("proyectos", i)} onEdit={(id, p) => editItem("proyectos", id, p)} onRemove={(id) => askDelete("proyectos", id)} onAddComentario={(i) => addItem("comentarios", i)} onRemoveComentario={(id) => askDelete("comentarios", id)} />
+            <Proyectos data={data} onAdd={(i) => addItem("proyectos", i)} onEdit={(id, p) => editItem("proyectos", id, p)} onRemove={(id) => askDelete("proyectos", id)} onAddComentario={(i) => addItem("comentarios", i)} onRemoveComentario={(id) => askDelete("comentarios", id)} onVerDetalle={irADetalleProyecto} />
+          )}
+          {view === "proyecto-detalle" && (
+            <ProyectoDetalle
+              data={data}
+              proyectoId={proyectoDetalleId}
+              onVolver={() => irAVista("proyectos")}
+              onAddTarea={(i) => addItem("pendientes", i)}
+              onEditTarea={(id, p) => editItem("pendientes", id, p)}
+              onRemoveTarea={(id, extraIds, mensaje) => askDelete("pendientes", id, { extraIds, mensaje })}
+              onAddComentario={(i) => addItem("comentarios", i)}
+              onRemoveComentario={(id) => askDelete("comentarios", id)}
+            />
           )}
           {view === "metas" && (
             <Metas data={data} onAdd={(i) => addItem("metas", i)} onEdit={(id, p) => editItem("metas", id, p)} onRemove={(id) => askDelete("metas", id)} />
@@ -2641,7 +2706,19 @@ function Stat({ label, value, tone }) {
 }
 
 /* ---------- Proyectos ---------- */
-function Proyectos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveComentario }) {
+// Ingresos/egresos cobrados y pagos a colaboradores relacionados con un proyecto (se usa en la
+// lista de Proyectos y en la pantalla de detalle, por eso vive fuera de ambos componentes).
+function rentabilidadProyecto(data, proyectoId) {
+  const movs = data.finanzas.filter((f) => f.proyectoId === proyectoId && f.estatus === "Cobrado");
+  const ingresos = movs.filter((f) => f.tipo === "Ingreso").reduce((s, f) => s + (Number(f.monto) || 0), 0);
+  const egresos = movs.filter((f) => f.tipo === "Egreso").reduce((s, f) => s + (Number(f.monto) || 0), 0);
+  const pagosColab = data.pendientes
+    .filter((t) => t.proyectoId === proyectoId && t.responsableId && t.estatus === "Hecho")
+    .reduce((s, t) => s + (Number(t.precio) || 0), 0);
+  return { ingresos, egresos, pagosColab, neto: ingresos - egresos };
+}
+
+function Proyectos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveComentario, onVerDetalle }) {
   const [modal, setModal] = useState(null);
   const [expanded, setExpanded] = useState(null);
   const [notaTexto, setNotaTexto] = useState("");
@@ -2670,15 +2747,7 @@ function Proyectos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
     setNotaTexto("");
   };
 
-  const rentabilidad = (proyectoId) => {
-    const movs = data.finanzas.filter((f) => f.proyectoId === proyectoId && f.estatus === "Cobrado");
-    const ingresos = movs.filter((f) => f.tipo === "Ingreso").reduce((s, f) => s + (Number(f.monto) || 0), 0);
-    const egresos = movs.filter((f) => f.tipo === "Egreso").reduce((s, f) => s + (Number(f.monto) || 0), 0);
-    const pagosColab = data.pendientes
-      .filter((t) => t.proyectoId === proyectoId && t.responsableId && t.estatus === "Hecho")
-      .reduce((s, t) => s + (Number(t.precio) || 0), 0);
-    return { ingresos, egresos, pagosColab, neto: ingresos - egresos };
-  };
+  const rentabilidad = (proyectoId) => rentabilidadProyecto(data, proyectoId);
 
   return (
     <div>
@@ -2736,6 +2805,34 @@ function Proyectos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
                         </label>
                         <input placeholder="link del repo (opcional)" value={p.github || ""} onChange={(e) => onEdit(p.id, { github: e.target.value })} className="gp-input flex-1" style={{ minWidth: 160, maxWidth: 280 }} />
                       </div>
+
+                      {(() => {
+                        const tareasProyecto = data.pendientes.filter((t) => t.proyectoId === p.id);
+                        const arbolP = buildTareaTree(tareasProyecto);
+                        const filasP = flattenTareas(arbolP);
+                        return (
+                          <div className="mb-4">
+                            <div className="flex items-center justify-between mb-2">
+                              <p className="text-xs font-medium gp-text-muted">Pendientes de este proyecto · {tareasProyecto.length}</p>
+                              <button onClick={(e) => { e.stopPropagation(); onVerDetalle(p.id); }} className="text-xs gp-text-gold flex items-center gap-1">
+                                Ver detalle completo <ChevronRight size={12} />
+                              </button>
+                            </div>
+                            {filasP.length === 0 && <p className="text-xs gp-text-muted">Sin pendientes registrados todavía.</p>}
+                            <div className="space-y-1">
+                              {filasP.slice(0, 8).map(({ item: t, nivel }) => (
+                                <div key={t.id} className="text-xs flex items-center gap-2" style={{ paddingLeft: nivel * 14 }}>
+                                  {nivel > 0 && <span className="gp-text-muted">└</span>}
+                                  <span className={t.estatus === "Hecho" ? "gp-text-muted" : ""} style={t.estatus === "Hecho" ? { textDecoration: "line-through" } : undefined}>{t.descripcion}</span>
+                                  <Badge tone={t.estatus === "Hecho" ? "teal" : t.estatus === "En progreso" ? "gold" : "muted"}>{t.estatus}</Badge>
+                                </div>
+                              ))}
+                              {filasP.length > 8 && <p className="text-xs gp-text-muted mt-1">y {filasP.length - 8} más — ve al detalle completo para verlas todas.</p>}
+                            </div>
+                          </div>
+                        );
+                      })()}
+
                       <p className="text-xs font-medium mb-2 gp-text-muted">Bitácora de avances (texto rápido)</p>
                       <div className="space-y-1.5 mb-2 max-h-40 overflow-y-auto gp-scroll">
                         {(p.notas || []).slice().reverse().map((n) => (
@@ -2788,12 +2885,171 @@ function ProyectoForm({ item, onSave }) {
       <p className="text-xs gp-text-muted -mt-2 mb-3">{v.modo === "Continuo" ? "Continuo: genera flujo de forma constante (ej. renta, agencia de servicios)." : "Finito: tiene un punto claro de terminado (ej. lanzar un sitio, un show específico)."}</p>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Field label="Prioridad"><select className="gp-input" value={v.prioridad || "Media"} onChange={(e) => setV({ ...v, prioridad: e.target.value })}>{PRIORIDADES.map((c) => <option key={c}>{c}</option>)}</select></Field>
-        <Field label="Fecha de revisión (cuándo revisar el avance)"><input type="date" className="gp-input" value={v.fechaRevision || ""} onChange={(e) => setV({ ...v, fechaRevision: e.target.value })} /></Field>
+        <Field label="Fecha de revisión"><input type="date" className="gp-input" value={v.fechaRevision || ""} onChange={(e) => setV({ ...v, fechaRevision: e.target.value })} /></Field>
       </div>
       <Field label="Descripción"><textarea className="gp-input" rows={3} value={v.descripcion} onChange={(e) => setV({ ...v, descripcion: e.target.value })} /></Field>
       {error && <p className="text-xs gp-text-red mb-2">{error}</p>}
 
       <button className="gp-btn w-full py-2 text-sm mt-2" onClick={() => { if (!v.nombre?.toString().trim()) { setError("El nombre del proyecto es obligatorio."); return; } setError(""); onSave(v); }}>Guardar</button>
+    </div>
+  );
+}
+
+/* ---------- Detalle de proyecto (Fase: navegación con breadcrumb) ---------- */
+// Pantalla completa de un solo proyecto: todos sus pendientes con subtareas anidadas,
+// porcentaje de avance (manual en tareas finales, calculado en tareas con hijos), y comentarios.
+function ProyectoDetalle({ data, proyectoId, onVolver, onAddTarea, onEditTarea, onRemoveTarea, onAddComentario, onRemoveComentario }) {
+  const proyecto = data.proyectos.find((p) => p.id === proyectoId);
+  const [modal, setModal] = useState(null);
+  const [comentariosDe, setComentariosDe] = useState(null);
+
+  if (!proyecto) {
+    return (
+      <div>
+        <button onClick={onVolver} className="text-xs gp-text-muted flex items-center gap-1 mb-4"><ChevronRight size={12} style={{ transform: "rotate(180deg)" }} /> Proyectos e ideas</button>
+        <p className="text-sm gp-text-muted">Este proyecto ya no existe o no tienes acceso a él.</p>
+      </div>
+    );
+  }
+
+  const empty = { proyectoId, parentId: "", descripcion: "", fechaLimite: todayISO(), fechaRevision: "", prioridad: "Media", estatus: "Pendiente", responsableId: "", contactoId: "", precio: "", tiempoEstimado: "", tiempoReal: "", asignadoA: "", avance: "" };
+  const tareasProyecto = data.pendientes.filter((t) => t.proyectoId === proyectoId);
+  const arbol = buildTareaTree(tareasProyecto);
+  const filas = flattenTareas(arbol);
+  const avanceGeneral = arbol.length ? Math.round(arbol.reduce((s, n) => s + calcAvanceTarea(n), 0) / arbol.length) : 0;
+  const r = rentabilidadProyecto(data, proyectoId);
+  const nComentarios = (id) => (data.comentarios || []).filter((c) => c.entidadTipo === "pendientes" && c.entidadId === id).length;
+  const nombreResp = (id) => data.equipo.find((e) => e.id === id)?.nombre || "Tú";
+  const nombreCliente = (id) => data.contactos.find((c) => c.id === id)?.nombre || "—";
+  const paraEditar = (t) => { const { hijos, ...limpio } = t; return limpio; };
+  const confirmarBorrado = (item) => {
+    const hijosIds = descendientesDe(item.id, data.pendientes);
+    if (hijosIds.length > 0) {
+      onRemoveTarea(item.id, hijosIds, `Esta tarea tiene ${hijosIds.length} subtarea${hijosIds.length > 1 ? "s" : ""} debajo. Si la eliminas, también se eliminan todas sus subtareas.`);
+    } else {
+      onRemoveTarea(item.id);
+    }
+  };
+
+  return (
+    <div>
+      {/* breadcrumb: para siempre saber en dónde estás navegando dentro de la app */}
+      <div className="flex items-center gap-1.5 text-xs gp-text-muted mb-3">
+        <button onClick={onVolver} className="hover:underline">Proyectos e ideas</button>
+        <ChevronRight size={12} />
+        <span className="gp-text-teal">{proyecto.nombre}</span>
+      </div>
+
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between mb-1">
+        <div>
+          <h2 className="gp-serif text-2xl">{proyecto.nombre}</h2>
+          <div className="flex items-center gap-2 flex-wrap mt-1">
+            <Badge tone="muted">{proyecto.categoria}</Badge>
+            <Badge tone={proyecto.modo === "Continuo" ? "teal" : "muted"}>{proyecto.modo || "Finito"}</Badge>
+            {proyecto.prioridad && <Badge tone={proyecto.prioridad === "Alta" ? "red" : proyecto.prioridad === "Media" ? "gold" : "muted"}>{proyecto.prioridad}</Badge>}
+          </div>
+        </div>
+        <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm w-full sm:w-auto"><Plus size={14} /> Nuevo pendiente</button>
+      </div>
+      {proyecto.descripcion && <p className="text-sm gp-text-muted mb-4">{proyecto.descripcion}</p>}
+
+      <div className="gp-panel-hi p-3 mb-4 grid grid-cols-2 sm:grid-cols-5 gap-2 text-xs">
+        <div><p className="gp-text-muted">Avance general</p><p className="gp-mono gp-text-gold">{avanceGeneral}%</p></div>
+        <div><p className="gp-text-muted">Ingresos</p><p className="gp-mono gp-text-teal">{fmtMoney(r.ingresos)}</p></div>
+        <div><p className="gp-text-muted">Egresos</p><p className="gp-mono gp-text-red">{fmtMoney(r.egresos)}</p></div>
+        <div><p className="gp-text-muted">Neto</p><p className={`gp-mono ${r.neto >= 0 ? "gp-text-teal" : "gp-text-red"}`}>{fmtMoney(r.neto)}</p></div>
+        <div><p className="gp-text-muted">Pagado a colaboradores</p><p className="gp-mono gp-text-gold">{fmtMoney(r.pagosColab)}</p></div>
+      </div>
+
+      <div className="gp-panel overflow-x-auto">
+        <table className="gp-table">
+          <thead><tr><th>Pendiente</th><th>Cliente</th><th>Responsable</th><th>Fecha</th><th>Prioridad</th><th>Avance</th><th>Precio</th><th></th></tr></thead>
+          <tbody>
+            {filas.map(({ item: p, nivel }) => {
+              const vencido = p.estatus !== "Hecho" && p.fechaLimite && daysUntil(p.fechaLimite) < 0;
+              const nc = nComentarios(p.id);
+              const tieneHijos = p.hijos && p.hijos.length > 0;
+              const avance = Math.round(calcAvanceTarea(p));
+              return (
+                <tr key={p.id}>
+                  <td>
+                    <span style={{ paddingLeft: nivel * 18 }} className="flex items-center gap-1">
+                      {nivel > 0 && <span className="gp-text-muted">└</span>}
+                      {p.descripcion}
+                    </span>
+                  </td>
+                  <td className="gp-text-muted">{p.contactoId ? nombreCliente(p.contactoId) : "—"}</td>
+                  <td className="gp-text-muted">{nombreResp(p.responsableId)}</td>
+                  <td className="gp-mono" style={{ color: vencido ? "var(--red)" : undefined }}>{p.fechaLimite}</td>
+                  <td><Badge tone={p.prioridad === "Alta" ? "red" : p.prioridad === "Media" ? "gold" : "muted"}>{p.prioridad}</Badge></td>
+                  <td>
+                    <div className="flex items-center gap-1.5" style={{ minWidth: 130 }}>
+                      <div className="h-1.5 rounded flex-1" style={{ background: "var(--border)" }}>
+                        <div className="h-1.5 rounded" style={{ width: `${avance}%`, background: avance === 100 ? "var(--teal)" : "var(--gold)" }} />
+                      </div>
+                      {tieneHijos ? (
+                        <span className="gp-mono" style={{ fontSize: 10 }}>{avance}%</span>
+                      ) : (
+                        <input
+                          type="number" min={0} max={100} value={p.avance ?? ""} placeholder={String(avance)}
+                          onChange={(e) => {
+                            const val = e.target.value === "" ? null : Math.max(0, Math.min(100, Number(e.target.value)));
+                            onEditTarea(p.id, { avance: val });
+                          }}
+                          className="gp-input gp-mono" style={{ width: 48, padding: "1px 4px", fontSize: 10 }}
+                        />
+                      )}
+                      {!tieneHijos && (
+                        <select className="gp-input" style={{ padding: "1px 4px", fontSize: 10, width: 88 }} value={p.estatus} onChange={(e) => onEditTarea(p.id, { estatus: e.target.value })}>
+                          {ESTATUS_TAREA.map((s) => <option key={s}>{s}</option>)}
+                        </select>
+                      )}
+                    </div>
+                  </td>
+                  <td className="gp-mono">{p.precio ? fmtMoney(p.precio) : "—"}</td>
+                  <td><div className="flex gap-1">
+                    <IconBtn onClick={() => setModal({ item: { ...empty, parentId: p.id } })}><Plus size={13} /></IconBtn>
+                    <IconBtn onClick={() => setComentariosDe(p)}><MessageCircle size={13} />{nc > 0 && <span className="gp-mono" style={{ fontSize: 9, marginLeft: 2 }}>{nc}</span>}</IconBtn>
+                    <IconBtn onClick={() => setModal({ item: paraEditar(p) })}><Pencil size={13} /></IconBtn>
+                    <IconBtn onClick={() => confirmarBorrado(p)}><Trash2 size={13} /></IconBtn>
+                  </div></td>
+                </tr>
+              );
+            })}
+            {filas.length === 0 && <tr><td colSpan={8} className="text-center gp-text-muted py-6">Sin pendientes registrados en este proyecto todavía.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="border-t gp-border pt-4 mt-6">
+        <p className="text-sm font-medium mb-2">Comentarios del proyecto</p>
+        <Bitacora data={data} entidadTipo="proyectos" entidadId={proyecto.id} onAdd={onAddComentario} onRemove={onRemoveComentario} />
+      </div>
+
+      {comentariosDe && (
+        <Modal title={`Comentarios — ${comentariosDe.descripcion}`} onClose={() => setComentariosDe(null)}>
+          <Bitacora data={data} entidadTipo="pendientes" entidadId={comentariosDe.id} onAdd={onAddComentario} onRemove={onRemoveComentario} />
+        </Modal>
+      )}
+
+      {modal && (
+        <Modal title={modal.item.id ? "Editar pendiente" : modal.item.parentId ? "Nueva subtarea" : "Nuevo pendiente"} onClose={() => setModal(null)}>
+          <PendienteForm item={modal.item} proyectos={data.proyectos} equipo={data.equipo} contactos={data.contactos} pendientes={data.pendientes} colaboradores={[]}
+            onSave={(v) => {
+              if (modal.item.id) {
+                onEditTarea(modal.item.id, v);
+                if (v.proyectoId !== modal.item.proyectoId) {
+                  const hijosIds = descendientesDe(modal.item.id, data.pendientes);
+                  hijosIds.forEach((hid) => onEditTarea(hid, { proyectoId: v.proyectoId }));
+                }
+              } else {
+                onAddTarea({ ...v, id: uid() });
+              }
+              setModal(null);
+            }}
+          />
+        </Modal>
+      )}
     </div>
   );
 }
@@ -2880,6 +3136,7 @@ function flattenTareas(tree, nivel = 0) {
 // si es una tarea final (sin hijos), es binario según su estatus.
 function calcAvanceTarea(nodo) {
   if (!nodo.hijos || nodo.hijos.length === 0) {
+    if (nodo.avance !== null && nodo.avance !== undefined && nodo.avance !== "") return Number(nodo.avance);
     return nodo.estatus === "Hecho" ? 100 : nodo.estatus === "En progreso" ? 50 : 0;
   }
   const suma = nodo.hijos.reduce((s, h) => s + calcAvanceTarea(h), 0);
@@ -3218,7 +3475,7 @@ function PendienteForm({ item, proyectos, equipo, contactos, pendientes, colabor
         <Field label="Fecha límite"><input type="date" className="gp-input" value={v.fechaLimite} onChange={(e) => setV({ ...v, fechaLimite: e.target.value })} /></Field>
         <Field label="Prioridad"><select className="gp-input" value={v.prioridad} onChange={(e) => setV({ ...v, prioridad: e.target.value })}>{PRIORIDADES.map((c) => <option key={c}>{c}</option>)}</select></Field>
       </div>
-      <Field label="Fecha de revisión (opcional, cuándo revisar el avance)"><input type="date" className="gp-input" value={v.fechaRevision || ""} onChange={(e) => setV({ ...v, fechaRevision: e.target.value })} /></Field>
+      <Field label="Fecha de revisión (opcional)"><input type="date" className="gp-input" value={v.fechaRevision || ""} onChange={(e) => setV({ ...v, fechaRevision: e.target.value })} /></Field>
       <Field label="Responsable">
         <select className="gp-input" value={v.responsableId} onChange={(e) => setV({ ...v, responsableId: e.target.value })}>
           <option value="">Tú</option>
@@ -4087,23 +4344,35 @@ function Metas({ data, onAdd, onEdit, onRemove }) {
 
       <div className="gp-panel overflow-x-auto">
         <table className="gp-table">
-          <thead><tr><Th label="Meta" sortKey="alfabetico" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} /><th>Proyecto</th><Th label="Prioridad" sortKey="prioridad" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} /><Th label="Fecha objetivo" sortKey="objetivo" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} /><th>Estatus</th><th></th></tr></thead>
+          <thead><tr><th style={{ width: 36 }}></th><Th label="Meta" sortKey="alfabetico" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} /><th>Proyecto</th><Th label="Prioridad" sortKey="prioridad" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} /><Th label="Fecha objetivo" sortKey="objetivo" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} /><th>Estatus</th><th></th></tr></thead>
           <tbody>
-            {ordenados.map((m) => (
-              <tr key={m.id}>
-                <td>{m.descripcion}</td>
-                <td className="gp-text-muted">{nombreProyecto(m.proyectoId)}</td>
-                <td><Badge tone={m.prioridad === "Alta" ? "red" : m.prioridad === "Media" ? "gold" : "muted"}>{m.prioridad || "Media"}</Badge></td>
-                <td className="gp-mono">{m.fechaObjetivo}</td>
-                <td>
-                  <select className="gp-input" style={{ padding: "2px 6px" }} value={m.estatus} onChange={(e) => onEdit(m.id, { estatus: e.target.value })}>
-                    {ESTATUS_META.map((s) => <option key={s}>{s}</option>)}
-                  </select>
-                </td>
-                <td><div className="flex gap-1"><IconBtn onClick={() => setModal({ item: m })}><Pencil size={13} /></IconBtn><IconBtn onClick={() => onRemove(m.id)}><Trash2 size={13} /></IconBtn></div></td>
-              </tr>
-            ))}
-            {ordenados.length === 0 && <tr><td colSpan={6} className="text-center gp-text-muted py-6">Sin metas registradas.</td></tr>}
+            {ordenados.map((m) => {
+              const cumplida = m.estatus === "Cumplida";
+              return (
+                <tr key={m.id} style={cumplida ? { background: "rgba(34,197,94,0.14)" } : undefined}>
+                  <td>
+                    <input
+                      type="checkbox"
+                      checked={cumplida}
+                      title="Marcar como cumplida"
+                      onChange={(e) => onEdit(m.id, { estatus: e.target.checked ? "Cumplida" : "En progreso" })}
+                      style={{ width: 16, height: 16, accentColor: "var(--gold)", cursor: "pointer" }}
+                    />
+                  </td>
+                  <td>{m.descripcion}</td>
+                  <td className="gp-text-muted">{nombreProyecto(m.proyectoId)}</td>
+                  <td><Badge tone={m.prioridad === "Alta" ? "red" : m.prioridad === "Media" ? "gold" : "muted"}>{m.prioridad || "Media"}</Badge></td>
+                  <td className="gp-mono">{m.fechaObjetivo}</td>
+                  <td>
+                    <select className="gp-input" style={{ padding: "2px 6px" }} value={m.estatus} onChange={(e) => onEdit(m.id, { estatus: e.target.value })}>
+                      {ESTATUS_META.map((s) => <option key={s}>{s}</option>)}
+                    </select>
+                  </td>
+                  <td><div className="flex gap-1"><IconBtn onClick={() => setModal({ item: m })}><Pencil size={13} /></IconBtn><IconBtn onClick={() => onRemove(m.id)}><Trash2 size={13} /></IconBtn></div></td>
+                </tr>
+              );
+            })}
+            {ordenados.length === 0 && <tr><td colSpan={7} className="text-center gp-text-muted py-6">Sin metas registradas.</td></tr>}
           </tbody>
         </table>
       </div>
