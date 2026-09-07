@@ -2819,16 +2819,28 @@ function Proyectos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
                               </button>
                             </div>
                             {filasP.length === 0 && <p className="text-xs gp-text-muted">Sin pendientes registrados todavía.</p>}
-                            <div className="space-y-1">
-                              {filasP.slice(0, 8).map(({ item: t, nivel }) => (
-                                <div key={t.id} className="text-xs flex items-center gap-2" style={{ paddingLeft: nivel * 14 }}>
-                                  {nivel > 0 && <span className="gp-text-muted">└</span>}
-                                  <span className={t.estatus === "Hecho" ? "gp-text-muted" : ""} style={t.estatus === "Hecho" ? { textDecoration: "line-through" } : undefined}>{t.descripcion}</span>
-                                  <Badge tone={t.estatus === "Hecho" ? "teal" : t.estatus === "En progreso" ? "gold" : "muted"}>{t.estatus}</Badge>
-                                </div>
-                              ))}
-                              {filasP.length > 8 && <p className="text-xs gp-text-muted mt-1">y {filasP.length - 8} más — ve al detalle completo para verlas todas.</p>}
-                            </div>
+                            {filasP.length > 0 && (
+                              <div className="gp-panel-hi overflow-x-auto">
+                                <table className="gp-table" style={{ fontSize: 12 }}>
+                                  <thead><tr><th>Pendiente</th><th>Precio</th><th>Estatus</th></tr></thead>
+                                  <tbody>
+                                    {filasP.slice(0, 8).map(({ item: t, nivel }) => (
+                                      <tr key={t.id}>
+                                        <td>
+                                          <span style={{ paddingLeft: nivel * 16 }} className="flex items-center gap-1">
+                                            {nivel > 0 && <span className="gp-text-muted">└</span>}
+                                            <span className={t.estatus === "Hecho" ? "gp-text-muted" : ""} style={t.estatus === "Hecho" ? { textDecoration: "line-through" } : undefined}>{t.descripcion}</span>
+                                          </span>
+                                        </td>
+                                        <td className="gp-mono">{t.precio ? fmtMoney(t.precio) : "—"}</td>
+                                        <td><Badge tone={t.estatus === "Hecho" ? "teal" : t.estatus === "En progreso" ? "gold" : "muted"}>{t.estatus}</Badge></td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            )}
+                            {filasP.length > 8 && <p className="text-xs gp-text-muted mt-1">y {filasP.length - 8} más — ve al detalle completo para verlas todas.</p>}
                           </div>
                         );
                       })()}
