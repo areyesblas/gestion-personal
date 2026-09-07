@@ -2213,6 +2213,7 @@ function Colaboradores({ misId, miEmail }) {
   const [modal, setModal] = useState(false);
   const [busy, setBusy] = useState(null);
   const [revocarConfirm, setRevocarConfirm] = useState(null);
+  const [eliminarConfirm, setEliminarConfirm] = useState(null);
   const [avisoCorreo, setAvisoCorreo] = useState(null); // { id, ok, mensaje }
 
   const cargar = async () => {
@@ -2242,7 +2243,7 @@ function Colaboradores({ misId, miEmail }) {
     }
   };
 
-  const invitar = async ({ correo, modulos }) => {
+  const invitar = async ({ nombre, correo, modulos }) => {
     setBusy("nuevo");
     const modulosSnake = modulos.map((k) => tableName(k));
     // "comentarios" siempre viene incluido si se dio acceso a cualquier módulo, para que vean la bitácora.
@@ -2251,7 +2252,7 @@ function Colaboradores({ misId, miEmail }) {
     if (modulos.includes("patrimonio") && !modulosSnake.includes("patrimonio_valuaciones")) modulosSnake.push("patrimonio_valuaciones");
     const { data: fila, error } = await supabase.from("colaboradores").insert({
       propietario_id: misId, propietario_email: miEmail,
-      colaborador_email: correo.trim().toLowerCase(), modulos: modulosSnake, estatus: "Pendiente",
+      colaborador_email: correo.trim().toLowerCase(), colaborador_nombre: nombre || null, modulos: modulosSnake, estatus: "Pendiente",
     }).select().single();
     if (error) { setBusy(null); alert("No se pudo invitar: " + error.message); return; }
     const { ok } = await enviarCorreoInvitacion(fila.id);
@@ -2285,6 +2286,15 @@ function Colaboradores({ misId, miEmail }) {
     cargar();
   };
 
+  const eliminar = async (id) => {
+    setBusy(id);
+    const { error } = await supabase.from("colaboradores").delete().eq("id", id);
+    setBusy(null);
+    if (error) { alert("No se pudo eliminar: " + error.message); return; }
+    setEliminarConfirm(null);
+    cargar();
+  };
+
   const toneEstatus = { Activo: "teal", Pendiente: "gold", Revocado: "red" };
 
   return (
@@ -2312,7 +2322,14 @@ function Colaboradores({ misId, miEmail }) {
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-sm font-medium truncate">{c.colaborador_email}</span>
+                    {c.colaborador_nombre ? (
+                      <>
+                        <span className="text-sm font-medium truncate">{c.colaborador_nombre}</span>
+                        <span className="text-xs gp-text-muted truncate">{c.colaborador_email}</span>
+                      </>
+                    ) : (
+                      <span className="text-sm font-medium truncate">{c.colaborador_email}</span>
+                    )}
                     <Badge tone={toneEstatus[c.estatus]}>{c.estatus}</Badge>
                   </div>
                   <div className="flex flex-wrap gap-1 mt-2">
@@ -2333,6 +2350,7 @@ function Colaboradores({ misId, miEmail }) {
                   ) : (
                     <button disabled={busy === c.id} onClick={() => setRevocarConfirm(c)} className="px-3 py-1.5 text-xs rounded" style={{ background: "var(--red)", color: "#fff" }}>Revocar</button>
                   )}
+                  <IconBtn onClick={() => setEliminarConfirm(c)} title="Eliminar colaborador"><Trash2 size={13} /></IconBtn>
                 </div>
               </div>
               {c.estatus === "Pendiente" && <p className="text-xs gp-text-muted mt-2">Ya le mandamos un correo de invitación. Se activa solo en cuanto esa persona cree su cuenta o inicie sesión con ese correo.</p>}
@@ -2354,6 +2372,19 @@ function Colaboradores({ misId, miEmail }) {
         </div>
       )}
 
+      {eliminarConfirm && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,.6)" }} onClick={() => setEliminarConfirm(null)}>
+          <div className="gp-panel w-full max-w-sm p-5" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-2 mb-2"><Trash2 size={16} className="gp-text-red" /><h3 className="gp-serif text-lg">¿Eliminar colaborador?</h3></div>
+            <p className="text-sm gp-text-muted mb-5">Se borra por completo el registro de {eliminarConfirm.colaborador_nombre || eliminarConfirm.colaborador_email} de tu lista de colaboradores. Esto no borra ninguna tarea que ya le hayas asignado, pero si quieres volver a darle acceso vas a tener que invitarlo de nuevo.</p>
+            <div className="flex gap-2">
+              <button onClick={() => setEliminarConfirm(null)} className="gp-btn-ghost flex-1 py-2 text-sm">Cancelar</button>
+              <button disabled={busy === eliminarConfirm.id} onClick={() => eliminar(eliminarConfirm.id)} className="flex-1 py-2 text-sm rounded" style={{ background: "var(--red)", color: "#fff" }}>Eliminar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {modal && (
         <Modal title="Invitar colaborador" onClose={() => setModal(false)}>
           <InvitarForm busy={busy === "nuevo"} onSave={invitar} />
@@ -2364,6 +2395,7 @@ function Colaboradores({ misId, miEmail }) {
 }
 
 function InvitarForm({ onSave, busy }) {
+  const [nombre, setNombre] = useState("");
   const [correo, setCorreo] = useState("");
   const [modulos, setModulos] = useState([]);
   const [error, setError] = useState("");
@@ -2372,6 +2404,7 @@ function InvitarForm({ onSave, busy }) {
 
   return (
     <div>
+      <Field label="Nombre (opcional)"><input className="gp-input" placeholder="ej. Mi contador, Juan asistente" value={nombre} onChange={(e) => setNombre(e.target.value)} /></Field>
       <Field label="Correo de la persona"><input type="email" className="gp-input" value={correo} onChange={(e) => setCorreo(e.target.value)} /></Field>
       <p className="text-xs gp-text-muted mb-2">¿Qué puede ver y editar?</p>
       <div className="grid grid-cols-2 gap-1.5 mb-4 max-h-56 overflow-y-auto gp-scroll">
@@ -2390,7 +2423,7 @@ function InvitarForm({ onSave, busy }) {
           if (!correo.trim() || !correo.includes("@")) { setError("Captura un correo válido."); return; }
           if (modulos.length === 0) { setError("Elige al menos un módulo."); return; }
           setError("");
-          onSave({ correo, modulos });
+          onSave({ nombre: nombre.trim(), correo, modulos });
         }}
       >
         {busy ? "Invitando…" : "Invitar"}
