@@ -2470,7 +2470,22 @@ function Pendientes({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCo
 
       {modal && (
         <Modal title={modal.item.id ? "Editar pendiente" : modal.item.parentId ? "Nueva subtarea" : "Nuevo pendiente"} onClose={() => setModal(null)}>
-          <PendienteForm item={modal.item} proyectos={data.proyectos} equipo={data.equipo} contactos={data.contactos} pendientes={data.pendientes} onSave={(v) => { modal.item.id ? onEdit(modal.item.id, v) : onAdd(v); setModal(null); }} />
+          <PendienteForm item={modal.item} proyectos={data.proyectos} equipo={data.equipo} contactos={data.contactos} pendientes={data.pendientes}
+            onSave={(v) => {
+              if (modal.item.id) {
+                onEdit(modal.item.id, v);
+                // Si cambió de proyecto (directo, o porque ahora es subtarea de otra tarea en otro proyecto),
+                // arrastra el cambio a todas sus propias subtareas para que nunca queden en un proyecto distinto.
+                if (v.proyectoId !== modal.item.proyectoId) {
+                  const hijosIds = descendientesDe(modal.item.id, data.pendientes);
+                  hijosIds.forEach((hid) => onEdit(hid, { proyectoId: v.proyectoId }));
+                }
+              } else {
+                onAdd(v);
+              }
+              setModal(null);
+            }}
+          />
         </Modal>
       )}
     </div>
@@ -2482,6 +2497,18 @@ function PendienteForm({ item, proyectos, equipo, contactos, pendientes, onSave 
   const [error, setError] = useState("");
   const excluidos = item.id ? [item.id, ...descendientesDe(item.id, pendientes)] : [];
   const opcionesParent = pendientes.filter((t) => !excluidos.includes(t.id));
+
+  // Si es subtarea de algo, el proyecto se hereda de la tarea principal — no se elige aparte.
+  // Esto se sincroniza cada vez que cambias de qué tarea es subtarea (por si eliges otra tarea principal).
+  useEffect(() => {
+    if (v.parentId) {
+      const padre = pendientes.find((t) => t.id === v.parentId);
+      if (padre && padre.proyectoId !== v.proyectoId) setV((prev) => ({ ...prev, proyectoId: padre.proyectoId }));
+    }
+  }, [v.parentId]);
+
+  const proyectoHeredado = v.parentId ? proyectos.find((p) => p.id === v.proyectoId) : null;
+
   return (
     <div>
       <Field label="Descripción"><input className="gp-input" value={v.descripcion} onChange={(e) => setV({ ...v, descripcion: e.target.value })} /></Field>
@@ -2492,10 +2519,17 @@ function PendienteForm({ item, proyectos, equipo, contactos, pendientes, onSave 
         </select>
       </Field>
       <Field label="Proyecto">
-        <select className="gp-input" value={v.proyectoId} onChange={(e) => setV({ ...v, proyectoId: e.target.value })}>
-          <option value="">— sin proyecto —</option>
-          {proyectos.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
-        </select>
+        {v.parentId ? (
+          <div>
+            <input className="gp-input" disabled value={proyectoHeredado ? proyectoHeredado.nombre : "— sin proyecto —"} style={{ opacity: 0.7 }} />
+            <p className="text-xs gp-text-muted mt-1">Hereda el proyecto de su tarea principal. Si necesitas cambiarlo, cambia el proyecto de esa tarea principal.</p>
+          </div>
+        ) : (
+          <select className="gp-input" value={v.proyectoId} onChange={(e) => setV({ ...v, proyectoId: e.target.value })}>
+            <option value="">— sin proyecto —</option>
+            {proyectos.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+          </select>
+        )}
       </Field>
       <Field label="Cliente (a quién se le entrega)">
         <select className="gp-input" value={v.contactoId || ""} onChange={(e) => setV({ ...v, contactoId: e.target.value })}>
