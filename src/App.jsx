@@ -866,7 +866,7 @@ function SplashScreen({ tema, fadingOut }) {
       `}</style>
       <div className="flex flex-col items-center">
         <img src="/logo-arkeyone.png" alt="ArkeyOne" className="splash-logo" style={{ height: 200 }} />
-        <p className="splash-tagline text-xs gp-text-muted mt-3 tracking-wide">La llave que ordena tu mundo</p>
+        <p className="splash-tagline text-xs gp-text-muted mt-3 tracking-wide">La llave que alinea tu mundo</p>
         <div className="splash-bar-track"><div className="splash-bar-fill" /></div>
       </div>
     </div>
