@@ -6,7 +6,7 @@ import {
   Users, Activity, Plus, X, Trash2, Pencil, Github, ChevronDown,
   ChevronRight, Bell, Lightbulb, Rocket, MessageCircle, Mail, Globe,
   Target, Contact, BarChart3, FileText, Flame, HeartPulse, Check, Menu, PieChart as PieChartIcon,
-  PiggyBank, Camera, Film, Upload, MapPin, Clock, Mic, Gift, Receipt, Megaphone, ChevronUp, Gem, Download, Sun, Moon, Shield,
+  PiggyBank, Camera, Film, Upload, MapPin, Clock, Mic, Gift, Receipt, Megaphone, ChevronUp, Gem, Download, Sun, Moon, Shield, LogOut, ChevronLeft,
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
@@ -1097,6 +1097,15 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
   const [view, setView] = useState("dashboard");
   const [regalosFiltroContacto, setRegalosFiltroContacto] = useState("");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  // El menú lateral se puede colapsar a solo íconos en escritorio; queda "fijo" como lo dejes (se recuerda en este navegador).
+  const [sidebarColapsado, setSidebarColapsado] = useState(() => localStorage.getItem("arkeyone_sidebar_colapsado") === "1");
+  const toggleSidebarColapsado = () => {
+    setSidebarColapsado((prev) => {
+      const next = !prev;
+      localStorage.setItem("arkeyone_sidebar_colapsado", next ? "1" : "0");
+      return next;
+    });
+  };
   // Qué grupos del menú lateral están cerrados (colapsados). Por default arrancan TODOS cerrados;
   // si el usuario abre alguno, se recuerda esa preferencia en este navegador.
   const [gruposCerrados, setGruposCerrados] = useState(() => {
@@ -1320,27 +1329,27 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
 
         {/* rail lateral / cajón */}
         <div
-          className={`w-64 md:w-56 shrink-0 border-r gp-border p-4 flex flex-col gap-4 overflow-y-auto gp-scroll fixed md:static inset-y-0 left-0 z-50 md:z-auto transition-transform duration-200 ${mobileNavOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"}`}
+          className={`w-64 ${sidebarColapsado ? "md:w-20" : "md:w-56"} shrink-0 border-r gp-border p-4 flex flex-col gap-4 overflow-y-auto gp-scroll fixed md:static inset-y-0 left-0 z-50 md:z-auto transition-all duration-200 ${mobileNavOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"}`}
           style={{ maxHeight: "100vh", background: "var(--bg)" }}
         >
-          <div className="px-2 flex items-start justify-between">
-            <div>
-              <div className="flex items-center gap-2 mb-1">
-                <img src="/icono-arkeyone.png" alt="" style={{ height: 34 }} />
-                <span className="gp-serif text-lg font-semibold" style={{ letterSpacing: "0.3px" }}>ArkeyOne</span>
-              </div>
-              <p className="text-xs gp-text-muted truncate" style={{ maxWidth: 160 }}>
-                {activeOwnerId === misId ? miEmail : `Viendo: ${activeOwnerEmail}`}
-              </p>
-            </div>
-            <div className="flex items-center gap-2">
-              <button onClick={() => supabase.auth.signOut()} title="Cerrar sesión" className="text-xs gp-text-muted gp-btn-ghost px-2 py-1 rounded hidden md:inline-block">Salir</button>
-              <button onClick={() => setMobileNavOpen(false)} className="md:hidden p-1 gp-btn-ghost rounded" aria-label="Cerrar menú"><X size={16} /></button>
-            </div>
+          <div className="px-2 flex flex-col items-center text-center gap-1 relative pt-1">
+            <button onClick={() => setMobileNavOpen(false)} className="md:hidden absolute right-0 top-0 p-1 gp-btn-ghost rounded" aria-label="Cerrar menú"><X size={16} /></button>
+            <button
+              onClick={toggleSidebarColapsado}
+              title={sidebarColapsado ? "Fijar menú abierto" : "Colapsar menú"}
+              className="hidden md:inline-flex absolute -right-2 top-0 p-1 gp-btn-ghost rounded"
+            >
+              {sidebarColapsado ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}
+            </button>
+            <img src="/icono-arkeyone.png" alt="ArkeyOne" style={{ height: 34 }} />
+            <span className={`gp-serif text-lg font-semibold ${sidebarColapsado ? "md:hidden" : ""}`} style={{ letterSpacing: "0.3px" }}>ArkeyOne</span>
+            <p className={`text-xs gp-text-muted truncate ${sidebarColapsado ? "md:hidden" : ""}`} style={{ maxWidth: 160 }}>
+              {activeOwnerId === misId ? miEmail : `Viendo: ${activeOwnerEmail}`}
+            </p>
           </div>
 
           {misColaboraciones.length > 0 && (
-            <div className="px-2">
+            <div className={`px-2 ${sidebarColapsado ? "md:hidden" : ""}`}>
               <select
                 className="gp-input text-xs w-full"
                 value={activeOwnerId}
@@ -1362,21 +1371,22 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
 
           {navGroupsFiltrados.map((g) => {
             const cerrado = grupoEstaCerrado(g.label);
+            const mostrarItems = sidebarColapsado || !cerrado;
             return (
               <div key={g.label}>
                 <button
                   onClick={() => toggleGrupo(g.label)}
-                  className="w-full flex items-center justify-between px-3 mb-1 text-xs gp-text-muted gp-btn-ghost rounded py-1"
+                  className={`w-full flex items-center justify-between px-3 mb-1 text-xs gp-text-muted gp-btn-ghost rounded py-1 ${sidebarColapsado ? "md:hidden" : ""}`}
                 >
                   <span>{g.label}</span>
                   {!cerrado ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
                 </button>
-                {!cerrado && (
+                {mostrarItems && (
                   <div className="flex flex-col gap-0.5">
                     {g.items.map((n) => (
-                      <button key={n.id} onClick={() => { setView(n.id); setMobileNavOpen(false); }}
-                        className={`gp-navitem flex items-center gap-2 px-3 py-2.5 md:py-2 text-sm text-left ${view === n.id ? "gp-navitem-active" : ""}`}>
-                        <n.icon size={15} /> {n.label}
+                      <button key={n.id} onClick={() => { setView(n.id); setMobileNavOpen(false); }} title={n.label}
+                        className={`gp-navitem flex items-center gap-2 px-3 py-2.5 md:py-2 text-sm text-left ${sidebarColapsado ? "md:justify-center md:px-2" : ""} ${view === n.id ? "gp-navitem-active" : ""}`}>
+                        <n.icon size={15} /> <span className={sidebarColapsado ? "md:hidden" : ""}>{n.label}</span>
                       </button>
                     ))}
                   </div>
@@ -1385,33 +1395,38 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
             );
           })}
           <div className="mt-auto pt-2 border-t gp-border flex flex-col gap-0.5">
-            <button onClick={() => cambiarTema(tema === "claro" ? "oscuro" : "claro")} className="gp-navitem flex items-center gap-2 px-3 py-2.5 md:py-2 text-sm text-left w-full">
-              {tema === "claro" ? <Moon size={15} /> : <Sun size={15} />} {tema === "claro" ? "Tema Azul Oscuro" : "Tema Azul Claro"}
+            <button onClick={() => cambiarTema(tema === "claro" ? "oscuro" : "claro")} title="Cambiar tema"
+              className={`gp-navitem flex items-center gap-2 px-3 py-2.5 md:py-2 text-sm text-left w-full ${sidebarColapsado ? "md:justify-center md:px-2" : ""}`}>
+              {tema === "claro" ? <Moon size={15} /> : <Sun size={15} />} <span className={sidebarColapsado ? "md:hidden" : ""}>{tema === "claro" ? "Tema Azul Oscuro" : "Tema Azul Claro"}</span>
             </button>
-            <button onClick={() => setExportPaso("confirmar")}
-              className="gp-navitem flex items-center gap-2 px-3 py-2.5 md:py-2 text-sm text-left w-full">
-              <Download size={15} /> Exportar mis datos
+            <button onClick={() => setExportPaso("confirmar")} title="Exportar mis datos"
+              className={`gp-navitem flex items-center gap-2 px-3 py-2.5 md:py-2 text-sm text-left w-full ${sidebarColapsado ? "md:justify-center md:px-2" : ""}`}>
+              <Download size={15} /> <span className={sidebarColapsado ? "md:hidden" : ""}>Exportar mis datos</span>
             </button>
-            <button onClick={() => setMfaModalAbierto(true)}
-              className="gp-navitem flex items-center gap-2 px-3 py-2.5 md:py-2 text-sm text-left w-full">
-              <Shield size={15} /> Verificación en dos pasos
+            <button onClick={() => setMfaModalAbierto(true)} title="Verificación en dos pasos"
+              className={`gp-navitem flex items-center gap-2 px-3 py-2.5 md:py-2 text-sm text-left w-full ${sidebarColapsado ? "md:justify-center md:px-2" : ""}`}>
+              <Shield size={15} /> <span className={sidebarColapsado ? "md:hidden" : ""}>Verificación en dos pasos</span>
             </button>
-            <button onClick={() => cambiarAlertasCorreo(!alertasCorreoActivas)}
-              className="gp-navitem flex items-center gap-2 px-3 py-2.5 md:py-2 text-sm text-left w-full">
-              <Bell size={15} /> {alertasCorreoActivas ? "Alertas por correo: activadas" : "Alertas por correo: desactivadas"}
+            <button onClick={() => cambiarAlertasCorreo(!alertasCorreoActivas)} title="Alertas por correo"
+              className={`gp-navitem flex items-center gap-2 px-3 py-2.5 md:py-2 text-sm text-left w-full ${sidebarColapsado ? "md:justify-center md:px-2" : ""}`}>
+              <Bell size={15} /> <span className={sidebarColapsado ? "md:hidden" : ""}>{alertasCorreoActivas ? "Alertas por correo: activadas" : "Alertas por correo: desactivadas"}</span>
             </button>
             {activeOwnerId === misId && (
               <>
-                <button onClick={() => { setView("colaboradores"); setMobileNavOpen(false); }}
-                  className={`gp-navitem flex items-center gap-2 px-3 py-2.5 md:py-2 text-sm text-left w-full ${view === "colaboradores" ? "gp-navitem-active" : ""}`}>
-                  <Users size={15} /> Colaboradores
+                <button onClick={() => { setView("colaboradores"); setMobileNavOpen(false); }} title="Colaboradores"
+                  className={`gp-navitem flex items-center gap-2 px-3 py-2.5 md:py-2 text-sm text-left w-full ${sidebarColapsado ? "md:justify-center md:px-2" : ""} ${view === "colaboradores" ? "gp-navitem-active" : ""}`}>
+                  <Users size={15} /> <span className={sidebarColapsado ? "md:hidden" : ""}>Colaboradores</span>
                 </button>
-                <button onClick={() => { setView("papelera"); setMobileNavOpen(false); }}
-                  className={`gp-navitem flex items-center gap-2 px-3 py-2.5 md:py-2 text-sm text-left w-full ${view === "papelera" ? "gp-navitem-active" : ""}`}>
-                  <Trash2 size={15} /> Papelera
+                <button onClick={() => { setView("papelera"); setMobileNavOpen(false); }} title="Papelera"
+                  className={`gp-navitem flex items-center gap-2 px-3 py-2.5 md:py-2 text-sm text-left w-full ${sidebarColapsado ? "md:justify-center md:px-2" : ""} ${view === "papelera" ? "gp-navitem-active" : ""}`}>
+                  <Trash2 size={15} /> <span className={sidebarColapsado ? "md:hidden" : ""}>Papelera</span>
                 </button>
               </>
             )}
+            <button onClick={() => supabase.auth.signOut()} title="Cerrar sesión"
+              className={`gp-navitem flex items-center gap-2 px-3 py-2.5 md:py-2 text-sm text-left w-full ${sidebarColapsado ? "md:justify-center md:px-2" : ""}`}>
+              <LogOut size={15} /> <span className={sidebarColapsado ? "md:hidden" : ""}>Cerrar sesión</span>
+            </button>
           </div>
         </div>
 
