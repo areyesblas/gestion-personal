@@ -2209,6 +2209,7 @@ function Colaboradores({ misId, miEmail }) {
   const [modal, setModal] = useState(false);
   const [busy, setBusy] = useState(null);
   const [revocarConfirm, setRevocarConfirm] = useState(null);
+  const [avisoCorreo, setAvisoCorreo] = useState(null); // { id, ok, mensaje }
 
   const cargar = async () => {
     setLista(null);
@@ -2218,6 +2219,18 @@ function Colaboradores({ misId, miEmail }) {
   };
   useEffect(() => { cargar(); }, []);
 
+  // Llama a la Edge Function que manda el correo de invitación por Resend.
+  const enviarCorreoInvitacion = async (colaboradorId) => {
+    const { data: sesion } = await supabase.auth.getSession();
+    const resp = await fetch(`${supabase.supabaseUrl}/functions/v1/invitar-colaborador`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${sesion.session.access_token}` },
+      body: JSON.stringify({ colaboradorId }),
+    });
+    const json = await resp.json().catch(() => ({}));
+    return { ok: resp.ok, json };
+  };
+
   const invitar = async ({ correo, modulos }) => {
     setBusy("nuevo");
     const modulosSnake = modulos.map((k) => tableName(k));
@@ -2225,14 +2238,23 @@ function Colaboradores({ misId, miEmail }) {
     if (modulosSnake.length && !modulosSnake.includes("comentarios")) modulosSnake.push("comentarios");
     // las valuaciones de patrimonio van junto con el módulo de patrimonio.
     if (modulos.includes("patrimonio") && !modulosSnake.includes("patrimonio_valuaciones")) modulosSnake.push("patrimonio_valuaciones");
-    const { error } = await supabase.from("colaboradores").insert({
+    const { data: fila, error } = await supabase.from("colaboradores").insert({
       propietario_id: misId, propietario_email: miEmail,
       colaborador_email: correo.trim().toLowerCase(), modulos: modulosSnake, estatus: "Pendiente",
-    });
+    }).select().single();
+    if (error) { setBusy(null); alert("No se pudo invitar: " + error.message); return; }
+    const { ok } = await enviarCorreoInvitacion(fila.id);
     setBusy(null);
-    if (error) { alert("No se pudo invitar: " + error.message); return; }
     setModal(false);
+    setAvisoCorreo({ id: fila.id, ok, mensaje: ok ? `Se envió el correo de invitación a ${fila.colaborador_email}.` : `Se guardó la invitación, pero no se pudo enviar el correo a ${fila.colaborador_email}. Puedes reenviarlo desde el botón "Reenviar correo".` });
     cargar();
+  };
+
+  const reenviarInvitacion = async (c) => {
+    setBusy(c.id);
+    const { ok } = await enviarCorreoInvitacion(c.id);
+    setBusy(null);
+    setAvisoCorreo({ id: c.id, ok, mensaje: ok ? `Se reenvió el correo de invitación a ${c.colaborador_email}.` : `No se pudo enviar el correo a ${c.colaborador_email}. Inténtalo de nuevo en un momento.` });
   };
 
   const revocar = async (id) => {
@@ -2262,6 +2284,13 @@ function Colaboradores({ misId, miEmail }) {
       </div>
       <p className="text-sm gp-text-muted mb-6">Invita por correo a alguien (tu contador, un asistente) y elige exactamente qué módulos puede ver y editar dentro de tu cuenta.</p>
 
+      {avisoCorreo && (
+        <div className="gp-panel-hi p-3 mb-4 text-xs flex items-start justify-between gap-3" style={{ borderLeft: `3px solid ${avisoCorreo.ok ? "var(--teal)" : "var(--red)"}` }}>
+          <span>{avisoCorreo.mensaje}</span>
+          <button onClick={() => setAvisoCorreo(null)} className="gp-text-muted shrink-0"><X size={14} /></button>
+        </div>
+      )}
+
       {lista === null && <p className="text-sm gp-text-muted">Cargando…</p>}
       {lista !== null && lista.length === 0 && <p className="text-sm gp-text-muted">Aún no has invitado a nadie.</p>}
 
@@ -2283,6 +2312,11 @@ function Colaboradores({ misId, miEmail }) {
                   </div>
                 </div>
                 <div className="flex gap-1 shrink-0">
+                  {c.estatus === "Pendiente" && (
+                    <button disabled={busy === c.id} onClick={() => reenviarInvitacion(c)} className="gp-btn-ghost px-3 py-1.5 text-xs whitespace-nowrap">
+                      {busy === c.id ? "Enviando…" : "Reenviar correo"}
+                    </button>
+                  )}
                   {c.estatus === "Revocado" ? (
                     <button disabled={busy === c.id} onClick={() => reactivar(c.id)} className="gp-btn-ghost px-3 py-1.5 text-xs">Reactivar</button>
                   ) : (
@@ -2290,7 +2324,7 @@ function Colaboradores({ misId, miEmail }) {
                   )}
                 </div>
               </div>
-              {c.estatus === "Pendiente" && <p className="text-xs gp-text-muted mt-2">Se activa solo, en cuanto esa persona cree su cuenta o inicie sesión con ese correo.</p>}
+              {c.estatus === "Pendiente" && <p className="text-xs gp-text-muted mt-2">Ya le mandamos un correo de invitación. Se activa solo en cuanto esa persona cree su cuenta o inicie sesión con ese correo.</p>}
             </div>
           ))}
         </div>
