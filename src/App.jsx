@@ -1194,10 +1194,11 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
     if (error) { console.error(`Error al actualizar ${tableName(key)}:`, error); alert("No se pudo guardar el cambio."); return; }
     setData((prev) => ({ ...prev, [key]: prev[key].map((i) => (i.id === id ? { ...i, ...patch } : i)) }));
   };
-  const removeItem = async (key, id) => {
-    const { error } = await supabase.from(tableName(key)).update({ deleted_at: new Date().toISOString() }).eq("id", id);
+  const removeItem = async (key, id, extraIds = []) => {
+    const idsTodos = [id, ...extraIds];
+    const { error } = await supabase.from(tableName(key)).update({ deleted_at: new Date().toISOString() }).in("id", idsTodos);
     if (error) { console.error(`Error al borrar en ${tableName(key)}:`, error); alert("No se pudo borrar."); return; }
-    setData((prev) => ({ ...prev, [key]: prev[key].filter((i) => i.id !== id) }));
+    setData((prev) => ({ ...prev, [key]: prev[key].filter((i) => !idsTodos.includes(i.id)) }));
   };
   const restoreItem = async (key, id) => {
     const { error } = await supabase.from(tableName(key)).update({ deleted_at: null }).eq("id", id);
@@ -1211,7 +1212,8 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
     if (error) { console.error(`Error al borrar definitivamente en ${tableName(key)}:`, error); alert("No se pudo borrar definitivamente."); return false; }
     return true;
   };
-  const askDelete = (key, id) => setConfirmDelete({ key, id });
+  // opts puede traer { extraIds: [...ids de subtareas que también se van a borrar], mensaje: "texto de advertencia" }
+  const askDelete = (key, id, opts = {}) => setConfirmDelete({ key, id, ...opts });
   const updatePerfilSalud = async (patch) => {
     const { error } = await supabase.from("perfil_salud").upsert({ altura_cm: patch.alturaCm || null }, { onConflict: "user_id" });
     if (error) { console.error("Error al guardar tu estatura:", error); return; }
@@ -1405,7 +1407,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
             <Metas data={data} onAdd={(i) => addItem("metas", i)} onEdit={(id, p) => editItem("metas", id, p)} onRemove={(id) => askDelete("metas", id)} />
           )}
           {view === "pendientes" && (
-            <Pendientes data={data} onAdd={(i) => addItem("pendientes", i)} onEdit={(id, p) => editItem("pendientes", id, p)} onRemove={(id) => askDelete("pendientes", id)} onAddComentario={(i) => addItem("comentarios", i)} onRemoveComentario={(id) => askDelete("comentarios", id)} />
+            <Pendientes data={data} onAdd={(i) => addItem("pendientes", i)} onEdit={(id, p) => editItem("pendientes", id, p)} onRemove={(id, extraIds, mensaje) => askDelete("pendientes", id, { extraIds, mensaje })} onAddComentario={(i) => addItem("comentarios", i)} onRemoveComentario={(id) => askDelete("comentarios", id)} />
           )}
           {view === "finanzas" && (
             <Finanzas data={data} onAdd={(i) => addItem("finanzas", i)} onEdit={(id, p) => editItem("finanzas", id, p)} onRemove={(id) => askDelete("finanzas", id)} />
@@ -1466,11 +1468,11 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
               <AlertTriangle size={16} className="gp-text-red" />
               <h3 className="gp-serif text-lg">¿Eliminar esto?</h3>
             </div>
-            <p className="text-sm gp-text-muted mb-5">Esta acción no se puede deshacer.</p>
+            <p className="text-sm gp-text-muted mb-5">{confirmDelete.mensaje || "Esta acción no se puede deshacer."}</p>
             <div className="flex gap-2">
               <button onClick={() => setConfirmDelete(null)} className="gp-btn-ghost flex-1 py-2 text-sm">Cancelar</button>
               <button
-                onClick={() => { removeItem(confirmDelete.key, confirmDelete.id); setConfirmDelete(null); }}
+                onClick={() => { removeItem(confirmDelete.key, confirmDelete.id, confirmDelete.extraIds || []); setConfirmDelete(null); }}
                 className="flex-1 py-2 text-sm rounded"
                 style={{ background: "var(--red)", color: "#fff" }}
               >
@@ -2223,9 +2225,9 @@ function descendientesDe(id, items) {
 }
 
 // Vista mind-map: dibuja el proyecto en el centro y sus pendientes/subtareas ramificándose a la derecha.
-function MindMapPendientes({ proyecto, tareas, onNodoClick, onAgregar }) {
+function MindMapPendientes({ proyecto, tareas, onNodoClick, onAgregar, onEliminar }) {
   const NODE_W = 190, NODE_H = 36, GAP_Y = 12, GAP_X = 60;
-  const BTN_R = 9; // radio del botoncito "+"
+  const BTN_R = 8; // radio de los botoncitos "+" y "×"
   const raices = buildTareaTree(tareas.filter((t) => t.proyectoId === proyecto.id));
   const root = { id: "_root", descripcion: proyecto.nombre, estatus: null, hijos: raices };
 
@@ -2273,7 +2275,7 @@ function MindMapPendientes({ proyecto, tareas, onNodoClick, onAgregar }) {
 
   return (
     <div>
-      <p className="text-xs gp-text-muted mb-2">Clic en un pendiente para editarlo · clic en <span className="gp-text-gold">➕</span> para agregarle una subtarea.</p>
+      <p className="text-xs gp-text-muted mb-2">Clic en un pendiente para editarlo · <span className="gp-text-gold">➕</span> agrega una subtarea · <span className="gp-text-red">✕</span> la elimina.</p>
       <div className="overflow-auto gp-scroll gp-panel p-4" style={{ maxHeight: 560 }}>
         <svg width={width} height={height} style={{ minWidth: width, display: "block" }}>
           {edges.map((e, i) => {
@@ -2301,15 +2303,25 @@ function MindMapPendientes({ proyecto, tareas, onNodoClick, onAgregar }) {
                     {texto}
                   </text>
                 </g>
-                {/* botón "+" para agregar una subtarea colgando de este nodo */}
+                {/* botón "+" para agregar una subtarea colgando de este nodo, y "×" para eliminarlo (todos menos el proyecto) */}
                 <g
-                  transform={`translate(${x + NODE_W + (GAP_X / 2)},${p.y + NODE_H / 2})`}
+                  transform={`translate(${x + NODE_W + (GAP_X / 2)},${p.y + NODE_H / 2 - (esRaiz ? 0 : 9)})`}
                   style={{ cursor: "pointer" }}
                   onClick={() => onAgregar && onAgregar(p.nodo)}
                 >
                   <circle r={BTN_R} fill="var(--gold)" />
-                  <text x={0} y={4} fontSize={13} textAnchor="middle" fontWeight={700} fill="#161822">+</text>
+                  <text x={0} y={3.5} fontSize={12} textAnchor="middle" fontWeight={700} fill="#161822">+</text>
                 </g>
+                {!esRaiz && (
+                  <g
+                    transform={`translate(${x + NODE_W + (GAP_X / 2)},${p.y + NODE_H / 2 + 9})`}
+                    style={{ cursor: "pointer" }}
+                    onClick={() => onEliminar && onEliminar(p.nodo)}
+                  >
+                    <circle r={BTN_R} fill="var(--red)" />
+                    <text x={0} y={3.5} fontSize={11} textAnchor="middle" fontWeight={700} fill="#fff">✕</text>
+                  </g>
+                )}
               </g>
             );
           })}
@@ -2354,6 +2366,15 @@ function Pendientes({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCo
   // Los objetos armados por buildTareaTree traen un campo "hijos" que es solo para dibujar el árbol
   // en pantalla — hay que quitarlo antes de mandar el ítem a editar, porque no es una columna real.
   const paraEditar = (t) => { const { hijos, ...limpio } = t; return limpio; };
+  // Si la tarea tiene subtareas debajo, avisa que también se van a borrar (si no, se quedarían "huérfanas").
+  const confirmarBorrado = (item) => {
+    const hijosIds = descendientesDe(item.id, data.pendientes);
+    if (hijosIds.length > 0) {
+      onRemove(item.id, hijosIds, `Esta tarea tiene ${hijosIds.length} subtarea${hijosIds.length > 1 ? "s" : ""} debajo. Si la eliminas, también se eliminan todas sus subtareas.`);
+    } else {
+      onRemove(item.id);
+    }
+  };
 
   return (
     <div>
@@ -2383,6 +2404,7 @@ function Pendientes({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCo
             tareas={data.pendientes}
             onNodoClick={(nodo) => setModal({ item: paraEditar(nodo) })}
             onAgregar={(nodo) => setModal({ item: { ...empty, proyectoId: proyectoMindMap, parentId: nodo.id === "_root" ? "" : nodo.id } })}
+            onEliminar={(nodo) => confirmarBorrado(nodo)}
           />
         ) : (
           <p className="text-sm gp-text-muted py-8 text-center">Elige un proyecto arriba para ver su mind-map de pendientes.</p>
@@ -2429,7 +2451,7 @@ function Pendientes({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCo
                   <td><div className="flex gap-1">
                     <IconBtn onClick={() => setModal({ item: { ...empty, proyectoId: p.proyectoId, parentId: p.id } })}><Plus size={13} /></IconBtn>
                     <IconBtn onClick={() => setComentariosDe(p)}><MessageCircle size={13} />{nc > 0 && <span className="gp-mono" style={{ fontSize: 9, marginLeft: 2 }}>{nc}</span>}</IconBtn>
-                    <IconBtn onClick={() => setModal({ item: paraEditar(p) })}><Pencil size={13} /></IconBtn><IconBtn onClick={() => onRemove(p.id)}><Trash2 size={13} /></IconBtn>
+                    <IconBtn onClick={() => setModal({ item: paraEditar(p) })}><Pencil size={13} /></IconBtn><IconBtn onClick={() => confirmarBorrado(p)}><Trash2 size={13} /></IconBtn>
                   </div></td>
                 </tr>
               );
