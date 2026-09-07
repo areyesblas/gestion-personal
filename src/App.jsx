@@ -3034,7 +3034,7 @@ function ProyectoDetalle({ data, proyectoId, onVolver, onAddTarea, onEditTarea, 
 
       {modal && (
         <Modal title={modal.item.id ? "Editar pendiente" : modal.item.parentId ? "Nueva subtarea" : "Nuevo pendiente"} onClose={() => setModal(null)}>
-          <PendienteForm item={modal.item} proyectos={data.proyectos} equipo={data.equipo} contactos={data.contactos} pendientes={data.pendientes} colaboradores={[]}
+          <PendienteForm item={modal.item} proyectos={data.proyectos} equipo={data.equipo} contactos={data.contactos} pendientes={data.pendientes} colaboradores={[]} proyectoFijoId={proyectoId}
             onSave={(v) => {
               if (modal.item.id) {
                 onEditTarea(modal.item.id, v);
@@ -3426,11 +3426,13 @@ function Pendientes({ data, activeOwnerId, onAdd, onEdit, onRemove, onAddComenta
   );
 }
 
-function PendienteForm({ item, proyectos, equipo, contactos, pendientes, colaboradores, onSave }) {
+function PendienteForm({ item, proyectos, equipo, contactos, pendientes, colaboradores, onSave, proyectoFijoId }) {
   const [v, setV] = useState(item);
   const [error, setError] = useState("");
   const excluidos = item.id ? [item.id, ...descendientesDe(item.id, pendientes)] : [];
-  const opcionesParent = pendientes.filter((t) => !excluidos.includes(t.id));
+  // Si el proyecto está fijo (venimos desde el detalle de un proyecto), solo se puede elegir
+  // como tarea principal a otra tarea de ESE mismo proyecto — no tiene sentido anidar entre proyectos distintos.
+  const opcionesParent = pendientes.filter((t) => !excluidos.includes(t.id) && (!proyectoFijoId || t.proyectoId === proyectoFijoId));
 
   // Si es subtarea de algo, el proyecto se hereda de la tarea principal — no se elige aparte.
   // Esto se sincroniza cada vez que cambias de qué tarea es subtarea (por si eliges otra tarea principal).
@@ -3442,6 +3444,7 @@ function PendienteForm({ item, proyectos, equipo, contactos, pendientes, colabor
   }, [v.parentId]);
 
   const proyectoHeredado = v.parentId ? proyectos.find((p) => p.id === v.proyectoId) : null;
+  const proyectoFijo = proyectoFijoId ? proyectos.find((p) => p.id === proyectoFijoId) : null;
 
   return (
     <div>
@@ -3453,7 +3456,12 @@ function PendienteForm({ item, proyectos, equipo, contactos, pendientes, colabor
         </select>
       </Field>
       <Field label="Proyecto">
-        {v.parentId ? (
+        {proyectoFijoId ? (
+          <div>
+            <input className="gp-input" disabled value={proyectoFijo ? proyectoFijo.nombre : "—"} style={{ opacity: 0.7 }} />
+            <p className="text-xs gp-text-muted mt-1">Estás creando este pendiente desde el detalle de este proyecto, así que no se puede cambiar aquí.</p>
+          </div>
+        ) : v.parentId ? (
           <div>
             <input className="gp-input" disabled value={proyectoHeredado ? proyectoHeredado.nombre : "— sin proyecto —"} style={{ opacity: 0.7 }} />
             <p className="text-xs gp-text-muted mt-1">Hereda el proyecto de su tarea principal. Si necesitas cambiarlo, cambia el proyecto de esa tarea principal.</p>
