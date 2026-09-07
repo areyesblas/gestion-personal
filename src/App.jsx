@@ -1098,6 +1098,19 @@ const VIEW_TO_MODULO = {
   redes: "redes_metricas", marketing: "campanas",
   actividades: "actividades", eventos: "eventos", habitos: "habitos", salud: "salud",
 };
+// Mapeo inverso: de nombre de tabla/módulo a id de vista, para los deep links de Push
+// (una notificación de una deuda trae recurso_tabla="deudas" y con esto sabemos a qué
+// pantalla mandar al usuario).
+const MODULO_TO_VIEW = Object.fromEntries(Object.entries(VIEW_TO_MODULO).map(([view, modulo]) => [modulo, view]));
+
+// Convierte la llave pública VAPID (base64url, como la da el navegador/servidor) al formato
+// binario que pide pushManager.subscribe(). Es texto de configuración, siempre igual.
+function urlBase64ToUint8Array(base64String) {
+  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const rawData = atob(base64);
+  return Uint8Array.from([...rawData].map((c) => c.charCodeAt(0)));
+}
 
 // Modal para activar/desactivar la verificación en dos pasos (MFA) de la cuenta.
 function SeguridadMfaModal({ onClose }) {
@@ -1332,6 +1345,105 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
     await supabase.from("preferencias").upsert({ user_id: misId, alertas_correo_activas: nuevoValor }, { onConflict: "user_id" });
   };
 
+  // --- Notificaciones Push -------------------------------------------------
+  // "sin-soporte" (navegador no puede), "sin-activar", "activando", "activo", "denegado".
+  const [pushEstado, setPushEstado] = useState("sin-soporte");
+  const [notifPanelAbierto, setNotifPanelAbierto] = useState(false);
+  const [notificaciones, setNotificaciones] = useState([]);
+  const notifNoLeidas = notificaciones.filter((n) => !n.leido).length;
+
+  const cargarNotificaciones = async () => {
+    const { data } = await supabase.from("notifications").select("*").eq("user_id", misId).order("created_at", { ascending: false }).limit(30);
+    setNotificaciones(data || []);
+  };
+
+  useEffect(() => {
+    cargarNotificaciones();
+    if (!("serviceWorker" in navigator) || !("PushManager" in window)) { setPushEstado("sin-soporte"); return; }
+    if (Notification.permission === "denied") { setPushEstado("denegado"); return; }
+    navigator.serviceWorker.ready.then(async (reg) => {
+      const sub = await reg.pushManager.getSubscription();
+      setPushEstado(sub ? "activo" : "sin-activar");
+    }).catch(() => setPushEstado("sin-soporte"));
+  }, []);
+
+  const activarPush = async () => {
+    setPushEstado("activando");
+    try {
+      const permiso = await Notification.requestPermission();
+      if (permiso !== "granted") { setPushEstado(permiso === "denied" ? "denegado" : "sin-activar"); return; }
+      const reg = await navigator.serviceWorker.ready;
+      const vapidKey = import.meta.env.VITE_VAPID_PUBLIC_KEY;
+      if (!vapidKey) { alert("Falta configurar la llave pública de Push (VITE_VAPID_PUBLIC_KEY)."); setPushEstado("sin-activar"); return; }
+      const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(vapidKey) });
+      const json = sub.toJSON();
+      const plataforma = /iphone|ipad|ipod/i.test(navigator.userAgent) ? "ios" : /android/i.test(navigator.userAgent) ? "android" : "desktop";
+      await supabase.from("push_subscriptions").upsert({
+        user_id: misId, endpoint: sub.endpoint, p256dh: json.keys.p256dh, auth: json.keys.auth,
+        user_agent: navigator.userAgent, plataforma, activo: true,
+      }, { onConflict: "user_id,endpoint" });
+      setPushEstado("activo");
+    } catch (err) {
+      console.error("Error activando push:", err);
+      setPushEstado("sin-activar");
+    }
+  };
+
+  const desactivarPush = async () => {
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.getSubscription();
+      if (sub) {
+        await supabase.from("push_subscriptions").update({ activo: false }).eq("user_id", misId).eq("endpoint", sub.endpoint);
+        await sub.unsubscribe();
+      }
+      setPushEstado("sin-activar");
+    } catch (err) {
+      console.error("Error desactivando push:", err);
+    }
+  };
+
+  const irADeepLink = (recursoTabla) => {
+    const destino = recursoTabla && MODULO_TO_VIEW[recursoTabla];
+    if (destino) irAVista(destino);
+    setNotifPanelAbierto(false);
+  };
+
+  const marcarNotificacionLeida = async (n) => {
+    if (!n.leido) {
+      setNotificaciones((prev) => prev.map((x) => (x.id === n.id ? { ...x, leido: true } : x)));
+      await supabase.from("notifications").update({ leido: true }).eq("id", n.id);
+    }
+    irADeepLink(n.recurso_tabla);
+  };
+
+  const marcarTodasLeidas = async () => {
+    setNotificaciones((prev) => prev.map((n) => ({ ...n, leido: true })));
+    await supabase.from("notifications").update({ leido: true }).eq("user_id", misId).eq("leido", false);
+  };
+
+  // Deep links: si llegan de un push tocado con la app cerrada (abre /?modulo=deudas), o de
+  // un push tocado con la app ya abierta (el Service Worker manda el mensaje a esta pestaña).
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const modulo = params.get("modulo");
+    if (modulo) {
+      irADeepLink(modulo);
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+    const alMensaje = (event) => {
+      if (event.data?.tipo === "arkeyone-deep-link") {
+        try {
+          const url = new URL(event.data.url, window.location.origin);
+          const m = url.searchParams.get("modulo");
+          if (m) irADeepLink(m);
+        } catch {}
+      }
+    };
+    navigator.serviceWorker?.addEventListener?.("message", alMensaje);
+    return () => navigator.serviceWorker?.removeEventListener?.("message", alMensaje);
+  }, []);
+
   const [exportPaso, setExportPaso] = useState(null); // null | "confirmar" | "listo"
   const [mfaModalAbierto, setMfaModalAbierto] = useState(false);
   const confirmarExportar = () => {
@@ -1562,6 +1674,28 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
               className={`gp-navitem flex items-center gap-2 px-3 py-2.5 md:py-2 text-sm text-left w-full ${sidebarColapsado ? "md:justify-center md:px-2" : ""}`}>
               <Bell size={15} /> <span className={sidebarColapsado ? "md:hidden" : ""}>{alertasCorreoActivas ? "Alertas por correo: activadas" : "Alertas por correo: desactivadas"}</span>
             </button>
+            {pushEstado !== "sin-soporte" && (
+              <button
+                onClick={() => (pushEstado === "activo" ? desactivarPush() : activarPush())}
+                disabled={pushEstado === "activando"}
+                title="Notificaciones push"
+                className={`gp-navitem flex items-center gap-2 px-3 py-2.5 md:py-2 text-sm text-left w-full ${sidebarColapsado ? "md:justify-center md:px-2" : ""}`}
+              >
+                <Bell size={15} />
+                <span className={sidebarColapsado ? "md:hidden" : ""}>
+                  {pushEstado === "activo" && "Notificaciones push: activadas"}
+                  {pushEstado === "sin-activar" && "Activar notificaciones push"}
+                  {pushEstado === "activando" && "Activando…"}
+                  {pushEstado === "denegado" && "Push bloqueado (revisa permisos del navegador)"}
+                </span>
+              </button>
+            )}
+            <button onClick={() => { setNotifPanelAbierto(true); setMobileNavOpen(false); }} title="Notificaciones"
+              className={`gp-navitem flex items-center gap-2 px-3 py-2.5 md:py-2 text-sm text-left w-full relative ${sidebarColapsado ? "md:justify-center md:px-2" : ""}`}>
+              <Bell size={15} />
+              <span className={sidebarColapsado ? "md:hidden" : ""}>Notificaciones{notifNoLeidas > 0 ? ` (${notifNoLeidas})` : ""}</span>
+              {notifNoLeidas > 0 && <span className="w-2 h-2 rounded-full absolute" style={{ background: "var(--red)", top: 8, left: sidebarColapsado ? 24 : 14 }} />}
+            </button>
             {activeOwnerId === misId && (
               <>
                 <button onClick={() => { setView("colaboradores"); setMobileNavOpen(false); }} title="Colaboradores"
@@ -1736,6 +1870,57 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
       )}
 
       {mfaModalAbierto && <SeguridadMfaModal onClose={() => setMfaModalAbierto(false)} />}
+
+      {notifPanelAbierto && (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,.65)" }} onClick={() => setNotifPanelAbierto(false)}>
+          <div className="gp-panel w-full max-w-md p-5 max-h-[80vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="gp-serif text-lg">Notificaciones</h3>
+              <button onClick={() => setNotifPanelAbierto(false)} className="gp-btn-ghost p-1 rounded"><X size={16} /></button>
+            </div>
+
+            {pushEstado === "activo" && (
+              <button
+                onClick={async () => {
+                  const { data: sesion } = await supabase.auth.getSession();
+                  await fetch(`${supabase.supabaseUrl}/functions/v1/enviar-push`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json", Authorization: `Bearer ${sesion.session.access_token}` },
+                    body: JSON.stringify({ titulo: "ARKEYONE", mensaje: "Esta es una notificación de prueba. Si la ves, el Push ya está funcionando 🎉", tipo: "prueba", url: "/" }),
+                  });
+                  setTimeout(cargarNotificaciones, 1000);
+                }}
+                className="text-xs gp-text-gold text-left mb-3"
+              >
+                Enviar notificación de prueba →
+              </button>
+            )}
+
+            {notificaciones.length > 0 && (
+              <button onClick={marcarTodasLeidas} className="text-xs gp-text-muted text-left mb-2">Marcar todas como leídas</button>
+            )}
+
+            <div className="overflow-y-auto gp-scroll flex-1 -mx-1 px-1">
+              {notificaciones.length === 0 && <p className="text-sm gp-text-muted">Aún no tienes notificaciones.</p>}
+              {notificaciones.map((n) => (
+                <button
+                  key={n.id}
+                  onClick={() => marcarNotificacionLeida(n)}
+                  className="w-full text-left p-3 rounded mb-1.5 gp-panel-hi"
+                  style={{ background: n.leido ? "transparent" : "var(--panel-hi)", border: "1px solid var(--border)" }}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <p className={`text-sm ${n.leido ? "gp-text-muted" : ""}`}>{n.titulo}</p>
+                    {!n.leido && <span className="w-2 h-2 rounded-full shrink-0 mt-1.5" style={{ background: "var(--gold)" }} />}
+                  </div>
+                  {n.mensaje && <p className="text-xs gp-text-muted mt-0.5">{n.mensaje}</p>}
+                  <p className="text-xs gp-text-muted mt-1 opacity-70">{new Date(n.created_at).toLocaleString("es-MX")}</p>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

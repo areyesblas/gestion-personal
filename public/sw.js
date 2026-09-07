@@ -76,3 +76,44 @@ self.addEventListener("fetch", (event) => {
 
   // Todo lo demás (Supabase, Resend, cualquier API) no se toca: va directo a la red.
 });
+
+// --- Web Push ---------------------------------------------------------------
+// El payload que manda nuestra Edge Function siempre es JSON:
+// { titulo, mensaje, url, tag, recursoTabla, recursoId }
+self.addEventListener("push", (event) => {
+  let datos = {};
+  try { datos = event.data ? event.data.json() : {}; } catch { datos = {}; }
+
+  const titulo = datos.titulo || "ARKEYONE";
+  const opciones = {
+    body: datos.mensaje || "",
+    icon: "/icons/icon-192.png",
+    badge: "/icons/icon-192.png",
+    tag: datos.tag || undefined, // notificaciones con el mismo tag se reemplazan en vez de amontonarse
+    data: { url: datos.url || "/" },
+    vibrate: [80, 40, 80],
+  };
+
+  event.waitUntil(self.registration.showNotification(titulo, opciones));
+});
+
+// Al tocar la notificación: si ya hay una pestaña/ventana de ARKEYONE abierta, la enfoca
+// y le manda la URL a donde ir (deep link); si no hay ninguna, abre una nueva.
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const url = event.notification.data?.url || "/";
+
+  event.waitUntil(
+    (async () => {
+      const clientList = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+      for (const client of clientList) {
+        if ("focus" in client) {
+          client.focus();
+          client.postMessage({ tipo: "arkeyone-deep-link", url });
+          return;
+        }
+      }
+      if (self.clients.openWindow) await self.clients.openWindow(url);
+    })()
+  );
+});
