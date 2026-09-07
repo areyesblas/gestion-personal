@@ -1103,6 +1103,7 @@ const VIEW_TO_MODULO = {
 // (una notificación de una deuda trae recurso_tabla="deudas" y con esto sabemos a qué
 // pantalla mandar al usuario).
 const MODULO_TO_VIEW = Object.fromEntries(Object.entries(VIEW_TO_MODULO).map(([view, modulo]) => [modulo, view]));
+MODULO_TO_VIEW["mi-trabajo"] = "mi-trabajo";
 
 // Convierte la llave pública VAPID (base64url, como la da el navegador/servidor) al formato
 // binario que pide pushManager.subscribe(). Es texto de configuración, siempre igual.
@@ -1498,7 +1499,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
   };
 
   const addItem = async (key, item) => {
-    const newItem = { ...item, id: uid(), userId: activeOwnerId };
+    const newItem = { ...item, id: item.id || uid(), userId: activeOwnerId };
     const { error } = await supabase.from(tableName(key)).insert(toRow(key, newItem));
     if (error) { console.error(`Error al guardar en ${tableName(key)}:`, error); alert("No se pudo guardar. Revisa tu conexión a internet."); return; }
     setData((prev) => ({ ...prev, [key]: [...prev[key], newItem] }));
@@ -1564,6 +1565,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
   const navGroups = [
     { label: "General", items: [
       { id: "dashboard", label: "Panorama", icon: LayoutDashboard },
+      { id: "mi-trabajo", label: "Mi trabajo", icon: CheckSquare },
       { id: "proyectos", label: "Proyectos e ideas", icon: FolderKanban },
       { id: "metas", label: "Metas por proyecto", icon: Target },
       { id: "pendientes", label: "Pendientes", icon: CheckSquare },
@@ -1605,7 +1607,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
   const navGroupsFiltrados = modulosPermitidos === null
     ? navGroups
     : navGroups
-        .map((g) => ({ ...g, items: g.items.filter((it) => VIEW_TO_MODULO[it.id] && modulosPermitidos.includes(VIEW_TO_MODULO[it.id])) }))
+        .map((g) => ({ ...g, items: g.items.filter((it) => it.id === "mi-trabajo" || (VIEW_TO_MODULO[it.id] && modulosPermitidos.includes(VIEW_TO_MODULO[it.id]))) }))
         .filter((g) => g.items.length > 0);
 
   return (
@@ -1764,7 +1766,16 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
             <Metas data={data} onAdd={(i) => addItem("metas", i)} onEdit={(id, p) => editItem("metas", id, p)} onRemove={(id) => askDelete("metas", id)} />
           )}
           {view === "pendientes" && (
-            <Pendientes data={data} onAdd={(i) => addItem("pendientes", i)} onEdit={(id, p) => editItem("pendientes", id, p)} onRemove={(id, extraIds, mensaje) => askDelete("pendientes", id, { extraIds, mensaje })} onAddComentario={(i) => addItem("comentarios", i)} onRemoveComentario={(id) => askDelete("comentarios", id)} />
+            <Pendientes data={data} activeOwnerId={activeOwnerId} onAdd={(i) => addItem("pendientes", i)} onEdit={(id, p) => editItem("pendientes", id, p)} onRemove={(id, extraIds, mensaje) => askDelete("pendientes", id, { extraIds, mensaje })} onAddComentario={(i) => addItem("comentarios", i)} onRemoveComentario={(id) => askDelete("comentarios", id)}
+              onAsignar={async (pendienteId) => {
+                const { data: sesion } = await supabase.auth.getSession();
+                await fetch(`${supabase.supabaseUrl}/functions/v1/notificar-asignacion`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json", Authorization: `Bearer ${sesion.session.access_token}` },
+                  body: JSON.stringify({ pendienteId }),
+                });
+              }}
+            />
           )}
           {view === "finanzas" && (
             <Finanzas data={data} onAdd={(i) => addItem("finanzas", i)} onEdit={(id, p) => editItem("finanzas", id, p)} onRemove={(id) => askDelete("finanzas", id)} />
@@ -1812,6 +1823,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
           {view === "salud" && (
             <Salud data={data} onAdd={(i) => addItem("salud", i)} onEdit={(id, p) => editItem("salud", id, p)} onRemove={(id) => askDelete("salud", id)} onUpdatePerfil={updatePerfilSalud} />
           )}
+          {view === "mi-trabajo" && <MiTrabajo misId={misId} />}
           {view === "medicamentos" && (
             <Medicamentos data={data} onAdd={(i) => addItem("medicamentos", i)} onEdit={(id, p) => editItem("medicamentos", id, p)} onRemove={(id) => askDelete("medicamentos", id)} />
           )}
@@ -2786,6 +2798,64 @@ function ProyectoForm({ item, onSave }) {
   );
 }
 
+/* ---------- Mi trabajo (workspace de colaborador — Fase 5) ---------- */
+// A diferencia del resto de la app (que muestra los datos de UNA cuenta a la vez, la propia
+// o una a la que cambiaste con el selector de cuentas), esta vista cruza TODAS las cuentas
+// donde te hayan asignado algo — por eso consulta Supabase directo en vez de usar `data`.
+function MiTrabajo({ misId }) {
+  const [tareas, setTareas] = useState(null); // null = cargando
+  const [proyectosPorId, setProyectosPorId] = useState({});
+
+  const cargar = async () => {
+    const { data: rows } = await supabase.from("pendientes").select("*").eq("asignado_a", misId).is("deleted_at", null).order("fecha_limite", { ascending: true });
+    setTareas(rows || []);
+    const idsProyectos = [...new Set((rows || []).map((r) => r.proyecto_id).filter(Boolean))];
+    if (idsProyectos.length) {
+      const { data: proys } = await supabase.from("proyectos").select("id, nombre").in("id", idsProyectos);
+      setProyectosPorId(Object.fromEntries((proys || []).map((p) => [p.id, p.nombre])));
+    }
+  };
+  useEffect(() => { cargar(); }, [misId]);
+
+  const marcarEstatus = async (id, estatus) => {
+    await supabase.from("pendientes").update({ estatus }).eq("id", id);
+    setTareas((prev) => prev.map((t) => (t.id === id ? { ...t, estatus } : t)));
+  };
+
+  return (
+    <div>
+      <h2 className="gp-serif text-2xl mb-1">Mi trabajo</h2>
+      <p className="text-sm gp-text-muted mb-6">Lo que te han asignado, sin importar de qué cuenta venga — aquí solo ves tus tareas, no el resto de la información de quien te las asignó.</p>
+
+      {tareas === null && <p className="text-sm gp-text-muted">Cargando…</p>}
+      {tareas && tareas.length === 0 && <p className="text-sm gp-text-muted">Nadie te ha asignado tareas todavía.</p>}
+
+      <div className="space-y-2">
+        {(tareas || []).map((t) => {
+          const vencido = t.estatus !== "Hecho" && t.fecha_limite && daysUntil(t.fecha_limite) < 0;
+          return (
+            <div key={t.id} className="gp-panel p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium">{t.descripcion}</p>
+                  <div className="flex flex-wrap gap-2 mt-1.5">
+                    {proyectosPorId[t.proyecto_id] && <Badge tone="gold">{proyectosPorId[t.proyecto_id]}</Badge>}
+                    {t.prioridad && <Badge tone={t.prioridad === "Alta" ? "red" : "muted"}>{t.prioridad}</Badge>}
+                    {t.fecha_limite && <span className="gp-mono text-xs" style={{ color: vencido ? "var(--red)" : "var(--muted)" }}>{t.fecha_limite}</span>}
+                  </div>
+                </div>
+                <select className="gp-input shrink-0" style={{ width: 120, padding: "4px 8px" }} value={t.estatus} onChange={(e) => marcarEstatus(t.id, e.target.value)}>
+                  {ESTATUS_TAREA.map((s) => <option key={s}>{s}</option>)}
+                </select>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 /* ---------- Pendientes ---------- */
 // Arma el árbol de subtareas (sin límite de profundidad) a partir de la lista plana.
 function buildTareaTree(items) {
@@ -2928,13 +2998,20 @@ function MindMapPendientes({ proyecto, tareas, onNodoClick, onAgregar, onElimina
   );
 }
 
-function Pendientes({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveComentario }) {
+function Pendientes({ data, activeOwnerId, onAdd, onEdit, onRemove, onAddComentario, onRemoveComentario, onAsignar }) {
   const [modal, setModal] = useState(null);
   const [comentariosDe, setComentariosDe] = useState(null);
   const [orden, setOrden] = useState("default");
   const [vista, setVista] = useState("lista"); // "lista" | "mindmap"
   const [proyectoMindMap, setProyectoMindMap] = useState("");
-  const empty = { proyectoId: "", parentId: "", descripcion: "", fechaLimite: todayISO(), fechaRevision: "", prioridad: "Media", estatus: "Pendiente", responsableId: "", contactoId: "", precio: "", tiempoEstimado: "", tiempoReal: "" };
+  const [colaboradores, setColaboradores] = useState([]);
+  const empty = { proyectoId: "", parentId: "", descripcion: "", fechaLimite: todayISO(), fechaRevision: "", prioridad: "Media", estatus: "Pendiente", responsableId: "", contactoId: "", precio: "", tiempoEstimado: "", tiempoReal: "", asignadoA: "" };
+
+  useEffect(() => {
+    if (!activeOwnerId) return;
+    supabase.from("colaboradores").select("colaborador_user_id, colaborador_email").eq("propietario_id", activeOwnerId).eq("estatus", "Activo")
+      .then(({ data: rows }) => setColaboradores(rows || []));
+  }, [activeOwnerId]);
 
   const camposOrden = {
     entrega: { get: (p) => p.fechaLimite, tipo: "fecha" },
@@ -3067,7 +3144,7 @@ function Pendientes({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCo
 
       {modal && (
         <Modal title={modal.item.id ? "Editar pendiente" : modal.item.parentId ? "Nueva subtarea" : "Nuevo pendiente"} onClose={() => setModal(null)}>
-          <PendienteForm item={modal.item} proyectos={data.proyectos} equipo={data.equipo} contactos={data.contactos} pendientes={data.pendientes}
+          <PendienteForm item={modal.item} proyectos={data.proyectos} equipo={data.equipo} contactos={data.contactos} pendientes={data.pendientes} colaboradores={colaboradores}
             onSave={(v) => {
               if (modal.item.id) {
                 onEdit(modal.item.id, v);
@@ -3077,8 +3154,11 @@ function Pendientes({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCo
                   const hijosIds = descendientesDe(modal.item.id, data.pendientes);
                   hijosIds.forEach((hid) => onEdit(hid, { proyectoId: v.proyectoId }));
                 }
+                if (v.asignadoA && v.asignadoA !== modal.item.asignadoA) onAsignar(modal.item.id);
               } else {
-                onAdd(v);
+                const nuevoId = uid();
+                onAdd({ ...v, id: nuevoId });
+                if (v.asignadoA) onAsignar(nuevoId);
               }
               setModal(null);
             }}
@@ -3089,7 +3169,7 @@ function Pendientes({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCo
   );
 }
 
-function PendienteForm({ item, proyectos, equipo, contactos, pendientes, onSave }) {
+function PendienteForm({ item, proyectos, equipo, contactos, pendientes, colaboradores, onSave }) {
   const [v, setV] = useState(item);
   const [error, setError] = useState("");
   const excluidos = item.id ? [item.id, ...descendientesDe(item.id, pendientes)] : [];
@@ -3145,6 +3225,14 @@ function PendienteForm({ item, proyectos, equipo, contactos, pendientes, onSave 
           {equipo.map((m) => <option key={m.id} value={m.id}>{m.nombre}</option>)}
         </select>
       </Field>
+      {colaboradores && colaboradores.length > 0 && (
+        <Field label="Asignar a colaborador ARKEYONE (opcional — le llega notificación push)">
+          <select className="gp-input" value={v.asignadoA || ""} onChange={(e) => setV({ ...v, asignadoA: e.target.value })}>
+            <option value="">— sin asignar —</option>
+            {colaboradores.map((c) => <option key={c.colaborador_user_id} value={c.colaborador_user_id}>{c.colaborador_email}</option>)}
+          </select>
+        </Field>
+      )}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Field label="Precio pactado (si es delegado)"><MoneyInput className="gp-input" value={v.precio} onChange={(val) => setV({ ...v, precio: val })} /></Field>
         <Field label="Tiempo estimado (horas)"><input type="number" className="gp-input" value={v.tiempoEstimado} onChange={(e) => setV({ ...v, tiempoEstimado: e.target.value })} /></Field>
