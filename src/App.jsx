@@ -47,10 +47,11 @@ const Tokens = ({ tema = "oscuro" }) => (
     .gp-badge{ display:inline-block; padding:2px 8px; border-radius:3px; font-size:11px; font-weight:500; }
     .gp-scroll::-webkit-scrollbar{ width:6px; height:6px; }
     .gp-scroll::-webkit-scrollbar-thumb{ background:var(--border); border-radius:3px; }
-    /* El panel lateral mantiene un azul medio en tema claro (no tan oscuro como "Azul Oscuro",
-       pero tampoco tan pálido como el resto del tema claro), para que el logo se siga viendo bien. */
+    /* El panel lateral tiene su propio "look": el logo y el color de letras SIEMPRE son los mismos
+       (claros), sin importar el tema. Solo el fondo (y sus tonos de hover/borde) cambia entre temas. */
+    .gp-sidebar-area{ --text:#EAF1FA; --muted:#93A7C4; }
     .gp-root.claro .gp-sidebar-area{
-      --bg:#1E4976; --panel-hi:#28527F; --border:#2F5C89; --text:#EAF1FA; --muted:#A9C2DE;
+      --bg:#1E4976; --panel-hi:#28527F; --border:#2F5C89;
     }
   `}</style>
 );
