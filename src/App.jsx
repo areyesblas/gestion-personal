@@ -30,6 +30,12 @@ const Tokens = ({ tema = "oscuro" }) => (
     .gp-input{ background:var(--bg); border:1px solid var(--border); color:var(--text);
       border-radius:4px; padding:6px 10px; font-size:13px; width:100%; }
     .gp-input:focus{ outline:1px solid var(--gold); border-color:var(--gold); }
+    /* En celular, un input con letra menor a 16px hace que iOS/Android le hagan zoom
+       automático al enfocarlo (y a veces no regresa bien al tamaño normal al desenfocar).
+       Por eso en pantallas chicas los inputs usan 16px; en escritorio se quedan en 13px. */
+    @media (max-width: 767px) {
+      .gp-input{ font-size:16px; }
+    }
     .gp-btn{ background:var(--gold); color:#161822; font-weight:600; border-radius:4px; }
     .gp-btn:hover{ opacity:.9; }
     .gp-btn-ghost{ background:transparent; border:1px solid var(--border); color:var(--text); border-radius:4px; }
