@@ -6,7 +6,7 @@ import {
   Users, Activity, Plus, X, Trash2, Pencil, Github, ChevronDown,
   ChevronRight, Bell, Lightbulb, Rocket, MessageCircle, Mail, Globe,
   Target, Contact, BarChart3, FileText, Flame, HeartPulse, Check, Menu, PieChart as PieChartIcon,
-  PiggyBank, Camera, Film, Upload, MapPin, Clock, Mic, Gift, Receipt, Megaphone, ChevronUp, Gem, Download, Sun, Moon, Shield, LogOut, ChevronLeft,
+  PiggyBank, Camera, Film, Upload, MapPin, Clock, Mic, Gift, Receipt, Megaphone, ChevronUp, Gem, Download, Sun, Moon, Shield, LogOut, ChevronLeft, Lock,
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
@@ -1122,8 +1122,8 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
   const [confirmDelete, setConfirmDelete] = useState(null); // { key, id, label }
 
   // Cierre de sesión automático por inactividad (hay datos sensibles: dinero, salud, documentos).
-  // 30 min sin actividad = cierra sesión sola; avisa 1 min antes por si el usuario sigue ahí.
-  const INACTIVIDAD_AVISO_MS = 29 * 60 * 1000;
+  // 30 min sin actividad = cierra sesión sola; avisa 2 min antes por si el usuario sigue ahí.
+  const INACTIVIDAD_AVISO_MS = 28 * 60 * 1000;
   const INACTIVIDAD_CIERRE_MS = 30 * 60 * 1000;
   const [avisoInactividad, setAvisoInactividad] = useState(false);
   useEffect(() => {
@@ -1144,6 +1144,62 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
       eventos.forEach((ev) => window.removeEventListener(ev, reiniciarTimers));
     };
   }, []);
+
+  // Sesión corta para módulos sensibles (dinero, salud, documentos): 15 min desde la última
+  // reautenticación o actividad. Si se cumple el plazo, se pide contraseña de nuevo antes de
+  // entrar/seguir en el módulo — independiente del cierre general de sesión a los 30 min.
+  const SENSIBLE_MS = 15 * 60 * 1000;
+  const VISTAS_SENSIBLES = ["finanzas", "facturas", "reportes", "deudas", "apartados", "patrimonio", "activos", "documentos", "salud"];
+  const [sensibleDesbloqueadoHasta, setSensibleDesbloqueadoHasta] = useState(0);
+  const [reauthPendiente, setReauthPendiente] = useState(null); // id de la vista esperando reautenticación
+  const [reauthPassword, setReauthPassword] = useState("");
+  const [reauthError, setReauthError] = useState("");
+  const [reauthCargando, setReauthCargando] = useState(false);
+
+  const irAVista = (id) => {
+    if (VISTAS_SENSIBLES.includes(id) && Date.now() > sensibleDesbloqueadoHasta) {
+      setReauthPendiente(id);
+      setReauthPassword("");
+      setReauthError("");
+      return;
+    }
+    if (VISTAS_SENSIBLES.includes(id)) setSensibleDesbloqueadoHasta(Date.now() + SENSIBLE_MS);
+    setView(id);
+  };
+
+  // Mientras se sigue navegando/interactuando dentro de un módulo sensible, se extiende el
+  // desbloqueo de 15 min (igual que el temporizador general de inactividad).
+  useEffect(() => {
+    if (!VISTAS_SENSIBLES.includes(view)) return;
+    const extender = () => setSensibleDesbloqueadoHasta(Date.now() + SENSIBLE_MS);
+    const eventos = ["mousemove", "keydown", "mousedown", "click", "scroll", "touchstart"];
+    eventos.forEach((ev) => window.addEventListener(ev, extender));
+    const interval = setInterval(() => {
+      if (Date.now() > sensibleDesbloqueadoHasta) {
+        setReauthPendiente(view);
+        setReauthPassword("");
+        setReauthError("");
+      }
+    }, 15000);
+    return () => {
+      eventos.forEach((ev) => window.removeEventListener(ev, extender));
+      clearInterval(interval);
+    };
+  }, [view, sensibleDesbloqueadoHasta]);
+
+  const confirmarReauth = async () => {
+    if (!reauthPassword) { setReauthError("Escribe tu contraseña."); return; }
+    setReauthCargando(true);
+    setReauthError("");
+    const { error } = await supabase.auth.signInWithPassword({ email: miEmail, password: reauthPassword });
+    setReauthCargando(false);
+    if (error) { setReauthError("Contraseña incorrecta."); return; }
+    setSensibleDesbloqueadoHasta(Date.now() + SENSIBLE_MS);
+    setView(reauthPendiente);
+    setReauthPendiente(null);
+    setReauthPassword("");
+  };
+
   const [activeOwnerId, setActiveOwnerId] = useState(misId);
   const [activeOwnerEmail, setActiveOwnerEmail] = useState(miEmail);
   const [modulosPermitidos, setModulosPermitidos] = useState(null); // null = soy el dueño, acceso total
@@ -1384,7 +1440,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
                 {mostrarItems && (
                   <div className="flex flex-col gap-0.5">
                     {g.items.map((n) => (
-                      <button key={n.id} onClick={() => { setView(n.id); setMobileNavOpen(false); }} title={n.label}
+                      <button key={n.id} onClick={() => { irAVista(n.id); setMobileNavOpen(false); }} title={n.label}
                         className={`gp-navitem flex items-center gap-2 px-3 py-2.5 md:py-2 text-sm text-left ${sidebarColapsado ? "md:justify-center md:px-2" : ""} ${view === n.id ? "gp-navitem-active" : ""}`}>
                         <n.icon size={15} /> <span className={sidebarColapsado ? "md:hidden" : ""}>{n.label}</span>
                       </button>
@@ -1428,7 +1484,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
 
         {/* contenido */}
         <div className="flex-1 p-4 pt-16 md:p-6 md:pt-6 overflow-y-auto gp-scroll w-full" style={{ maxHeight: "100vh" }}>
-          {view === "dashboard" && <Dashboard data={data} setView={setView} onAddSaldo={(i) => addItem("saldoInicial", i)} />}
+          {view === "dashboard" && <Dashboard data={data} setView={irAVista} onAddSaldo={(i) => addItem("saldoInicial", i)} />}
           {view === "papelera" && <Papelera onRestore={restoreItem} onPermanentDelete={permanentDelete} ownerId={activeOwnerId} />}
           {view === "colaboradores" && <Colaboradores misId={misId} miEmail={miEmail} />}
           {view === "admin" && <AdminUsuarios adminUid={ADMIN_UID} />}
@@ -1548,8 +1604,34 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
           <div className="gp-panel w-full max-w-sm p-5 text-center">
             <AlertTriangle size={22} className="gp-text-gold mx-auto mb-2" />
             <h3 className="gp-serif text-lg mb-2">¿Sigues ahí?</h3>
-            <p className="text-sm gp-text-muted mb-5">Por seguridad, como tu información es sensible, la sesión se va a cerrar en 1 minuto por inactividad.</p>
+            <p className="text-sm gp-text-muted mb-5">Por seguridad, como tu información es sensible, la sesión se va a cerrar en 2 minutos por inactividad.</p>
             <button onClick={() => setAvisoInactividad(false)} className="gp-btn w-full py-2 text-sm">Seguir conectado</button>
+          </div>
+        </div>
+      )}
+
+      {reauthPendiente && (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,.65)" }}>
+          <div className="gp-panel w-full max-w-sm p-5">
+            <div className="text-center mb-3">
+              <Lock size={22} className="gp-text-gold mx-auto mb-2" />
+              <h3 className="gp-serif text-lg mb-1">Confirma que eres tú</h3>
+              <p className="text-sm gp-text-muted">Este módulo tiene información sensible. Escribe tu contraseña para continuar.</p>
+            </div>
+            <input
+              type="password"
+              autoFocus
+              value={reauthPassword}
+              onChange={(e) => setReauthPassword(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") confirmarReauth(); }}
+              placeholder="Tu contraseña"
+              className="gp-input w-full mb-2"
+            />
+            {reauthError && <p className="text-sm text-red-400 mb-2">{reauthError}</p>}
+            <div className="flex gap-2 mt-3">
+              <button onClick={() => { setReauthPendiente(null); setReauthPassword(""); setReauthError(""); }} className="gp-btn-ghost flex-1 py-2 text-sm">Cancelar</button>
+              <button onClick={confirmarReauth} disabled={reauthCargando} className="gp-btn flex-1 py-2 text-sm">{reauthCargando ? "Verificando…" : "Continuar"}</button>
+            </div>
           </div>
         </div>
       )}
