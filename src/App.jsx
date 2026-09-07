@@ -1833,12 +1833,16 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
           {view === "pendientes" && (
             <Pendientes data={data} activeOwnerId={activeOwnerId} onAdd={(i) => addItem("pendientes", i)} onEdit={(id, p) => editItem("pendientes", id, p)} onRemove={(id, extraIds, mensaje) => askDelete("pendientes", id, { extraIds, mensaje })} onAddComentario={(i) => addItem("comentarios", i)} onRemoveComentario={(id) => askDelete("comentarios", id)}
               onAsignar={async (pendienteId) => {
-                const { data: sesion } = await supabase.auth.getSession();
-                await fetch(`${supabase.supabaseUrl}/functions/v1/notificar-asignacion`, {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json", Authorization: `Bearer ${sesion.session.access_token}` },
-                  body: JSON.stringify({ pendienteId }),
-                });
+                try {
+                  const { data: sesion } = await supabase.auth.getSession();
+                  await fetch(`${supabase.supabaseUrl}/functions/v1/notificar-asignacion`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json", Authorization: `Bearer ${sesion.session.access_token}` },
+                    body: JSON.stringify({ pendienteId }),
+                  });
+                } catch (err) {
+                  console.error("Error al notificar la asignación:", err);
+                }
               }}
             />
           )}
@@ -2220,15 +2224,22 @@ function Colaboradores({ misId, miEmail }) {
   useEffect(() => { cargar(); }, []);
 
   // Llama a la Edge Function que manda el correo de invitación por Resend.
+  // Blindado con try/catch: si falla la red o el fetch se cae (ej. CORS, sin conexión),
+  // nunca debe dejar el botón pegado en "Invitando…" — siempre regresa un resultado.
   const enviarCorreoInvitacion = async (colaboradorId) => {
-    const { data: sesion } = await supabase.auth.getSession();
-    const resp = await fetch(`${supabase.supabaseUrl}/functions/v1/invitar-colaborador`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${sesion.session.access_token}` },
-      body: JSON.stringify({ colaboradorId }),
-    });
-    const json = await resp.json().catch(() => ({}));
-    return { ok: resp.ok, json };
+    try {
+      const { data: sesion } = await supabase.auth.getSession();
+      const resp = await fetch(`${supabase.supabaseUrl}/functions/v1/invitar-colaborador`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${sesion.session.access_token}` },
+        body: JSON.stringify({ colaboradorId }),
+      });
+      const json = await resp.json().catch(() => ({}));
+      return { ok: resp.ok, json };
+    } catch (err) {
+      console.error("Error al enviar correo de invitación:", err);
+      return { ok: false, json: { error: String(err) } };
+    }
   };
 
   const invitar = async ({ correo, modulos }) => {
