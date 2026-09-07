@@ -58,16 +58,13 @@ const Tokens = ({ tema = "oscuro" }) => (
 
 // Recuerda tu tema (Azul Claro / Azul Oscuro) entre visitas, guardado en este navegador
 // y, una vez que inicias sesión, también en tu cuenta (para que te siga en otros dispositivos).
+// El tema ahora es fijo (Azul Oscuro) — se quitó la opción de cambiar a tema claro.
+// Se deja la función con la misma forma (tema, toggleTema, setTema) para no tener que tocar
+// cada lugar que la usa; toggleTema/setTema ya no hacen nada.
 function useTema() {
-  const [tema, setTemaState] = useState(() => {
-    try { return localStorage.getItem("arkeyone-tema") || "oscuro"; } catch { return "oscuro"; }
-  });
-  const setTema = (valor) => {
-    setTemaState(valor);
-    try { localStorage.setItem("arkeyone-tema", valor); } catch {}
-  };
-  const toggleTema = () => setTema(tema === "oscuro" ? "claro" : "oscuro");
-  return [tema, toggleTema, setTema];
+  const tema = "oscuro";
+  const noop = () => {};
+  return [tema, noop, noop];
 }
 
 
@@ -756,9 +753,6 @@ function LoginScreen({ tema, toggleTema }) {
     <div className={`gp-root gp-sidebar-area flex items-center justify-center ${tema === "claro" ? "claro" : ""}`} style={{ minHeight: "100vh" }}>
       <Tokens tema={tema} />
       <form onSubmit={handleSubmit} className="gp-panel p-6 w-full max-w-sm relative">
-        <button type="button" onClick={toggleTema} className="absolute top-4 right-4 gp-btn-ghost p-1.5 rounded" aria-label="Cambiar tema" title={tema === "claro" ? "Cambiar a Azul Oscuro" : "Cambiar a Azul Claro"}>
-          {tema === "claro" ? <Moon size={14} /> : <Sun size={14} />}
-        </button>
         <img src="/logo-arkeyone.png" alt="ArkeyOne" style={{ height: 108 }} className="mb-3" />
         <p className="text-xs gp-text-muted mb-4">
           {modo === "entrar" ? "Inicia sesión para entrar a tu sistema." : modo === "crear" ? "Crea tu cuenta." : "Te mandamos un enlace para poner una contraseña nueva."}
@@ -1348,7 +1342,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
               {sidebarColapsado ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}
             </button>
             <img src="/icono-arkeyone.png" alt="ArkeyOne" style={{ height: 34 }} />
-            <span className={`gp-serif text-lg font-semibold ${sidebarColapsado ? "md:hidden" : ""}`} style={{ letterSpacing: "0.3px" }}>ArkeyOne</span>
+            <span className={`gp-serif text-lg font-semibold ${sidebarColapsado ? "md:hidden" : ""}`} style={{ letterSpacing: "0.3px" }}>ARKEYONE</span>
             <p className={`text-xs gp-text-muted truncate ${sidebarColapsado ? "md:hidden" : ""}`} style={{ maxWidth: 160 }}>
               {activeOwnerId === misId ? miEmail : `Viendo: ${activeOwnerEmail}`}
             </p>
@@ -1401,10 +1395,6 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
             );
           })}
           <div className="mt-auto pt-2 border-t gp-border flex flex-col gap-0.5">
-            <button onClick={() => cambiarTema(tema === "claro" ? "oscuro" : "claro")} title="Cambiar tema"
-              className={`gp-navitem flex items-center gap-2 px-3 py-2.5 md:py-2 text-sm text-left w-full ${sidebarColapsado ? "md:justify-center md:px-2" : ""}`}>
-              {tema === "claro" ? <Moon size={15} /> : <Sun size={15} />} <span className={sidebarColapsado ? "md:hidden" : ""}>{tema === "claro" ? "Tema Azul Oscuro" : "Tema Azul Claro"}</span>
-            </button>
             <button onClick={() => setExportPaso("confirmar")} title="Exportar mis datos"
               className={`gp-navitem flex items-center gap-2 px-3 py-2.5 md:py-2 text-sm text-left w-full ${sidebarColapsado ? "md:justify-center md:px-2" : ""}`}>
               <Download size={15} /> <span className={sidebarColapsado ? "md:hidden" : ""}>Exportar mis datos</span>
