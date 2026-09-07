@@ -51,7 +51,7 @@ const Tokens = ({ tema = "oscuro" }) => (
        (claros), sin importar el tema. Solo el fondo (y sus tonos de hover/borde) cambia entre temas. */
     .gp-sidebar-area{ --text:#EAF1FA; --muted:#93A7C4; }
     .gp-root.claro .gp-sidebar-area{
-      --bg:#1E4976; --panel-hi:#28527F; --border:#2F5C89;
+      --bg:#1A3C60; --panel:#1E4976; --panel-hi:#28527F; --border:#2F5C89;
     }
   `}</style>
 );
@@ -753,7 +753,7 @@ function LoginScreen({ tema, toggleTema }) {
   };
 
   return (
-    <div className={`gp-root flex items-center justify-center ${tema === "claro" ? "claro" : ""}`} style={{ minHeight: "100vh" }}>
+    <div className={`gp-root gp-sidebar-area flex items-center justify-center ${tema === "claro" ? "claro" : ""}`} style={{ minHeight: "100vh" }}>
       <Tokens tema={tema} />
       <form onSubmit={handleSubmit} className="gp-panel p-6 w-full max-w-sm relative">
         <button type="button" onClick={toggleTema} className="absolute top-4 right-4 gp-btn-ghost p-1.5 rounded" aria-label="Cambiar tema" title={tema === "claro" ? "Cambiar a Azul Oscuro" : "Cambiar a Azul Claro"}>
@@ -821,7 +821,7 @@ function NuevaPasswordScreen({ onListo, tema }) {
   };
 
   return (
-    <div className={`gp-root flex items-center justify-center ${tema === "claro" ? "claro" : ""}`} style={{ minHeight: "100vh" }}>
+    <div className={`gp-root gp-sidebar-area flex items-center justify-center ${tema === "claro" ? "claro" : ""}`} style={{ minHeight: "100vh" }}>
       <Tokens tema={tema} />
       <div className="gp-panel p-6 w-full max-w-sm">
         <img src="/logo-arkeyone.png" alt="ArkeyOne" style={{ height: 108 }} className="mb-3" />
@@ -851,7 +851,7 @@ function NuevaPasswordScreen({ onListo, tema }) {
 function SplashScreen({ tema, fadingOut }) {
   return (
     <div
-      className={`gp-root fixed inset-0 z-[100] flex items-center justify-center ${tema === "claro" ? "claro" : ""}`}
+      className={`gp-root gp-sidebar-area fixed inset-0 z-[100] flex items-center justify-center ${tema === "claro" ? "claro" : ""}`}
       style={{ transition: "opacity .4s ease", opacity: fadingOut ? 0 : 1 }}
     >
       <Tokens tema={tema} />
@@ -892,7 +892,7 @@ function MfaChallengeScreen({ factorId, onVerificado, tema }) {
   };
 
   return (
-    <div className={`gp-root flex items-center justify-center ${tema === "claro" ? "claro" : ""}`} style={{ minHeight: "100vh" }}>
+    <div className={`gp-root gp-sidebar-area flex items-center justify-center ${tema === "claro" ? "claro" : ""}`} style={{ minHeight: "100vh" }}>
       <Tokens tema={tema} />
       <div className="gp-panel p-6 w-full max-w-sm">
         <img src="/logo-arkeyone.png" alt="ArkeyOne" style={{ height: 92 }} className="mb-4" />
