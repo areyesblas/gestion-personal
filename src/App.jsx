@@ -936,8 +936,8 @@ function IndicadorConexion() {
   if (enLinea && !mostrarRecuperado) return null;
   return (
     <div
-      className="fixed top-0 left-0 right-0 z-[100] text-center text-xs py-1.5 px-3"
-      style={{ background: enLinea ? "#1a7a4c" : "#8a2f2f", color: "#fff" }}
+      className="fixed top-0 left-0 right-0 z-[100] text-center text-xs px-3"
+      style={{ background: enLinea ? "#1a7a4c" : "#8a2f2f", color: "#fff", paddingTop: "calc(env(safe-area-inset-top) + 6px)", paddingBottom: "6px" }}
     >
       {enLinea ? "Conexión recuperada — la información ya está actualizada." : "Sin conexión a internet. Lo que ves puede no estar actualizado; reconéctate para seguir trabajando."}
     </div>
@@ -972,7 +972,7 @@ function AvisoInstalarPWA() {
   if (instalado || cerrado || !promptEvent) return null;
 
   return (
-    <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[100] flex items-center gap-3 px-4 py-3 rounded-lg shadow-lg" style={{ background: "#132a4a", border: "1px solid #2a4a72", maxWidth: "92vw" }}>
+    <div className="fixed left-1/2 -translate-x-1/2 z-[100] flex items-center gap-3 px-4 py-3 rounded-lg shadow-lg" style={{ background: "#132a4a", border: "1px solid #2a4a72", maxWidth: "92vw", bottom: "calc(env(safe-area-inset-bottom) + 16px)" }}>
       <img src="/icons/icon-192.png" alt="" style={{ width: 32, height: 32, borderRadius: 8 }} />
       <div className="text-xs text-white">
         <p className="font-medium">Instala ARKEYONE</p>
@@ -1461,8 +1461,12 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
     <div className={`gp-root overflow-hidden ${tema === "claro" ? "claro" : ""}`} style={{ minHeight: "100vh" }}>
       <Tokens tema={tema} />
       <div className="flex relative" style={{ minHeight: "100vh" }}>
-        {/* barra superior solo en móvil */}
-        <div className="gp-sidebar-area md:hidden fixed top-0 left-0 right-0 z-30 flex items-center justify-between px-4 py-3 border-b gp-border" style={{ background: "var(--bg)" }}>
+        {/* barra superior solo en móvil — padding extra arriba/lados para no quedar tapada
+            por el notch/isla dinámica ni el reloj cuando la app corre "standalone" (instalada) */}
+        <div
+          className="gp-sidebar-area md:hidden fixed top-0 left-0 right-0 z-30 flex items-center justify-between px-4 pb-3 border-b gp-border"
+          style={{ background: "var(--bg)", paddingTop: "calc(env(safe-area-inset-top) + 12px)", paddingLeft: "calc(env(safe-area-inset-left) + 16px)", paddingRight: "calc(env(safe-area-inset-right) + 16px)" }}
+        >
           <button onClick={() => setMobileNavOpen(true)} className="p-2 -ml-2 gp-btn-ghost rounded" aria-label="Abrir menú">
             <Menu size={20} />
           </button>
@@ -1480,8 +1484,8 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
           className={`gp-sidebar-area w-64 ${sidebarColapsado ? "md:w-20" : "md:w-56"} shrink-0 border-r gp-border p-4 flex flex-col gap-4 overflow-y-auto gp-scroll fixed md:static inset-y-0 left-0 z-50 md:z-auto transition-all duration-200 ${mobileNavOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"}`}
           style={{ maxHeight: "100vh", background: "var(--bg)" }}
         >
-          <div className="px-2 flex flex-col items-center text-center gap-1 relative pt-1">
-            <button onClick={() => setMobileNavOpen(false)} className="md:hidden absolute right-0 top-0 p-1 gp-btn-ghost rounded" aria-label="Cerrar menú"><X size={16} /></button>
+          <div className="px-2 flex flex-col items-center text-center gap-1 relative" style={{ paddingTop: "calc(env(safe-area-inset-top) + 4px)" }}>
+            <button onClick={() => setMobileNavOpen(false)} className="md:hidden absolute right-0 p-1 gp-btn-ghost rounded" style={{ top: "calc(env(safe-area-inset-top) + 4px)" }} aria-label="Cerrar menú"><X size={16} /></button>
             <button
               onClick={toggleSidebarColapsado}
               title={sidebarColapsado ? "Fijar menú abierto" : "Colapsar menú"}
@@ -1575,7 +1579,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
         </div>
 
         {/* contenido */}
-        <div className="flex-1 p-4 pt-16 md:p-6 md:pt-6 overflow-y-auto gp-scroll w-full" style={{ maxHeight: "100vh" }}>
+        <div className="flex-1 p-4 pt-[calc(env(safe-area-inset-top)+4rem)] md:p-6 md:pt-6 overflow-y-auto gp-scroll w-full" style={{ maxHeight: "100vh" }}>
           {view === "dashboard" && <Dashboard data={data} setView={irAVista} onAddSaldo={(i) => addItem("saldoInicial", i)} />}
           {view === "papelera" && <Papelera onRestore={restoreItem} onPermanentDelete={permanentDelete} ownerId={activeOwnerId} />}
           {view === "colaboradores" && <Colaboradores misId={misId} miEmail={miEmail} />}
