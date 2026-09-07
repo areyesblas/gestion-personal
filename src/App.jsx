@@ -759,13 +759,16 @@ function LoginScreen({ tema, toggleTema }) {
     <div className={`gp-root gp-sidebar-area flex items-center justify-center ${tema === "claro" ? "claro" : ""}`} style={{ minHeight: "100vh" }}>
       <Tokens tema={tema} />
       <form onSubmit={handleSubmit} className="gp-panel p-6 w-full max-w-sm relative">
-        <img src="/logo-arkeyone.png" alt="ArkeyOne" style={{ height: 108 }} className="mb-3" />
-        <p className="text-xs gp-text-muted mb-4">
-          {modo === "entrar" ? "Inicia sesión para entrar a tu sistema." : modo === "crear" ? "Crea tu cuenta." : "Te mandamos un enlace para poner una contraseña nueva."}
-        </p>
+        <div className="flex flex-col items-center text-center mb-4">
+          <img src="/logo-arkeyone.png" alt="ArkeyOne" style={{ height: 108 }} className="mb-2" />
+          <p className="text-xs gp-text-gold tracking-wide mb-3">La llave que alinea tu mundo</p>
+          <p className="text-xs gp-text-muted">
+            {modo === "entrar" ? "Inicia sesión para entrar a tu sistema." : modo === "crear" ? "Crea tu cuenta." : "Te mandamos un enlace para poner una contraseña nueva."}
+          </p>
+        </div>
 
         {modo !== "recuperar" && (
-          <div className="flex gap-1 mb-4">
+          <div className="flex gap-1 mb-4 w-full">
             <button type="button" onClick={() => { setModo("entrar"); setError(""); setAvisoRegistro(""); }} className={`text-xs px-3 py-1.5 rounded-full border flex-1 ${modo === "entrar" ? "gp-btn" : "gp-text-muted"}`}>Iniciar sesión</button>
             <button type="button" onClick={() => { setModo("crear"); setError(""); setAvisoRegistro(""); }} className={`text-xs px-3 py-1.5 rounded-full border flex-1 ${modo === "crear" ? "gp-btn" : "gp-text-muted"}`}>Crear cuenta</button>
           </div>
