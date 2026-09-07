@@ -47,6 +47,11 @@ const Tokens = ({ tema = "oscuro" }) => (
     .gp-badge{ display:inline-block; padding:2px 8px; border-radius:3px; font-size:11px; font-weight:500; }
     .gp-scroll::-webkit-scrollbar{ width:6px; height:6px; }
     .gp-scroll::-webkit-scrollbar-thumb{ background:var(--border); border-radius:3px; }
+    /* El panel lateral mantiene un azul medio en tema claro (no tan oscuro como "Azul Oscuro",
+       pero tampoco tan pálido como el resto del tema claro), para que el logo se siga viendo bien. */
+    .gp-root.claro .gp-sidebar-area{
+      --bg:#1E4976; --panel-hi:#28527F; --border:#2F5C89; --text:#EAF1FA; --muted:#A9C2DE;
+    }
   `}</style>
 );
 
@@ -1314,7 +1319,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
       <Tokens tema={tema} />
       <div className="flex relative" style={{ minHeight: "100vh" }}>
         {/* barra superior solo en móvil */}
-        <div className="md:hidden fixed top-0 left-0 right-0 z-30 flex items-center justify-between px-4 py-3 border-b gp-border" style={{ background: "var(--bg)" }}>
+        <div className="gp-sidebar-area md:hidden fixed top-0 left-0 right-0 z-30 flex items-center justify-between px-4 py-3 border-b gp-border" style={{ background: "var(--bg)" }}>
           <button onClick={() => setMobileNavOpen(true)} className="p-2 -ml-2 gp-btn-ghost rounded" aria-label="Abrir menú">
             <Menu size={20} />
           </button>
@@ -1329,7 +1334,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
 
         {/* rail lateral / cajón */}
         <div
-          className={`w-64 ${sidebarColapsado ? "md:w-20" : "md:w-56"} shrink-0 border-r gp-border p-4 flex flex-col gap-4 overflow-y-auto gp-scroll fixed md:static inset-y-0 left-0 z-50 md:z-auto transition-all duration-200 ${mobileNavOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"}`}
+          className={`gp-sidebar-area w-64 ${sidebarColapsado ? "md:w-20" : "md:w-56"} shrink-0 border-r gp-border p-4 flex flex-col gap-4 overflow-y-auto gp-scroll fixed md:static inset-y-0 left-0 z-50 md:z-auto transition-all duration-200 ${mobileNavOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"}`}
           style={{ maxHeight: "100vh", background: "var(--bg)" }}
         >
           <div className="px-2 flex flex-col items-center text-center gap-1 relative pt-1">
