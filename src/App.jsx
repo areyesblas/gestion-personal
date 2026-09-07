@@ -2712,10 +2712,38 @@ function rentabilidadProyecto(data, proyectoId) {
   const movs = data.finanzas.filter((f) => f.proyectoId === proyectoId && f.estatus === "Cobrado");
   const ingresos = movs.filter((f) => f.tipo === "Ingreso").reduce((s, f) => s + (Number(f.monto) || 0), 0);
   const egresos = movs.filter((f) => f.tipo === "Egreso").reduce((s, f) => s + (Number(f.monto) || 0), 0);
-  const pagosColab = data.pendientes
-    .filter((t) => t.proyectoId === proyectoId && t.responsableId && t.estatus === "Hecho")
+  const tareasProyecto = data.pendientes.filter((t) => t.proyectoId === proyectoId);
+  const pagosColab = tareasProyecto
+    .filter((t) => t.responsableId && t.estatus === "Hecho")
     .reduce((s, t) => s + (Number(t.precio) || 0), 0);
-  return { ingresos, egresos, pagosColab, neto: ingresos - egresos };
+  // Cuánto costaría en total hacer el proyecto si se pagara TODO lo pactado en el precio de cada
+  // tarea (sin importar si ya está hecha o quién la haga) — un estimado, no un movimiento real.
+  const costoEstimadoTotal = tareasProyecto.reduce((s, t) => s + (Number(t.precio) || 0), 0);
+  return { ingresos, egresos, pagosColab, neto: ingresos - egresos, costoEstimadoTotal };
+}
+
+// Cuánto dinero (según el precio pactado de cada tarea) le corresponde a cada quien en el proyecto:
+// a un colaborador con Responsable asignado, o a ti mismo cuando la tarea no tiene responsable
+// (si la haces tú, ese dinero es ingreso potencial tuyo, no un costo a pagarle a alguien más).
+function repartoCostosProyecto(data, proyectoId) {
+  const tareas = data.pendientes.filter((t) => t.proyectoId === proyectoId && Number(t.precio) > 0);
+  const grupos = {};
+  for (const t of tareas) {
+    const key = t.responsableId || "_yo";
+    if (!grupos[key]) {
+      grupos[key] = {
+        key,
+        nombre: t.responsableId ? (data.equipo.find((e) => e.id === t.responsableId)?.nombre || "—") : "Tú",
+        esYo: !t.responsableId,
+        tareas: 0, total: 0, generado: 0, pendiente: 0,
+      };
+    }
+    const precio = Number(t.precio) || 0;
+    grupos[key].tareas += 1;
+    grupos[key].total += precio;
+    if (t.estatus === "Hecho") grupos[key].generado += precio; else grupos[key].pendiente += precio;
+  }
+  return Object.values(grupos).sort((a, b) => (a.esYo ? -1 : b.esYo ? 1 : a.nombre.localeCompare(b.nombre)));
 }
 
 function Proyectos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveComentario, onVerDetalle }) {
@@ -2790,11 +2818,38 @@ function Proyectos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
                       {(() => {
                         const r = rentabilidad(p.id);
                         return (
-                          <div className="gp-panel-hi p-3 mb-3 grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                          <div className="gp-panel-hi p-3 mb-3 grid grid-cols-2 sm:grid-cols-5 gap-2 text-xs">
                             <div><p className="gp-text-muted">Ingresos</p><p className="gp-mono gp-text-teal">{fmtMoney(r.ingresos)}</p></div>
                             <div><p className="gp-text-muted">Egresos</p><p className="gp-mono gp-text-red">{fmtMoney(r.egresos)}</p></div>
                             <div><p className="gp-text-muted">Neto</p><p className={`gp-mono ${r.neto >= 0 ? "gp-text-teal" : "gp-text-red"}`}>{fmtMoney(r.neto)}</p></div>
                             <div><p className="gp-text-muted">Pagado a colaboradores</p><p className="gp-mono gp-text-gold">{fmtMoney(r.pagosColab)}</p></div>
+                            <div><p className="gp-text-muted">Costo estimado total</p><p className="gp-mono">{fmtMoney(r.costoEstimadoTotal)}</p></div>
+                          </div>
+                        );
+                      })()}
+                      {(() => {
+                        const reparto = repartoCostosProyecto(data, p.id);
+                        if (reparto.length === 0) return null;
+                        return (
+                          <div className="mb-4">
+                            <p className="text-xs font-medium gp-text-muted mb-2">Reparto de costos por participante</p>
+                            <div className="gp-panel-hi overflow-x-auto">
+                              <table className="gp-table" style={{ fontSize: 12 }}>
+                                <thead><tr><th>Participante</th><th>Tareas</th><th>Ya generado</th><th>Por hacer</th><th>Total pactado</th></tr></thead>
+                                <tbody>
+                                  {reparto.map((g) => (
+                                    <tr key={g.key}>
+                                      <td>{g.esYo ? "Tú" : g.nombre}</td>
+                                      <td className="gp-mono">{g.tareas}</td>
+                                      <td className="gp-mono gp-text-teal">{fmtMoney(g.generado)}</td>
+                                      <td className="gp-mono gp-text-gold">{fmtMoney(g.pendiente)}</td>
+                                      <td className="gp-mono">{fmtMoney(g.total)}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                            <p className="text-xs gp-text-muted mt-1">Es un estimado según el precio pactado en cada tarea. Lo tuyo ("Tú") es ingreso potencial y no se suma solo a Ingresos y egresos; para eso registra el movimiento ahí cuando lo cobres.</p>
                           </div>
                         );
                       })()}
@@ -2965,13 +3020,41 @@ function ProyectoDetalle({ data, proyectoId, onVolver, onAddTarea, onEditTarea, 
       </div>
       {proyecto.descripcion && <p className="text-sm gp-text-muted mb-4">{proyecto.descripcion}</p>}
 
-      <div className="gp-panel-hi p-3 mb-4 grid grid-cols-2 sm:grid-cols-5 gap-2 text-xs">
+      <div className="gp-panel-hi p-3 mb-4 grid grid-cols-2 sm:grid-cols-6 gap-2 text-xs">
         <div><p className="gp-text-muted">Avance general</p><p className="gp-mono gp-text-gold">{avanceGeneral}%</p></div>
         <div><p className="gp-text-muted">Ingresos</p><p className="gp-mono gp-text-teal">{fmtMoney(r.ingresos)}</p></div>
         <div><p className="gp-text-muted">Egresos</p><p className="gp-mono gp-text-red">{fmtMoney(r.egresos)}</p></div>
         <div><p className="gp-text-muted">Neto</p><p className={`gp-mono ${r.neto >= 0 ? "gp-text-teal" : "gp-text-red"}`}>{fmtMoney(r.neto)}</p></div>
         <div><p className="gp-text-muted">Pagado a colaboradores</p><p className="gp-mono gp-text-gold">{fmtMoney(r.pagosColab)}</p></div>
+        <div><p className="gp-text-muted">Costo estimado total</p><p className="gp-mono">{fmtMoney(r.costoEstimadoTotal)}</p></div>
       </div>
+
+      {(() => {
+        const reparto = repartoCostosProyecto(data, proyectoId);
+        if (reparto.length === 0) return null;
+        return (
+          <div className="mb-4">
+            <p className="text-sm font-medium mb-2">Reparto de costos por participante</p>
+            <div className="gp-panel overflow-x-auto">
+              <table className="gp-table">
+                <thead><tr><th>Participante</th><th>Tareas con precio</th><th>Ya generado</th><th>Por hacer</th><th>Total pactado</th></tr></thead>
+                <tbody>
+                  {reparto.map((g) => (
+                    <tr key={g.key}>
+                      <td>{g.esYo ? "Tú" : g.nombre}</td>
+                      <td className="gp-mono">{g.tareas}</td>
+                      <td className="gp-mono gp-text-teal">{fmtMoney(g.generado)}</td>
+                      <td className="gp-mono gp-text-gold">{fmtMoney(g.pendiente)}</td>
+                      <td className="gp-mono">{fmtMoney(g.total)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p className="text-xs gp-text-muted mt-1">Es un estimado según el precio pactado en cada tarea (columna "Precio" del pendiente). Lo tuyo ("Tú") es ingreso potencial y no se suma solo a Ingresos y egresos; para eso registra el movimiento ahí cuando lo cobres.</p>
+          </div>
+        );
+      })()}
 
       <div className="gp-panel overflow-x-auto">
         <table className="gp-table">
@@ -3273,6 +3356,7 @@ function Pendientes({ data, activeOwnerId, onAdd, onEdit, onRemove, onAddComenta
   const [orden, setOrden] = useState("default");
   const [vista, setVista] = useState("lista"); // "lista" | "mindmap"
   const [proyectoMindMap, setProyectoMindMap] = useState("");
+  const [filtroProyecto, setFiltroProyecto] = useState(""); // "" = todos los proyectos, en la vista de lista
   const [colaboradores, setColaboradores] = useState([]);
   const empty = { proyectoId: "", parentId: "", descripcion: "", fechaLimite: todayISO(), fechaRevision: "", prioridad: "Media", estatus: "Pendiente", responsableId: "", contactoId: "", precio: "", tiempoEstimado: "", tiempoReal: "", asignadoA: "" };
 
@@ -3296,9 +3380,20 @@ function Pendientes({ data, activeOwnerId, onAdd, onEdit, onRemove, onAddComenta
     { key: "alfabetico", label: "alfabético" },
     { key: "prioridad", label: "prioridad" },
   ];
+  const nombreProyectoOrden = (t) => (t.proyectoId ? (data.proyectos.find((pr) => pr.id === t.proyectoId)?.nombre || "") : "");
+  const pendientesFiltrados = filtroProyecto ? data.pendientes.filter((t) => t.proyectoId === filtroProyecto) : data.pendientes;
+  // Orden por default: alfabético por proyecto (los que no tienen proyecto van al final), y dentro
+  // de cada proyecto por fecha de entrega. Como las subtareas siempre heredan el proyecto de su
+  // tarea principal, este orden agrupa cada proyecto junto sin romper la jerarquía de subtareas.
   const base = orden === "default"
-    ? [...data.pendientes].sort((a, b) => (a.fechaLimite || "").localeCompare(b.fechaLimite || ""))
-    : ordenarLista(data.pendientes, orden, camposOrden);
+    ? [...pendientesFiltrados].sort((a, b) => {
+        const pa = nombreProyectoOrden(a), pb = nombreProyectoOrden(b);
+        if (!pa && pb) return 1;
+        if (pa && !pb) return -1;
+        if (pa !== pb) return pa.localeCompare(pb, "es");
+        return (a.fechaLimite || "").localeCompare(b.fechaLimite || "");
+      })
+    : ordenarLista(pendientesFiltrados, orden, camposOrden);
   const arbol = buildTareaTree(base);
   const filas = flattenTareas(arbol);
   const nComentarios = (id) => (data.comentarios || []).filter((c) => c.entidadTipo === "pendientes" && c.entidadId === id).length;
@@ -3331,7 +3426,15 @@ function Pendientes({ data, activeOwnerId, onAdd, onEdit, onRemove, onAddComenta
           <button onClick={() => setVista("lista")} className={`px-3 py-1 text-xs rounded ${vista === "lista" ? "gp-btn" : "gp-text-muted"}`}>Lista</button>
           <button onClick={() => setVista("mindmap")} className={`px-3 py-1 text-xs rounded ${vista === "mindmap" ? "gp-btn" : "gp-text-muted"}`}>Mind-map</button>
         </div>
-        {vista === "lista" && <OrdenSelector opciones={opcionesOrden} value={orden} onChange={setOrden} />}
+        {vista === "lista" && (
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <select className="gp-input" style={{ maxWidth: 220 }} value={filtroProyecto} onChange={(e) => setFiltroProyecto(e.target.value)}>
+              <option value="">Todos los proyectos</option>
+              {[...data.proyectos].sort((a, b) => a.nombre.localeCompare(b.nombre, "es")).map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+            </select>
+            <OrdenSelector opciones={opcionesOrden} value={orden} onChange={setOrden} />
+          </div>
+        )}
         {vista === "mindmap" && (
           <select className="gp-input" style={{ maxWidth: 260 }} value={proyectoMindMap} onChange={(e) => setProyectoMindMap(e.target.value)}>
             <option value="">— elige un proyecto —</option>
