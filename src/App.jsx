@@ -1288,6 +1288,12 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
     ]},
   ];
 
+  const ADMIN_UID = "eca7e776-6c96-44eb-b4e0-b03c85fa5bb8";
+  const esAdmin = misId === ADMIN_UID && activeOwnerId === misId;
+  if (esAdmin) {
+    navGroups.push({ label: "Administración", items: [{ id: "admin", label: "Usuarios", icon: Shield }] });
+  }
+
   const navGroupsFiltrados = modulosPermitidos === null
     ? navGroups
     : navGroups
@@ -1411,6 +1417,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
           {view === "dashboard" && <Dashboard data={data} setView={setView} onAddSaldo={(i) => addItem("saldoInicial", i)} />}
           {view === "papelera" && <Papelera onRestore={restoreItem} onPermanentDelete={permanentDelete} ownerId={activeOwnerId} />}
           {view === "colaboradores" && <Colaboradores misId={misId} miEmail={miEmail} />}
+          {view === "admin" && <AdminUsuarios adminUid={ADMIN_UID} />}
           {view === "proyectos" && (
             <Proyectos data={data} onAdd={(i) => addItem("proyectos", i)} onEdit={(id, p) => editItem("proyectos", id, p)} onRemove={(id) => askDelete("proyectos", id)} onAddComentario={(i) => addItem("comentarios", i)} onRemoveComentario={(id) => askDelete("comentarios", id)} />
           )}
@@ -1541,6 +1548,121 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
 /* ---------- Dashboard ---------- */
 /* ---------- Papelera (recuperar o borrar definitivamente) ---------- */
 /* ---------- Colaboradores (invitar gente a tu cuenta, con permisos por módulo) ---------- */
+// Panel de administración: lista todos los usuarios registrados en ArkeyOne y permite
+// bloquearlos (les impide entrar, pero conserva su información) o eliminarlos por completo
+// (borra su cuenta y todos sus datos, sin poder deshacerse). Solo tú puedes ver esta pantalla.
+function AdminUsuarios({ adminUid }) {
+  const [usuarios, setUsuarios] = useState(null); // null = cargando
+  const [error, setError] = useState("");
+  const [accionEnCurso, setAccionEnCurso] = useState(null); // id del usuario sobre el que se está actuando
+  const [confirmar, setConfirmar] = useState(null); // { usuario, tipo: "bloquear" | "reactivar" | "eliminar" }
+
+  const llamar = async (action, userId) => {
+    const { data: sesion } = await supabase.auth.getSession();
+    const resp = await fetch(`${supabase.supabaseUrl}/functions/v1/admin-usuarios`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${sesion.session.access_token}` },
+      body: JSON.stringify({ action, userId }),
+    });
+    return resp.json();
+  };
+
+  const cargar = async () => {
+    setError("");
+    const resultado = await llamar("listar");
+    if (resultado.error) { setError(resultado.error); setUsuarios([]); return; }
+    setUsuarios(resultado.usuarios.sort((a, b) => new Date(b.creado) - new Date(a.creado)));
+  };
+  useEffect(() => { cargar(); }, []);
+
+  const ejecutarAccion = async (usuario, tipo) => {
+    setAccionEnCurso(usuario.id);
+    const resultado = await llamar(tipo, usuario.id);
+    setAccionEnCurso(null);
+    setConfirmar(null);
+    if (resultado.error) { alert(resultado.error); return; }
+    cargar();
+  };
+
+  return (
+    <div>
+      <h2 className="gp-serif text-xl mb-1">Administración — Usuarios</h2>
+      <p className="text-sm gp-text-muted mb-4">Todas las cuentas registradas en ArkeyOne. Esta pantalla solo tú la puedes ver.</p>
+
+      {usuarios === null && <p className="text-sm gp-text-muted">Cargando…</p>}
+      {error && <p className="text-sm gp-text-red mb-3">{error}</p>}
+
+      {usuarios && usuarios.length > 0 && (
+        <div className="gp-panel overflow-x-auto">
+          <table className="gp-table">
+            <thead><tr>
+              <th className="text-left">Correo</th>
+              <th className="text-left">Registrado</th>
+              <th className="text-left">Último acceso</th>
+              <th className="text-left">Estado</th>
+              <th></th>
+            </tr></thead>
+            <tbody>
+              {usuarios.map((u) => (
+                <tr key={u.id}>
+                  <td>{u.email}{u.id === adminUid && <Badge tone="gold">tú</Badge>}</td>
+                  <td className="text-xs gp-text-muted">{u.creado ? new Date(u.creado).toLocaleDateString("es-MX") : "—"}</td>
+                  <td className="text-xs gp-text-muted">{u.ultimoAcceso ? new Date(u.ultimoAcceso).toLocaleDateString("es-MX") : "Nunca"}</td>
+                  <td>{u.bloqueado ? <Badge tone="red">Bloqueado</Badge> : <Badge tone="teal">Activo</Badge>}</td>
+                  <td className="text-right">
+                    {u.id !== adminUid && (
+                      <div className="flex gap-1 justify-end">
+                        {u.bloqueado ? (
+                          <button disabled={accionEnCurso === u.id} onClick={() => setConfirmar({ usuario: u, tipo: "reactivar" })} className="text-xs gp-text-teal">Reactivar</button>
+                        ) : (
+                          <button disabled={accionEnCurso === u.id} onClick={() => setConfirmar({ usuario: u, tipo: "bloquear" })} className="text-xs gp-text-gold">Bloquear</button>
+                        )}
+                        <button disabled={accionEnCurso === u.id} onClick={() => setConfirmar({ usuario: u, tipo: "eliminar" })} className="text-xs gp-text-red">Eliminar</button>
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {confirmar && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,.6)" }} onClick={() => setConfirmar(null)}>
+          <div className="gp-panel w-full max-w-sm p-5" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-2 mb-2">
+              <AlertTriangle size={16} className="gp-text-red" />
+              <h3 className="gp-serif text-lg">
+                {confirmar.tipo === "bloquear" && "¿Bloquear esta cuenta?"}
+                {confirmar.tipo === "reactivar" && "¿Reactivar esta cuenta?"}
+                {confirmar.tipo === "eliminar" && "¿Eliminar esta cuenta por completo?"}
+              </h3>
+            </div>
+            <p className="text-sm gp-text-muted mb-5">
+              {confirmar.tipo === "bloquear" && `${confirmar.usuario.email} no va a poder iniciar sesión, pero su información se conserva por si la reactivas.`}
+              {confirmar.tipo === "reactivar" && `${confirmar.usuario.email} va a poder volver a entrar normalmente.`}
+              {confirmar.tipo === "eliminar" && `Se borra la cuenta de ${confirmar.usuario.email} y absolutamente toda su información (proyectos, finanzas, todo). Esto NO se puede deshacer.`}
+            </p>
+            <div className="flex gap-2">
+              <button onClick={() => setConfirmar(null)} className="gp-btn-ghost flex-1 py-2 text-sm">Cancelar</button>
+              <button
+                onClick={() => ejecutarAccion(confirmar.usuario, confirmar.tipo)}
+                className="flex-1 py-2 text-sm rounded"
+                style={{ background: confirmar.tipo === "eliminar" ? "var(--red)" : "var(--gold)", color: confirmar.tipo === "eliminar" ? "#fff" : "#161822" }}
+              >
+                {confirmar.tipo === "bloquear" && "Bloquear"}
+                {confirmar.tipo === "reactivar" && "Reactivar"}
+                {confirmar.tipo === "eliminar" && "Eliminar todo"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Colaboradores({ misId, miEmail }) {
   const [lista, setLista] = useState(null);
   const [modal, setModal] = useState(false);
