@@ -1432,8 +1432,21 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
       const pospuestoHasta = new Date(Date.now() + ACCION_MINUTOS[accion] * 60000).toISOString();
       await supabase.from("recordatorios").update({ estado: "pospuesto", pospuesto_hasta: pospuestoHasta }).eq("id", recordatorioId).eq("user_id", misId);
     }
-    irAVista("salud");
+    irAVista("medicamentos");
     cargarNotificaciones();
+  };
+
+  // Igual que arriba, pero desde un botón inline en el panel de notificaciones (no navega a
+  // ningún lado, solo marca la acción y refresca la lista) — la vía principal para iPhone.
+  const marcarAccionDesdeNotif = async (n, accion) => {
+    if (accion === "tomado") {
+      await supabase.from("recordatorios").update({ estado: "completado" }).eq("id", n.recordatorio_id).eq("user_id", misId);
+    } else if (ACCION_MINUTOS[accion]) {
+      const pospuestoHasta = new Date(Date.now() + ACCION_MINUTOS[accion] * 60000).toISOString();
+      await supabase.from("recordatorios").update({ estado: "pospuesto", pospuesto_hasta: pospuestoHasta }).eq("id", n.recordatorio_id).eq("user_id", misId);
+    }
+    await supabase.from("notifications").update({ leido: true }).eq("id", n.id);
+    setNotificaciones((prev) => prev.map((x) => (x.id === n.id ? { ...x, leido: true } : x)));
   };
 
   // Deep links: si llegan de un push tocado con la app cerrada (abre /?modulo=deudas), o de
@@ -1929,10 +1942,10 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
             <div className="overflow-y-auto gp-scroll flex-1 -mx-1 px-1">
               {notificaciones.length === 0 && <p className="text-sm gp-text-muted">Aún no tienes notificaciones.</p>}
               {notificaciones.map((n) => (
-                <button
+                <div
                   key={n.id}
                   onClick={() => marcarNotificacionLeida(n)}
-                  className="w-full text-left p-3 rounded mb-1.5 gp-panel-hi"
+                  className="w-full text-left p-3 rounded mb-1.5 gp-panel-hi cursor-pointer"
                   style={{ background: n.leido ? "transparent" : "var(--panel-hi)", border: "1px solid var(--border)" }}
                 >
                   <div className="flex items-start justify-between gap-2">
@@ -1941,7 +1954,22 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
                   </div>
                   {n.mensaje && <p className="text-xs gp-text-muted mt-0.5">{n.mensaje}</p>}
                   <p className="text-xs gp-text-muted mt-1 opacity-70">{new Date(n.created_at).toLocaleString("es-MX")}</p>
-                </button>
+                  {/* Botones manuales para marcar medicamentos — imprescindibles en iPhone, donde
+                      los botones de la notificación del sistema no existen (limitación de Apple). */}
+                  {n.tipo === "medicamento" && n.recordatorio_id && !n.leido && (
+                    <div className="flex gap-2 mt-2" onClick={(e) => e.stopPropagation()}>
+                      <button
+                        onClick={() => marcarAccionDesdeNotif(n, "tomado")}
+                        className="text-xs px-2.5 py-1 rounded"
+                        style={{ background: "var(--teal)", color: "#12141c" }}
+                      >Tomado</button>
+                      <button
+                        onClick={() => marcarAccionDesdeNotif(n, "posponer30")}
+                        className="text-xs px-2.5 py-1 rounded gp-btn-ghost"
+                      >+30 min</button>
+                    </div>
+                  )}
+                </div>
               ))}
             </div>
           </div>
