@@ -1146,8 +1146,9 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
       const { data: colabs } = await supabase.from("colaboradores").select("*").eq("colaborador_user_id", misId).eq("estatus", "Activo");
       setMisColaboraciones((colabs || []).map((c) => ({ propietarioId: c.propietario_id, propietarioEmail: c.propietario_email, modulos: c.modulos })));
 
-      const { data: pref } = await supabase.from("preferencias").select("tema").eq("user_id", misId).maybeSingle();
+      const { data: pref } = await supabase.from("preferencias").select("tema, alertas_correo_activas").eq("user_id", misId).maybeSingle();
       if (pref?.tema && pref.tema !== tema) setTema(pref.tema);
+      if (pref && pref.alertas_correo_activas === false) setAlertasCorreoActivas(false);
 
       let result = await loadAllTables(misId);
       result = await migrateFromOldBlobIfNeeded(result, misId);
@@ -1163,6 +1164,12 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
   const cambiarTema = async (nuevoValor) => {
     setTema(nuevoValor);
     await supabase.from("preferencias").upsert({ user_id: misId, tema: nuevoValor }, { onConflict: "user_id" });
+  };
+
+  const [alertasCorreoActivas, setAlertasCorreoActivas] = useState(true);
+  const cambiarAlertasCorreo = async (nuevoValor) => {
+    setAlertasCorreoActivas(nuevoValor);
+    await supabase.from("preferencias").upsert({ user_id: misId, alertas_correo_activas: nuevoValor }, { onConflict: "user_id" });
   };
 
   const [exportPaso, setExportPaso] = useState(null); // null | "confirmar" | "listo"
@@ -1379,6 +1386,10 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
             <button onClick={() => setMfaModalAbierto(true)}
               className="gp-navitem flex items-center gap-2 px-3 py-2.5 md:py-2 text-sm text-left w-full">
               <Shield size={15} /> Verificación en dos pasos
+            </button>
+            <button onClick={() => cambiarAlertasCorreo(!alertasCorreoActivas)}
+              className="gp-navitem flex items-center gap-2 px-3 py-2.5 md:py-2 text-sm text-left w-full">
+              <Bell size={15} /> {alertasCorreoActivas ? "Alertas por correo: activadas" : "Alertas por correo: desactivadas"}
             </button>
             {activeOwnerId === misId && (
               <>
