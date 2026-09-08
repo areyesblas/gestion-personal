@@ -20,13 +20,20 @@ const Tokens = ({ tema = "oscuro" }) => (
     .gp-root{ --bg:#0B2341; --panel:#12304F; --panel-hi:#1A3D63; --border:#234A70;
       --text:#EAF1FA; --muted:#93A7C4; --gold:#F59E0B; --teal:#5FBF8B; --teal-tint:#DCF5E6; --teal-text:#1D6B42; --panel-2:rgba(255,255,255,.12); --red:#EF4444;
       background:var(--bg); color:var(--text); font-family:'IBM Plex Sans',sans-serif; }
-    /* Temas: todos oscuros (a propósito — el tema claro se probó antes y el logo perdía
-       contraste sobre fondos pálidos). Solo cambia la familia de color de fondo/paneles;
-       el dorado de acento, el verde/rojo semánticos y demás se quedan iguales en todos. */
+    /* Temas oscuros. */
     .gp-root.tema-negro{ --bg:#0A0A0A; --panel:#1A1A1A; --panel-hi:#262626; --border:#333333; --text:#F2F2F2; --muted:#9A9A9A; }
     .gp-root.tema-oliva{ --bg:#232A1C; --panel:#333D28; --panel-hi:#414D34; --border:#4A5639; --text:#F0F3EA; --muted:#A8B49B; }
     .gp-root.tema-rojo{ --bg:#2A0F0F; --panel:#3D1717; --panel-hi:#4D1F1F; --border:#5C2828; --text:#F5E9E9; --muted:#C79B9B; }
     .gp-root.tema-naranja{ --bg:#2A1607; --panel:#3D200D; --panel-hi:#4D2A14; --border:#5C3A1E; --text:#F5EBDF; --muted:#C2A183; }
+    /* Temas claros: versión pálida de cada uno de los 5 de arriba. --panel-2 se redefine con un
+       tinte OSCURO (no blanco) en estos, porque el de arriba (blanco a 12%) es invisible sobre
+       fondo claro. El logo y el menú lateral NUNCA usan estos colores — ver .gp-sidebar-area
+       más abajo, así el logo queda a salvo pase lo que pase. */
+    .gp-root.tema-azul-claro{ --bg:#E8F1FB; --panel:#F7FBFF; --panel-hi:#DCEAFA; --border:#C3D9EE; --text:#0B2341; --muted:#5B7A9E; --panel-2:rgba(11,35,65,.06); }
+    .gp-root.tema-gris-claro{ --bg:#F2F2F2; --panel:#FAFAFA; --panel-hi:#E8E8E8; --border:#D6D6D6; --text:#1A1A1A; --muted:#6B6B6B; --panel-2:rgba(0,0,0,.06); }
+    .gp-root.tema-verde-claro{ --bg:#EEF3E7; --panel:#F7FAF2; --panel-hi:#E3ECD8; --border:#CDDBBC; --text:#2B3620; --muted:#6B7C57; --panel-2:rgba(43,54,32,.06); }
+    .gp-root.tema-rojo-claro{ --bg:#FBEAEA; --panel:#FFF5F5; --panel-hi:#F7DCDC; --border:#EFC2C2; --text:#4A1414; --muted:#9C6B6B; --panel-2:rgba(74,20,20,.06); }
+    .gp-root.tema-naranja-claro{ --bg:#FBEEE1; --panel:#FFF7EF; --panel-hi:#F7E2CB; --border:#EFCBA3; --text:#4A2A0F; --muted:#9C7A55; --panel-2:rgba(74,42,15,.06); }
     .gp-serif{ font-family:'Poppins',sans-serif; font-weight:600; }
     .gp-mono{ font-family:'IBM Plex Mono',monospace; }
     .gp-panel{ background:var(--panel); border:1px solid var(--border); border-radius:6px; }
@@ -59,10 +66,11 @@ const Tokens = ({ tema = "oscuro" }) => (
     .gp-badge{ display:inline-block; padding:2px 8px; border-radius:3px; font-size:11px; font-weight:500; }
     .gp-scroll::-webkit-scrollbar{ width:6px; height:6px; }
     .gp-scroll::-webkit-scrollbar-thumb{ background:var(--border); border-radius:3px; }
-    /* El panel lateral tiene su propio "look": el logo y el color de letras SIEMPRE son los mismos
-       (claros), sin importar el tema — todos los temas son oscuros así que esto ya no necesita
-       overrides por tema como cuando existía el tema claro. */
-    .gp-sidebar-area{ --text:#EAF1FA; --muted:#93A7C4; }
+    /* El logo y el menú lateral (además de login/splash, que usan esta misma clase) SIEMPRE
+       usan este azul oscuro fijo, sin importar qué tema esté activo en el resto de la app —
+       incluidos los 5 temas claros nuevos. Esto es justo lo que evita que el logo pierda
+       contraste otra vez, sin tener que renunciar a tener temas claros. */
+    .gp-sidebar-area{ --bg:#0B2341; --panel:#12304F; --panel-hi:#1A3D63; --border:#234A70; --text:#EAF1FA; --muted:#93A7C4; }
     /* Fondo "blanco hueso" para paneles puntuales (chat del Asistente, calendario de Agenda)
        que deben verse claros aunque el resto de la app esté en un tema oscuro. Redefine las
        variables de color solo dentro de este panel, así todo lo de adentro (texto, badges,
@@ -74,7 +82,7 @@ const Tokens = ({ tema = "oscuro" }) => (
 
 // Recuerda tu tema entre visitas, guardado en este navegador y, una vez que inicias sesión,
 // también en tu cuenta (para que te siga en otros dispositivos, vía cambiarTema/preferencias).
-const TEMAS_VALIDOS = ["actual", "negro", "oliva", "rojo", "naranja"];
+const TEMAS_VALIDOS = ["actual", "negro", "oliva", "rojo", "naranja", "azul-claro", "gris-claro", "verde-claro", "rojo-claro", "naranja-claro"];
 function useTema() {
   const [tema, setTemaState] = useState(() => {
     try {
@@ -1603,6 +1611,11 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
     { id: "oliva", label: "Verde Olivo", swatch: "#333D28" },
     { id: "rojo", label: "Rojo", swatch: "#3D1717" },
     { id: "naranja", label: "Naranja", swatch: "#3D200D" },
+    { id: "azul-claro", label: "Azul Claro", swatch: "#F7FBFF" },
+    { id: "gris-claro", label: "Gris Claro", swatch: "#FAFAFA" },
+    { id: "verde-claro", label: "Verde Claro", swatch: "#F7FAF2" },
+    { id: "rojo-claro", label: "Rojo Claro", swatch: "#FFF5F5" },
+    { id: "naranja-claro", label: "Naranja Claro", swatch: "#FFF7EF" },
   ];
   const confirmarExportar = () => {
     exportarExcel(data, activeOwnerId === misId ? "mi-cuenta" : activeOwnerEmail?.split("@")[0]);
