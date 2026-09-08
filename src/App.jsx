@@ -410,6 +410,15 @@ function rowToSalud(row) {
   return { ...rest, estudio: estudioNombre ? { nombre: estudioNombre, url: estudioUrl } : null };
 }
 const toRow = (key, obj) => (key === "salud" ? saludToRow(obj) : jsToRow(obj));
+// Distingue un error de red real (sin respuesta del servidor: sí aplica "revisa tu conexión") de un
+// error que el servidor sí respondió pero rechazó (dato inválido, columna que no existe, etc. — ahí
+// decir "revisa tu conexión" es engañoso y no ayuda a nadie a resolverlo).
+function mensajeErrorGuardado(error) {
+  const esErrorDeRed = !error?.code && /fetch|network/i.test(error?.message || "");
+  return esErrorDeRed
+    ? "No se pudo guardar. Revisa tu conexión a internet."
+    : "No se pudo guardar. Hubo un problema con los datos — si se repite, cuéntame qué campos llenaste.";
+}
 const fromRow = (key, row) => (key === "salud" ? rowToSalud(row) : rowToJs(row));
 
 async function fetchTable(key, ownerId) {
@@ -1551,7 +1560,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
   const addItem = async (key, item) => {
     const newItem = { ...item, id: item.id || uid(), userId: activeOwnerId };
     const { error } = await supabase.from(tableName(key)).insert(toRow(key, newItem));
-    if (error) { console.error(`Error al guardar en ${tableName(key)}:`, error); alert("No se pudo guardar. Revisa tu conexión a internet."); return; }
+    if (error) { console.error(`Error al guardar en ${tableName(key)}:`, error); alert(mensajeErrorGuardado(error)); return; }
     setData((prev) => ({ ...prev, [key]: [...prev[key], newItem] }));
   };
   const editItem = async (key, id, patch) => {
@@ -6530,7 +6539,7 @@ function QuickCapture({ data, onAdd, irAVista }) {
         {abierto && (
           <div className="gp-panel p-2 mb-2 flex flex-col gap-1" style={{ minWidth: 180 }}>
             {OPCIONES.map((o) => (
-              <button key={o.key} onClick={() => setTipo(o.key)} className="gp-btn-ghost flex items-center gap-2 px-3 py-2 text-sm rounded text-left">
+              <button key={o.key} onClick={() => { setTipo(o.key); setAbierto(false); }} className="gp-btn-ghost flex items-center gap-2 px-3 py-2 text-sm rounded text-left">
                 <o.icon size={15} /> {o.label}
               </button>
             ))}
@@ -6608,7 +6617,7 @@ function IdeaRapidaForm({ onSave }) {
       <button className="gp-btn w-full py-2 text-sm mt-1" onClick={() => {
         if (!nombre.trim()) { setError("Captura un nombre."); return; }
         onSave({
-          nombre: nombre.trim(), categoria: "Software", estatus: "Idea", modo: "Finito", comoGeneraValor: "Dinero",
+          nombre: nombre.trim(), categoria: "Software", estatus: "Idea", modo: "Finito", monetizacion: "Dinero",
           prioridad: "Media", fechaRevision: "", descripcion: "", githubSubido: false, github: "",
         });
       }}>
