@@ -18,10 +18,10 @@ const Tokens = ({ tema = "oscuro" }) => (
   <style>{`
     @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');
     .gp-root{ --bg:#0B2341; --panel:#12304F; --panel-hi:#1A3D63; --border:#234A70;
-      --text:#EAF1FA; --muted:#93A7C4; --gold:#F59E0B; --teal:#5FBF8B; --teal-tint:rgba(95,191,139,.16); --panel-2:rgba(255,255,255,.12); --red:#EF4444;
+      --text:#EAF1FA; --muted:#93A7C4; --gold:#F59E0B; --teal:#5FBF8B; --teal-tint:#DCF5E6; --teal-text:#1D6B42; --panel-2:rgba(255,255,255,.12); --red:#EF4444;
       background:var(--bg); color:var(--text); font-family:'IBM Plex Sans',sans-serif; }
     .gp-root.claro{ --bg:#E8F1FB; --panel:#F7FBFF; --panel-hi:#DCEAFA; --border:#C3D9EE;
-      --text:#0B2341; --muted:#5B7A9E; --gold:#F59E0B; --teal:#4CAF7A; --teal-tint:rgba(76,175,122,.14); --panel-2:rgba(11,35,65,.06); --red:#DC2626; }
+      --text:#0B2341; --muted:#5B7A9E; --gold:#F59E0B; --teal:#4CAF7A; --teal-tint:#DCF5E6; --teal-text:#1D6B42; --panel-2:rgba(11,35,65,.06); --red:#DC2626; }
     .gp-serif{ font-family:'Poppins',sans-serif; font-weight:600; }
     .gp-mono{ font-family:'IBM Plex Mono',monospace; }
     .gp-panel{ background:var(--panel); border:1px solid var(--border); border-radius:6px; }
@@ -1018,7 +1018,17 @@ export default function App() {
   const [session, setSession] = useState(undefined); // undefined = cargando, null = sin sesión
   const [recuperando, setRecuperando] = useState(false);
   const [tema, toggleTema, setTema] = useTema();
-  const [showSplash, setShowSplash] = useState(true);
+  const [showSplash, setShowSplash] = useState(() => {
+    // Después de cerrar sesión forzamos un reload para dejar todo limpio, pero eso no debe
+    // implicar ver la animación de bienvenida otra vez — se salta una sola vez con esta bandera.
+    try {
+      if (sessionStorage.getItem("arkeyone_skip_splash") === "1") {
+        sessionStorage.removeItem("arkeyone_skip_splash");
+        return false;
+      }
+    } catch {}
+    return true;
+  });
   const [splashFadingOut, setSplashFadingOut] = useState(false);
   // Verificación en dos pasos (MFA): null = todavía sin revisar, { pendiente, factorId }
   const [mfaEstado, setMfaEstado] = useState(null);
@@ -1358,7 +1368,10 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
     } catch (err) {
       console.error("Error al cerrar sesión:", err);
     } finally {
-      try { localStorage.removeItem("arkeyone_login_at"); } catch {}
+      try {
+        localStorage.removeItem("arkeyone_login_at");
+        sessionStorage.setItem("arkeyone_skip_splash", "1");
+      } catch {}
       window.location.reload();
     }
   };
@@ -1592,6 +1605,44 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
     const unicos = [...new Set(keys)];
     const entries = await Promise.all(unicos.map(async (k) => [k, await fetchTable(k, activeOwnerId)]));
     setData((prev) => ({ ...prev, ...Object.fromEntries(entries) }));
+  };
+
+  // "Pull to refresh": deslizar hacia abajo desde arriba del todo en el contenido para volver
+  // a traer todo de la base de datos (por si se hizo un cambio desde otro dispositivo, o desde
+  // el Asistente en otra pestaña). Solo se activa si el scroll ya está hasta arriba.
+  const [pullDist, setPullDist] = useState(0);
+  const [refrescando, setRefrescando] = useState(false);
+  const pullRef = useRef({ activo: false, startY: 0 });
+  const contenidoRef = useRef(null);
+
+  const refrescarTodo = async () => {
+    setRefrescando(true);
+    try {
+      const result = await loadAllTables(activeOwnerId);
+      setData(result);
+    } finally {
+      setRefrescando(false);
+      setPullDist(0);
+    }
+  };
+  const onTouchStartContenido = (e) => {
+    if ((contenidoRef.current?.scrollTop || 0) > 0 || refrescando) { pullRef.current.activo = false; return; }
+    pullRef.current = { activo: true, startY: e.touches[0].clientY };
+  };
+  const onTouchMoveContenido = (e) => {
+    if (!pullRef.current.activo || refrescando) return;
+    const dy = e.touches[0].clientY - pullRef.current.startY;
+    if (dy > 0 && (contenidoRef.current?.scrollTop || 0) <= 0) {
+      setPullDist(Math.min(dy * 0.5, 90));
+    } else {
+      pullRef.current.activo = false;
+      setPullDist(0);
+    }
+  };
+  const onTouchEndContenido = () => {
+    if (!pullRef.current.activo) return;
+    pullRef.current.activo = false;
+    if (pullDist > 60) refrescarTodo(); else setPullDist(0);
   };
 
   const addItem = async (key, item) => {
@@ -1901,7 +1952,22 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
         </div>
 
         {/* contenido */}
-        <div className="flex-1 p-4 pt-[calc(env(safe-area-inset-top)+4rem)] md:p-6 md:pt-6 overflow-y-auto gp-scroll w-full" style={{ maxHeight: "100vh" }}>
+        <div
+          ref={contenidoRef}
+          onTouchStart={onTouchStartContenido}
+          onTouchMove={onTouchMoveContenido}
+          onTouchEnd={onTouchEndContenido}
+          className="flex-1 p-4 pt-[calc(env(safe-area-inset-top)+4rem)] md:p-6 md:pt-6 overflow-y-auto gp-scroll w-full"
+          style={{ maxHeight: "100vh" }}
+        >
+          {(pullDist > 0 || refrescando) && (
+            <div
+              className="flex items-center justify-center text-xs gp-text-muted"
+              style={{ height: refrescando ? 32 : pullDist, overflow: "hidden", transition: refrescando ? "height .15s" : "none" }}
+            >
+              {refrescando ? "Actualizando…" : pullDist > 60 ? "Suelta para actualizar ↓" : "Desliza hacia abajo para actualizar…"}
+            </div>
+          )}
           {view === "dashboard" && <Dashboard data={data} setView={irAVista} onAddSaldo={(i) => addItem("saldoInicial", i)} />}
           {view === "papelera" && <Papelera onRestore={restoreItem} onPermanentDelete={permanentDelete} ownerId={activeOwnerId} />}
           {view === "colaboradores" && <Colaboradores misId={misId} miEmail={miEmail} />}
@@ -3641,7 +3707,20 @@ function Pendientes({ data, activeOwnerId, onAdd, onEdit, onRemove, onAddComenta
       ) : (
       <div className="gp-panel overflow-x-auto">
         <table className="gp-table">
-          <thead><tr><th>Pendiente</th><th>Proyecto</th><th>Cliente</th><th>Responsable</th><th>Fecha</th><th>Prioridad</th><th>Avance</th><th>Precio</th><th>Horas</th><th></th></tr></thead>
+          <thead>
+            <tr>
+              <th>Pendiente</th>
+              <th className="hidden md:table-cell">Proyecto</th>
+              <th className="hidden md:table-cell">Cliente</th>
+              <th className="hidden md:table-cell">Responsable</th>
+              <th className="hidden md:table-cell">Fecha</th>
+              <th className="hidden md:table-cell">Prioridad</th>
+              <th>Avance</th>
+              <th className="hidden md:table-cell">Precio</th>
+              <th className="hidden md:table-cell">Horas</th>
+              <th></th>
+            </tr>
+          </thead>
           <tbody>
             {filas.map(({ item: p, nivel }) => {
               const vencido = p.estatus !== "Hecho" && p.fechaLimite && daysUntil(p.fechaLimite) < 0;
@@ -3649,19 +3728,24 @@ function Pendientes({ data, activeOwnerId, onAdd, onEdit, onRemove, onAddComenta
               const tieneHijos = p.hijos && p.hijos.length > 0;
               const avance = tieneHijos ? Math.round(calcAvanceTarea(p)) : null;
               return (
-                <tr key={p.id} style={p.estatus === "Hecho" ? { background: "var(--teal-tint)" } : undefined}>
-                  <td>
-                    <span style={{ paddingLeft: nivel * 18 }} className="flex items-center gap-1">
-                      {nivel > 0 && <span className="gp-text-muted">└</span>}
-                      {p.descripcion}
+                <tr
+                  key={p.id}
+                  onClick={() => setModal({ item: paraEditar(p) })}
+                  className="cursor-pointer"
+                  style={p.estatus === "Hecho" ? { background: "var(--teal-tint)", color: "var(--teal-text)", "--muted": "#3F8562" } : undefined}
+                >
+                  <td style={{ maxWidth: 220 }}>
+                    <span style={{ paddingLeft: nivel * 18 }} className="flex items-start gap-1">
+                      {nivel > 0 && <span className="gp-text-muted shrink-0">└</span>}
+                      <span className="line-clamp-2 md:line-clamp-none">{p.descripcion}</span>
                     </span>
                   </td>
-                  <td className="gp-text-muted">{nombreProyecto(p.proyectoId)}</td>
-                  <td className="gp-text-muted">{p.contactoId ? nombreCliente(p.contactoId) : "—"}</td>
-                  <td className="gp-text-muted">{nombreResp(p.responsableId)}</td>
-                  <td className="gp-mono" style={{ color: vencido ? "var(--red)" : undefined }}>{p.fechaLimite}</td>
-                  <td><Badge tone={p.prioridad === "Alta" ? "red" : p.prioridad === "Media" ? "gold" : "muted"}>{p.prioridad}</Badge></td>
-                  <td>
+                  <td className="gp-text-muted hidden md:table-cell">{nombreProyecto(p.proyectoId)}</td>
+                  <td className="gp-text-muted hidden md:table-cell">{p.contactoId ? nombreCliente(p.contactoId) : "—"}</td>
+                  <td className="gp-text-muted hidden md:table-cell">{nombreResp(p.responsableId)}</td>
+                  <td className="gp-mono hidden md:table-cell" style={{ color: vencido ? "var(--red)" : undefined }}>{p.fechaLimite}</td>
+                  <td className="hidden md:table-cell"><Badge tone={p.prioridad === "Alta" ? "red" : p.prioridad === "Media" ? "gold" : "muted"}>{p.prioridad}</Badge></td>
+                  <td onClick={(e) => e.stopPropagation()}>
                     {tieneHijos ? (
                       <div className="flex items-center gap-1.5" style={{ minWidth: 70 }}>
                         <div className="h-1.5 rounded flex-1" style={{ background: "var(--border)" }}>
@@ -3675,9 +3759,9 @@ function Pendientes({ data, activeOwnerId, onAdd, onEdit, onRemove, onAddComenta
                       </select>
                     )}
                   </td>
-                  <td className="gp-mono">{p.precio ? fmtMoney(p.precio) : "—"}</td>
-                  <td className="gp-mono gp-text-muted">{p.tiempoEstimado ? `${p.tiempoEstimado}h` : "—"}{p.tiempoReal ? ` / ${p.tiempoReal}h` : ""}</td>
-                  <td><div className="flex gap-1">
+                  <td className="gp-mono hidden md:table-cell">{p.precio ? fmtMoney(p.precio) : "—"}</td>
+                  <td className="gp-mono gp-text-muted hidden md:table-cell">{p.tiempoEstimado ? `${p.tiempoEstimado}h` : "—"}{p.tiempoReal ? ` / ${p.tiempoReal}h` : ""}</td>
+                  <td onClick={(e) => e.stopPropagation()}><div className="flex gap-1">
                     <IconBtn onClick={() => setModal({ item: { ...empty, proyectoId: p.proyectoId, parentId: p.id } })}><Plus size={13} /></IconBtn>
                     <IconBtn onClick={() => setComentariosDe(p)}><MessageCircle size={13} />{nc > 0 && <span className="gp-mono" style={{ fontSize: 9, marginLeft: 2 }}>{nc}</span>}</IconBtn>
                     <IconBtn onClick={() => setModal({ item: paraEditar(p) })}><Pencil size={13} /></IconBtn><IconBtn onClick={() => confirmarBorrado(p)}><Trash2 size={13} /></IconBtn>
@@ -6643,7 +6727,7 @@ function Agenda({ data, onEditPendiente, onAddCita, misId }) {
                           height: Math.max(b.duracion * PX_POR_HORA - 2, 18),
                           left: 2, right: 2,
                           background: b.tipo === "cita" ? "var(--gold)" : b.tipo === "comida" ? "var(--border)" : hecho ? "var(--teal-tint)" : "var(--panel-2)",
-                          color: b.tipo === "cita" ? "#0B2341" : "inherit",
+                          color: b.tipo === "cita" ? "#0B2341" : hecho ? "var(--teal-text)" : "inherit",
                           border: b.tipo === "pendiente" ? `1px solid ${hecho ? "var(--teal)" : "var(--border)"}` : "none",
                           textDecoration: hecho ? "line-through" : "none",
                           opacity: b.tipo === "comida" ? 0.7 : 1,
