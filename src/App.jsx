@@ -6,7 +6,7 @@ import {
   Users, Activity, Plus, X, Trash2, Pencil, Github, ChevronDown,
   ChevronRight, Bell, Lightbulb, Rocket, MessageCircle, Mail, Globe,
   Target, Contact, BarChart3, FileText, Flame, HeartPulse, Check, Menu, PieChart as PieChartIcon,
-  PiggyBank, Camera, Film, Upload, MapPin, Clock, Mic, Gift, Receipt, Megaphone, ChevronUp, Gem, Download, Sun, Moon, Shield, LogOut, ChevronLeft, Lock, Pill,
+  PiggyBank, Camera, Film, Upload, MapPin, Clock, Mic, Gift, Receipt, Megaphone, ChevronUp, Gem, Download, Sun, Moon, Shield, LogOut, ChevronLeft, Lock, Pill, CalendarClock, Zap,
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
@@ -295,7 +295,7 @@ const categoriaIMC = (imc) => {
 };
 
 /* ---------- persistencia relacional ---------- */
-const TABLES = ["proyectos", "pendientes", "equipo", "finanzas", "deudas", "actividades", "activos", "metas", "contactos", "redesMetricas", "documentos", "habitos", "salud", "apartados", "eventos", "comentarios", "saldoInicial", "regalos", "facturas", "campanas", "patrimonio", "patrimonioValuaciones", "medicamentos"];
+const TABLES = ["proyectos", "pendientes", "equipo", "finanzas", "deudas", "actividades", "activos", "metas", "contactos", "redesMetricas", "documentos", "habitos", "salud", "apartados", "eventos", "comentarios", "saldoInicial", "regalos", "facturas", "campanas", "patrimonio", "patrimonioValuaciones", "medicamentos", "citas"];
 const OLD_STORAGE_KEY = "gestion_personal_data"; // localStorage, versión muy vieja
 const OLD_BLOB_TABLE = "gestion_data"; // tabla única jsonb, versión anterior a este modelo relacional
 
@@ -310,7 +310,7 @@ const ETIQUETA_TABLA = {
   habitos: "Hábito", salud: "Registro de salud", apartados: "Apartado", eventos: "Evento",
   comentarios: "Comentario", saldoInicial: "Saldo inicial", regalos: "Regalo",
   facturas: "Factura", campanas: "Campaña", patrimonio: "Bien patrimonial",
-  patrimonioValuaciones: "Valuación de patrimonio", medicamentos: "Medicamento",
+  patrimonioValuaciones: "Valuación de patrimonio", medicamentos: "Medicamento", citas: "Cita",
 };
 
 // Exporta toda la información visible del usuario a un archivo Excel, un módulo por hoja.
@@ -357,6 +357,8 @@ function labelFor(key, item) {
       return item.concepto || item.categoria || "(sin concepto)";
     case "deudas":
       return item.acreedor || "(sin acreedor)";
+    case "citas":
+      return item.titulo || "(sin título)";
     case "redesMetricas":
       return item.plataforma || "(sin plataforma)";
     case "salud":
@@ -1098,7 +1100,7 @@ const VIEW_TO_MODULO = {
   equipo: "equipo", contactos: "contactos", regalos: "regalos",
   redes: "redes_metricas", marketing: "campanas",
   actividades: "actividades", eventos: "eventos", habitos: "habitos", salud: "salud",
-  medicamentos: "medicamentos",
+  medicamentos: "medicamentos", citas: "citas",
 };
 // Mapeo inverso: de nombre de tabla/módulo a id de vista, para los deep links de Push
 // (una notificación de una deuda trae recurso_tabla="deudas" y con esto sabemos a qué
@@ -1603,6 +1605,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
   const navGroups = [
     { label: "General", items: [
       { id: "dashboard", label: "Panorama", icon: LayoutDashboard },
+      { id: "citas", label: "Citas", icon: CalendarClock },
       { id: "mi-trabajo", label: "Mi trabajo", icon: CheckSquare },
       { id: "proyectos", label: "Proyectos e ideas", icon: FolderKanban },
       { id: "metas", label: "Metas por proyecto", icon: Target },
@@ -1899,8 +1902,13 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
           {view === "activos" && (
             <ActivosDigitales data={data} onAdd={(i) => addItem("activos", i)} onEdit={(id, p) => editItem("activos", id, p)} onRemove={(id) => askDelete("activos", id)} />
           )}
+          {view === "citas" && (
+            <Citas data={data} onAdd={(i) => addItem("citas", i)} onEdit={(id, p) => editItem("citas", id, p)} onRemove={(id) => askDelete("citas", id)} />
+          )}
         </div>
       </div>
+
+      <QuickCapture data={data} onAdd={addItem} irAVista={irAVista} />
 
       {confirmDelete && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,.6)" }} onClick={() => setConfirmDelete(null)}>
@@ -6122,6 +6130,260 @@ function MoverFondosForm({ apartado, proyectos, onSave }) {
 }
 
 /* ---------- Eventos (con fotos y videos) ---------- */
+/* ---------- Citas (agenda ligera con hora y recordatorio push — distinta de Eventos/Actividades) ---------- */
+function fechaHoraALocalInputs(iso) {
+  if (!iso) return { fecha: todayISO(), hora: "09:00" };
+  const d = new Date(iso);
+  const pad = (n) => String(n).padStart(2, "0");
+  return { fecha: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`, hora: `${pad(d.getHours())}:${pad(d.getMinutes())}` };
+}
+function localInputsAFechaHora(fecha, hora) {
+  if (!fecha) return "";
+  return new Date(`${fecha}T${hora || "09:00"}:00`).toISOString();
+}
+function fmtFechaHora(iso) {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleString("es-MX", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit", hour12: true });
+}
+
+function Citas({ data, onAdd, onEdit, onRemove }) {
+  const [modal, setModal] = useState(null);
+  const empty = { titulo: "", fechaHora: localInputsAFechaHora(todayISO(), "09:00"), lugar: "", contactoId: "", notas: "" };
+  const nombreContacto = (id) => data.contactos.find((c) => c.id === id)?.nombre || "—";
+  const ahora = new Date();
+  const ordenadas = [...data.citas].sort((a, b) => (a.fechaHora || "").localeCompare(b.fechaHora || ""));
+  const proximas = ordenadas.filter((c) => new Date(c.fechaHora) >= ahora);
+  const pasadas = ordenadas.filter((c) => new Date(c.fechaHora) < ahora).reverse();
+  const [mostrarPasadas, setMostrarPasadas] = useState(false);
+
+  const Fila = (c) => {
+    const esHoy = new Date(c.fechaHora).toDateString() === ahora.toDateString();
+    return (
+      <div key={c.id} className="gp-panel p-3 flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-sm font-medium truncate">{c.titulo}</span>
+            {esHoy && <Badge tone="gold">Hoy</Badge>}
+          </div>
+          <div className="flex items-center gap-3 flex-wrap mt-1 text-xs gp-text-muted">
+            <span className="flex items-center gap-1"><Clock size={11} /> {fmtFechaHora(c.fechaHora)}</span>
+            {c.lugar && <span className="flex items-center gap-1"><MapPin size={11} /> {c.lugar}</span>}
+            {c.contactoId && <span>{nombreContacto(c.contactoId)}</span>}
+          </div>
+          {c.notas && <p className="text-xs gp-text-muted mt-1">{c.notas}</p>}
+        </div>
+        <div className="flex gap-1 shrink-0">
+          <IconBtn onClick={() => setModal({ item: c })}><Pencil size={13} /></IconBtn>
+          <IconBtn onClick={() => onRemove(c.id)}><Trash2 size={13} /></IconBtn>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div>
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-1">
+        <h2 className="gp-serif text-2xl">Citas</h2>
+        <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm w-full sm:w-auto"><Plus size={14} /> Nueva</button>
+      </div>
+      <p className="text-sm gp-text-muted mb-4">Agenda con hora y recordatorio push antes de la hora. Para shows de tu negocio usa Eventos; para bitácora personal, Actividades.</p>
+
+      {proximas.length === 0 && <p className="text-sm gp-text-muted mb-4">No tienes citas próximas.</p>}
+      <div className="space-y-2 mb-4">{proximas.map(Fila)}</div>
+
+      {pasadas.length > 0 && (
+        <div>
+          <button onClick={() => setMostrarPasadas((v) => !v)} className="text-xs gp-text-muted flex items-center gap-1 mb-2">
+            {mostrarPasadas ? <ChevronDown size={13} /> : <ChevronRight size={13} />} Citas pasadas ({pasadas.length})
+          </button>
+          {mostrarPasadas && <div className="space-y-2 opacity-60">{pasadas.map(Fila)}</div>}
+        </div>
+      )}
+
+      {modal && (
+        <Modal title={modal.item.id ? "Editar cita" : "Nueva cita"} onClose={() => setModal(null)}>
+          <CitaForm item={modal.item} contactos={data.contactos} onSave={(v) => { modal.item.id ? onEdit(modal.item.id, v) : onAdd({ ...v, id: uid() }); setModal(null); }} />
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+function CitaForm({ item, contactos, onSave }) {
+  const inicial = fechaHoraALocalInputs(item.fechaHora);
+  const [titulo, setTitulo] = useState(item.titulo || "");
+  const [fecha, setFecha] = useState(inicial.fecha);
+  const [hora, setHora] = useState(inicial.hora);
+  const [lugar, setLugar] = useState(item.lugar || "");
+  const [contactoId, setContactoId] = useState(item.contactoId || "");
+  const [notas, setNotas] = useState(item.notas || "");
+  const [error, setError] = useState("");
+
+  return (
+    <div>
+      <Field label="Título"><input className="gp-input" value={titulo} onChange={(e) => setTitulo(e.target.value)} /></Field>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Fecha"><input type="date" className="gp-input" value={fecha} onChange={(e) => setFecha(e.target.value)} /></Field>
+        <Field label="Hora"><input type="time" className="gp-input" value={hora} onChange={(e) => setHora(e.target.value)} /></Field>
+      </div>
+      <Field label="Lugar (opcional)"><input className="gp-input" value={lugar} onChange={(e) => setLugar(e.target.value)} /></Field>
+      <Field label="Con quién (opcional)">
+        <select className="gp-input" value={contactoId} onChange={(e) => setContactoId(e.target.value)}>
+          <option value="">— sin contacto —</option>
+          {contactos.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+        </select>
+      </Field>
+      <Field label="Notas (opcional)"><textarea className="gp-input" rows={2} value={notas} onChange={(e) => setNotas(e.target.value)} /></Field>
+      {error && <p className="text-xs gp-text-red mb-2">{error}</p>}
+      <button
+        className="gp-btn w-full py-2 text-sm mt-1"
+        onClick={() => {
+          if (!titulo.trim()) { setError("Captura un título."); return; }
+          if (!fecha) { setError("Elige una fecha."); return; }
+          onSave({ titulo: titulo.trim(), fechaHora: localInputsAFechaHora(fecha, hora), lugar: lugar.trim(), contactoId, notas: notas.trim() });
+        }}
+      >
+        Guardar
+      </button>
+    </div>
+  );
+}
+
+/* ---------- Captura rápida (botón flotante, para no tener que navegar a cada módulo) ---------- */
+function QuickCapture({ data, onAdd, irAVista }) {
+  const [abierto, setAbierto] = useState(false);
+  const [tipo, setTipo] = useState(null); // "cita" | "contacto" | "idea" | "ingreso" | "egreso"
+
+  const OPCIONES = [
+    { key: "cita", label: "Cita", icon: CalendarClock },
+    { key: "contacto", label: "Contacto", icon: Contact },
+    { key: "idea", label: "Idea", icon: Lightbulb },
+    { key: "ingreso", label: "Ingreso", icon: Wallet },
+    { key: "egreso", label: "Egreso", icon: Receipt },
+  ];
+
+  const cerrar = () => { setAbierto(false); setTipo(null); };
+
+  return (
+    <>
+      <div className="fixed z-[55]" style={{ right: 20, bottom: "calc(env(safe-area-inset-bottom) + 20px)" }}>
+        {abierto && (
+          <div className="gp-panel p-2 mb-2 flex flex-col gap-1" style={{ minWidth: 180 }}>
+            {OPCIONES.map((o) => (
+              <button key={o.key} onClick={() => setTipo(o.key)} className="gp-btn-ghost flex items-center gap-2 px-3 py-2 text-sm rounded text-left">
+                <o.icon size={15} /> {o.label}
+              </button>
+            ))}
+          </div>
+        )}
+        <button
+          onClick={() => setAbierto((v) => !v)}
+          title="Captura rápida"
+          className="rounded-full flex items-center justify-center shadow-lg"
+          style={{ width: 52, height: 52, background: "var(--gold)", color: "#0B2341", marginLeft: "auto" }}
+        >
+          {abierto ? <X size={22} /> : <Zap size={22} />}
+        </button>
+      </div>
+
+      {tipo === "cita" && (
+        <Modal title="Nueva cita" onClose={cerrar}>
+          <CitaForm item={{ titulo: "", fechaHora: localInputsAFechaHora(todayISO(), "09:00"), lugar: "", contactoId: "", notas: "" }} contactos={data.contactos}
+            onSave={(v) => { onAdd("citas", { ...v, id: uid() }); cerrar(); irAVista("citas"); }} />
+        </Modal>
+      )}
+      {tipo === "contacto" && (
+        <Modal title="Nuevo contacto" onClose={cerrar}>
+          <ContactoRapidoForm onSave={(v) => { onAdd("contactos", { ...v, id: uid() }); cerrar(); irAVista("contactos"); }} />
+        </Modal>
+      )}
+      {tipo === "idea" && (
+        <Modal title="Nueva idea" onClose={cerrar}>
+          <IdeaRapidaForm onSave={(v) => { onAdd("proyectos", { ...v, id: uid() }); cerrar(); irAVista("proyectos"); }} />
+        </Modal>
+      )}
+      {(tipo === "ingreso" || tipo === "egreso") && (
+        <Modal title={tipo === "ingreso" ? "Nuevo ingreso" : "Nuevo egreso"} onClose={cerrar}>
+          <MovimientoRapidoForm tipoInicial={tipo === "ingreso" ? "Ingreso" : "Egreso"}
+            onSave={(v) => { onAdd("finanzas", { ...v, id: uid() }); cerrar(); irAVista("finanzas"); }} />
+        </Modal>
+      )}
+    </>
+  );
+}
+
+function ContactoRapidoForm({ onSave }) {
+  const [nombre, setNombre] = useState("");
+  const [fechaNacimiento, setFechaNacimiento] = useState("");
+  const [telefono, setTelefono] = useState("");
+  const [error, setError] = useState("");
+  return (
+    <div>
+      <Field label="Nombre"><input className="gp-input" value={nombre} onChange={(e) => setNombre(e.target.value)} /></Field>
+      <Field label="Teléfono (opcional)"><input className="gp-input" value={telefono} onChange={(e) => setTelefono(e.target.value)} /></Field>
+      <Field label="Fecha de nacimiento (opcional, para recordar su cumpleaños)"><input type="date" className="gp-input" value={fechaNacimiento} onChange={(e) => setFechaNacimiento(e.target.value)} /></Field>
+      {error && <p className="text-xs gp-text-red mb-2">{error}</p>}
+      <button className="gp-btn w-full py-2 text-sm mt-1" onClick={() => {
+        if (!nombre.trim()) { setError("Captura un nombre."); return; }
+        onSave({ nombre: nombre.trim(), telefono: telefono.trim(), correo: "", empresa: "", categoria: "General", notas: "", fechaNacimiento });
+      }}>
+        Guardar (puedes agregar más datos después desde Contactos)
+      </button>
+    </div>
+  );
+}
+
+function IdeaRapidaForm({ onSave }) {
+  const [nombre, setNombre] = useState("");
+  const [error, setError] = useState("");
+  return (
+    <div>
+      <Field label="Nombre de la idea"><input className="gp-input" value={nombre} onChange={(e) => setNombre(e.target.value)} placeholder="ej. App para..." /></Field>
+      {error && <p className="text-xs gp-text-red mb-2">{error}</p>}
+      <button className="gp-btn w-full py-2 text-sm mt-1" onClick={() => {
+        if (!nombre.trim()) { setError("Captura un nombre."); return; }
+        onSave({
+          nombre: nombre.trim(), categoria: "Software", estatus: "Idea", modo: "Finito", comoGeneraValor: "Dinero",
+          prioridad: "Media", fechaRevision: "", descripcion: "", githubSubido: false, github: "",
+        });
+      }}>
+        Guardar (puedes completar los detalles después desde Proyectos e ideas)
+      </button>
+    </div>
+  );
+}
+
+function MovimientoRapidoForm({ tipoInicial, onSave }) {
+  const [concepto, setConcepto] = useState("");
+  const [monto, setMonto] = useState("");
+  const [tipo, setTipo] = useState(tipoInicial);
+  const [error, setError] = useState("");
+  return (
+    <div>
+      <Field label="Concepto"><input className="gp-input" value={concepto} onChange={(e) => setConcepto(e.target.value)} /></Field>
+      <Field label="Monto"><input type="number" step="0.01" className="gp-input" value={monto} onChange={(e) => setMonto(e.target.value)} /></Field>
+      <Field label="Tipo">
+        <div className="flex gap-1">
+          {["Ingreso", "Egreso"].map((t) => (
+            <button key={t} onClick={() => setTipo(t)} className={`text-xs px-3 py-1.5 rounded-full border ${tipo === t ? "gp-btn" : "gp-text-muted"}`}>{t}</button>
+          ))}
+        </div>
+      </Field>
+      {error && <p className="text-xs gp-text-red mb-2">{error}</p>}
+      <button className="gp-btn w-full py-2 text-sm mt-1" onClick={() => {
+        if (!concepto.trim()) { setError("Captura un concepto."); return; }
+        if (!monto || Number(monto) <= 0) { setError("Captura un monto válido."); return; }
+        onSave({
+          concepto: concepto.trim(), tipo, proyectoId: "", contactoId: "", fecha: todayISO(), fechaVencimiento: "",
+          monto, categoria: "", forma: "Transferencia", estatus: "Cobrado", pautando: false, esRecurrente: false, frecuencia: "Mensual", fechaFin: "",
+        });
+      }}>
+        Guardar (puedes agregar proyecto, categoría, etc. después desde Ingresos y egresos)
+      </button>
+    </div>
+  );
+}
+
 function Eventos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveComentario }) {
   const [modal, setModal] = useState(null);
   const [expanded, setExpanded] = useState(null);
