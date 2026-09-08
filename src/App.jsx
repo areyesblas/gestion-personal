@@ -6,7 +6,7 @@ import {
   Users, Activity, Plus, X, Trash2, Pencil, Github, ChevronDown,
   ChevronRight, Bell, Lightbulb, Rocket, MessageCircle, Mail, Globe,
   Target, Contact, BarChart3, FileText, Flame, HeartPulse, Check, Menu, PieChart as PieChartIcon,
-  PiggyBank, Camera, Film, Upload, MapPin, Clock, Mic, Gift, Receipt, Megaphone, ChevronUp, Gem, Download, Sun, Moon, Shield, LogOut, ChevronLeft, Lock, Pill, CalendarClock, Zap, StickyNote, Search, Sparkles, Send, Bot, Volume2, VolumeX, Square,
+  PiggyBank, Camera, Film, Upload, MapPin, Clock, Mic, Gift, Receipt, Megaphone, ChevronUp, Gem, Download, Sun, Moon, Shield, LogOut, ChevronLeft, Lock, Pill, CalendarClock, Zap, StickyNote, Search, Sparkles, Send, Bot, Volume2, VolumeX, Square, Settings, CalendarRange,
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
@@ -1625,6 +1625,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
     { label: "General", items: [
       { id: "dashboard", label: "Panorama", icon: LayoutDashboard },
       { id: "asistente", label: "Asistente", icon: Sparkles },
+      { id: "agenda", label: "Agenda", icon: CalendarRange },
       { id: "citas", label: "Citas", icon: CalendarClock },
       { id: "notas", label: "Notas", icon: StickyNote },
       { id: "mi-trabajo", label: "Mi trabajo", icon: CheckSquare },
@@ -1948,6 +1949,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
             <ActivosDigitales data={data} onAdd={(i) => addItem("activos", i)} onEdit={(id, p) => editItem("activos", id, p)} onRemove={(id) => askDelete("activos", id)} />
           )}
           {view === "asistente" && <Asistente />}
+          {view === "agenda" && <Agenda data={data} misId={misId} onEditPendiente={(id, p) => editItem("pendientes", id, p)} />}
           {view === "citas" && (
             <Citas data={data} onAdd={(i) => addItem("citas", i)} onEdit={(id, p) => editItem("citas", id, p)} onRemove={(id) => askDelete("citas", id)} />
           )}
@@ -6287,6 +6289,235 @@ function fmtFechaHora(iso) {
   return new Date(iso).toLocaleString("es-MX", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit", hour12: true });
 }
 
+// --- Agenda visual (día/semana) ---------------------------------------------------------------
+// Muestra en una cuadrícula de horario las citas (bloques fijos, a su hora) y los pendientes con
+// fecha límite en el rango visible (auto-acomodados en los huecos libres del día, respetando la
+// jornada laboral configurable). No mueve ni cambia nada en Citas/Pendientes — solo los organiza
+// visualmente aquí; si algo no cupo en el horario visible, se omite del dibujo pero sigue
+// existiendo normal en su módulo.
+const DIA_ISO_LABEL = { 1: "Lun", 2: "Mar", 3: "Mié", 4: "Jue", 5: "Vie", 6: "Sáb", 7: "Dom" };
+
+function lunesDeSemana(fecha) {
+  const d = new Date(fecha);
+  const diaIso = d.getDay() === 0 ? 7 : d.getDay(); // 1=lunes..7=domingo
+  d.setDate(d.getDate() - (diaIso - 1));
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+function sumarDias(fecha, n) {
+  const d = new Date(fecha);
+  d.setDate(d.getDate() + n);
+  return d;
+}
+function dateStr(d) { return d.toISOString().slice(0, 10); }
+
+function calcularBloquesAgenda({ dias, citas, pendientes, horaInicio, horasDiarias }) {
+  const bloquesPorDia = {};
+  dias.forEach((d) => (bloquesPorDia[dateStr(d)] = []));
+
+  citas.forEach((c) => {
+    if (!c.fechaHora) return;
+    const d = new Date(c.fechaHora);
+    const key = dateStr(d);
+    if (!bloquesPorDia[key]) return;
+    const horaDecimal = d.getHours() + d.getMinutes() / 60;
+    bloquesPorDia[key].push({ tipo: "cita", inicio: horaDecimal, duracion: 1, item: c });
+  });
+
+  const pendientesOrdenados = [...pendientes].sort((a, b) =>
+    (PRIORIDAD_ORDEN[a.prioridad] ?? 1) - (PRIORIDAD_ORDEN[b.prioridad] ?? 1) ||
+    (a.fechaLimite || "").localeCompare(b.fechaLimite || "")
+  );
+  const clavesDias = dias.map(dateStr);
+
+  pendientesOrdenados.forEach((p) => {
+    const duracion = Number(p.tiempoEstimado) > 0 ? Number(p.tiempoEstimado) : 1;
+    let candidatos = clavesDias;
+    if (p.fechaLimite && clavesDias.includes(p.fechaLimite)) {
+      candidatos = [p.fechaLimite, ...clavesDias.filter((k) => k !== p.fechaLimite)];
+    } else if (!p.fechaLimite) {
+      return; // sin fecha límite: no se agenda automáticamente, sigue viviendo en Pendientes
+    } else {
+      return; // fecha límite fuera del rango visible
+    }
+    for (const key of candidatos) {
+      const ocupados = bloquesPorDia[key].map((b) => [b.inicio, b.inicio + b.duracion]).sort((a, b) => a[0] - b[0]);
+      let cursor = horaInicio;
+      let cabe = false;
+      for (const [ini, fin] of ocupados) {
+        if (cursor + duracion <= ini) { cabe = true; break; }
+        cursor = Math.max(cursor, fin);
+      }
+      if (!cabe && cursor + duracion <= horaInicio + horasDiarias) cabe = true;
+      if (cabe) {
+        bloquesPorDia[key].push({ tipo: "pendiente", inicio: cursor, duracion, item: p });
+        bloquesPorDia[key].sort((a, b) => a.inicio - b.inicio);
+        break;
+      }
+    }
+  });
+
+  return bloquesPorDia;
+}
+
+function Agenda({ data, onEditPendiente, misId }) {
+  const [vista, setVista] = useState("semana"); // "dia" | "semana"
+  const [base, setBase] = useState(() => new Date());
+  const [config, setConfig] = useState({ horasLaboralesDiarias: 8, horaInicioLaboral: "09:00", diasLaborales: [1, 2, 3, 4, 5] });
+  const [configAbierta, setConfigAbierta] = useState(false);
+  const [cargando, setCargando] = useState(true);
+
+  useEffect(() => {
+    (async () => {
+      const { data: pref } = await supabase.from("preferencias")
+        .select("horas_laborales_diarias, hora_inicio_laboral, dias_laborales").eq("user_id", misId).maybeSingle();
+      if (pref) {
+        setConfig({
+          horasLaboralesDiarias: Number(pref.horas_laborales_diarias) || 8,
+          horaInicioLaboral: (pref.hora_inicio_laboral || "09:00").slice(0, 5),
+          diasLaborales: pref.dias_laborales?.length ? pref.dias_laborales : [1, 2, 3, 4, 5],
+        });
+      }
+      setCargando(false);
+    })();
+  }, [misId]);
+
+  const guardarConfig = async (nuevo) => {
+    setConfig(nuevo);
+    await supabase.from("preferencias").upsert({
+      user_id: misId,
+      horas_laborales_diarias: nuevo.horasLaboralesDiarias,
+      hora_inicio_laboral: nuevo.horaInicioLaboral,
+      dias_laborales: nuevo.diasLaborales,
+    }, { onConflict: "user_id" });
+  };
+
+  const lunes = lunesDeSemana(base);
+  const diasVisibles = useMemo(() => {
+    if (vista === "dia") return [new Date(base)];
+    return [0, 1, 2, 3, 4, 5, 6].map((i) => sumarDias(lunes, i)).filter((d) => {
+      const iso = d.getDay() === 0 ? 7 : d.getDay();
+      return config.diasLaborales.includes(iso);
+    });
+  }, [vista, base, lunes, config.diasLaborales]);
+
+  const horaInicioDec = useMemo(() => {
+    const [h, m] = config.horaInicioLaboral.split(":").map(Number);
+    return h + (m || 0) / 60;
+  }, [config.horaInicioLaboral]);
+
+  const rangoStr = { desde: dateStr(diasVisibles[0]), hasta: dateStr(diasVisibles[diasVisibles.length - 1]) };
+  const citasEnRango = (data.citas || []).filter((c) => c.fechaHora && dateStr(new Date(c.fechaHora)) >= rangoStr.desde && dateStr(new Date(c.fechaHora)) <= rangoStr.hasta);
+  const pendientesEnRango = (data.pendientes || []).filter((p) => p.estatus !== "Hecho" && p.fechaLimite && p.fechaLimite >= rangoStr.desde && p.fechaLimite <= rangoStr.hasta);
+
+  const bloques = useMemo(() => calcularBloquesAgenda({
+    dias: diasVisibles, citas: citasEnRango, pendientes: pendientesEnRango,
+    horaInicio: horaInicioDec, horasDiarias: config.horasLaboralesDiarias,
+  }), [diasVisibles, citasEnRango, pendientesEnRango, horaInicioDec, config.horasLaboralesDiarias]);
+
+  const PX_POR_HORA = 56;
+  const horas = Array.from({ length: Math.ceil(config.horasLaboralesDiarias) + 1 }, (_, i) => horaInicioDec + i);
+
+  if (cargando) return <p className="text-sm gp-text-muted">Cargando tu agenda…</p>;
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+        <h1 className="text-2xl font-bold">Agenda</h1>
+        <div className="flex items-center gap-2">
+          <button className="gp-btn-ghost px-2 py-1 text-xs rounded" onClick={() => setVista((v) => (v === "dia" ? "semana" : "dia"))}>
+            {vista === "dia" ? "Ver semana" : "Ver día"}
+          </button>
+          <button className="gp-btn-ghost p-1.5 rounded" onClick={() => setBase((b) => sumarDias(b, vista === "dia" ? -1 : -7))}><ChevronLeft size={16} /></button>
+          <button className="gp-btn-ghost px-2 py-1 text-xs rounded" onClick={() => setBase(new Date())}>Hoy</button>
+          <button className="gp-btn-ghost p-1.5 rounded" onClick={() => setBase((b) => sumarDias(b, vista === "dia" ? 1 : 7))}><ChevronRight size={16} /></button>
+          <button className="gp-btn-ghost p-1.5 rounded" onClick={() => setConfigAbierta(true)} title="Configurar jornada"><Settings size={16} /></button>
+        </div>
+      </div>
+
+      {configAbierta && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,.6)" }} onClick={() => setConfigAbierta(false)}>
+          <div className="gp-panel p-4 max-w-sm w-full" onClick={(e) => e.stopPropagation()}>
+            <h3 className="font-semibold mb-3">Configurar tu jornada</h3>
+            <Field label="Horas laborales por día">
+              <input type="number" min="1" max="16" step="0.5" className="gp-input" value={config.horasLaboralesDiarias}
+                onChange={(e) => setConfig((c) => ({ ...c, horasLaboralesDiarias: Number(e.target.value) || 1 }))} />
+            </Field>
+            <Field label="Hora de inicio">
+              <input type="time" className="gp-input" value={config.horaInicioLaboral}
+                onChange={(e) => setConfig((c) => ({ ...c, horaInicioLaboral: e.target.value }))} />
+            </Field>
+            <Field label="Días laborales">
+              <div className="flex gap-1 flex-wrap">
+                {[1, 2, 3, 4, 5, 6, 7].map((iso) => (
+                  <button key={iso} type="button"
+                    onClick={() => setConfig((c) => ({ ...c, diasLaborales: c.diasLaborales.includes(iso) ? c.diasLaborales.filter((d) => d !== iso) : [...c.diasLaborales, iso].sort() }))}
+                    className="px-2 py-1 rounded text-xs"
+                    style={{ background: config.diasLaborales.includes(iso) ? "var(--gold)" : "var(--panel-2, rgba(255,255,255,.08))", color: config.diasLaborales.includes(iso) ? "#0B2341" : "inherit" }}>
+                    {DIA_ISO_LABEL[iso]}
+                  </button>
+                ))}
+              </div>
+            </Field>
+            <div className="flex gap-2 justify-end mt-2">
+              <button className="gp-btn-ghost px-3 py-2 text-sm rounded" onClick={() => setConfigAbierta(false)}>Cancelar</button>
+              <button className="gp-btn px-3 py-2 text-sm" onClick={() => { guardarConfig(config); setConfigAbierta(false); }}>Guardar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="gp-panel p-3 overflow-x-auto">
+        <div className="flex" style={{ minWidth: vista === "semana" ? 720 : 320 }}>
+          <div style={{ width: 44 }}>
+            <div style={{ height: 28 }} />
+            {horas.map((h) => (
+              <div key={h} style={{ height: PX_POR_HORA }} className="text-[10px] gp-text-muted text-right pr-1 -mt-2">
+                {String(Math.floor(h)).padStart(2, "0")}:{h % 1 ? "30" : "00"}
+              </div>
+            ))}
+          </div>
+          {diasVisibles.map((d) => {
+            const key = dateStr(d);
+            const esHoy = key === todayISO();
+            return (
+              <div key={key} className="flex-1" style={{ minWidth: vista === "semana" ? 96 : 280 }}>
+                <div className="text-center text-xs mb-1 pb-1" style={{ height: 28, fontWeight: esHoy ? 700 : 400, color: esHoy ? "var(--gold)" : undefined }}>
+                  {DIA_ISO_LABEL[d.getDay() === 0 ? 7 : d.getDay()]} {d.getDate()}
+                </div>
+                <div className="relative" style={{ height: PX_POR_HORA * config.horasLaboralesDiarias, borderLeft: "1px solid var(--gp-border, rgba(255,255,255,.08))" }}>
+                  {horas.slice(0, -1).map((h) => (
+                    <div key={h} style={{ position: "absolute", top: (h - horaInicioDec) * PX_POR_HORA, left: 0, right: 0, borderTop: "1px solid var(--gp-border, rgba(255,255,255,.06))" }} />
+                  ))}
+                  {(bloques[key] || []).map((b, i) => (
+                    <div key={i}
+                      className="absolute rounded px-1.5 py-0.5 text-[11px] overflow-hidden"
+                      style={{
+                        top: (b.inicio - horaInicioDec) * PX_POR_HORA + 1,
+                        height: Math.max(b.duracion * PX_POR_HORA - 2, 18),
+                        left: 2, right: 2,
+                        background: b.tipo === "cita" ? "var(--gold)" : "rgba(255,255,255,.12)",
+                        color: b.tipo === "cita" ? "#0B2341" : "inherit",
+                        border: b.tipo === "pendiente" ? "1px solid rgba(255,255,255,.15)" : "none",
+                        cursor: b.tipo === "pendiente" ? "pointer" : "default",
+                      }}
+                      title={b.tipo === "cita" ? b.item.titulo : b.item.descripcion}
+                      onClick={() => { if (b.tipo === "pendiente") onEditPendiente(b.item.id, { estatus: "Hecho" }); }}
+                    >
+                      <span className="font-medium">{b.tipo === "cita" ? b.item.titulo : b.item.descripcion}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+      <p className="text-xs gp-text-muted mt-2">Los pendientes se acomodan solos en los huecos libres de su día límite — tócalos para marcarlos como hechos. Lo que no cupo sigue en Pendientes normal.</p>
+    </div>
+  );
+}
+
 function Citas({ data, onAdd, onEdit, onRemove }) {
   const [modal, setModal] = useState(null);
   const empty = { titulo: "", fechaHora: localInputsAFechaHora(todayISO(), "09:00"), lugar: "", contactoId: "", notas: "" };
@@ -6555,8 +6786,35 @@ function Asistente() {
     try { return localStorage.getItem("arkeyone_asistente_voz") === "1"; } catch { return false; }
   });
   const [hablando, setHablando] = useState(false);
+  const [cargandoHistorial, setCargandoHistorial] = useState(true);
+  const [confirmarBorrado, setConfirmarBorrado] = useState(false);
   const finRef = useRef(null);
   const reconocimientoRef = useRef(null);
+
+  // Carga el historial ya guardado (asistente_mensajes) al entrar a la pantalla — antes se
+  // guardaba en la base pero nunca se volvía a mostrar, así que cada vez se veía vacío.
+  useEffect(() => {
+    (async () => {
+      const { data: sesion } = await supabase.auth.getSession();
+      const userId = sesion?.session?.user?.id;
+      if (!userId) { setCargandoHistorial(false); return; }
+      const { data, error } = await supabase.from("asistente_mensajes")
+        .select("rol, contenido, acciones, created_at")
+        .eq("user_id", userId).order("created_at", { ascending: true }).limit(200);
+      if (!error && data) {
+        setMensajes(data.map((m) => ({ rol: m.rol, texto: m.contenido, acciones: m.acciones || [] })));
+      }
+      setCargandoHistorial(false);
+    })();
+  }, []);
+
+  const borrarConversacion = async () => {
+    const { data: sesion } = await supabase.auth.getSession();
+    const userId = sesion?.session?.user?.id;
+    if (userId) await supabase.from("asistente_mensajes").delete().eq("user_id", userId);
+    setMensajes([]);
+    setConfirmarBorrado(false);
+  };
 
   useEffect(() => { finRef.current?.scrollIntoView({ behavior: "smooth" }); }, [mensajes, enviando]);
   // Se detiene la voz si sales de la pantalla del Asistente a media lectura.
@@ -6665,11 +6923,29 @@ function Asistente() {
               {lecturaAuto ? <Volume2 size={18} /> : <VolumeX size={18} />}
             </button>
           )}
+          {mensajes.length > 0 && (
+            <button onClick={() => setConfirmarBorrado(true)} title="Borrar conversación" className="gp-btn-ghost p-2 rounded">
+              <Trash2 size={18} />
+            </button>
+          )}
         </div>
       </div>
 
+      {confirmarBorrado && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,.6)" }} onClick={() => setConfirmarBorrado(false)}>
+          <div className="gp-panel p-4 max-w-sm w-full" onClick={(e) => e.stopPropagation()}>
+            <p className="text-sm mb-4">¿Borrar toda la conversación con el Asistente? No se puede deshacer.</p>
+            <div className="flex gap-2 justify-end">
+              <button className="gp-btn-ghost px-3 py-2 text-sm rounded" onClick={() => setConfirmarBorrado(false)}>Cancelar</button>
+              <button className="gp-btn px-3 py-2 text-sm" style={{ background: "#ef4444", color: "#fff" }} onClick={borrarConversacion}>Borrar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="flex-1 overflow-y-auto gp-panel p-4 mb-3" style={{ minHeight: 0 }}>
-        {mensajes.length === 0 && (
+        {cargandoHistorial && <p className="text-sm gp-text-muted">Cargando conversación…</p>}
+        {!cargandoHistorial && mensajes.length === 0 && (
           <p className="text-sm gp-text-muted">
             Pregúntame lo que quieras sobre tus datos en ARKEYONE, o pídeme que guarde algo por ti — por ejemplo
             "guárdame una nota de que hoy quedamos en...", "crea una idea de...", o "agrégale un avance de 10% a ARKEYDATA".
