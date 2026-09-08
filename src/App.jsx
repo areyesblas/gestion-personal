@@ -3793,6 +3793,24 @@ function calcularSaldo(data) {
   return { fecha: activo.fecha, efectivo, cuenta, total: efectivo + cuenta, checkpoints };
 }
 
+// Agrupa movimientos NO recurrentes por mes (YYYY-MM) para la vista tipo "estado de cuenta".
+// Los recurrentes no se agrupan aquí — viven en su propia pestaña porque no tienen "un mes", se repiten.
+function agruparFinanzasPorMes(movs) {
+  const grupos = {};
+  for (const f of movs) {
+    const mes = (f.fecha || "").slice(0, 7) || "sin-fecha";
+    if (!grupos[mes]) grupos[mes] = [];
+    grupos[mes].push(f);
+  }
+  return Object.entries(grupos).sort((a, b) => b[0].localeCompare(a[0]));
+}
+function fmtMesLabel(mes) {
+  if (mes === "sin-fecha") return "Sin fecha";
+  const [y, m] = mes.split("-").map(Number);
+  const txt = new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString("es-MX", { month: "long", year: "numeric", timeZone: "UTC" });
+  return txt.charAt(0).toUpperCase() + txt.slice(1);
+}
+
 function Finanzas({ data, onAdd, onEdit, onRemove }) {
   const [modal, setModal] = useState(null);
   const [vista, setVista] = useState("todos");
@@ -3804,18 +3822,30 @@ function Finanzas({ data, onAdd, onEdit, onRemove }) {
   const empty = { concepto: "", tipo: "Ingreso", proyectoId: "", contactoId: "", fecha: todayISO(), fechaVencimiento: "", monto: "", categoria: "", forma: "Transferencia", estatus: "Cobrado", pautando: false, esRecurrente: false, frecuencia: "Mensual", fechaFin: "" };
   const nombreProyecto = (id) => data.proyectos.find((p) => p.id === id)?.nombre || "—";
   const nombreCliente = (id) => data.contactos.find((c) => c.id === id)?.nombre || "—";
+  const hoy = todayISO();
+  const mesActual = hoy.slice(0, 7);
+  const esVigente = (f) => !f.fechaFin || f.fechaFin >= hoy;
 
   const cobrosPendientes = data.finanzas
     .filter((f) => f.tipo === "Ingreso" && f.estatus === "Pendiente")
     .sort((a, b) => (a.fechaVencimiento || "9999").localeCompare(b.fechaVencimiento || "9999"));
   const totalCobrosPendientes = cobrosPendientes.reduce((s, f) => s + (Number(f.monto) || 0), 0);
 
-  const hoy = todayISO();
-  const esVigente = (f) => !f.fechaFin || f.fechaFin >= hoy;
   let recurrentes = data.finanzas.filter((f) => f.esRecurrente);
   if (filtroTipoRecurrente !== "Todos") recurrentes = recurrentes.filter((f) => f.tipo === filtroTipoRecurrente);
   if (filtroVigencia !== "Todos") recurrentes = recurrentes.filter((f) => (filtroVigencia === "Vigentes" ? esVigente(f) : !esVigente(f)));
   const totalRecurrentes = recurrentes.reduce((s, f) => s + (Number(f.monto) || 0) * (f.tipo === "Ingreso" ? 1 : -1), 0);
+
+  // Resumen del mes: movimientos puntuales de este mes ya cobrados, más los recurrentes vigentes
+  // (esos ocurren cada mes, incluido este, sin importar en qué mes se hayan dado de alta).
+  const movsDelMes = data.finanzas.filter((f) => {
+    if (f.estatus !== "Cobrado") return false;
+    if (f.esRecurrente) return esVigente(f);
+    return (f.fecha || "").startsWith(mesActual);
+  });
+  const ingresosMes = movsDelMes.filter((f) => f.tipo === "Ingreso").reduce((s, f) => s + (Number(f.monto) || 0), 0);
+  const egresosMes = movsDelMes.filter((f) => f.tipo === "Egreso").reduce((s, f) => s + (Number(f.monto) || 0), 0);
+  const netoMes = ingresosMes - egresosMes;
 
   const camposOrden = {
     fecha: { get: (f) => f.fecha, tipo: "fecha" },
@@ -3829,8 +3859,13 @@ function Finanzas({ data, onAdd, onEdit, onRemove }) {
     { key: "alfabetico", label: "alfabético" },
     { key: "monto", label: "monto" },
   ];
-  const base = vista === "cobros" ? cobrosPendientes : vista === "recurrentes" ? recurrentes : [...data.finanzas].sort((a, b) => (b.fecha || "").localeCompare(a.fecha || ""));
-  const ordenados = vista === "cobros" ? base : ordenarLista(base, orden, camposOrden, ordenDir);
+  const movsPuntuales = data.finanzas.filter((f) => !f.esRecurrente);
+  const gruposMes = agruparFinanzasPorMes(movsPuntuales);
+  const [mesesAbiertos, setMesesAbiertos] = useState(() => new Set([mesActual]));
+  const toggleMes = (mes) => setMesesAbiertos((prev) => { const next = new Set(prev); next.has(mes) ? next.delete(mes) : next.add(mes); return next; });
+  const [expandido, setExpandido] = useState(null);
+
+  const recurrentesOrdenados = ordenarLista(recurrentes, orden, camposOrden, ordenDir);
 
   return (
     <div>
@@ -3840,6 +3875,26 @@ function Finanzas({ data, onAdd, onEdit, onRemove }) {
       </div>
       <p className="text-sm gp-text-muted mb-4">Incluye pagos recurrentes (luz, agua, compras a meses) con fecha de inicio y fin, o indefinidos.</p>
 
+      {/* Resumen arriba: lo primero que ves, antes de cualquier tabla o filtro. */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4">
+        <div className="gp-panel-hi p-3">
+          <p className="text-xs gp-text-muted">Ingresos de {fmtMesLabel(mesActual)}</p>
+          <p className="gp-serif text-xl gp-text-teal">{fmtMoney(ingresosMes)}</p>
+        </div>
+        <div className="gp-panel-hi p-3">
+          <p className="text-xs gp-text-muted">Egresos de {fmtMesLabel(mesActual)}</p>
+          <p className="gp-serif text-xl gp-text-red">{fmtMoney(egresosMes)}</p>
+        </div>
+        <div className="gp-panel-hi p-3">
+          <p className="text-xs gp-text-muted">Neto de {fmtMesLabel(mesActual)}</p>
+          <p className={`gp-serif text-xl ${netoMes >= 0 ? "gp-text-teal" : "gp-text-red"}`}>{fmtMoney(netoMes)}</p>
+        </div>
+        <div className="gp-panel-hi p-3">
+          <p className="text-xs gp-text-muted">Por cobrar</p>
+          <p className="gp-serif text-xl gp-text-gold">{fmtMoney(totalCobrosPendientes)}</p>
+        </div>
+      </div>
+
       <div className="flex flex-wrap items-center gap-2 mb-4">
         <button onClick={() => setVista("todos")} className={`text-xs px-3 py-1.5 rounded-full border ${vista === "todos" ? "gp-btn" : "gp-text-muted"}`}>Todos los movimientos</button>
         <button onClick={() => setVista("cobros")} className={`text-xs px-3 py-1.5 rounded-full border flex items-center gap-1 ${vista === "cobros" ? "gp-btn" : "gp-text-muted"}`}>
@@ -3848,7 +3903,6 @@ function Finanzas({ data, onAdd, onEdit, onRemove }) {
         <button onClick={() => setVista("recurrentes")} className={`text-xs px-3 py-1.5 rounded-full border flex items-center gap-1 ${vista === "recurrentes" ? "gp-btn" : "gp-text-muted"}`}>
           Pagos recurrentes
         </button>
-        {vista === "todos" && <OrdenSelector opciones={opcionesOrden} value={orden} onChange={setOrden} />}
         {vista === "recurrentes" && <OrdenSelector opciones={opcionesOrden} value={orden} onChange={setOrden} />}
       </div>
 
@@ -3884,44 +3938,81 @@ function Finanzas({ data, onAdd, onEdit, onRemove }) {
         </>
       )}
 
-      <div className="gp-panel overflow-x-auto">
-        <table className="gp-table">
-          <thead><tr><Th label="Concepto" sortKey="alfabetico" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} /><Th label="Fecha" sortKey="fecha" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} /><th>Día de pago</th>{vista === "cobros" && <th>Vence</th>}{vista === "recurrentes" && <th>Vigencia</th>}<th>Tipo</th><th>Proyecto</th><th>Cliente</th><th>Categoría</th><th>Forma</th><th>Estatus</th><th>Recurrente</th><Th label="Monto" sortKey="monto" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} /><th></th></tr></thead>
-          <tbody>
-            {ordenados.map((f) => {
-              const vencido = f.fechaVencimiento && daysUntil(f.fechaVencimiento) < 0;
+      {/* Fila compacta reutilizada tanto en "Todos" (agrupado por mes) como en cobros/recurrentes */}
+      {(() => {
+        const Fila = (f) => {
+          const vencido = f.fechaVencimiento && daysUntil(f.fechaVencimiento) < 0;
+          const abierta = expandido === f.id;
+          return (
+            <div key={f.id} className="gp-panel p-3">
+              <div className="flex items-center gap-2 cursor-pointer" onClick={() => setExpandido(abierta ? null : f.id)}>
+                {abierta ? <ChevronDown size={13} className="gp-text-muted shrink-0" /> : <ChevronRight size={13} className="gp-text-muted shrink-0" />}
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-sm font-medium truncate">{f.concepto || "—"}</span>
+                    <Badge tone={f.estatus === "Cobrado" ? "teal" : "gold"}>{f.estatus}</Badge>
+                    {f.esRecurrente && <Badge tone="gold">{f.frecuencia || "Mensual"}{f.fechaFin ? ` · hasta ${f.fechaFin}` : " · indefinido"}</Badge>}
+                  </div>
+                  <p className="text-xs gp-text-muted mt-0.5">
+                    {f.esRecurrente ? `Día de pago: ${f.fecha ? Number(f.fecha.slice(8, 10)) : "—"}` : (f.fecha || "—")}
+                    {vista === "cobros" && f.fechaVencimiento && <span style={{ color: vencido ? "var(--red)" : undefined }}> · vence {f.fechaVencimiento}{vencido ? " (vencido)" : ""}</span>}
+                  </p>
+                </div>
+                <span className={`gp-mono text-sm shrink-0 ${f.tipo === "Ingreso" ? "gp-text-teal" : "gp-text-red"}`}>{f.tipo === "Ingreso" ? "+" : "−"}{f.monto ? fmtMoney(f.monto) : "—"}</span>
+              </div>
+              {abierta && (
+                <div className="mt-2.5 pt-2.5 border-t gp-border pl-5">
+                  <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-xs gp-text-muted mb-3">
+                    <div>Proyecto: <span className="gp-text-teal">{nombreProyecto(f.proyectoId)}</span></div>
+                    <div>Cliente: <span className="gp-text-teal">{f.contactoId ? nombreCliente(f.contactoId) : "—"}</span></div>
+                    <div>Categoría: {f.categoria || "—"}</div>
+                    <div>Forma: {f.forma || "—"}</div>
+                  </div>
+                  <div className="flex gap-1">
+                    <button onClick={(e) => { e.stopPropagation(); setModal({ item: f }); }} className="gp-btn-ghost px-3 py-1 text-xs flex items-center gap-1"><Pencil size={12} /> Editar</button>
+                    <button onClick={(e) => { e.stopPropagation(); onRemove(f.id); }} className="gp-btn-ghost px-3 py-1 text-xs flex items-center gap-1"><Trash2 size={12} /> Eliminar</button>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        };
+
+        if (vista === "cobros") {
+          return <div className="space-y-2">{cobrosPendientes.map(Fila)}{cobrosPendientes.length === 0 && <p className="text-center gp-text-muted py-6 text-sm">No tienes cobros pendientes.</p>}</div>;
+        }
+        if (vista === "recurrentes") {
+          return <div className="space-y-2">{recurrentesOrdenados.map(Fila)}{recurrentesOrdenados.length === 0 && <p className="text-center gp-text-muted py-6 text-sm">No hay pagos recurrentes con este filtro.</p>}</div>;
+        }
+        // "todos": agrupado por mes, como un estado de cuenta — el mes actual abierto por default.
+        return (
+          <div className="space-y-3">
+            {gruposMes.map(([mes, movs]) => {
+              const ingMes = movs.filter((f) => f.tipo === "Ingreso").reduce((s, f) => s + (Number(f.monto) || 0), 0);
+              const egMes = movs.filter((f) => f.tipo === "Egreso").reduce((s, f) => s + (Number(f.monto) || 0), 0);
+              const abierto = mesesAbiertos.has(mes);
               return (
-              <tr key={f.id}>
-                <td>{f.concepto || "—"}</td>
-                <td className="gp-mono">{f.esRecurrente ? "—" : (f.fecha || "—")}</td>
-                <td className="gp-mono">{f.esRecurrente && f.fecha ? Number(f.fecha.slice(8, 10)) : "—"}</td>
-                {vista === "cobros" && (
-                  <td className="gp-mono" style={{ color: vencido ? "var(--red)" : undefined }}>
-                    {f.fechaVencimiento ? `${f.fechaVencimiento}${vencido ? " (vencido)" : ""}` : "—"}
-                  </td>
-                )}
-                {vista === "recurrentes" && (
-                  <td><Badge tone={esVigente(f) ? "teal" : "muted"}>{esVigente(f) ? "Vigente" : "No vigente"}</Badge></td>
-                )}
-                <td><Badge tone={f.tipo === "Ingreso" ? "teal" : "red"}>{f.tipo}</Badge></td>
-                <td className="gp-text-muted">{nombreProyecto(f.proyectoId)}</td>
-                <td className="gp-text-muted">{f.contactoId ? nombreCliente(f.contactoId) : "—"}</td>
-                <td className="gp-text-muted">{f.categoria}</td>
-                <td className="gp-text-muted">{f.forma}</td>
-                <td><Badge tone={f.estatus === "Cobrado" ? "teal" : "gold"}>{f.estatus}</Badge></td>
-                <td>
-                  {f.esRecurrente ? (
-                    <Badge tone="gold">{f.frecuencia || "Mensual"}{f.fechaFin ? ` · hasta ${f.fechaFin}` : " · indefinido"}</Badge>
-                  ) : "—"}
-                </td>
-                <td className={`gp-mono ${f.tipo === "Ingreso" ? "gp-text-teal" : "gp-text-red"}`}>{f.monto ? fmtMoney(f.monto) : "—"}</td>
-                <td><div className="flex gap-1"><IconBtn onClick={() => setModal({ item: f })}><Pencil size={13} /></IconBtn><IconBtn onClick={() => onRemove(f.id)}><Trash2 size={13} /></IconBtn></div></td>
-              </tr>
-            );})}
-            {ordenados.length === 0 && <tr><td colSpan={vista === "cobros" ? 13 : 12} className="text-center gp-text-muted py-6">{vista === "cobros" ? "No tienes cobros pendientes." : vista === "recurrentes" ? "No hay pagos recurrentes con este filtro." : "Sin movimientos registrados."}</td></tr>}
-          </tbody>
-        </table>
-      </div>
+                <div key={mes}>
+                  <button onClick={() => toggleMes(mes)} className="w-full gp-panel-hi p-3 flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2">
+                      {abierto ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                      <span className="text-sm font-medium">{fmtMesLabel(mes)}</span>
+                      <span className="text-xs gp-text-muted">({movs.length})</span>
+                    </div>
+                    <div className="flex items-center gap-3 text-xs gp-mono">
+                      <span className="gp-text-teal">+{fmtMoney(ingMes)}</span>
+                      <span className="gp-text-red">−{fmtMoney(egMes)}</span>
+                      <span className={ingMes - egMes >= 0 ? "gp-text-teal" : "gp-text-red"}>{fmtMoney(ingMes - egMes)}</span>
+                    </div>
+                  </button>
+                  {abierto && <div className="space-y-2 mt-2 pl-2">{movs.map(Fila)}</div>}
+                </div>
+              );
+            })}
+            {gruposMes.length === 0 && <p className="text-center gp-text-muted py-6 text-sm">Sin movimientos registrados.</p>}
+          </div>
+        );
+      })()}
 
       {modal && (
         <Modal title={modal.item.id ? "Editar movimiento" : "Nuevo movimiento"} onClose={() => setModal(null)}>
