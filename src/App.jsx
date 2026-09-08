@@ -82,7 +82,7 @@ const Tokens = ({ tema = "oscuro" }) => (
 
 // Recuerda tu tema entre visitas, guardado en este navegador y, una vez que inicias sesión,
 // también en tu cuenta (para que te siga en otros dispositivos, vía cambiarTema/preferencias).
-const TEMAS_VALIDOS = ["actual", "negro", "oliva", "rojo", "naranja", "azul-claro", "gris-claro", "verde-claro", "rojo-claro", "naranja-claro"];
+const TEMAS_VALIDOS = ["actual", "negro", "oliva", "rojo", "naranja", "azul-claro", "gris-claro", "verde-claro", "rojo-claro", "naranja-claro", "personalizado"];
 function useTema() {
   const [tema, setTemaState] = useState(() => {
     try {
@@ -98,9 +98,75 @@ function useTema() {
   const toggleTema = () => {}; // ya no aplica con varios temas — se deja por compatibilidad de firma
   return [tema, toggleTema, setTema];
 }
-// "actual" es el tema base (mismos valores que .gp-root, sin clase extra); los demás agregan
-// su propia clase .tema-XXX que sobreescribe las variables de color.
-const claseTema = (tema) => (tema && tema !== "actual" ? `tema-${tema}` : "");
+// "actual" es el tema base (mismos valores que .gp-root, sin clase extra); "personalizado" tampoco
+// usa clase (sus colores se calculan al vuelo con generarPaletaPersonalizada, ver abajo); los
+// demás agregan su propia clase .tema-XXX que sobreescribe las variables de color.
+const claseTema = (tema) => (tema && tema !== "actual" && tema !== "personalizado" ? `tema-${tema}` : "");
+
+// --- Tema personalizado: a partir de UN solo color elegido por el usuario, genera una paleta
+// completa (fondo, panel, panel resaltado, borde, texto y "muted") que siempre es legible —
+// nunca deja que el usuario termine con texto ilegible sobre su propio fondo, porque el color
+// del texto se decide automáticamente según qué tan clara u oscura sea su elección. ---
+function hexARgb(hex) {
+  const limpio = hex.replace("#", "");
+  const partes = limpio.match(/.{1,2}/g);
+  return partes.map((x) => parseInt(x, 16));
+}
+function rgbAHsl(r, g, b) {
+  r /= 255; g /= 255; b /= 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  let h, s;
+  const l = (max + min) / 2;
+  if (max === min) { h = s = 0; }
+  else {
+    const d = max - min;
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    switch (max) {
+      case r: h = (g - b) / d + (g < b ? 6 : 0); break;
+      case g: h = (b - r) / d + 2; break;
+      default: h = (r - g) / d + 4; break;
+    }
+    h /= 6;
+  }
+  return { h: h * 360, s: s * 100, l: l * 100 };
+}
+function hslAHex(h, s, l) {
+  s /= 100; l /= 100;
+  const k = (n) => (n + h / 30) % 12;
+  const a = s * Math.min(l, 1 - l);
+  const f = (n) => l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+  const aHex = (x) => Math.round(255 * x).toString(16).padStart(2, "0");
+  return `#${aHex(f(0))}${aHex(f(8))}${aHex(f(4))}`;
+}
+function generarPaletaPersonalizada(hexBase) {
+  let h, s, l;
+  try {
+    const [r, g, b] = hexARgb(hexBase);
+    if ([r, g, b].some((v) => Number.isNaN(v))) return null;
+    ({ h, s, l } = rgbAHsl(r, g, b));
+  } catch { return null; }
+  // Si el color elegido ya es claro, genera una familia clara (fondo pálido, texto oscuro);
+  // si es oscuro, genera una familia oscura (fondo oscuro, texto claro) — igual que los 10
+  // temas fijos, solo que aquí el matiz (hue) sale del color que eligió el usuario.
+  const esClaro = l >= 55;
+  return esClaro ? {
+    "--bg": hslAHex(h, Math.min(s, 35), 93),
+    "--panel": hslAHex(h, Math.min(s, 28), 98),
+    "--panel-hi": hslAHex(h, Math.min(s, 32), 89),
+    "--border": hslAHex(h, Math.min(s, 30), 78),
+    "--text": hslAHex(h, Math.min(s, 35), 15),
+    "--muted": hslAHex(h, Math.min(s, 25), 38),
+    "--panel-2": `hsla(${Math.round(h)}, ${Math.min(Math.round(s), 40)}%, 15%, .06)`,
+  } : {
+    "--bg": hslAHex(h, Math.min(s, 55), 13),
+    "--panel": hslAHex(h, Math.min(s, 50), 19),
+    "--panel-hi": hslAHex(h, Math.min(s, 45), 25),
+    "--border": hslAHex(h, Math.min(s, 40), 33),
+    "--text": hslAHex(h, Math.min(s, 12), 94),
+    "--muted": hslAHex(h, Math.min(s, 20), 66),
+    "--panel-2": "hsla(0, 0%, 100%, .12)",
+  };
+}
 
 
 /* ---------- datos base ---------- */
@@ -1442,9 +1508,10 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
       const { data: colabs } = await supabase.from("colaboradores").select("*").eq("colaborador_user_id", misId).eq("estatus", "Activo");
       setMisColaboraciones((colabs || []).map((c) => ({ propietarioId: c.propietario_id, propietarioEmail: c.propietario_email, modulos: c.modulos })));
 
-      const { data: pref } = await supabase.from("preferencias").select("tema, alertas_correo_activas").eq("user_id", misId).maybeSingle();
+      const { data: pref } = await supabase.from("preferencias").select("tema, alertas_correo_activas, color_personalizado").eq("user_id", misId).maybeSingle();
       const temaGuardado = pref?.tema === "claro" || pref?.tema === "oscuro" ? "actual" : pref?.tema;
       if (temaGuardado && temaGuardado !== tema) setTema(temaGuardado);
+      if (pref?.color_personalizado) setColorPersonalizado(pref.color_personalizado);
       if (pref && pref.alertas_correo_activas === false) setAlertasCorreoActivas(false);
 
       let result = await loadAllTables(misId);
@@ -1458,9 +1525,15 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
     })();
   }, []);
 
+  const [colorPersonalizado, setColorPersonalizado] = useState("#F59E0B");
   const cambiarTema = async (nuevoValor) => {
     setTema(nuevoValor);
     await supabase.from("preferencias").upsert({ user_id: misId, tema: nuevoValor }, { onConflict: "user_id" });
+  };
+  const cambiarColorPersonalizado = async (nuevoColor) => {
+    setColorPersonalizado(nuevoColor);
+    setTema("personalizado");
+    await supabase.from("preferencias").upsert({ user_id: misId, tema: "personalizado", color_personalizado: nuevoColor }, { onConflict: "user_id" });
   };
 
   const [alertasCorreoActivas, setAlertasCorreoActivas] = useState(true);
@@ -1798,7 +1871,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
         .filter((g) => g.items.length > 0);
 
   return (
-    <div className={`gp-root overflow-hidden ${claseTema(tema)}`} style={{ minHeight: "100vh" }}>
+    <div className={`gp-root overflow-hidden ${claseTema(tema)}`} style={{ minHeight: "100vh", ...(tema === "personalizado" ? generarPaletaPersonalizada(colorPersonalizado || "#F59E0B") : null) }}>
       <Tokens tema={tema} />
       <div className="flex relative" style={{ minHeight: "100vh" }}>
         {/* barra superior solo en móvil — padding extra arriba/lados para no quedar tapada
@@ -1935,7 +2008,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
           <div className="mt-auto pt-2 border-t gp-border flex flex-col gap-0.5">
             <button onClick={() => setTemaModalAbierto(true)} title="Tema"
               className={`gp-navitem flex items-center gap-2 px-3 py-2.5 md:py-2 text-sm text-left w-full ${sidebarColapsado ? "md:justify-center md:px-2" : ""}`}>
-              <Palette size={15} /> <span className={sidebarColapsado ? "md:hidden" : ""}>Tema: {TEMAS.find((t) => t.id === tema)?.label || "Actual"}</span>
+              <Palette size={15} /> <span className={sidebarColapsado ? "md:hidden" : ""}>Tema: {tema === "personalizado" ? "Personalizado" : (TEMAS.find((t) => t.id === tema)?.label || "Actual")}</span>
             </button>
             <button onClick={() => setExportPaso("confirmar")} title="Exportar mis datos"
               className={`gp-navitem flex items-center gap-2 px-3 py-2.5 md:py-2 text-sm text-left w-full ${sidebarColapsado ? "md:justify-center md:px-2" : ""}`}>
@@ -2215,6 +2288,23 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
                   {tema === t.id && <Check size={14} className="ml-auto gp-text-gold shrink-0" />}
                 </button>
               ))}
+            </div>
+            <div className="mt-2 pt-2" style={{ borderTop: "1px solid var(--border)" }}>
+              <label
+                className="flex items-center gap-2 p-2.5 rounded text-sm cursor-pointer"
+                style={{ border: `2px solid ${tema === "personalizado" ? "var(--gold)" : "var(--border)"}`, background: "var(--panel-2)" }}
+              >
+                <input
+                  type="color"
+                  value={colorPersonalizado}
+                  onChange={(e) => cambiarColorPersonalizado(e.target.value)}
+                  className="shrink-0"
+                  style={{ width: 22, height: 22, padding: 0, border: "1px solid var(--border)", borderRadius: 4, background: "none", cursor: "pointer" }}
+                />
+                Personalizado — elige tu color
+                {tema === "personalizado" && <Check size={14} className="ml-auto gp-text-gold shrink-0" />}
+              </label>
+              <p className="text-xs gp-text-muted mt-1.5">Elige un color y el resto (fondo, paneles, texto) se genera solo, para que siempre se vea bien.</p>
             </div>
             <button className="gp-btn-ghost w-full px-3 py-2 text-sm rounded mt-3" onClick={() => setTemaModalAbierto(false)}>Cerrar</button>
           </div>
