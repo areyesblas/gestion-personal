@@ -6,7 +6,7 @@ import {
   Users, Activity, Plus, X, Trash2, Pencil, Github, ChevronDown,
   ChevronRight, Bell, Lightbulb, Rocket, MessageCircle, Mail, Globe,
   Target, Contact, BarChart3, FileText, Flame, HeartPulse, Check, Menu, PieChart as PieChartIcon,
-  PiggyBank, Camera, Film, Upload, MapPin, Clock, Mic, Gift, Receipt, Megaphone, ChevronUp, Gem, Download, Sun, Moon, Shield, LogOut, ChevronLeft, Lock, Pill, CalendarClock, Zap, StickyNote, Search,
+  PiggyBank, Camera, Film, Upload, MapPin, Clock, Mic, Gift, Receipt, Megaphone, ChevronUp, Gem, Download, Sun, Moon, Shield, LogOut, ChevronLeft, Lock, Pill, CalendarClock, Zap, StickyNote, Search, Sparkles, Send,
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
@@ -1624,6 +1624,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
   const navGroups = [
     { label: "General", items: [
       { id: "dashboard", label: "Panorama", icon: LayoutDashboard },
+      { id: "asistente", label: "Asistente", icon: Sparkles },
       { id: "citas", label: "Citas", icon: CalendarClock },
       { id: "notas", label: "Notas", icon: StickyNote },
       { id: "mi-trabajo", label: "Mi trabajo", icon: CheckSquare },
@@ -1934,6 +1935,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
           {view === "activos" && (
             <ActivosDigitales data={data} onAdd={(i) => addItem("activos", i)} onEdit={(id, p) => editItem("activos", id, p)} onRemove={(id) => askDelete("activos", id)} />
           )}
+          {view === "asistente" && <Asistente />}
           {view === "citas" && (
             <Citas data={data} onAdd={(i) => addItem("citas", i)} onEdit={(id, p) => editItem("citas", id, p)} onRemove={(id) => askDelete("citas", id)} />
           )}
@@ -6517,6 +6519,117 @@ function NotaForm({ item, onSave }) {
   );
 }
 
+
+// Etiquetas legibles de las herramientas que puede ejecutar el asistente, para mostrar un
+// resumen corto de qué hizo (en vez del nombre técnico de la función).
+const ETIQUETA_ACCION_ASISTENTE = {
+  buscar_datos: "Buscó información",
+  crear_nota: "Creó una nota",
+  crear_idea_proyecto: "Creó una idea nueva",
+  crear_pendiente: "Creó un pendiente",
+  registrar_avance_proyecto: "Registró un avance",
+  crear_movimiento: "Registró un movimiento",
+  crear_cita: "Agendó una cita",
+};
+
+function Asistente() {
+  const [mensajes, setMensajes] = useState([]); // [{rol: "usuario"|"asistente", texto, acciones}]
+  const [texto, setTexto] = useState("");
+  const [enviando, setEnviando] = useState(false);
+  const [uso, setUso] = useState(null); // {consultas_usadas, limite_mes}
+  const [error, setError] = useState("");
+  const finRef = useRef(null);
+
+  useEffect(() => { finRef.current?.scrollIntoView({ behavior: "smooth" }); }, [mensajes, enviando]);
+
+  const enviar = async () => {
+    const contenido = texto.trim();
+    if (!contenido || enviando) return;
+    setTexto("");
+    setError("");
+    setMensajes((prev) => [...prev, { rol: "usuario", texto: contenido }]);
+    setEnviando(true);
+    try {
+      const { data: sesion } = await supabase.auth.getSession();
+      const resp = await fetch(`${supabase.supabaseUrl}/functions/v1/asistente-ia`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${sesion.session.access_token}` },
+        body: JSON.stringify({ mensaje: contenido }),
+      });
+      const json = await resp.json().catch(() => ({}));
+      if (!resp.ok || json.error) {
+        setError(json.error || "No se pudo contactar al asistente. Intenta de nuevo.");
+        setMensajes((prev) => prev.slice(0, -1)); // quita el mensaje del usuario si ni siquiera se proceso
+        return;
+      }
+      setMensajes((prev) => [...prev, { rol: "asistente", texto: json.respuesta, acciones: json.acciones || [] }]);
+      if (json.consultas_usadas != null) setUso({ consultas_usadas: json.consultas_usadas, limite_mes: json.limite_mes });
+    } catch (err) {
+      console.error("Error al hablar con el asistente:", err);
+      setError("No se pudo contactar al asistente. Revisa tu conexión.");
+      setMensajes((prev) => prev.slice(0, -1));
+    } finally {
+      setEnviando(false);
+    }
+  };
+
+  return (
+    <div className="flex flex-col" style={{ height: "calc(100vh - 160px)" }}>
+      <div className="flex items-center justify-between mb-3">
+        <h1 className="text-2xl font-bold flex items-center gap-2"><Sparkles size={22} className="gp-text-gold" /> Asistente</h1>
+        {uso && (
+          <span className="text-xs gp-text-muted">{uso.limite_mes - uso.consultas_usadas} de {uso.limite_mes} consultas restantes este mes</span>
+        )}
+      </div>
+
+      <div className="flex-1 overflow-y-auto gp-panel p-4 mb-3" style={{ minHeight: 0 }}>
+        {mensajes.length === 0 && (
+          <p className="text-sm gp-text-muted">
+            Pregúntame lo que quieras sobre tus datos en ARKEYONE, o pídeme que guarde algo por ti — por ejemplo
+            "guárdame una nota de que hoy quedamos en...", "crea una idea de...", o "agrégale un avance de 10% a ARKEYDATA".
+          </p>
+        )}
+        {mensajes.map((m, i) => (
+          <div key={i} className={`mb-3 flex ${m.rol === "usuario" ? "justify-end" : "justify-start"}`}>
+            <div className="max-w-[85%] rounded-lg px-3 py-2 text-sm" style={{
+              background: m.rol === "usuario" ? "var(--gold)" : "var(--panel-2, rgba(255,255,255,.06))",
+              color: m.rol === "usuario" ? "#0B2341" : "inherit",
+            }}>
+              <p style={{ whiteSpace: "pre-wrap" }}>{m.texto}</p>
+              {m.acciones?.length > 0 && (
+                <div className="mt-2 pt-2 flex flex-col gap-1" style={{ borderTop: "1px solid rgba(0,0,0,.15)" }}>
+                  {m.acciones.map((a, j) => (
+                    <span key={j} className="text-xs flex items-center gap-1 opacity-80">
+                      <Check size={12} /> {ETIQUETA_ACCION_ASISTENTE[a.herramienta] || a.herramienta}
+                      {a.resultado?.error ? ` — no se pudo (${a.resultado.error})` : ""}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        ))}
+        {enviando && <p className="text-xs gp-text-muted">Pensando…</p>}
+        {error && <p className="text-xs gp-text-red">{error}</p>}
+        <div ref={finRef} />
+      </div>
+
+      <div className="flex gap-2">
+        <input
+          className="gp-input flex-1"
+          placeholder="Escribe tu mensaje…"
+          value={texto}
+          onChange={(e) => setTexto(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); enviar(); } }}
+          disabled={enviando}
+        />
+        <button className="gp-btn px-4" onClick={enviar} disabled={enviando || !texto.trim()}>
+          <Send size={16} />
+        </button>
+      </div>
+    </div>
+  );
+}
 
 function QuickCapture({ data, onAdd, irAVista }) {
   const [abierto, setAbierto] = useState(false);
