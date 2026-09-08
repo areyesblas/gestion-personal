@@ -1584,6 +1584,16 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
     setLoading(false);
   };
 
+  // El Asistente guarda directo en Supabase desde el servidor, así que el navegador no se
+  // entera solo. Esto vuelve a leer nada más las tablas que el Asistente tocó (no toda la
+  // cuenta) y actualiza `data`, para que lo que acaba de crear se vea de inmediato en el
+  // resto de la app sin tener que recargar la página a mano.
+  const recargarModulos = async (keys) => {
+    const unicos = [...new Set(keys)];
+    const entries = await Promise.all(unicos.map(async (k) => [k, await fetchTable(k, activeOwnerId)]));
+    setData((prev) => ({ ...prev, ...Object.fromEntries(entries) }));
+  };
+
   const addItem = async (key, item) => {
     const newItem = { ...item, id: item.id || uid(), userId: activeOwnerId };
     const { error } = await supabase.from(tableName(key)).insert(toRow(key, newItem));
@@ -1983,7 +1993,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
           {view === "activos" && (
             <ActivosDigitales data={data} onAdd={(i) => addItem("activos", i)} onEdit={(id, p) => editItem("activos", id, p)} onRemove={(id) => askDelete("activos", id)} />
           )}
-          {view === "asistente" && <Asistente />}
+          {view === "asistente" && <Asistente onDatosCreados={recargarModulos} />}
           {view === "agenda" && <Agenda data={data} misId={misId} onEditPendiente={(id, p) => editItem("pendientes", id, p)} />}
           {view === "citas" && (
             <Citas data={data} onAdd={(i) => addItem("citas", i)} onEdit={(id, p) => editItem("citas", id, p)} onRemove={(id) => askDelete("citas", id)} />
@@ -6809,8 +6819,21 @@ const ETIQUETA_ACCION_ASISTENTE = {
   crear_movimiento: "Registró un movimiento",
   crear_cita: "Agendó una cita",
 };
+// A qué módulo de `data` (el estado local ya cargado en el navegador) pertenece cada
+// herramienta de escritura del Asistente. Como el Asistente guarda directo en Supabase desde
+// el servidor (Edge Function), el navegador no se entera solo — sin este mapeo, lo que crea
+// el Asistente no aparecía en el resto de la app (Agenda, Pendientes, etc.) hasta recargar
+// la página a mano.
+const MODULO_POR_HERRAMIENTA_ASISTENTE = {
+  crear_nota: "notas",
+  crear_idea_proyecto: "proyectos",
+  crear_pendiente: "pendientes",
+  registrar_avance_proyecto: "comentarios",
+  crear_movimiento: "finanzas",
+  crear_cita: "citas",
+};
 
-function Asistente() {
+function Asistente({ onDatosCreados }) {
   const [mensajes, setMensajes] = useState([]); // [{rol: "usuario"|"asistente", texto, acciones}]
   const [texto, setTexto] = useState("");
   const [enviando, setEnviando] = useState(false);
@@ -6931,6 +6954,14 @@ function Asistente() {
       setMensajes((prev) => [...prev, { rol: "asistente", texto: json.respuesta, acciones: json.acciones || [] }]);
       if (lecturaAuto) hablar(json.respuesta);
       if (json.consultas_usadas != null) setUso({ consultas_usadas: json.consultas_usadas, limite_mes: json.limite_mes });
+      // Si el Asistente creó o modificó algo (sin error), refrescamos esos módulos del lado
+      // del cliente para que se vea de inmediato en Agenda/Pendientes/etc., sin recargar.
+      const modulosTocados = [...new Set(
+        (json.acciones || [])
+          .filter((a) => !a.resultado?.error && MODULO_POR_HERRAMIENTA_ASISTENTE[a.herramienta])
+          .map((a) => MODULO_POR_HERRAMIENTA_ASISTENTE[a.herramienta])
+      )];
+      if (modulosTocados.length > 0) onDatosCreados?.(modulosTocados);
     } catch (err) {
       console.error("Error al hablar con el asistente:", err);
       setError("No se pudo contactar al asistente. Revisa tu conexión.");
