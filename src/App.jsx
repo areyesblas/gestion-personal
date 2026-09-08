@@ -18,10 +18,10 @@ const Tokens = ({ tema = "oscuro" }) => (
   <style>{`
     @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');
     .gp-root{ --bg:#0B2341; --panel:#12304F; --panel-hi:#1A3D63; --border:#234A70;
-      --text:#EAF1FA; --muted:#93A7C4; --gold:#F59E0B; --teal:#22C55E; --red:#EF4444;
+      --text:#EAF1FA; --muted:#93A7C4; --gold:#F59E0B; --teal:#5FBF8B; --teal-tint:rgba(95,191,139,.16); --panel-2:rgba(255,255,255,.12); --red:#EF4444;
       background:var(--bg); color:var(--text); font-family:'IBM Plex Sans',sans-serif; }
     .gp-root.claro{ --bg:#E8F1FB; --panel:#F7FBFF; --panel-hi:#DCEAFA; --border:#C3D9EE;
-      --text:#0B2341; --muted:#5B7A9E; --gold:#F59E0B; --teal:#16A34A; --red:#DC2626; }
+      --text:#0B2341; --muted:#5B7A9E; --gold:#F59E0B; --teal:#4CAF7A; --teal-tint:rgba(76,175,122,.14); --panel-2:rgba(11,35,65,.06); --red:#DC2626; }
     .gp-serif{ font-family:'Poppins',sans-serif; font-weight:600; }
     .gp-mono{ font-family:'IBM Plex Mono',monospace; }
     .gp-panel{ background:var(--panel); border:1px solid var(--border); border-radius:6px; }
@@ -60,6 +60,12 @@ const Tokens = ({ tema = "oscuro" }) => (
     .gp-root.claro .gp-sidebar-area{
       --bg:#1A3C60; --panel:#1E4976; --panel-hi:#28527F; --border:#2F5C89;
     }
+    /* Fondo "blanco hueso" para paneles puntuales (chat del Asistente, calendario de Agenda)
+       que deben verse claros aunque el resto de la app esté en tema oscuro. Redefine las
+       variables de color solo dentro de este panel, así todo lo de adentro (texto, badges,
+       bloques) se ajusta automáticamente sin tocar el resto de la app. */
+    .gp-hueso{ --panel:#F7F3EA; --panel-2:#E9E1CC; --border:#DDD3BA; --text:#3A2F22; --muted:#8A7E68;
+      background:var(--panel); color:var(--text); }
   `}</style>
 );
 
@@ -1680,14 +1686,22 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
         {/* barra superior solo en móvil — padding extra arriba/lados para no quedar tapada
             por el notch/isla dinámica ni el reloj cuando la app corre "standalone" (instalada) */}
         <div
-          className="gp-sidebar-area md:hidden fixed top-0 left-0 right-0 z-30 flex items-center justify-between px-4 pb-3 border-b gp-border"
-          style={{ background: "var(--bg)", paddingTop: "calc(env(safe-area-inset-top) + 12px)", paddingLeft: "calc(env(safe-area-inset-left) + 16px)", paddingRight: "calc(env(safe-area-inset-right) + 16px)" }}
+          className="gp-sidebar-area md:hidden fixed top-0 left-0 right-0 z-30 grid items-center px-4 pb-3 border-b gp-border"
+          style={{
+            background: "var(--bg)",
+            gridTemplateColumns: "1fr auto 1fr",
+            paddingTop: "calc(env(safe-area-inset-top) + 12px)",
+            paddingLeft: "calc(env(safe-area-inset-left) + 16px)",
+            paddingRight: "calc(env(safe-area-inset-right) + 16px)",
+          }}
         >
-          <button onClick={() => setMobileNavOpen(true)} className="p-2 -ml-2 gp-btn-ghost rounded" aria-label="Abrir menú">
+          <button onClick={() => setMobileNavOpen(true)} className="p-2 -ml-2 gp-btn-ghost rounded justify-self-start" aria-label="Abrir menú">
             <Menu size={20} />
           </button>
-          <img src="/icono-arkeyone.png" alt="ArkeyOne" style={{ height: 36 }} />
-          <div className="flex items-center gap-1">
+          {/* El icono siempre queda centrado en la columna del medio (1fr auto 1fr), sin
+              importar cuántos controles haya a los lados ni qué tan anchos sean. */}
+          <img src="/icono-arkeyone.png" alt="ArkeyOne" style={{ height: 36 }} className="justify-self-center" />
+          <div className="flex items-center gap-1 justify-self-end">
             <button onClick={() => setBusquedaAbierta(true)} className="p-2 gp-btn-ghost rounded" aria-label="Buscar">
               <Search size={18} />
             </button>
@@ -3604,7 +3618,7 @@ function Pendientes({ data, activeOwnerId, onAdd, onEdit, onRemove, onAddComenta
               const tieneHijos = p.hijos && p.hijos.length > 0;
               const avance = tieneHijos ? Math.round(calcAvanceTarea(p)) : null;
               return (
-                <tr key={p.id}>
+                <tr key={p.id} style={p.estatus === "Hecho" ? { background: "var(--teal-tint)" } : undefined}>
                   <td>
                     <span style={{ paddingLeft: nivel * 18 }} className="flex items-center gap-1">
                       {nivel > 0 && <span className="gp-text-muted">└</span>}
@@ -6467,7 +6481,7 @@ function Agenda({ data, onEditPendiente, misId }) {
         </div>
       )}
 
-      <div className="gp-panel p-3 overflow-x-auto">
+      <div className="gp-panel gp-hueso p-3 overflow-x-auto">
         <div className="flex" style={{ minWidth: vista === "semana" ? 720 : 320 }}>
           <div style={{ width: 44 }}>
             <div style={{ height: 28 }} />
@@ -6485,9 +6499,9 @@ function Agenda({ data, onEditPendiente, misId }) {
                 <div className="text-center text-xs mb-1 pb-1" style={{ height: 28, fontWeight: esHoy ? 700 : 400, color: esHoy ? "var(--gold)" : undefined }}>
                   {DIA_ISO_LABEL[d.getDay() === 0 ? 7 : d.getDay()]} {d.getDate()}
                 </div>
-                <div className="relative" style={{ height: PX_POR_HORA * config.horasLaboralesDiarias, borderLeft: "1px solid var(--gp-border, rgba(255,255,255,.08))" }}>
+                <div className="relative" style={{ height: PX_POR_HORA * config.horasLaboralesDiarias, borderLeft: "1px solid var(--border)" }}>
                   {horas.slice(0, -1).map((h) => (
-                    <div key={h} style={{ position: "absolute", top: (h - horaInicioDec) * PX_POR_HORA, left: 0, right: 0, borderTop: "1px solid var(--gp-border, rgba(255,255,255,.06))" }} />
+                    <div key={h} style={{ position: "absolute", top: (h - horaInicioDec) * PX_POR_HORA, left: 0, right: 0, borderTop: "1px solid var(--border)" }} />
                   ))}
                   {(bloques[key] || []).map((b, i) => (
                     <div key={i}
@@ -6496,9 +6510,9 @@ function Agenda({ data, onEditPendiente, misId }) {
                         top: (b.inicio - horaInicioDec) * PX_POR_HORA + 1,
                         height: Math.max(b.duracion * PX_POR_HORA - 2, 18),
                         left: 2, right: 2,
-                        background: b.tipo === "cita" ? "var(--gold)" : "rgba(255,255,255,.12)",
+                        background: b.tipo === "cita" ? "var(--gold)" : "var(--panel-2)",
                         color: b.tipo === "cita" ? "#0B2341" : "inherit",
-                        border: b.tipo === "pendiente" ? "1px solid rgba(255,255,255,.15)" : "none",
+                        border: b.tipo === "pendiente" ? "1px solid var(--border)" : "none",
                         cursor: b.tipo === "pendiente" ? "pointer" : "default",
                       }}
                       title={b.tipo === "cita" ? b.item.titulo : b.item.descripcion}
@@ -6943,7 +6957,7 @@ function Asistente() {
         </div>
       )}
 
-      <div className="flex-1 overflow-y-auto gp-panel p-4 mb-3" style={{ minHeight: 0 }}>
+      <div className="flex-1 overflow-y-auto gp-panel gp-hueso p-4 mb-3" style={{ minHeight: 0 }}>
         {cargandoHistorial && <p className="text-sm gp-text-muted">Cargando conversación…</p>}
         {!cargandoHistorial && mensajes.length === 0 && (
           <p className="text-sm gp-text-muted">
@@ -7099,6 +7113,11 @@ function QuickCapture({ data, onAdd, irAVista }) {
 
   return (
     <>
+      {/* Fondo invisible: al tocar cualquier otro lado de la pantalla con el menú abierto,
+          se cierra solo (sin mover el botón de su lugar) y el ícono regresa al rayo normal. */}
+      {abierto && (
+        <div className="fixed inset-0" style={{ zIndex: 54 }} onClick={() => setAbierto(false)} />
+      )}
       <div style={estiloContenedor} className="flex flex-col items-end">
         {!abrirHaciaAbajo && panel}
         <button
