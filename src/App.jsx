@@ -6,7 +6,7 @@ import {
   Users, Activity, Plus, X, Trash2, Pencil, Github, ChevronDown,
   ChevronRight, Bell, Lightbulb, Rocket, MessageCircle, Mail, Globe,
   Target, Contact, BarChart3, FileText, Flame, HeartPulse, Check, Menu, PieChart as PieChartIcon,
-  PiggyBank, Camera, Film, Upload, MapPin, Clock, Mic, Gift, Receipt, Megaphone, ChevronUp, Gem, Download, Sun, Moon, Shield, LogOut, ChevronLeft, Lock, Pill, CalendarClock, Zap, StickyNote, Search, Sparkles, Send,
+  PiggyBank, Camera, Film, Upload, MapPin, Clock, Mic, Gift, Receipt, Megaphone, ChevronUp, Gem, Download, Sun, Moon, Shield, LogOut, ChevronLeft, Lock, Pill, CalendarClock, Zap, StickyNote, Search, Sparkles, Send, Bot,
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
@@ -1690,6 +1690,9 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
             <button onClick={() => setBusquedaAbierta(true)} className="p-2 gp-btn-ghost rounded" aria-label="Buscar">
               <Search size={18} />
             </button>
+            <button onClick={() => irAVista("asistente")} className="p-2 gp-btn-ghost rounded" aria-label="Asistente">
+              <Bot size={18} />
+            </button>
             <button onClick={() => supabase.auth.signOut()} className="text-xs gp-text-muted px-2 py-1">Salir</button>
           </div>
         </div>
@@ -1720,12 +1723,21 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
             </p>
           </div>
 
-          <button
-            onClick={() => setBusquedaAbierta(true)}
-            className={`gp-input flex items-center gap-2 text-xs gp-text-muted px-3 py-2 ${sidebarColapsado ? "md:justify-center md:px-0" : ""}`}
-          >
-            <Search size={14} /> <span className={sidebarColapsado ? "md:hidden" : ""}>Buscar en todo…</span>
-          </button>
+          <div className={`flex gap-1 ${sidebarColapsado ? "md:flex-col" : ""}`}>
+            <button
+              onClick={() => setBusquedaAbierta(true)}
+              className={`gp-input flex-1 flex items-center gap-2 text-xs gp-text-muted px-3 py-2 ${sidebarColapsado ? "md:justify-center md:px-0" : ""}`}
+            >
+              <Search size={14} /> <span className={sidebarColapsado ? "md:hidden" : ""}>Buscar en todo…</span>
+            </button>
+            <button
+              onClick={() => irAVista("asistente")}
+              title="Asistente"
+              className={`gp-input flex items-center justify-center px-3 py-2 ${sidebarColapsado ? "md:px-0" : ""}`}
+            >
+              <Bot size={16} />
+            </button>
+          </div>
 
           {misColaboraciones.length > 0 && (
             <div className={`px-2 ${sidebarColapsado ? "md:hidden" : ""}`}>
