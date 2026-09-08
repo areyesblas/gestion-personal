@@ -7154,8 +7154,12 @@ function QuickCapture({ data, onAdd, irAVista }) {
 
   const panel = abierto && panelEstilo && (
     <div
-      className="gp-panel p-2 flex flex-col gap-1 overflow-y-auto"
-      style={{ position: "fixed", left: panelEstilo.left, top: panelEstilo.top, bottom: panelEstilo.bottom, maxHeight: panelEstilo.maxHeight, width: 180, zIndex: 56 }}
+      className="p-2 flex flex-col gap-1 overflow-y-auto rounded-lg shadow-lg"
+      style={{
+        position: "fixed", left: panelEstilo.left, top: panelEstilo.top, bottom: panelEstilo.bottom,
+        maxHeight: panelEstilo.maxHeight, width: 180, zIndex: 56,
+        background: "var(--panel-hi)", border: "1.5px solid var(--gold)",
+      }}
     >
       {OPCIONES.map((o) => (
         <button key={o.key} onClick={() => { setTipo(o.key); setAbierto(false); }} className="gp-btn-ghost flex items-center gap-2 px-3 py-2 text-sm rounded text-left">
