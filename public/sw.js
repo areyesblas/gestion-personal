@@ -7,10 +7,17 @@
 //
 // Sube este número cada vez que cambie la lógica del propio Service Worker
 // (no hace falta tocarlo por cambios normales del código de la app).
-const CACHE_VERSION = "arkeyone-sw-v1";
+const CACHE_VERSION = "arkeyone-sw-v2";
 
 self.addEventListener("install", (event) => {
   self.skipWaiting();
+});
+
+// Por si en el futuro se quita el skipWaiting() automático de arriba: main.jsx puede pedirle
+// explícitamente a un service worker en espera que tome control ya, sin esperar a que se
+// cierren todas las pestañas/la PWA (ver comentario largo en main.jsx sobre por qué importa).
+self.addEventListener("message", (event) => {
+  if (event.data?.tipo === "arkeyone-skip-waiting") self.skipWaiting();
 });
 
 self.addEventListener("activate", (event) => {
