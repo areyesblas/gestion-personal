@@ -6,7 +6,7 @@ import {
   Users, Activity, Plus, X, Trash2, Pencil, Github, ChevronDown,
   ChevronRight, Bell, Lightbulb, Rocket, MessageCircle, Mail, Globe,
   Target, Contact, BarChart3, FileText, Flame, HeartPulse, Check, Menu, PieChart as PieChartIcon,
-  PiggyBank, Camera, Film, Upload, MapPin, Clock, Mic, Gift, Receipt, Megaphone, ChevronUp, Gem, Download, Sun, Moon, Shield, LogOut, ChevronLeft, Lock, Pill, CalendarClock, Zap, StickyNote, Search, Sparkles, Send, Bot,
+  PiggyBank, Camera, Film, Upload, MapPin, Clock, Mic, Gift, Receipt, Megaphone, ChevronUp, Gem, Download, Sun, Moon, Shield, LogOut, ChevronLeft, Lock, Pill, CalendarClock, Zap, StickyNote, Search, Sparkles, Send, Bot, Volume2, VolumeX, Square,
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
@@ -6551,10 +6551,41 @@ function Asistente() {
   const [uso, setUso] = useState(null); // {consultas_usadas, limite_mes}
   const [error, setError] = useState("");
   const [escuchando, setEscuchando] = useState(false);
+  const [lecturaAuto, setLecturaAuto] = useState(() => {
+    try { return localStorage.getItem("arkeyone_asistente_voz") === "1"; } catch { return false; }
+  });
+  const [hablando, setHablando] = useState(false);
   const finRef = useRef(null);
   const reconocimientoRef = useRef(null);
 
   useEffect(() => { finRef.current?.scrollIntoView({ behavior: "smooth" }); }, [mensajes, enviando]);
+  // Se detiene la voz si sales de la pantalla del Asistente a media lectura.
+  useEffect(() => () => { try { window.speechSynthesis?.cancel(); } catch {} }, []);
+
+  // Lectura en voz alta de las respuestas: usa la síntesis de voz del navegador (speechSynthesis),
+  // que a diferencia del dictado SÍ funciona en Safari de iPhone, además de escritorio y Android.
+  const VozDisponible = typeof window !== "undefined" && "speechSynthesis" in window;
+  const hablar = (texto) => {
+    if (!VozDisponible || !texto) return;
+    try {
+      window.speechSynthesis.cancel(); // corta cualquier lectura anterior antes de empezar una nueva
+      const u = new SpeechSynthesisUtterance(texto);
+      u.lang = "es-MX";
+      u.onstart = () => setHablando(true);
+      u.onend = () => setHablando(false);
+      u.onerror = () => setHablando(false);
+      window.speechSynthesis.speak(u);
+    } catch { setHablando(false); }
+  };
+  const detenerVoz = () => { try { window.speechSynthesis?.cancel(); } catch {} setHablando(false); };
+  const alternarLecturaAuto = () => {
+    setLecturaAuto((v) => {
+      const nuevo = !v;
+      try { localStorage.setItem("arkeyone_asistente_voz", nuevo ? "1" : "0"); } catch {}
+      if (!nuevo) detenerVoz();
+      return nuevo;
+    });
+  };
 
   // Dictado por voz: usa el reconocimiento de voz del navegador (Web Speech API). Chrome/Edge
   // de escritorio y Android lo soportan bien; Safari de iOS NO lo soporta todavía (ni en la app
@@ -6605,6 +6636,7 @@ function Asistente() {
         return;
       }
       setMensajes((prev) => [...prev, { rol: "asistente", texto: json.respuesta, acciones: json.acciones || [] }]);
+      if (lecturaAuto) hablar(json.respuesta);
       if (json.consultas_usadas != null) setUso({ consultas_usadas: json.consultas_usadas, limite_mes: json.limite_mes });
     } catch (err) {
       console.error("Error al hablar con el asistente:", err);
@@ -6619,9 +6651,21 @@ function Asistente() {
     <div className="flex flex-col" style={{ height: "calc(100vh - 160px)" }}>
       <div className="flex items-center justify-between mb-3">
         <h1 className="text-2xl font-bold flex items-center gap-2"><Sparkles size={22} className="gp-text-gold" /> Asistente</h1>
-        {uso && (
-          <span className="text-xs gp-text-muted">{uso.limite_mes - uso.consultas_usadas} de {uso.limite_mes} consultas restantes este mes</span>
-        )}
+        <div className="flex items-center gap-3">
+          {uso && (
+            <span className="text-xs gp-text-muted">{uso.limite_mes - uso.consultas_usadas} de {uso.limite_mes} consultas restantes este mes</span>
+          )}
+          {VozDisponible && (
+            <button
+              onClick={alternarLecturaAuto}
+              title={lecturaAuto ? "Dejar de leer las respuestas en voz alta" : "Leer las respuestas en voz alta"}
+              className="gp-btn-ghost p-2 rounded"
+              style={lecturaAuto ? { color: "var(--gold)" } : undefined}
+            >
+              {lecturaAuto ? <Volume2 size={18} /> : <VolumeX size={18} />}
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto gp-panel p-4 mb-3" style={{ minHeight: 0 }}>
@@ -6637,7 +6681,18 @@ function Asistente() {
               background: m.rol === "usuario" ? "var(--gold)" : "var(--panel-2, rgba(255,255,255,.06))",
               color: m.rol === "usuario" ? "#0B2341" : "inherit",
             }}>
-              <p style={{ whiteSpace: "pre-wrap" }}>{m.texto}</p>
+              <div className="flex items-start gap-2">
+                <p className="flex-1" style={{ whiteSpace: "pre-wrap" }}>{m.texto}</p>
+                {m.rol === "asistente" && VozDisponible && (
+                  <button
+                    onClick={() => (hablando ? detenerVoz() : hablar(m.texto))}
+                    title={hablando ? "Detener" : "Escuchar"}
+                    className="shrink-0 opacity-60 hover:opacity-100"
+                  >
+                    {hablando ? <Square size={13} /> : <Volume2 size={13} />}
+                  </button>
+                )}
+              </div>
               {m.acciones?.length > 0 && (
                 <div className="mt-2 pt-2 flex flex-col gap-1" style={{ borderTop: "1px solid rgba(0,0,0,.15)" }}>
                   {m.acciones.map((a, j) => (
