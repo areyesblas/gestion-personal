@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from "react";
+import React, { useState, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { supabase } from "./supabaseClient";
 import * as XLSX from "xlsx";
 import {
@@ -1342,6 +1342,27 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
     setView(id);
   };
 
+  // Cerrar sesión "a prueba de fallos": antes solo llamábamos a signOut() sin esperar su
+  // resultado ni manejar errores — si esa llamada fallaba en silencio (por ejemplo con mala
+  // conexión), la app se quedaba con la sesión vieja y el botón parecía no hacer nada. Ahora
+  // esperamos la respuesta, y pase lo que pase (funcione o falle) forzamos que la app quede
+  // en estado "sin sesión" limpiando lo local y recargando, para que siempre se sienta el
+  // cierre de sesión como algo que sí ocurrió.
+  const [cerrandoSesion, setCerrandoSesion] = useState(false);
+  const cerrarSesion = async () => {
+    if (cerrandoSesion) return;
+    setCerrandoSesion(true);
+    try {
+      const { error } = await supabase.auth.signOut();
+      if (error) console.error("Error al cerrar sesión:", error);
+    } catch (err) {
+      console.error("Error al cerrar sesión:", err);
+    } finally {
+      try { localStorage.removeItem("arkeyone_login_at"); } catch {}
+      window.location.reload();
+    }
+  };
+
   // Mientras se sigue navegando/interactuando dentro de un módulo sensible, se extiende el
   // desbloqueo de 15 min (igual que el temporizador general de inactividad).
   useEffect(() => {
@@ -1708,7 +1729,6 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
             <button onClick={() => irAVista("asistente")} className="p-2 gp-btn-ghost rounded" aria-label="Asistente">
               <Bot size={18} />
             </button>
-            <button onClick={() => supabase.auth.signOut()} className="text-xs gp-text-muted px-2 py-1">Salir</button>
           </div>
         </div>
 
@@ -1862,9 +1882,10 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
                 </button>
               </>
             )}
-            <button onClick={() => supabase.auth.signOut()} title="Cerrar sesión"
-              className={`gp-navitem flex items-center gap-2 px-3 py-2.5 md:py-2 text-sm text-left w-full ${sidebarColapsado ? "md:justify-center md:px-2" : ""}`}>
-              <LogOut size={15} /> <span className={sidebarColapsado ? "md:hidden" : ""}>Cerrar sesión</span>
+            <button onClick={cerrarSesion} disabled={cerrandoSesion} title="Cerrar sesión"
+              className={`gp-navitem flex items-center gap-2 px-3 py-2.5 md:py-2 text-sm text-left w-full ${sidebarColapsado ? "md:justify-center md:px-2" : ""}`}
+              style={cerrandoSesion ? { opacity: 0.6 } : undefined}>
+              <LogOut size={15} /> <span className={sidebarColapsado ? "md:hidden" : ""}>{cerrandoSesion ? "Cerrando sesión…" : "Cerrar sesión"}</span>
             </button>
           </div>
         </div>
@@ -7095,14 +7116,47 @@ function QuickCapture({ data, onAdd, irAVista }) {
 
   const cerrar = () => { setAbierto(false); setTipo(null); };
 
-  // Si el botón quedó en la mitad superior de la pantalla, el menú se abre hacia abajo en vez
-  // de hacia arriba, para que no se salga de la vista.
-  const abrirHaciaAbajo = pos && pos.y < window.innerHeight * 0.45;
   const estiloContenedor = pos
     ? { position: "fixed", left: pos.x, top: pos.y, zIndex: 55 }
     : { position: "fixed", right: 20, bottom: "calc(env(safe-area-inset-bottom) + 20px)", zIndex: 55 };
-  const panel = abierto && (
-    <div className={`gp-panel p-2 flex flex-col gap-1 ${abrirHaciaAbajo ? "mt-2" : "mb-2"}`} style={{ minWidth: 180 }}>
+
+  // El panel de opciones ya no depende de si el botón está a la izquierda/derecha/arriba/abajo
+  // por CSS (eso era lo que lo hacía "perderse" en las esquinas). En vez de eso, cuando se abre
+  // medimos la posición real del botón en pantalla (getBoundingClientRect) y calculamos dónde
+  // poner el panel para que siempre quede completo dentro del área visible, sin importar en qué
+  // esquina esté el rayo. Se recalcula también si cambia el tamaño de la ventana.
+  const [panelEstilo, setPanelEstilo] = useState(null);
+  useLayoutEffect(() => {
+    if (!abierto) { setPanelEstilo(null); return; }
+    const calcular = () => {
+      const rect = btnRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const ANCHO_PANEL = 180, MARGEN = 8, HUECO = 8;
+      let left = rect.right - ANCHO_PANEL; // alineado al borde derecho del botón por default
+      left = Math.min(Math.max(left, MARGEN), window.innerWidth - ANCHO_PANEL - MARGEN);
+
+      const espacioArriba = rect.top - MARGEN;
+      const espacioAbajo = window.innerHeight - rect.bottom - MARGEN;
+      const abrirAbajo = espacioAbajo >= espacioArriba;
+      const alturaMax = Math.max(abrirAbajo ? espacioAbajo : espacioArriba, 120) - HUECO;
+
+      setPanelEstilo({
+        left,
+        top: abrirAbajo ? rect.bottom + HUECO : undefined,
+        bottom: abrirAbajo ? undefined : window.innerHeight - rect.top + HUECO,
+        maxHeight: alturaMax,
+      });
+    };
+    calcular();
+    window.addEventListener("resize", calcular);
+    return () => window.removeEventListener("resize", calcular);
+  }, [abierto, pos]);
+
+  const panel = abierto && panelEstilo && (
+    <div
+      className="gp-panel p-2 flex flex-col gap-1 overflow-y-auto"
+      style={{ position: "fixed", left: panelEstilo.left, top: panelEstilo.top, bottom: panelEstilo.bottom, maxHeight: panelEstilo.maxHeight, width: 180, zIndex: 56 }}
+    >
       {OPCIONES.map((o) => (
         <button key={o.key} onClick={() => { setTipo(o.key); setAbierto(false); }} className="gp-btn-ghost flex items-center gap-2 px-3 py-2 text-sm rounded text-left">
           <o.icon size={15} /> {o.label}
@@ -7118,8 +7172,8 @@ function QuickCapture({ data, onAdd, irAVista }) {
       {abierto && (
         <div className="fixed inset-0" style={{ zIndex: 54 }} onClick={() => setAbierto(false)} />
       )}
-      <div style={estiloContenedor} className="flex flex-col items-end">
-        {!abrirHaciaAbajo && panel}
+      {panel}
+      <div style={estiloContenedor}>
         <button
           ref={btnRef}
           onPointerDown={onPointerDown}
@@ -7132,7 +7186,6 @@ function QuickCapture({ data, onAdd, irAVista }) {
         >
           {abierto ? <X size={22} /> : <Zap size={22} />}
         </button>
-        {abrirHaciaAbajo && panel}
       </div>
 
       {tipo === "cita" && (
