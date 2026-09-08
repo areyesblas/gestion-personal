@@ -6538,9 +6538,39 @@ function Asistente() {
   const [enviando, setEnviando] = useState(false);
   const [uso, setUso] = useState(null); // {consultas_usadas, limite_mes}
   const [error, setError] = useState("");
+  const [escuchando, setEscuchando] = useState(false);
   const finRef = useRef(null);
+  const reconocimientoRef = useRef(null);
 
   useEffect(() => { finRef.current?.scrollIntoView({ behavior: "smooth" }); }, [mensajes, enviando]);
+
+  // Dictado por voz: usa el reconocimiento de voz del navegador (Web Speech API). Chrome/Edge
+  // de escritorio y Android lo soportan bien; Safari de iOS NO lo soporta todavía (ni en la app
+  // instalada ni en el navegador) — por eso el botón solo aparece si el navegador lo tiene. En
+  // iPhone, el micrófono del teclado del sistema (junto a la barra espaciadora) sigue funcionando
+  // igual para dictar en este mismo campo de texto.
+  const ReconocimientoVoz = typeof window !== "undefined" && (window.SpeechRecognition || window.webkitSpeechRecognition);
+
+  const alternarDictado = () => {
+    if (!ReconocimientoVoz) return;
+    if (escuchando) {
+      reconocimientoRef.current?.stop();
+      return;
+    }
+    const r = new ReconocimientoVoz();
+    r.lang = "es-MX";
+    r.interimResults = false;
+    r.continuous = false;
+    r.onresult = (e) => {
+      const dicho = Array.from(e.results).map((res) => res[0].transcript).join(" ");
+      setTexto((prev) => (prev ? prev.trim() + " " : "") + dicho.trim());
+    };
+    r.onerror = () => setEscuchando(false);
+    r.onend = () => setEscuchando(false);
+    reconocimientoRef.current = r;
+    setEscuchando(true);
+    r.start();
+  };
 
   const enviar = async () => {
     const contenido = texto.trim();
@@ -6615,9 +6645,19 @@ function Asistente() {
       </div>
 
       <div className="flex gap-2">
+        {ReconocimientoVoz && (
+          <button
+            className="gp-btn-ghost px-3 rounded"
+            onClick={alternarDictado}
+            title={escuchando ? "Detener dictado" : "Dictar por voz"}
+            style={escuchando ? { color: "#ef4444" } : undefined}
+          >
+            <Mic size={18} className={escuchando ? "animate-pulse" : ""} />
+          </button>
+        )}
         <input
           className="gp-input flex-1"
-          placeholder="Escribe tu mensaje…"
+          placeholder={escuchando ? "Escuchando…" : "Escribe tu mensaje…"}
           value={texto}
           onChange={(e) => setTexto(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); enviar(); } }}
@@ -6635,6 +6675,58 @@ function QuickCapture({ data, onAdd, irAVista }) {
   const [abierto, setAbierto] = useState(false);
   const [tipo, setTipo] = useState(null); // "cita" | "contacto" | "idea" | "ingreso" | "egreso"
 
+  // Posición libre: por default va abajo a la derecha, pero el usuario puede arrastrarlo a
+  // donde quiera (ej. en el Asistente se encimaba con el botón de enviar del chat). Se guarda
+  // en localStorage por dispositivo — cada quien lo deja donde le acomode.
+  const [pos, setPos] = useState(() => {
+    try {
+      const guardada = localStorage.getItem("arkeyone_qc_pos");
+      return guardada ? JSON.parse(guardada) : null; // null = posición default
+    } catch { return null; }
+  });
+  const btnRef = useRef(null);
+  const arrastreRef = useRef({ activo: false, movido: false, startX: 0, startY: 0, offsetX: 0, offsetY: 0 });
+
+  const clamp = (x, y) => {
+    const w = 52, h = 52, margen = 8;
+    const maxX = window.innerWidth - w - margen;
+    const maxY = window.innerHeight - h - margen;
+    return { x: Math.min(Math.max(x, margen), maxX), y: Math.min(Math.max(y, margen), maxY) };
+  };
+
+  const onPointerDown = (e) => {
+    const rect = btnRef.current.getBoundingClientRect();
+    arrastreRef.current = {
+      activo: true, movido: false, startX: e.clientX, startY: e.clientY,
+      offsetX: e.clientX - rect.left, offsetY: e.clientY - rect.top,
+    };
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch {}
+  };
+  const onPointerMove = (e) => {
+    const a = arrastreRef.current;
+    if (!a.activo) return;
+    if (!a.movido && (Math.abs(e.clientX - a.startX) > 6 || Math.abs(e.clientY - a.startY) > 6)) a.movido = true;
+    if (!a.movido) return;
+    setPos(clamp(e.clientX - a.offsetX, e.clientY - a.offsetY));
+  };
+  const onPointerUp = () => {
+    const a = arrastreRef.current;
+    if (a.movido) {
+      setPos((p) => {
+        if (p) { try { localStorage.setItem("arkeyone_qc_pos", JSON.stringify(p)); } catch {} }
+        return p;
+      });
+    } else {
+      setAbierto((v) => !v); // fue un toque, no un arrastre: abre/cierra el menú como siempre
+    }
+    arrastreRef.current = { activo: false, movido: false, startX: 0, startY: 0, offsetX: 0, offsetY: 0 };
+  };
+  // Doble toque: regresa el botón a su posición default (abajo a la derecha), por si se pierde de vista.
+  const alDobleToque = () => {
+    setPos(null);
+    try { localStorage.removeItem("arkeyone_qc_pos"); } catch {}
+  };
+
   const OPCIONES = [
     { key: "cita", label: "Cita", icon: CalendarClock },
     { key: "nota", label: "Nota", icon: StickyNote },
@@ -6646,26 +6738,39 @@ function QuickCapture({ data, onAdd, irAVista }) {
 
   const cerrar = () => { setAbierto(false); setTipo(null); };
 
+  // Si el botón quedó en la mitad superior de la pantalla, el menú se abre hacia abajo en vez
+  // de hacia arriba, para que no se salga de la vista.
+  const abrirHaciaAbajo = pos && pos.y < window.innerHeight * 0.45;
+  const estiloContenedor = pos
+    ? { position: "fixed", left: pos.x, top: pos.y, zIndex: 55 }
+    : { position: "fixed", right: 20, bottom: "calc(env(safe-area-inset-bottom) + 20px)", zIndex: 55 };
+  const panel = abierto && (
+    <div className={`gp-panel p-2 flex flex-col gap-1 ${abrirHaciaAbajo ? "mt-2" : "mb-2"}`} style={{ minWidth: 180 }}>
+      {OPCIONES.map((o) => (
+        <button key={o.key} onClick={() => { setTipo(o.key); setAbierto(false); }} className="gp-btn-ghost flex items-center gap-2 px-3 py-2 text-sm rounded text-left">
+          <o.icon size={15} /> {o.label}
+        </button>
+      ))}
+    </div>
+  );
+
   return (
     <>
-      <div className="fixed z-[55]" style={{ right: 20, bottom: "calc(env(safe-area-inset-bottom) + 20px)" }}>
-        {abierto && (
-          <div className="gp-panel p-2 mb-2 flex flex-col gap-1" style={{ minWidth: 180 }}>
-            {OPCIONES.map((o) => (
-              <button key={o.key} onClick={() => { setTipo(o.key); setAbierto(false); }} className="gp-btn-ghost flex items-center gap-2 px-3 py-2 text-sm rounded text-left">
-                <o.icon size={15} /> {o.label}
-              </button>
-            ))}
-          </div>
-        )}
+      <div style={estiloContenedor} className="flex flex-col items-end">
+        {!abrirHaciaAbajo && panel}
         <button
-          onClick={() => setAbierto((v) => !v)}
-          title="Captura rápida"
+          ref={btnRef}
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={onPointerUp}
+          onDoubleClick={alDobleToque}
+          title="Captura rápida — mantén presionado para moverlo, doble toque para regresarlo a su lugar"
           className="rounded-full flex items-center justify-center shadow-lg"
-          style={{ width: 52, height: 52, background: "var(--gold)", color: "#0B2341", marginLeft: "auto" }}
+          style={{ width: 52, height: 52, background: "var(--gold)", color: "#0B2341", touchAction: "none" }}
         >
           {abierto ? <X size={22} /> : <Zap size={22} />}
         </button>
+        {abrirHaciaAbajo && panel}
       </div>
 
       {tipo === "cita" && (
