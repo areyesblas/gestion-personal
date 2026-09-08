@@ -1994,7 +1994,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
             <ActivosDigitales data={data} onAdd={(i) => addItem("activos", i)} onEdit={(id, p) => editItem("activos", id, p)} onRemove={(id) => askDelete("activos", id)} />
           )}
           {view === "asistente" && <Asistente onDatosCreados={recargarModulos} />}
-          {view === "agenda" && <Agenda data={data} misId={misId} onEditPendiente={(id, p) => editItem("pendientes", id, p)} />}
+          {view === "agenda" && <Agenda data={data} misId={misId} onEditPendiente={(id, p) => editItem("pendientes", id, p)} onAddCita={(c) => addItem("citas", c)} />}
           {view === "citas" && (
             <Citas data={data} onAdd={(i) => addItem("citas", i)} onEdit={(id, p) => editItem("citas", id, p)} onRemove={(id) => askDelete("citas", id)} />
           )}
@@ -6356,9 +6356,18 @@ function sumarDias(fecha, n) {
 }
 function dateStr(d) { return d.toISOString().slice(0, 10); }
 
-function calcularBloquesAgenda({ dias, citas, pendientes, horaInicio, horasDiarias }) {
+function calcularBloquesAgenda({ dias, citas, pendientes, horaInicio, horasDiarias, comida }) {
   const bloquesPorDia = {};
   dias.forEach((d) => (bloquesPorDia[dateStr(d)] = []));
+
+  // La comida se agrega primero como un bloque más (ocupado), así los pendientes automáticos
+  // ya no se acomodan encima — se trata igual que una cita fija todos los días visibles.
+  if (comida) {
+    dias.forEach((d) => {
+      const key = dateStr(d);
+      bloquesPorDia[key].push({ tipo: "comida", inicio: comida.inicio, duracion: comida.duracion });
+    });
+  }
 
   citas.forEach((c) => {
     if (!c.fechaHora) return;
@@ -6405,22 +6414,34 @@ function calcularBloquesAgenda({ dias, citas, pendientes, horaInicio, horasDiari
   return bloquesPorDia;
 }
 
-function Agenda({ data, onEditPendiente, misId }) {
+function Agenda({ data, onEditPendiente, onAddCita, misId }) {
   const [vista, setVista] = useState("semana"); // "dia" | "semana"
   const [base, setBase] = useState(() => new Date());
-  const [config, setConfig] = useState({ horasLaboralesDiarias: 8, horaInicioLaboral: "09:00", diasLaborales: [1, 2, 3, 4, 5] });
+  const [config, setConfig] = useState({
+    horasLaboralesDiarias: 8, horaInicioLaboral: "09:00", diasLaborales: [1, 2, 3, 4, 5],
+    horaInicioComida: "", duracionComidaMin: 60,
+  });
   const [configAbierta, setConfigAbierta] = useState(false);
   const [cargando, setCargando] = useState(true);
+  const [modalAgregar, setModalAgregar] = useState(null); // null | "nueva" | "existente"
+  // El acomodo automático de pendientes no corre solo — hay que confirmarlo con este botón cada
+  // vez que se entra a la Agenda. Los que el usuario asigna a mano desde el "+" (pestaña "Desde
+  // lo guardado") se muestran de inmediato sin esperar esa confirmación, porque elegirlos a mano
+  // YA es la confirmación.
+  const [acomodoConfirmado, setAcomodoConfirmado] = useState(false);
+  const [idsManualesSesion, setIdsManualesSesion] = useState(() => new Set());
 
   useEffect(() => {
     (async () => {
       const { data: pref } = await supabase.from("preferencias")
-        .select("horas_laborales_diarias, hora_inicio_laboral, dias_laborales").eq("user_id", misId).maybeSingle();
+        .select("horas_laborales_diarias, hora_inicio_laboral, dias_laborales, hora_inicio_comida, duracion_comida_min").eq("user_id", misId).maybeSingle();
       if (pref) {
         setConfig({
           horasLaboralesDiarias: Number(pref.horas_laborales_diarias) || 8,
           horaInicioLaboral: (pref.hora_inicio_laboral || "09:00").slice(0, 5),
           diasLaborales: pref.dias_laborales?.length ? pref.dias_laborales : [1, 2, 3, 4, 5],
+          horaInicioComida: pref.hora_inicio_comida ? pref.hora_inicio_comida.slice(0, 5) : "",
+          duracionComidaMin: pref.duracion_comida_min || 60,
         });
       }
       setCargando(false);
@@ -6434,6 +6455,8 @@ function Agenda({ data, onEditPendiente, misId }) {
       horas_laborales_diarias: nuevo.horasLaboralesDiarias,
       hora_inicio_laboral: nuevo.horaInicioLaboral,
       dias_laborales: nuevo.diasLaborales,
+      hora_inicio_comida: nuevo.horaInicioComida || null,
+      duracion_comida_min: nuevo.duracionComidaMin || null,
     }, { onConflict: "user_id" });
   };
 
@@ -6451,14 +6474,38 @@ function Agenda({ data, onEditPendiente, misId }) {
     return h + (m || 0) / 60;
   }, [config.horaInicioLaboral]);
 
+  const comidaDec = useMemo(() => {
+    if (!config.horaInicioComida) return null;
+    const [h, m] = config.horaInicioComida.split(":").map(Number);
+    return { inicio: h + (m || 0) / 60, duracion: (config.duracionComidaMin || 60) / 60 };
+  }, [config.horaInicioComida, config.duracionComidaMin]);
+
   const rangoStr = { desde: dateStr(diasVisibles[0]), hasta: dateStr(diasVisibles[diasVisibles.length - 1]) };
   const citasEnRango = (data.citas || []).filter((c) => c.fechaHora && dateStr(new Date(c.fechaHora)) >= rangoStr.desde && dateStr(new Date(c.fechaHora)) <= rangoStr.hasta);
-  const pendientesEnRango = (data.pendientes || []).filter((p) => p.estatus !== "Hecho" && p.fechaLimite && p.fechaLimite >= rangoStr.desde && p.fechaLimite <= rangoStr.hasta);
+  const pendientesEnRango = (data.pendientes || []).filter((p) => p.fechaLimite && p.fechaLimite >= rangoStr.desde && p.fechaLimite <= rangoStr.hasta);
+  const pendientesHechos = pendientesEnRango.filter((p) => p.estatus === "Hecho");
+  const pendientesPendientesDeAcomodo = pendientesEnRango.filter((p) => p.estatus !== "Hecho" && !idsManualesSesion.has(p.id));
+  const pendientesManuales = pendientesEnRango.filter((p) => p.estatus !== "Hecho" && idsManualesSesion.has(p.id));
+  // Lo que sí se manda a acomodar en el horario: los ya hechos (se quedan visibles siempre), los
+  // que el usuario agregó a mano, y el resto SOLO si ya se confirmó el acomodo automático.
+  const pendientesParaBloques = [
+    ...pendientesHechos,
+    ...pendientesManuales,
+    ...(acomodoConfirmado ? pendientesPendientesDeAcomodo : []),
+  ];
 
   const bloques = useMemo(() => calcularBloquesAgenda({
-    dias: diasVisibles, citas: citasEnRango, pendientes: pendientesEnRango,
-    horaInicio: horaInicioDec, horasDiarias: config.horasLaboralesDiarias,
-  }), [diasVisibles, citasEnRango, pendientesEnRango, horaInicioDec, config.horasLaboralesDiarias]);
+    dias: diasVisibles, citas: citasEnRango, pendientes: pendientesParaBloques,
+    horaInicio: horaInicioDec, horasDiarias: config.horasLaboralesDiarias, comida: comidaDec,
+  }), [diasVisibles, citasEnRango, pendientesParaBloques, horaInicioDec, config.horasLaboralesDiarias, comidaDec]);
+
+  const alternarHecho = (p) => onEditPendiente(p.id, { estatus: p.estatus === "Hecho" ? "Pendiente" : "Hecho" });
+
+  const asignarPendienteExistente = (id, fechaLimite) => {
+    onEditPendiente(id, { fechaLimite });
+    setIdsManualesSesion((prev) => new Set(prev).add(id));
+    setModalAgregar(null);
+  };
 
   const PX_POR_HORA = 56;
   const horas = Array.from({ length: Math.ceil(config.horasLaboralesDiarias) + 1 }, (_, i) => horaInicioDec + i);
@@ -6470,6 +6517,9 @@ function Agenda({ data, onEditPendiente, misId }) {
       <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
         <h1 className="text-2xl font-bold">Agenda</h1>
         <div className="flex items-center gap-2">
+          <button className="gp-btn flex items-center gap-1 px-2.5 py-1.5 text-xs" onClick={() => setModalAgregar("nueva")}>
+            <Plus size={14} /> Agregar
+          </button>
           <button className="gp-btn-ghost px-2 py-1 text-xs rounded" onClick={() => setVista((v) => (v === "dia" ? "semana" : "dia"))}>
             {vista === "dia" ? "Ver semana" : "Ver día"}
           </button>
@@ -6479,6 +6529,42 @@ function Agenda({ data, onEditPendiente, misId }) {
           <button className="gp-btn-ghost p-1.5 rounded" onClick={() => setConfigAbierta(true)} title="Configurar jornada"><Settings size={16} /></button>
         </div>
       </div>
+
+      {/* Barra de confirmación del acomodo automático — no se acomoda nada hasta que se presiona. */}
+      {!acomodoConfirmado && pendientesPendientesDeAcomodo.length > 0 && (
+        <div className="gp-panel-hi p-3 mb-4 text-sm flex items-center justify-between gap-3 flex-wrap">
+          <span>Tienes {pendientesPendientesDeAcomodo.length} pendiente{pendientesPendientesDeAcomodo.length === 1 ? "" : "s"} con fecha en este rango que no se ha{pendientesPendientesDeAcomodo.length === 1 ? "" : "n"} acomodado en el horario todavía.</span>
+          <button className="gp-btn px-3 py-1.5 text-xs shrink-0" onClick={() => setAcomodoConfirmado(true)}>Acomodar en huecos libres</button>
+        </div>
+      )}
+      {acomodoConfirmado && (
+        <div className="p-2 mb-4 text-xs gp-text-muted flex items-center justify-between gap-3 flex-wrap">
+          <span>Los pendientes con fecha se están acomodando solos en los huecos libres.</span>
+          <button className="gp-btn-ghost px-2 py-1 rounded" onClick={() => setAcomodoConfirmado(false)}>Quitar acomodo automático</button>
+        </div>
+      )}
+
+      {modalAgregar && (
+        <Modal title="Agregar a la Agenda" onClose={() => setModalAgregar(null)}>
+          <div className="flex gap-1 mb-4">
+            <button onClick={() => setModalAgregar("nueva")} className="flex-1 px-3 py-2 text-sm rounded"
+              style={{ background: modalAgregar === "nueva" ? "var(--gold)" : "var(--panel-2)", color: modalAgregar === "nueva" ? "#0B2341" : "inherit" }}>
+              Actividad nueva
+            </button>
+            <button onClick={() => setModalAgregar("existente")} className="flex-1 px-3 py-2 text-sm rounded"
+              style={{ background: modalAgregar === "existente" ? "var(--gold)" : "var(--panel-2)", color: modalAgregar === "existente" ? "#0B2341" : "inherit" }}>
+              Desde lo guardado
+            </button>
+          </div>
+          {modalAgregar === "nueva" && (
+            <CitaForm item={{ titulo: "", fechaHora: localInputsAFechaHora(todayISO(), "09:00"), lugar: "", contactoId: "", notas: "" }} contactos={data.contactos}
+              onSave={(v) => { onAddCita({ ...v, id: uid() }); setModalAgregar(null); }} />
+          )}
+          {modalAgregar === "existente" && (
+            <PendienteExistenteForm pendientes={(data.pendientes || []).filter((p) => p.estatus !== "Hecho")} onAsignar={asignarPendienteExistente} />
+          )}
+        </Modal>
+      )}
 
       {configAbierta && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,.6)" }} onClick={() => setConfigAbierta(false)}>
@@ -6504,6 +6590,19 @@ function Agenda({ data, onEditPendiente, misId }) {
                 ))}
               </div>
             </Field>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Hora de comida (opcional)">
+                <input type="time" className="gp-input" value={config.horaInicioComida}
+                  onChange={(e) => setConfig((c) => ({ ...c, horaInicioComida: e.target.value }))} />
+              </Field>
+              <Field label="Duración (min)">
+                <input type="number" min="15" step="15" className="gp-input" value={config.duracionComidaMin}
+                  onChange={(e) => setConfig((c) => ({ ...c, duracionComidaMin: Number(e.target.value) || 60 }))} disabled={!config.horaInicioComida} />
+              </Field>
+            </div>
+            {config.horaInicioComida && (
+              <button type="button" className="text-xs gp-text-red mb-2" onClick={() => setConfig((c) => ({ ...c, horaInicioComida: "" }))}>Quitar horario de comida</button>
+            )}
             <div className="flex gap-2 justify-end mt-2">
               <button className="gp-btn-ghost px-3 py-2 text-sm rounded" onClick={() => setConfigAbierta(false)}>Cancelar</button>
               <button className="gp-btn px-3 py-2 text-sm" onClick={() => { guardarConfig(config); setConfigAbierta(false); }}>Guardar</button>
@@ -6534,31 +6633,60 @@ function Agenda({ data, onEditPendiente, misId }) {
                   {horas.slice(0, -1).map((h) => (
                     <div key={h} style={{ position: "absolute", top: (h - horaInicioDec) * PX_POR_HORA, left: 0, right: 0, borderTop: "1px solid var(--border)" }} />
                   ))}
-                  {(bloques[key] || []).map((b, i) => (
-                    <div key={i}
-                      className="absolute rounded px-1.5 py-0.5 text-[11px] overflow-hidden"
-                      style={{
-                        top: (b.inicio - horaInicioDec) * PX_POR_HORA + 1,
-                        height: Math.max(b.duracion * PX_POR_HORA - 2, 18),
-                        left: 2, right: 2,
-                        background: b.tipo === "cita" ? "var(--gold)" : "var(--panel-2)",
-                        color: b.tipo === "cita" ? "#0B2341" : "inherit",
-                        border: b.tipo === "pendiente" ? "1px solid var(--border)" : "none",
-                        cursor: b.tipo === "pendiente" ? "pointer" : "default",
-                      }}
-                      title={b.tipo === "cita" ? b.item.titulo : b.item.descripcion}
-                      onClick={() => { if (b.tipo === "pendiente") onEditPendiente(b.item.id, { estatus: "Hecho" }); }}
-                    >
-                      <span className="font-medium">{b.tipo === "cita" ? b.item.titulo : b.item.descripcion}</span>
-                    </div>
-                  ))}
+                  {(bloques[key] || []).map((b, i) => {
+                    const hecho = b.tipo === "pendiente" && b.item.estatus === "Hecho";
+                    return (
+                      <div key={i}
+                        className="absolute rounded px-1.5 py-0.5 text-[11px] overflow-hidden"
+                        style={{
+                          top: (b.inicio - horaInicioDec) * PX_POR_HORA + 1,
+                          height: Math.max(b.duracion * PX_POR_HORA - 2, 18),
+                          left: 2, right: 2,
+                          background: b.tipo === "cita" ? "var(--gold)" : b.tipo === "comida" ? "var(--border)" : hecho ? "var(--teal-tint)" : "var(--panel-2)",
+                          color: b.tipo === "cita" ? "#0B2341" : "inherit",
+                          border: b.tipo === "pendiente" ? `1px solid ${hecho ? "var(--teal)" : "var(--border)"}` : "none",
+                          textDecoration: hecho ? "line-through" : "none",
+                          opacity: b.tipo === "comida" ? 0.7 : 1,
+                          cursor: b.tipo === "pendiente" ? "pointer" : "default",
+                        }}
+                        title={b.tipo === "cita" ? b.item.titulo : b.tipo === "comida" ? "Comida" : b.item.descripcion}
+                        onClick={() => { if (b.tipo === "pendiente") alternarHecho(b.item); }}
+                      >
+                        <span className="font-medium">{b.tipo === "cita" ? b.item.titulo : b.tipo === "comida" ? "Comida" : b.item.descripcion}</span>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             );
           })}
         </div>
       </div>
-      <p className="text-xs gp-text-muted mt-2">Los pendientes se acomodan solos en los huecos libres de su día límite — tócalos para marcarlos como hechos. Lo que no cupo sigue en Pendientes normal.</p>
+      <p className="text-xs gp-text-muted mt-2">Toca un pendiente para marcarlo hecho (se queda en verde) o para regresarlo a pendiente. Lo que no cupo sigue en Pendientes normal.</p>
+    </div>
+  );
+}
+
+// Elegir un pendiente que ya existe (guardado en el sistema) y asignarle cuándo va, sin salir
+// de la Agenda ni tener que ir al módulo de Pendientes.
+function PendienteExistenteForm({ pendientes, onAsignar }) {
+  const [pendienteId, setPendienteId] = useState("");
+  const [fecha, setFecha] = useState(todayISO());
+  return (
+    <div>
+      <Field label="Pendiente guardado">
+        <select className="gp-input" value={pendienteId} onChange={(e) => setPendienteId(e.target.value)}>
+          <option value="">— elige uno —</option>
+          {pendientes.map((p) => <option key={p.id} value={p.id}>{p.descripcion}{p.fechaLimite ? ` (actual: ${p.fechaLimite})` : ""}</option>)}
+        </select>
+      </Field>
+      {pendientes.length === 0 && <p className="text-xs gp-text-muted mb-2">No tienes pendientes guardados sin marcar como hechos.</p>}
+      <Field label="Fecha en la que va">
+        <input type="date" className="gp-input" value={fecha} onChange={(e) => setFecha(e.target.value)} />
+      </Field>
+      <button className="gp-btn w-full py-2 mt-2 text-sm" disabled={!pendienteId} onClick={() => onAsignar(pendienteId, fecha)}>
+        Agregar a la Agenda
+      </button>
     </div>
   );
 }
