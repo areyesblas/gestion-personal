@@ -1758,7 +1758,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
             </p>
           </div>
 
-          <div className={`flex gap-1 ${sidebarColapsado ? "md:flex-col" : ""}`}>
+          <div className={`hidden md:flex gap-1 ${sidebarColapsado ? "md:flex-col" : ""}`}>
             <button
               onClick={() => setBusquedaAbierta(true)}
               className={`gp-input flex-1 flex items-center gap-2 text-xs gp-text-muted px-3 py-2 ${sidebarColapsado ? "md:justify-center md:px-0" : ""}`}
