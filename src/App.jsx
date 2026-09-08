@@ -6,7 +6,7 @@ import {
   Users, Activity, Plus, X, Trash2, Pencil, Github, ChevronDown,
   ChevronRight, Bell, Lightbulb, Rocket, MessageCircle, Mail, Globe,
   Target, Contact, BarChart3, FileText, Flame, HeartPulse, Check, Menu, PieChart as PieChartIcon,
-  PiggyBank, Camera, Film, Upload, MapPin, Clock, Mic, Gift, Receipt, Megaphone, ChevronUp, Gem, Download, Sun, Moon, Shield, LogOut, ChevronLeft, Lock, Pill, CalendarClock, Zap,
+  PiggyBank, Camera, Film, Upload, MapPin, Clock, Mic, Gift, Receipt, Megaphone, ChevronUp, Gem, Download, Sun, Moon, Shield, LogOut, ChevronLeft, Lock, Pill, CalendarClock, Zap, StickyNote, Search,
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
@@ -295,13 +295,15 @@ const categoriaIMC = (imc) => {
 };
 
 /* ---------- persistencia relacional ---------- */
-const TABLES = ["proyectos", "pendientes", "equipo", "finanzas", "deudas", "actividades", "activos", "metas", "contactos", "redesMetricas", "documentos", "habitos", "salud", "apartados", "eventos", "comentarios", "saldoInicial", "regalos", "facturas", "campanas", "patrimonio", "patrimonioValuaciones", "medicamentos", "citas"];
+const TABLES = ["proyectos", "pendientes", "equipo", "finanzas", "deudas", "actividades", "activos", "metas", "contactos", "redesMetricas", "documentos", "habitos", "salud", "apartados", "eventos", "comentarios", "saldoInicial", "regalos", "facturas", "campanas", "patrimonio", "patrimonioValuaciones", "medicamentos", "citas", "notas"];
 const OLD_STORAGE_KEY = "gestion_personal_data"; // localStorage, versión muy vieja
 const OLD_BLOB_TABLE = "gestion_data"; // tabla única jsonb, versión anterior a este modelo relacional
 
 const camelToSnake = (s) => s.replace(/[A-Z]/g, (c) => "_" + c.toLowerCase());
 const snakeToCamel = (s) => s.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
 const tableName = (key) => camelToSnake(key);
+// Quita acentos y pasa a minúsculas, para que buscar "cancion" también encuentre "canción".
+const normalizarTexto = (s) => (s || "").toString().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 
 const ETIQUETA_TABLA = {
   proyectos: "Proyecto", pendientes: "Pendiente", equipo: "Equipo", finanzas: "Movimiento financiero",
@@ -310,7 +312,7 @@ const ETIQUETA_TABLA = {
   habitos: "Hábito", salud: "Registro de salud", apartados: "Apartado", eventos: "Evento",
   comentarios: "Comentario", saldoInicial: "Saldo inicial", regalos: "Regalo",
   facturas: "Factura", campanas: "Campaña", patrimonio: "Bien patrimonial",
-  patrimonioValuaciones: "Valuación de patrimonio", medicamentos: "Medicamento", citas: "Cita",
+  patrimonioValuaciones: "Valuación de patrimonio", medicamentos: "Medicamento", citas: "Cita", notas: "Nota",
 };
 
 // Exporta toda la información visible del usuario a un archivo Excel, un módulo por hoja.
@@ -359,6 +361,8 @@ function labelFor(key, item) {
       return item.acreedor || "(sin acreedor)";
     case "citas":
       return item.titulo || "(sin título)";
+    case "notas":
+      return item.titulo || (item.contenido ? item.contenido.slice(0, 40) : "(nota vacía)");
     case "redesMetricas":
       return item.plataforma || "(sin plataforma)";
     case "salud":
@@ -1100,7 +1104,7 @@ const VIEW_TO_MODULO = {
   equipo: "equipo", contactos: "contactos", regalos: "regalos",
   redes: "redes_metricas", marketing: "campanas",
   actividades: "actividades", eventos: "eventos", habitos: "habitos", salud: "salud",
-  medicamentos: "medicamentos", citas: "citas",
+  medicamentos: "medicamentos", citas: "citas", notas: "notas",
 };
 // Mapeo inverso: de nombre de tabla/módulo a id de vista, para los deep links de Push
 // (una notificación de una deuda trae recurso_tabla="deudas" y con esto sabemos a qué
@@ -1211,6 +1215,12 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
   const [regalosFiltroContacto, setRegalosFiltroContacto] = useState("");
   const [proyectoDetalleId, setProyectoDetalleId] = useState(null);
   const irADetalleProyecto = (proyectoId) => { setProyectoDetalleId(proyectoId); irAVista("proyecto-detalle"); };
+  const [busquedaAbierta, setBusquedaAbierta] = useState(false);
+  const buscarNavegarA = (key, item) => {
+    setBusquedaAbierta(false);
+    if (key === "proyectos") { irADetalleProyecto(item.id); return; }
+    irAVista(KEY_TO_VIEW_BUSQUEDA[key] || "dashboard");
+  };
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   // El menú lateral se puede colapsar a solo íconos en escritorio; queda "fijo" como lo dejes (se recuerda en este navegador).
   const [sidebarColapsado, setSidebarColapsado] = useState(() => localStorage.getItem("arkeyone_sidebar_colapsado") === "1");
@@ -1606,6 +1616,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
     { label: "General", items: [
       { id: "dashboard", label: "Panorama", icon: LayoutDashboard },
       { id: "citas", label: "Citas", icon: CalendarClock },
+      { id: "notas", label: "Notas", icon: StickyNote },
       { id: "mi-trabajo", label: "Mi trabajo", icon: CheckSquare },
       { id: "proyectos", label: "Proyectos e ideas", icon: FolderKanban },
       { id: "metas", label: "Metas por proyecto", icon: Target },
@@ -1665,7 +1676,12 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
             <Menu size={20} />
           </button>
           <img src="/icono-arkeyone.png" alt="ArkeyOne" style={{ height: 36 }} />
-          <button onClick={() => supabase.auth.signOut()} className="text-xs gp-text-muted px-2 py-1">Salir</button>
+          <div className="flex items-center gap-1">
+            <button onClick={() => setBusquedaAbierta(true)} className="p-2 gp-btn-ghost rounded" aria-label="Buscar">
+              <Search size={18} />
+            </button>
+            <button onClick={() => supabase.auth.signOut()} className="text-xs gp-text-muted px-2 py-1">Salir</button>
+          </div>
         </div>
 
         {/* fondo oscuro al abrir el cajón en móvil */}
@@ -1693,6 +1709,13 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
               {activeOwnerId === misId ? miEmail : `Viendo: ${activeOwnerEmail}`}
             </p>
           </div>
+
+          <button
+            onClick={() => setBusquedaAbierta(true)}
+            className={`gp-input flex items-center gap-2 text-xs gp-text-muted px-3 py-2 ${sidebarColapsado ? "md:justify-center md:px-0" : ""}`}
+          >
+            <Search size={14} /> <span className={sidebarColapsado ? "md:hidden" : ""}>Buscar en todo…</span>
+          </button>
 
           {misColaboraciones.length > 0 && (
             <div className={`px-2 ${sidebarColapsado ? "md:hidden" : ""}`}>
@@ -1905,10 +1928,14 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
           {view === "citas" && (
             <Citas data={data} onAdd={(i) => addItem("citas", i)} onEdit={(id, p) => editItem("citas", id, p)} onRemove={(id) => askDelete("citas", id)} />
           )}
+          {view === "notas" && (
+            <Notas data={data} onAdd={(i) => addItem("notas", i)} onEdit={(id, p) => editItem("notas", id, p)} onRemove={(id) => askDelete("notas", id)} />
+          )}
         </div>
       </div>
 
       <QuickCapture data={data} onAdd={addItem} irAVista={irAVista} />
+      {busquedaAbierta && <BusquedaGlobal data={data} onNavigate={buscarNavegarA} onClose={() => setBusquedaAbierta(false)} />}
 
       {confirmDelete && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,.6)" }} onClick={() => setConfirmDelete(null)}>
@@ -6340,13 +6367,155 @@ function CitaForm({ item, contactos, onSave }) {
   );
 }
 
-/* ---------- Captura rápida (botón flotante, para no tener que navegar a cada módulo) ---------- */
+// Config de la búsqueda global: qué ícono mostrar y a qué vista mandar al usuario por cada módulo.
+// Deliberadamente NO incluye "comentarios", "saldoInicial" ni "patrimonioValuaciones": no tienen
+// pantalla propia a la que navegar, así que un resultado ahí no le serviría de nada al usuario.
+const ICONO_MODULO_BUSQUEDA = {
+  proyectos: FolderKanban, pendientes: CheckSquare, equipo: Users, finanzas: Wallet, deudas: AlertTriangle,
+  actividades: Activity, activos: Globe, metas: Target, contactos: Contact, redesMetricas: BarChart3,
+  documentos: FileText, habitos: Flame, salud: HeartPulse, apartados: PiggyBank, eventos: Camera,
+  regalos: Gift, facturas: Receipt, campanas: Megaphone, patrimonio: Gem, medicamentos: Pill,
+  citas: CalendarClock, notas: StickyNote,
+};
+const KEY_TO_VIEW_BUSQUEDA = {
+  proyectos: "proyectos", pendientes: "pendientes", equipo: "equipo", finanzas: "finanzas", deudas: "deudas",
+  actividades: "actividades", activos: "activos", metas: "metas", contactos: "contactos", redesMetricas: "redes",
+  documentos: "documentos", habitos: "habitos", salud: "salud", apartados: "apartados", eventos: "eventos",
+  regalos: "regalos", facturas: "facturas", campanas: "marketing", patrimonio: "patrimonio", medicamentos: "medicamentos",
+  citas: "citas", notas: "notas",
+};
+function subtituloResultadoBusqueda(key, item) {
+  switch (key) {
+    case "finanzas": return `${item.tipo || ""} · ${item.monto ? fmtMoney(item.monto) : ""}`;
+    case "citas": return fmtFechaHora(item.fechaHora);
+    case "pendientes": return item.fechaLimite ? `Vence ${item.fechaLimite}` : "";
+    case "contactos": return item.correo || item.telefono || "";
+    case "notas": return (item.contenido || "").slice(0, 90);
+    case "proyectos": return item.categoria || "";
+    case "deudas": return item.monto ? fmtMoney(item.monto) : "";
+    default: return "";
+  }
+}
+
+// Búsqueda global: recorre TODO lo que ya está cargado en memoria (data) para la cuenta activa —
+// no hace falta ir a la base de datos porque el usuario ya tiene todos sus módulos en el cliente.
+function BusquedaGlobal({ data, onNavigate, onClose }) {
+  const [q, setQ] = useState("");
+  const qn = normalizarTexto(q);
+  const resultados = useMemo(() => {
+    if (!qn) return [];
+    const out = [];
+    for (const key of Object.keys(KEY_TO_VIEW_BUSQUEDA)) {
+      for (const item of data[key] || []) {
+        const coincide = Object.values(item).some((v) => typeof v === "string" && normalizarTexto(v).includes(qn));
+        if (coincide) out.push({ key, item });
+      }
+      if (out.length > 80) break;
+    }
+    return out.slice(0, 60);
+  }, [qn, data]);
+
+  return (
+    <div className="fixed inset-0 z-[90] flex items-start justify-center p-4" style={{ background: "rgba(0,0,0,.7)", paddingTop: "8vh" }} onClick={onClose}>
+      <div className="gp-panel w-full max-w-xl p-4 flex flex-col" style={{ maxHeight: "78vh" }} onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center gap-2 mb-3 shrink-0">
+          <Search size={16} className="gp-text-muted" />
+          <input autoFocus className="gp-input flex-1" placeholder="Buscar en todo ARKEYONE… (proyectos, pendientes, notas, contactos, movimientos…)" value={q} onChange={(e) => setQ(e.target.value)} />
+          <button onClick={onClose} className="gp-btn-ghost p-1.5 rounded shrink-0"><X size={16} /></button>
+        </div>
+        <div className="overflow-y-auto gp-scroll flex-1 space-y-1">
+          {!qn && <p className="text-sm gp-text-muted text-center py-8">Busca en todos tus módulos a la vez, incluyendo Notas.</p>}
+          {qn && resultados.length === 0 && <p className="text-sm gp-text-muted text-center py-8">Sin resultados para "{q}".</p>}
+          {resultados.map(({ key, item }) => {
+            const Icono = ICONO_MODULO_BUSQUEDA[key] || FileText;
+            const sub = subtituloResultadoBusqueda(key, item);
+            return (
+              <button key={key + item.id} onClick={() => onNavigate(key, item)} className="w-full flex items-center gap-3 p-2.5 rounded gp-btn-ghost text-left">
+                <Icono size={15} className="gp-text-muted shrink-0" />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-sm truncate">{labelFor(key, item)}</span>
+                    <Badge tone="muted">{ETIQUETA_TABLA[key]}</Badge>
+                  </div>
+                  {sub && <p className="text-xs gp-text-muted truncate">{sub}</p>}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+function Notas({ data, onAdd, onEdit, onRemove }) {
+  const [modal, setModal] = useState(null);
+  const [busqueda, setBusqueda] = useState("");
+  const empty = { titulo: "", contenido: "" };
+
+  const filtradas = [...data.notas]
+    .filter((n) => !busqueda.trim() || normalizarTexto(n.titulo).includes(normalizarTexto(busqueda)) || normalizarTexto(n.contenido).includes(normalizarTexto(busqueda)))
+    .sort((a, b) => (b.updatedAt || b.createdAt || "").localeCompare(a.updatedAt || a.createdAt || ""));
+
+  const fmtFechaCorta = (iso) => iso ? new Date(iso).toLocaleDateString("es-MX", { day: "numeric", month: "short" }) : "";
+
+  return (
+    <div>
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-1">
+        <h2 className="gp-serif text-2xl">Notas</h2>
+        <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm w-full sm:w-auto"><Plus size={14} /> Nueva</button>
+      </div>
+      <p className="text-sm gp-text-muted mb-4">Texto libre, sin ligar a ningún proyecto, tarea ni nada — para anotar cualquier cosa rápido.</p>
+
+      <input className="gp-input mb-4" placeholder="Buscar en tus notas…" value={busqueda} onChange={(e) => setBusqueda(e.target.value)} />
+
+      {filtradas.length === 0 && <p className="text-sm gp-text-muted text-center py-6">{busqueda ? "Sin resultados." : "Aún no tienes notas."}</p>}
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+        {filtradas.map((n) => (
+          <div key={n.id} onClick={() => setModal({ item: n })} className="gp-panel p-4 cursor-pointer flex flex-col" style={{ minHeight: 120 }}>
+            <div className="flex items-start justify-between gap-2 mb-1">
+              <span className="text-sm font-medium truncate">{n.titulo || "Sin título"}</span>
+              <IconBtn onClick={(e) => { e.stopPropagation(); onRemove(n.id); }}><Trash2 size={13} /></IconBtn>
+            </div>
+            <p className="text-xs gp-text-muted flex-1" style={{ display: "-webkit-box", WebkitLineClamp: 5, WebkitBoxOrient: "vertical", overflow: "hidden", whiteSpace: "pre-wrap" }}>{n.contenido}</p>
+            <p className="text-xs gp-text-muted mt-2" style={{ opacity: 0.7 }}>{fmtFechaCorta(n.updatedAt || n.createdAt)}</p>
+          </div>
+        ))}
+      </div>
+
+      {modal && (
+        <Modal title={modal.item.id ? "Editar nota" : "Nueva nota"} onClose={() => setModal(null)}>
+          <NotaForm item={modal.item} onSave={(v) => { modal.item.id ? onEdit(modal.item.id, v) : onAdd({ ...v, id: uid() }); setModal(null); }} />
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+function NotaForm({ item, onSave }) {
+  const [titulo, setTitulo] = useState(item.titulo || "");
+  const [contenido, setContenido] = useState(item.contenido || "");
+  return (
+    <div>
+      <Field label="Título (opcional)"><input className="gp-input" value={titulo} onChange={(e) => setTitulo(e.target.value)} /></Field>
+      <Field label="Escribe lo que sea"><textarea className="gp-input" rows={8} value={contenido} onChange={(e) => setContenido(e.target.value)} autoFocus /></Field>
+      <button className="gp-btn w-full py-2 text-sm mt-1" onClick={() => onSave({ titulo: titulo.trim(), contenido })}>
+        Guardar
+      </button>
+    </div>
+  );
+}
+
+
 function QuickCapture({ data, onAdd, irAVista }) {
   const [abierto, setAbierto] = useState(false);
   const [tipo, setTipo] = useState(null); // "cita" | "contacto" | "idea" | "ingreso" | "egreso"
 
   const OPCIONES = [
     { key: "cita", label: "Cita", icon: CalendarClock },
+    { key: "nota", label: "Nota", icon: StickyNote },
     { key: "contacto", label: "Contacto", icon: Contact },
     { key: "idea", label: "Idea", icon: Lightbulb },
     { key: "ingreso", label: "Ingreso", icon: Wallet },
@@ -6381,6 +6550,11 @@ function QuickCapture({ data, onAdd, irAVista }) {
         <Modal title="Nueva cita" onClose={cerrar}>
           <CitaForm item={{ titulo: "", fechaHora: localInputsAFechaHora(todayISO(), "09:00"), lugar: "", contactoId: "", notas: "" }} contactos={data.contactos}
             onSave={(v) => { onAdd("citas", { ...v, id: uid() }); cerrar(); irAVista("citas"); }} />
+        </Modal>
+      )}
+      {tipo === "nota" && (
+        <Modal title="Nueva nota" onClose={cerrar}>
+          <NotaForm item={{ titulo: "", contenido: "" }} onSave={(v) => { onAdd("notas", { ...v, id: uid() }); cerrar(); irAVista("notas"); }} />
         </Modal>
       )}
       {tipo === "contacto" && (
