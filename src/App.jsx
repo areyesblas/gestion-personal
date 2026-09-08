@@ -6,7 +6,7 @@ import {
   Users, Activity, Plus, X, Trash2, Pencil, Github, ChevronDown,
   ChevronRight, Bell, Lightbulb, Rocket, MessageCircle, Mail, Globe,
   Target, Contact, BarChart3, FileText, Flame, HeartPulse, Check, Menu, PieChart as PieChartIcon,
-  PiggyBank, Camera, Film, Upload, MapPin, Clock, Mic, Gift, Receipt, Megaphone, ChevronUp, Gem, Download, Sun, Moon, Shield, LogOut, ChevronLeft, Lock, Pill, CalendarClock, Zap, StickyNote, Search, Sparkles, Send, Bot, Volume2, VolumeX, Square, Settings, CalendarRange,
+  PiggyBank, Camera, Film, Upload, MapPin, Clock, Mic, Gift, Receipt, Megaphone, ChevronUp, Gem, Download, Sun, Moon, Shield, LogOut, ChevronLeft, Lock, Pill, CalendarClock, Zap, StickyNote, Search, Sparkles, Send, Bot, Volume2, VolumeX, Square, Settings, CalendarRange, Palette,
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
@@ -20,8 +20,13 @@ const Tokens = ({ tema = "oscuro" }) => (
     .gp-root{ --bg:#0B2341; --panel:#12304F; --panel-hi:#1A3D63; --border:#234A70;
       --text:#EAF1FA; --muted:#93A7C4; --gold:#F59E0B; --teal:#5FBF8B; --teal-tint:#DCF5E6; --teal-text:#1D6B42; --panel-2:rgba(255,255,255,.12); --red:#EF4444;
       background:var(--bg); color:var(--text); font-family:'IBM Plex Sans',sans-serif; }
-    .gp-root.claro{ --bg:#E8F1FB; --panel:#F7FBFF; --panel-hi:#DCEAFA; --border:#C3D9EE;
-      --text:#0B2341; --muted:#5B7A9E; --gold:#F59E0B; --teal:#4CAF7A; --teal-tint:#DCF5E6; --teal-text:#1D6B42; --panel-2:rgba(11,35,65,.06); --red:#DC2626; }
+    /* Temas: todos oscuros (a propósito — el tema claro se probó antes y el logo perdía
+       contraste sobre fondos pálidos). Solo cambia la familia de color de fondo/paneles;
+       el dorado de acento, el verde/rojo semánticos y demás se quedan iguales en todos. */
+    .gp-root.tema-negro{ --bg:#0A0A0A; --panel:#1A1A1A; --panel-hi:#262626; --border:#333333; --text:#F2F2F2; --muted:#9A9A9A; }
+    .gp-root.tema-oliva{ --bg:#232A1C; --panel:#333D28; --panel-hi:#414D34; --border:#4A5639; --text:#F0F3EA; --muted:#A8B49B; }
+    .gp-root.tema-rojo{ --bg:#2A0F0F; --panel:#3D1717; --panel-hi:#4D1F1F; --border:#5C2828; --text:#F5E9E9; --muted:#C79B9B; }
+    .gp-root.tema-naranja{ --bg:#2A1607; --panel:#3D200D; --panel-hi:#4D2A14; --border:#5C3A1E; --text:#F5EBDF; --muted:#C2A183; }
     .gp-serif{ font-family:'Poppins',sans-serif; font-weight:600; }
     .gp-mono{ font-family:'IBM Plex Mono',monospace; }
     .gp-panel{ background:var(--panel); border:1px solid var(--border); border-radius:6px; }
@@ -55,13 +60,11 @@ const Tokens = ({ tema = "oscuro" }) => (
     .gp-scroll::-webkit-scrollbar{ width:6px; height:6px; }
     .gp-scroll::-webkit-scrollbar-thumb{ background:var(--border); border-radius:3px; }
     /* El panel lateral tiene su propio "look": el logo y el color de letras SIEMPRE son los mismos
-       (claros), sin importar el tema. Solo el fondo (y sus tonos de hover/borde) cambia entre temas. */
+       (claros), sin importar el tema — todos los temas son oscuros así que esto ya no necesita
+       overrides por tema como cuando existía el tema claro. */
     .gp-sidebar-area{ --text:#EAF1FA; --muted:#93A7C4; }
-    .gp-root.claro .gp-sidebar-area{
-      --bg:#1A3C60; --panel:#1E4976; --panel-hi:#28527F; --border:#2F5C89;
-    }
     /* Fondo "blanco hueso" para paneles puntuales (chat del Asistente, calendario de Agenda)
-       que deben verse claros aunque el resto de la app esté en tema oscuro. Redefine las
+       que deben verse claros aunque el resto de la app esté en un tema oscuro. Redefine las
        variables de color solo dentro de este panel, así todo lo de adentro (texto, badges,
        bloques) se ajusta automáticamente sin tocar el resto de la app. */
     .gp-hueso{ --panel:#F7F3EA; --panel-2:#E9E1CC; --border:#DDD3BA; --text:#3A2F22; --muted:#8A7E68;
@@ -69,16 +72,27 @@ const Tokens = ({ tema = "oscuro" }) => (
   `}</style>
 );
 
-// Recuerda tu tema (Azul Claro / Azul Oscuro) entre visitas, guardado en este navegador
-// y, una vez que inicias sesión, también en tu cuenta (para que te siga en otros dispositivos).
-// El tema ahora es fijo (Azul Oscuro) — se quitó la opción de cambiar a tema claro.
-// Se deja la función con la misma forma (tema, toggleTema, setTema) para no tener que tocar
-// cada lugar que la usa; toggleTema/setTema ya no hacen nada.
+// Recuerda tu tema entre visitas, guardado en este navegador y, una vez que inicias sesión,
+// también en tu cuenta (para que te siga en otros dispositivos, vía cambiarTema/preferencias).
+const TEMAS_VALIDOS = ["actual", "negro", "oliva", "rojo", "naranja"];
 function useTema() {
-  const tema = "oscuro";
-  const noop = () => {};
-  return [tema, noop, noop];
+  const [tema, setTemaState] = useState(() => {
+    try {
+      const guardado = localStorage.getItem("arkeyone_tema");
+      return TEMAS_VALIDOS.includes(guardado) ? guardado : "actual";
+    } catch { return "actual"; }
+  });
+  const setTema = (nuevo) => {
+    if (!TEMAS_VALIDOS.includes(nuevo)) return;
+    setTemaState(nuevo);
+    try { localStorage.setItem("arkeyone_tema", nuevo); } catch {}
+  };
+  const toggleTema = () => {}; // ya no aplica con varios temas — se deja por compatibilidad de firma
+  return [tema, toggleTema, setTema];
 }
+// "actual" es el tema base (mismos valores que .gp-root, sin clase extra); los demás agregan
+// su propia clase .tema-XXX que sobreescribe las variables de color.
+const claseTema = (tema) => (tema && tema !== "actual" ? `tema-${tema}` : "");
 
 
 /* ---------- datos base ---------- */
@@ -711,7 +725,7 @@ function renderLegalText(texto) {
 
 function DocumentoLegal({ titulo, texto, onVolver, tema }) {
   return (
-    <div className={`gp-root ${tema === "claro" ? "claro" : ""}`} style={{ minHeight: "100vh" }}>
+    <div className={`gp-root ${claseTema(tema)}`} style={{ minHeight: "100vh" }}>
       <Tokens tema={tema} />
       <div className="max-w-2xl mx-auto p-6">
         <button onClick={onVolver} className="text-xs gp-text-gold mb-4">← Regresar</button>
@@ -778,7 +792,7 @@ function LoginScreen({ tema, toggleTema }) {
   };
 
   return (
-    <div className={`gp-root gp-sidebar-area flex items-center justify-center ${tema === "claro" ? "claro" : ""}`} style={{ minHeight: "100vh" }}>
+    <div className={`gp-root gp-sidebar-area flex items-center justify-center ${claseTema(tema)}`} style={{ minHeight: "100vh" }}>
       <Tokens tema={tema} />
       <form onSubmit={handleSubmit} className="gp-panel p-6 w-full max-w-sm relative">
         <div className="flex flex-col items-center text-center mb-4">
@@ -846,7 +860,7 @@ function NuevaPasswordScreen({ onListo, tema }) {
   };
 
   return (
-    <div className={`gp-root gp-sidebar-area flex items-center justify-center ${tema === "claro" ? "claro" : ""}`} style={{ minHeight: "100vh" }}>
+    <div className={`gp-root gp-sidebar-area flex items-center justify-center ${claseTema(tema)}`} style={{ minHeight: "100vh" }}>
       <Tokens tema={tema} />
       <div className="gp-panel p-6 w-full max-w-sm">
         <img src="/logo-arkeyone.png" alt="ArkeyOne" style={{ height: 108 }} className="mb-3" />
@@ -876,7 +890,7 @@ function NuevaPasswordScreen({ onListo, tema }) {
 function SplashScreen({ tema, fadingOut }) {
   return (
     <div
-      className={`gp-root gp-sidebar-area fixed inset-0 z-[100] flex items-center justify-center ${tema === "claro" ? "claro" : ""}`}
+      className={`gp-root gp-sidebar-area fixed inset-0 z-[100] flex items-center justify-center ${claseTema(tema)}`}
       style={{ transition: "opacity .4s ease", opacity: fadingOut ? 0 : 1 }}
     >
       <Tokens tema={tema} />
@@ -917,7 +931,7 @@ function MfaChallengeScreen({ factorId, onVerificado, tema }) {
   };
 
   return (
-    <div className={`gp-root gp-sidebar-area flex items-center justify-center ${tema === "claro" ? "claro" : ""}`} style={{ minHeight: "100vh" }}>
+    <div className={`gp-root gp-sidebar-area flex items-center justify-center ${claseTema(tema)}`} style={{ minHeight: "100vh" }}>
       <Tokens tema={tema} />
       <div className="gp-panel p-6 w-full max-w-sm">
         <img src="/logo-arkeyone.png" alt="ArkeyOne" style={{ height: 92 }} className="mb-4" />
@@ -1091,7 +1105,7 @@ export default function App() {
   let pantalla;
   if (session === undefined) {
     pantalla = (
-      <div className={`gp-root min-h-screen flex items-center justify-center ${tema === "claro" ? "claro" : ""}`}>
+      <div className={`gp-root min-h-screen flex items-center justify-center ${claseTema(tema)}`}>
         <Tokens tema={tema} />
         <p className="gp-text-muted text-sm">Cargando…</p>
       </div>
@@ -1102,7 +1116,7 @@ export default function App() {
     pantalla = <LoginScreen tema={tema} toggleTema={toggleTema} />;
   } else if (mfaEstado === null) {
     pantalla = (
-      <div className={`gp-root min-h-screen flex items-center justify-center ${tema === "claro" ? "claro" : ""}`}>
+      <div className={`gp-root min-h-screen flex items-center justify-center ${claseTema(tema)}`}>
         <Tokens tema={tema} />
         <p className="gp-text-muted text-sm">Cargando…</p>
       </div>
@@ -1421,7 +1435,8 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
       setMisColaboraciones((colabs || []).map((c) => ({ propietarioId: c.propietario_id, propietarioEmail: c.propietario_email, modulos: c.modulos })));
 
       const { data: pref } = await supabase.from("preferencias").select("tema, alertas_correo_activas").eq("user_id", misId).maybeSingle();
-      if (pref?.tema && pref.tema !== tema) setTema(pref.tema);
+      const temaGuardado = pref?.tema === "claro" || pref?.tema === "oscuro" ? "actual" : pref?.tema;
+      if (temaGuardado && temaGuardado !== tema) setTema(temaGuardado);
       if (pref && pref.alertas_correo_activas === false) setAlertasCorreoActivas(false);
 
       let result = await loadAllTables(misId);
@@ -1581,6 +1596,14 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
 
   const [exportPaso, setExportPaso] = useState(null); // null | "confirmar" | "listo"
   const [mfaModalAbierto, setMfaModalAbierto] = useState(false);
+  const [temaModalAbierto, setTemaModalAbierto] = useState(false);
+  const TEMAS = [
+    { id: "actual", label: "Actual", swatch: "#12304F" },
+    { id: "negro", label: "Negro", swatch: "#1A1A1A" },
+    { id: "oliva", label: "Verde Olivo", swatch: "#333D28" },
+    { id: "rojo", label: "Rojo", swatch: "#3D1717" },
+    { id: "naranja", label: "Naranja", swatch: "#3D200D" },
+  ];
   const confirmarExportar = () => {
     exportarExcel(data, activeOwnerId === misId ? "mi-cuenta" : activeOwnerEmail?.split("@")[0]);
     setExportPaso("listo");
@@ -1702,7 +1725,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
 
   if (loading || !data) {
     return (
-      <div className={`gp-root min-h-screen flex items-center justify-center ${tema === "claro" ? "claro" : ""}`}>
+      <div className={`gp-root min-h-screen flex items-center justify-center ${claseTema(tema)}`}>
         <Tokens tema={tema} />
         <p className="gp-text-muted text-sm">Cargando tu sistema…</p>
       </div>
@@ -1762,7 +1785,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
         .filter((g) => g.items.length > 0);
 
   return (
-    <div className={`gp-root overflow-hidden ${tema === "claro" ? "claro" : ""}`} style={{ minHeight: "100vh" }}>
+    <div className={`gp-root overflow-hidden ${claseTema(tema)}`} style={{ minHeight: "100vh" }}>
       <Tokens tema={tema} />
       <div className="flex relative" style={{ minHeight: "100vh" }}>
         {/* barra superior solo en móvil — padding extra arriba/lados para no quedar tapada
@@ -1897,6 +1920,10 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
             );
           })}
           <div className="mt-auto pt-2 border-t gp-border flex flex-col gap-0.5">
+            <button onClick={() => setTemaModalAbierto(true)} title="Tema"
+              className={`gp-navitem flex items-center gap-2 px-3 py-2.5 md:py-2 text-sm text-left w-full ${sidebarColapsado ? "md:justify-center md:px-2" : ""}`}>
+              <Palette size={15} /> <span className={sidebarColapsado ? "md:hidden" : ""}>Tema: {TEMAS.find((t) => t.id === tema)?.label || "Actual"}</span>
+            </button>
             <button onClick={() => setExportPaso("confirmar")} title="Exportar mis datos"
               className={`gp-navitem flex items-center gap-2 px-3 py-2.5 md:py-2 text-sm text-left w-full ${sidebarColapsado ? "md:justify-center md:px-2" : ""}`}>
               <Download size={15} /> <span className={sidebarColapsado ? "md:hidden" : ""}>Exportar mis datos</span>
@@ -2161,6 +2188,25 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
       )}
 
       {mfaModalAbierto && <SeguridadMfaModal onClose={() => setMfaModalAbierto(false)} />}
+      {temaModalAbierto && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,.6)" }} onClick={() => setTemaModalAbierto(false)}>
+          <div className="gp-panel p-4 max-w-sm w-full" onClick={(e) => e.stopPropagation()}>
+            <h3 className="font-semibold mb-3">Elige un tema</h3>
+            <div className="grid grid-cols-2 gap-2">
+              {TEMAS.map((t) => (
+                <button key={t.id} onClick={() => cambiarTema(t.id)}
+                  className="flex items-center gap-2 p-2.5 rounded text-sm text-left"
+                  style={{ border: `2px solid ${tema === t.id ? "var(--gold)" : "var(--border)"}`, background: "var(--panel-2)" }}>
+                  <span className="rounded-full shrink-0" style={{ width: 18, height: 18, background: t.swatch, border: "1px solid var(--border)" }} />
+                  {t.label}
+                  {tema === t.id && <Check size={14} className="ml-auto gp-text-gold shrink-0" />}
+                </button>
+              ))}
+            </div>
+            <button className="gp-btn-ghost w-full px-3 py-2 text-sm rounded mt-3" onClick={() => setTemaModalAbierto(false)}>Cerrar</button>
+          </div>
+        </div>
+      )}
 
       {notifPanelAbierto && (
         <div className="fixed inset-0 z-[80] flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,.65)" }} onClick={() => setNotifPanelAbierto(false)}>
