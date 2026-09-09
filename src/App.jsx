@@ -1379,6 +1379,18 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
       return next;
     });
   };
+  // El modo "solo íconos" (sidebarColapsado) es una preferencia de ESCRITORIO. Como se guarda en
+  // localStorage sin distinguir viewport, si el usuario la activó alguna vez en escritorio, en
+  // móvil quedaba forzando mostrarItems=true (ver más abajo) e impedía que las secciones del
+  // menú se colapsaran al tocarlas. Este flag detecta si estamos en viewport de escritorio (≥768px,
+  // el breakpoint "md" de Tailwind) para que esa preferencia solo aplique ahí.
+  const [esEscritorio, setEsEscritorio] = useState(() => window.matchMedia?.("(min-width: 768px)").matches ?? true);
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 768px)");
+    const actualizar = (e) => setEsEscritorio(e.matches);
+    mq.addEventListener("change", actualizar);
+    return () => mq.removeEventListener("change", actualizar);
+  }, []);
   // Qué grupos del menú lateral están cerrados (colapsados). Por default arrancan TODOS cerrados;
   // si el usuario abre alguno, se recuerda esa preferencia en este navegador.
   const [gruposCerrados, setGruposCerrados] = useState(() => {
@@ -2018,7 +2030,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
 
           {navGroupsFiltrados.map((g) => {
             const cerrado = grupoEstaCerrado(g.label);
-            const mostrarItems = sidebarColapsado || !cerrado;
+            const mostrarItems = (sidebarColapsado && esEscritorio) || !cerrado;
             const itemsOrdenados = ordenarItemsGrupo(g.label, g.items);
             return (
               <div key={g.label}>
