@@ -229,7 +229,7 @@ Deno.serve(async (_req) => {
             items.push({ tipo: "pago_recurrente", tabla: "finanzas", id: r.id, texto: `${r.concepto || "Pago recurrente"} \u2014 ${fmtMoney(r.monto)}, vence ${fmtFecha(r.fecha_vencimiento)}` });
           }
         }); }
-      { const { data } = await admin.from("pendientes").select("id, descripcion, fecha_limite").eq("user_id", uid).is("deleted_at", null).neq("estatus", "Hecho").gte("fecha_limite", hoy).lte("fecha_limite", limite);
+      { const { data } = await admin.from("pendientes").select("id, descripcion, fecha_limite").eq("user_id", uid).is("deleted_at", null).not("estatus", "in", "(Completada,Cancelada)").gte("fecha_limite", hoy).lte("fecha_limite", limite);
         (data || []).forEach((r) => items.push({ tipo: "pendiente", tabla: "pendientes", id: r.id, texto: `${r.descripcion} \u2014 vence ${fmtFecha(r.fecha_limite)}` })); }
       { const { data } = await admin.from("documentos").select("id, nombre, fecha_vencimiento").eq("user_id", uid).is("deleted_at", null).gte("fecha_vencimiento", hoy).lte("fecha_vencimiento", limite);
         (data || []).forEach((r) => items.push({ tipo: "documento", tabla: "documentos", id: r.id, texto: `${r.nombre} \u2014 vence ${fmtFecha(r.fecha_vencimiento)}` })); }

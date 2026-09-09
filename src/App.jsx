@@ -177,7 +177,18 @@ const ESTATUS_PROYECTO = ["Idea", "En validación", "En desarrollo", "Activo", "
 const MODO_PROYECTO = ["Finito", "Continuo"];
 const MONETIZACION = ["Dinero", "Especie", "Intercambio", "No genera dinero"];
 const PRIORIDADES = ["Alta", "Media", "Baja"];
-const ESTATUS_TAREA = ["Pendiente", "En progreso", "Hecho"];
+// 7 estados según el documento maestro v0.1 (antes eran solo 3: Pendiente/En progreso/Hecho).
+const ESTATUS_TAREA = ["Borrador", "No iniciada", "Pendiente", "En proceso", "En espera", "Completada", "Cancelada"];
+// Estados que cuentan como "ya no requiere trabajo activo" (para filtros de "abiertas" vs archivadas).
+const ESTATUS_TAREA_CERRADOS = ["Completada", "Cancelada"];
+const tareaAbierta = (estatus) => !ESTATUS_TAREA_CERRADOS.includes(estatus);
+const toneEstatusTarea = (estatus) => (
+  estatus === "Completada" ? "teal" :
+  estatus === "Cancelada" ? "muted" :
+  estatus === "En proceso" ? "gold" :
+  estatus === "En espera" ? "red" :
+  "muted" // Borrador, No iniciada, Pendiente
+);
 const TIPO_FIN = ["Ingreso", "Egreso"];
 const FORMA_PAGO = ["Efectivo", "Transferencia", "Especie", "Intercambio"];
 const OCASIONES_REGALO = ["Cumpleaños", "Navidad", "Aniversario", "Felicitación", "Otro"];
@@ -3130,7 +3141,7 @@ function Dashboard({ data, setView, onAddSaldo, onVerProyecto, onEditPendiente }
   // ni una tabla nueva — solo lee de las entidades reales (Pendientes, Citas, Finanzas).
   const acciones = [];
   data.pendientes.forEach((p) => {
-    if (p.estatus === "Hecho") return;
+    if (p.estatus === "Completada") return;
     if (p.fechaLimite) {
       const dd = daysUntil(p.fechaLimite);
       if (dd <= 7) acciones.push({ id: `pend-${p.id}`, origen: "Tarea", tipo: "pendiente", texto: p.descripcion, sub: nombreProyecto(p.proyectoId), dd, irA: () => setView("pendientes"), pendienteId: p.id });
@@ -3189,7 +3200,7 @@ function Dashboard({ data, setView, onAddSaldo, onVerProyecto, onEditPendiente }
     .filter((p) => p.estatus === "Activo" || p.estatus === "En desarrollo")
     .map((p) => {
       const revisionDd = p.fechaRevision ? daysUntil(p.fechaRevision) : null;
-      const pendVencidos = data.pendientes.filter((t) => t.proyectoId === p.id && t.estatus !== "Hecho" && t.fechaLimite && daysUntil(t.fechaLimite) < 0).length;
+      const pendVencidos = data.pendientes.filter((t) => t.proyectoId === p.id && t.estatus !== "Completada" && t.fechaLimite && daysUntil(t.fechaLimite) < 0).length;
       const motivo = revisionDd !== null && revisionDd <= 7 ? (revisionDd < 0 ? "Revisión vencida" : revisionDd === 0 ? "Revisión hoy" : `Revisión en ${revisionDd}d`) : pendVencidos > 0 ? `${pendVencidos} pendiente${pendVencidos === 1 ? "" : "s"} vencido${pendVencidos === 1 ? "" : "s"}` : null;
       return { ...p, motivo };
     })
@@ -3207,7 +3218,7 @@ function Dashboard({ data, setView, onAddSaldo, onVerProyecto, onEditPendiente }
   }).filter((p) => p.neto !== 0).sort((a, b) => b.neto - a.neto);
 
   const pendientesTotal = data.pendientes.length;
-  const pendientesHechos = data.pendientes.filter((p) => p.estatus === "Hecho").length;
+  const pendientesHechos = data.pendientes.filter((p) => p.estatus === "Completada").length;
   const metasTotal = data.metas.length;
   const metasCumplidas = data.metas.filter((m) => m.estatus === "Cumplida").length;
   const pctPendientes = pendientesTotal ? Math.round((pendientesHechos / pendientesTotal) * 100) : 0;
@@ -3217,7 +3228,7 @@ function Dashboard({ data, setView, onAddSaldo, onVerProyecto, onEditPendiente }
     .filter((p) => p.estatus === "Activo" || p.estatus === "En desarrollo")
     .map((p) => {
       const pends = data.pendientes.filter((t) => t.proyectoId === p.id);
-      const hechos = pends.filter((t) => t.estatus === "Hecho").length;
+      const hechos = pends.filter((t) => t.estatus === "Completada").length;
       return { nombre: p.nombre, total: pends.length, hechos, pct: pends.length ? Math.round((hechos / pends.length) * 100) : null };
     })
     .filter((p) => p.total > 0)
@@ -3242,7 +3253,7 @@ function Dashboard({ data, setView, onAddSaldo, onVerProyecto, onEditPendiente }
               {accionesHoy.map((a) => (
                 <li key={a.id} className="flex items-center gap-2">
                   {a.pendienteId ? (
-                    <button onClick={() => onEditPendiente(a.pendienteId, { estatus: "Hecho" })} title="Marcar como hecho"
+                    <button onClick={() => onEditPendiente(a.pendienteId, { estatus: "Completada" })} title="Marcar como hecho"
                       className="w-5 h-5 rounded flex items-center justify-center shrink-0" style={{ border: "1px solid var(--border)" }}>
                     </button>
                   ) : <span className="w-5 shrink-0" />}
@@ -3500,7 +3511,7 @@ function rentabilidadProyecto(data, proyectoId) {
   const egresos = movs.filter((f) => f.tipo === "Egreso").reduce((s, f) => s + (Number(f.monto) || 0), 0);
   const tareasProyecto = data.pendientes.filter((t) => t.proyectoId === proyectoId);
   const pagosColab = tareasProyecto
-    .filter((t) => t.responsableId && t.estatus === "Hecho")
+    .filter((t) => t.responsableId && t.estatus === "Completada")
     .reduce((s, t) => s + (Number(t.precio) || 0), 0);
   // Cuánto costaría en total hacer el proyecto si se pagara TODO lo pactado en el precio de cada
   // tarea (sin importar si ya está hecha o quién la haga) — un estimado, no un movimiento real.
@@ -3527,7 +3538,7 @@ function repartoCostosProyecto(data, proyectoId) {
     const precio = Number(t.precio) || 0;
     grupos[key].tareas += 1;
     grupos[key].total += precio;
-    if (t.estatus === "Hecho") grupos[key].generado += precio; else grupos[key].pendiente += precio;
+    if (t.estatus === "Completada") grupos[key].generado += precio; else grupos[key].pendiente += precio;
   }
   return Object.values(grupos).sort((a, b) => (a.esYo ? -1 : b.esYo ? 1 : a.nombre.localeCompare(b.nombre)));
 }
@@ -3670,11 +3681,11 @@ function Proyectos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
                                         <td>
                                           <span style={{ paddingLeft: nivel * 16 }} className="flex items-center gap-1">
                                             {nivel > 0 && <span className="gp-text-muted">└</span>}
-                                            <span className={t.estatus === "Hecho" ? "gp-text-muted" : ""} style={t.estatus === "Hecho" ? { textDecoration: "line-through" } : undefined}>{t.descripcion}</span>
+                                            <span className={t.estatus === "Completada" ? "gp-text-muted" : ""} style={t.estatus === "Completada" ? { textDecoration: "line-through" } : undefined}>{t.descripcion}</span>
                                           </span>
                                         </td>
                                         <td className="gp-mono">{t.precio ? fmtMoney(t.precio) : "—"}</td>
-                                        <td><Badge tone={t.estatus === "Hecho" ? "teal" : t.estatus === "En progreso" ? "gold" : "muted"}>{t.estatus}</Badge></td>
+                                        <td><Badge tone={toneEstatusTarea(t.estatus)}>{t.estatus}</Badge></td>
                                       </tr>
                                     ))}
                                   </tbody>
@@ -3887,7 +3898,7 @@ function ProyectoDetalle({ data, proyectoId, onVolver, onAddTarea, onEditTarea, 
           <thead><tr><th>Pendiente</th><th>Cliente</th><th>Responsable</th><th>Fecha</th><th>Prioridad</th><th>Avance</th><th>Precio</th><th></th></tr></thead>
           <tbody>
             {filas.map(({ item: p, nivel }) => {
-              const vencido = p.estatus !== "Hecho" && p.fechaLimite && daysUntil(p.fechaLimite) < 0;
+              const vencido = p.estatus !== "Completada" && p.fechaLimite && daysUntil(p.fechaLimite) < 0;
               const nc = nComentarios(p.id);
               const tieneHijos = p.hijos && p.hijos.length > 0;
               const avance = Math.round(calcAvanceTarea(p));
@@ -4009,7 +4020,7 @@ function MiTrabajo({ misId }) {
 
       <div className="space-y-2">
         {(tareas || []).map((t) => {
-          const vencido = t.estatus !== "Hecho" && t.fecha_limite && daysUntil(t.fecha_limite) < 0;
+          const vencido = t.estatus !== "Completada" && t.fecha_limite && daysUntil(t.fecha_limite) < 0;
           return (
             <div key={t.id} className="gp-panel p-4">
               <div className="flex items-start justify-between gap-3">
@@ -4058,7 +4069,7 @@ function flattenTareas(tree, nivel = 0) {
 function calcAvanceTarea(nodo) {
   if (!nodo.hijos || nodo.hijos.length === 0) {
     if (nodo.avance !== null && nodo.avance !== undefined && nodo.avance !== "") return Number(nodo.avance);
-    return nodo.estatus === "Hecho" ? 100 : nodo.estatus === "En progreso" ? 50 : 0;
+    return nodo.estatus === "Completada" ? 100 : nodo.estatus === "En proceso" ? 50 : 0;
   }
   const suma = nodo.hijos.reduce((s, h) => s + calcAvanceTarea(h), 0);
   return suma / nodo.hijos.length;
@@ -4116,7 +4127,7 @@ function MindMapPendientes({ proyecto, tareas, onNodoClick, onAgregar, onElimina
   const maxY = Math.max(...posiciones.map((p) => p.y));
   const width = (maxNivel + 1) * (NODE_W + GAP_X) + 20;
   const height = maxY + NODE_H + 20;
-  const colorEstatus = (estatus) => (estatus === "Hecho" ? "var(--teal)" : estatus === "En progreso" ? "var(--gold)" : "var(--border)");
+  const colorEstatus = (estatus) => (estatus === "Completada" ? "var(--teal)" : estatus === "En proceso" ? "var(--gold)" : estatus === "En espera" ? "var(--red)" : estatus === "Cancelada" ? "var(--muted)" : "var(--border)");
 
   return (
     <div>
@@ -4300,7 +4311,7 @@ function Pendientes({ data, activeOwnerId, onAdd, onEdit, onRemove, onAddComenta
           </thead>
           <tbody>
             {filas.map(({ item: p, nivel }) => {
-              const vencido = p.estatus !== "Hecho" && p.fechaLimite && daysUntil(p.fechaLimite) < 0;
+              const vencido = p.estatus !== "Completada" && p.fechaLimite && daysUntil(p.fechaLimite) < 0;
               const nc = nComentarios(p.id);
               const tieneHijos = p.hijos && p.hijos.length > 0;
               const avance = tieneHijos ? Math.round(calcAvanceTarea(p)) : null;
@@ -4309,7 +4320,7 @@ function Pendientes({ data, activeOwnerId, onAdd, onEdit, onRemove, onAddComenta
                   key={p.id}
                   onClick={() => setModal({ item: paraEditar(p) })}
                   className="cursor-pointer"
-                  style={p.estatus === "Hecho" ? { background: "var(--teal-tint)", color: "var(--teal-text)", "--muted": "#3F8562" } : undefined}
+                  style={p.estatus === "Completada" ? { background: "var(--teal-tint)", color: "var(--teal-text)", "--muted": "#3F8562" } : undefined}
                 >
                   <td style={{ maxWidth: 220 }}>
                     <span style={{ paddingLeft: nivel * 18 }} className="flex items-start gap-1">
@@ -7359,9 +7370,9 @@ function Agenda({ data, onEditPendiente, onAddCita, misId }) {
   const rangoStr = { desde: dateStr(diasVisibles[0]), hasta: dateStr(diasVisibles[diasVisibles.length - 1]) };
   const citasEnRango = (data.citas || []).filter((c) => c.fechaHora && dateStr(new Date(c.fechaHora)) >= rangoStr.desde && dateStr(new Date(c.fechaHora)) <= rangoStr.hasta);
   const pendientesEnRango = (data.pendientes || []).filter((p) => p.fechaLimite && p.fechaLimite >= rangoStr.desde && p.fechaLimite <= rangoStr.hasta);
-  const pendientesHechos = pendientesEnRango.filter((p) => p.estatus === "Hecho");
-  const pendientesPendientesDeAcomodo = pendientesEnRango.filter((p) => p.estatus !== "Hecho" && !idsManualesSesion.has(p.id));
-  const pendientesManuales = pendientesEnRango.filter((p) => p.estatus !== "Hecho" && idsManualesSesion.has(p.id));
+  const pendientesHechos = pendientesEnRango.filter((p) => p.estatus === "Completada");
+  const pendientesPendientesDeAcomodo = pendientesEnRango.filter((p) => p.estatus !== "Completada" && !idsManualesSesion.has(p.id));
+  const pendientesManuales = pendientesEnRango.filter((p) => p.estatus !== "Completada" && idsManualesSesion.has(p.id));
   // Lo que sí se manda a acomodar en el horario: los ya hechos (se quedan visibles siempre), los
   // que el usuario agregó a mano, y el resto SOLO si ya se confirmó el acomodo automático.
   const pendientesParaBloques = [
@@ -7375,7 +7386,7 @@ function Agenda({ data, onEditPendiente, onAddCita, misId }) {
     horaInicio: horaInicioDec, horasDiarias: config.horasLaboralesDiarias, comida: comidaDec,
   }), [diasVisibles, citasEnRango, pendientesParaBloques, horaInicioDec, config.horasLaboralesDiarias, comidaDec]);
 
-  const alternarHecho = (p) => onEditPendiente(p.id, { estatus: p.estatus === "Hecho" ? "Pendiente" : "Hecho" });
+  const alternarHecho = (p) => onEditPendiente(p.id, { estatus: p.estatus === "Completada" ? "Pendiente" : "Completada" });
 
   const asignarPendienteExistente = (id, fechaLimite) => {
     onEditPendiente(id, { fechaLimite });
@@ -7437,7 +7448,7 @@ function Agenda({ data, onEditPendiente, onAddCita, misId }) {
               onSave={(v) => { onAddCita({ ...v, id: uid() }); setModalAgregar(null); }} />
           )}
           {modalAgregar === "existente" && (
-            <PendienteExistenteForm pendientes={(data.pendientes || []).filter((p) => p.estatus !== "Hecho")} onAsignar={asignarPendienteExistente} />
+            <PendienteExistenteForm pendientes={(data.pendientes || []).filter((p) => p.estatus !== "Completada")} onAsignar={asignarPendienteExistente} />
           )}
         </Modal>
       )}
@@ -7510,7 +7521,7 @@ function Agenda({ data, onEditPendiente, onAddCita, misId }) {
                     <div key={h} style={{ position: "absolute", top: (h - horaInicioDec) * PX_POR_HORA, left: 0, right: 0, borderTop: "1px solid var(--border)" }} />
                   ))}
                   {(bloques[key] || []).map((b, i) => {
-                    const hecho = b.tipo === "pendiente" && b.item.estatus === "Hecho";
+                    const hecho = b.tipo === "pendiente" && b.item.estatus === "Completada";
                     return (
                       <div key={i}
                         className="absolute rounded px-1.5 py-0.5 text-[11px] overflow-hidden"
