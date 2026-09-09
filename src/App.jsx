@@ -1773,6 +1773,27 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
     setData((prev) => ({ ...prev, [key]: fresh }));
     return true;
   };
+
+  // Cada Evento tiene su propia estructura (lugar, horario, costos, fotos) que no tiene sentido
+  // meter en Finanzas — pero su utilidad SÍ debe contar como ingreso real en Panorama/Reportes/
+  // Finanzas. En vez de fusionar las tablas, se mantiene un movimiento "espejo" en Finanzas
+  // (Ingreso, categoría "Eventos", ligado por evento_id) que se crea/actualiza/borra solo cada
+  // vez que se guarda o borra un evento — así los lugares que ya suman "Ingreso" en Finanzas no
+  // necesitan tocarse, simplemente ven este movimiento como uno más.
+  const sincronizarFinanzasDeEvento = async (evento) => {
+    const monto = evento.utilidad !== null && evento.utilidad !== undefined && evento.utilidad !== ""
+      ? Number(evento.utilidad)
+      : (evento.ganancia !== null && evento.ganancia !== undefined && evento.ganancia !== "" ? Number(evento.ganancia) : null);
+    const existente = data.finanzas.find((f) => f.eventoId === evento.id);
+    if (!monto || monto <= 0) {
+      if (existente) await removeItem("finanzas", existente.id);
+      return;
+    }
+    const campos = { tipo: "Ingreso", categoria: "Eventos", monto, concepto: evento.nombre, fecha: evento.fecha, estatus: "Cobrado", eventoId: evento.id };
+    if (existente) await editItem("finanzas", existente.id, campos);
+    else await addItem("finanzas", campos);
+  };
+
   const permanentDelete = async (key, id) => {
     const { error } = await supabase.from(tableName(key)).delete().eq("id", id);
     if (error) { console.error(`Error al borrar definitivamente en ${tableName(key)}:`, error); alert("No se pudo borrar definitivamente."); return false; }
@@ -2154,7 +2175,11 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
             <Actividades data={data} onAdd={(i) => addItem("actividades", i)} onEdit={(id, p) => editItem("actividades", id, p)} onRemove={(id) => askDelete("actividades", id)} />
           )}
           {view === "eventos" && (
-            <Eventos data={data} onAdd={(i) => addItem("eventos", i)} onEdit={(id, p) => editItem("eventos", id, p)} onRemove={(id) => askDelete("eventos", id)} onAddComentario={(i) => addItem("comentarios", i)} onRemoveComentario={(id) => askDelete("comentarios", id)} />
+            <Eventos data={data}
+              onAdd={async (i) => { const id = i.id || uid(); await addItem("eventos", { ...i, id }); await sincronizarFinanzasDeEvento({ ...i, id }); }}
+              onEdit={async (id, p) => { await editItem("eventos", id, p); const actual = data.eventos.find((e) => e.id === id); await sincronizarFinanzasDeEvento({ ...actual, ...p, id }); }}
+              onRemove={(id) => askDelete("eventos", id)}
+              onAddComentario={(i) => addItem("comentarios", i)} onRemoveComentario={(id) => askDelete("comentarios", id)} />
           )}
           {view === "habitos" && (
             <Habitos data={data} onAdd={(i) => addItem("habitos", i)} onEdit={(id, p) => editItem("habitos", id, p)} onRemove={(id) => askDelete("habitos", id)} />
@@ -2194,7 +2219,14 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
             <div className="flex gap-2">
               <button onClick={() => setConfirmDelete(null)} className="gp-btn-ghost flex-1 py-2 text-sm">Cancelar</button>
               <button
-                onClick={() => { removeItem(confirmDelete.key, confirmDelete.id, confirmDelete.extraIds || []); setConfirmDelete(null); }}
+                onClick={() => {
+                  if (confirmDelete.key === "eventos") {
+                    const espejo = data.finanzas.find((f) => f.eventoId === confirmDelete.id);
+                    if (espejo) removeItem("finanzas", espejo.id);
+                  }
+                  removeItem(confirmDelete.key, confirmDelete.id, confirmDelete.extraIds || []);
+                  setConfirmDelete(null);
+                }}
                 className="flex-1 py-2 text-sm rounded"
                 style={{ background: "var(--red)", color: "#fff" }}
               >
@@ -4266,6 +4298,7 @@ function Finanzas({ data, onAdd, onEdit, onRemove }) {
                     <span className="text-sm font-medium truncate">{f.concepto || "—"}</span>
                     <Badge tone={f.estatus === "Cobrado" ? "teal" : "gold"}>{f.estatus}</Badge>
                     {f.esRecurrente && <Badge tone="gold">{f.frecuencia || "Mensual"}{f.fechaFin ? ` · hasta ${f.fechaFin}` : " · indefinido"}</Badge>}
+                    {f.eventoId && <Badge tone="muted">🔗 Desde Eventos</Badge>}
                   </div>
                   <p className="text-xs gp-text-muted mt-0.5">
                     {f.esRecurrente ? `Día de pago: ${f.fecha ? Number(f.fecha.slice(8, 10)) : "—"}` : (f.fecha || "—")}
@@ -4276,6 +4309,7 @@ function Finanzas({ data, onAdd, onEdit, onRemove }) {
               </div>
               {abierta && (
                 <div className="mt-2.5 pt-2.5 border-t gp-border pl-5">
+                  {f.eventoId && <p className="text-xs gp-text-gold mb-2">Este movimiento se generó solo desde un Evento — para cambiarlo, edita el evento en el módulo Eventos (si lo cambias aquí, se sobrescribe la próxima vez que se guarde ese evento).</p>}
                   <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-xs gp-text-muted mb-3">
                     <div>Proyecto: <span className="gp-text-teal">{nombreProyecto(f.proyectoId)}</span></div>
                     <div>Cliente: <span className="gp-text-teal">{f.contactoId ? nombreCliente(f.contactoId) : "—"}</span></div>
