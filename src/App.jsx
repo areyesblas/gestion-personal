@@ -1553,6 +1553,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
   // "sin-soporte" (navegador no puede), "sin-activar", "activando", "activo", "denegado".
   const [pushEstado, setPushEstado] = useState("sin-soporte");
   const [notifPanelAbierto, setNotifPanelAbierto] = useState(false);
+  const [enviandoPrueba, setEnviandoPrueba] = useState(false);
   const [notificaciones, setNotificaciones] = useState([]);
   const notifNoLeidas = notificaciones.filter((n) => !n.leido).length;
 
@@ -1624,6 +1625,12 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
   const marcarTodasLeidas = async () => {
     setNotificaciones((prev) => prev.map((n) => ({ ...n, leido: true })));
     await supabase.from("notifications").update({ leido: true }).eq("user_id", misId).eq("leido", false);
+  };
+
+  const eliminarNotificacion = async (id) => {
+    setNotificaciones((prev) => prev.filter((n) => n.id !== id));
+    const { error } = await supabase.from("notifications").delete().eq("id", id);
+    if (error) console.error("Error al eliminar notificación:", error);
   };
 
   // Procesa el botón de acción rápida de una notificación de medicamento (Tomado / Posponer).
@@ -2317,17 +2324,23 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
             {pushEstado === "activo" && (
               <button
                 onClick={async () => {
-                  const { data: sesion } = await supabase.auth.getSession();
-                  await fetch(`${supabase.supabaseUrl}/functions/v1/enviar-push`, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json", Authorization: `Bearer ${sesion.session.access_token}` },
-                    body: JSON.stringify({ titulo: "ARKEYONE", mensaje: "Esta es una notificación de prueba. Si la ves, el Push ya está funcionando 🎉", tipo: "prueba", url: "/" }),
-                  });
-                  setTimeout(cargarNotificaciones, 1000);
+                  setEnviandoPrueba(true);
+                  try {
+                    const { data: sesion } = await supabase.auth.getSession();
+                    await fetch(`${supabase.supabaseUrl}/functions/v1/enviar-push`, {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json", Authorization: `Bearer ${sesion.session.access_token}` },
+                      body: JSON.stringify({ titulo: "ARKEYONE", mensaje: "Esta es una notificación de prueba. Si la ves, el Push ya está funcionando 🎉", tipo: "prueba", url: "/" }),
+                    });
+                    setTimeout(cargarNotificaciones, 1000);
+                  } finally {
+                    setEnviandoPrueba(false);
+                  }
                 }}
-                className="text-xs gp-text-gold text-left mb-3"
+                disabled={enviandoPrueba}
+                className="text-xs gp-text-gold text-left mb-3 md:hidden disabled:opacity-50"
               >
-                Enviar notificación de prueba →
+                {enviandoPrueba ? "Enviando…" : "Enviar notificación de prueba →"}
               </button>
             )}
 
@@ -2346,7 +2359,16 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
                 >
                   <div className="flex items-start justify-between gap-2">
                     <p className={`text-sm ${n.leido ? "gp-text-muted" : ""}`}>{n.titulo}</p>
-                    {!n.leido && <span className="w-2 h-2 rounded-full shrink-0 mt-1.5" style={{ background: "var(--gold)" }} />}
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {!n.leido && <span className="w-2 h-2 rounded-full" style={{ background: "var(--gold)" }} />}
+                      <button
+                        onClick={(e) => { e.stopPropagation(); eliminarNotificacion(n.id); }}
+                        className="gp-btn-ghost p-1 rounded"
+                        title="Eliminar notificación"
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    </div>
                   </div>
                   {n.mensaje && <p className="text-xs gp-text-muted mt-0.5">{n.mensaje}</p>}
                   <p className="text-xs gp-text-muted mt-1 opacity-70">{new Date(n.created_at).toLocaleString("es-MX")}</p>
