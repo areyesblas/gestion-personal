@@ -1095,7 +1095,8 @@ function AvisoInstalarPWA() {
       </div>
       <button
         onClick={async () => { promptEvent.prompt(); await promptEvent.userChoice; setPromptEvent(null); }}
-        className="gp-btn text-xs px-3 py-1.5 whitespace-nowrap"
+        className="text-xs px-3 py-1.5 whitespace-nowrap font-semibold rounded"
+        style={{ background: "#2a4a72", color: "#FFFFFF" }}
       >
         Instalar
       </button>
