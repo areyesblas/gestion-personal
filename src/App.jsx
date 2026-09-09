@@ -761,6 +761,31 @@ function Modal({ title, onClose, children }) {
   );
 }
 
+// Prompt reutilizable: "¿Deseas crear una acción relacionada?" — tras guardar una Cita, Deuda,
+// Documento o Activo digital, ofrece crear una Tarea real ligada a ese origen (origenTabla/origenId),
+// sin obligar a hacerlo. Como pide el documento maestro v0.1: una Cita/Deuda/Documento/Activo no ES
+// una Tarea, pero puede GENERAR una.
+function PromptTareaRelacionada({ origenTabla, origenId, proyectoId, descripcionSugerida, fechaSugerida, onCrear, onOmitir }) {
+  const [descripcion, setDescripcion] = useState(descripcionSugerida || "");
+  const [fechaLimite, setFechaLimite] = useState(fechaSugerida || todayISO());
+  return (
+    <div>
+      <p className="text-sm gp-text-muted mb-3">¿Deseas crear una tarea relacionada con esto? Quedará ligada aquí para que puedas encontrarla desde ambos lados.</p>
+      <Field label="Descripción de la tarea"><input className="gp-input" value={descripcion} onChange={(e) => setDescripcion(e.target.value)} /></Field>
+      <Field label="Fecha límite"><input type="date" className="gp-input" value={fechaLimite} onChange={(e) => setFechaLimite(e.target.value)} /></Field>
+      <div className="flex gap-2 mt-3">
+        <button className="gp-btn-ghost flex-1 py-2 text-sm" onClick={onOmitir}>Omitir</button>
+        <button
+          className="gp-btn flex-1 py-2 text-sm"
+          onClick={() => { if (descripcion.trim()) onCrear({ descripcion: descripcion.trim(), fechaLimite, proyectoId: proyectoId || "", origenTabla, origenId, estatus: "Pendiente" }); }}
+        >
+          Crear tarea
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /* ---------- login ---------- */
 // Evalúa la fortaleza de una contraseña (0 a 4) y qué requisitos le faltan.
 function evaluarPassword(pw) {
@@ -2252,7 +2277,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
           )}
           {view === "reportes" && <Reportes data={data} />}
           {view === "deudas" && (
-            <Deudas data={data} onAdd={(i) => addItem("deudas", i)} onEdit={(id, p) => editItem("deudas", id, p)} onRemove={(id) => askDelete("deudas", id)} />
+            <Deudas data={data} onAdd={(i) => addItem("deudas", i)} onEdit={(id, p) => editItem("deudas", id, p)} onRemove={(id) => askDelete("deudas", id)} onCrearTarea={(t) => addItem("pendientes", t)} />
           )}
           {view === "apartados" && (
             <Apartados data={data} onAdd={(i) => addItem("apartados", i)} onEdit={(id, p) => editItem("apartados", id, p)} onRemove={(id) => askDelete("apartados", id)} onMoverFondos={moverFondosApartado} />
@@ -2261,7 +2286,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
             <Patrimonio data={data} onAdd={(i) => addItem("patrimonio", i)} onEdit={(id, p) => editItem("patrimonio", id, p)} onRemove={(id) => askDelete("patrimonio", id)} onAddValuacion={(i) => addItem("patrimonioValuaciones", i)} onRemoveValuacion={(id) => askDelete("patrimonioValuaciones", id)} onAddComentario={(i) => addItem("comentarios", i)} onRemoveComentario={(id) => askDelete("comentarios", id)} />
           )}
           {view === "documentos" && (
-            <Documentos data={data} onAdd={(i) => addItem("documentos", i)} onEdit={(id, p) => editItem("documentos", id, p)} onRemove={(id) => askDelete("documentos", id)} />
+            <Documentos data={data} onAdd={(i) => addItem("documentos", i)} onEdit={(id, p) => editItem("documentos", id, p)} onRemove={(id) => askDelete("documentos", id)} onCrearTarea={(t) => addItem("pendientes", t)} />
           )}
           {view === "equipo" && (
             <Equipo data={data} onAdd={(i) => addItem("equipo", i)} onEdit={(id, p) => editItem("equipo", id, p)} onRemove={(id) => askDelete("equipo", id)} />
@@ -2302,12 +2327,12 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
             <Medicamentos data={data} onAdd={(i) => addItem("medicamentos", i)} onEdit={(id, p) => editItem("medicamentos", id, p)} onRemove={(id) => askDelete("medicamentos", id)} />
           )}
           {view === "activos" && (
-            <ActivosDigitales data={data} onAdd={(i) => addItem("activos", i)} onEdit={(id, p) => editItem("activos", id, p)} onRemove={(id) => askDelete("activos", id)} />
+            <ActivosDigitales data={data} onAdd={(i) => addItem("activos", i)} onEdit={(id, p) => editItem("activos", id, p)} onRemove={(id) => askDelete("activos", id)} onCrearTarea={(t) => addItem("pendientes", t)} />
           )}
           {view === "asistente" && <Asistente onDatosCreados={recargarModulos} />}
           {view === "agenda" && <Agenda data={data} misId={misId} onEditPendiente={(id, p) => editItem("pendientes", id, p)} onAddCita={(c) => addItem("citas", c)} />}
           {view === "citas" && (
-            <Citas data={data} onAdd={(i) => addItem("citas", i)} onEdit={(id, p) => editItem("citas", id, p)} onRemove={(id) => askDelete("citas", id)} />
+            <Citas data={data} onAdd={(i) => addItem("citas", i)} onEdit={(id, p) => editItem("citas", id, p)} onRemove={(id) => askDelete("citas", id)} onCrearTarea={(t) => addItem("pendientes", t)} />
           )}
           {view === "notas" && (
             <Notas data={data} onAdd={(i) => addItem("notas", i)} onEdit={(id, p) => editItem("notas", id, p)} onRemove={(id) => askDelete("notas", id)} />
@@ -5053,8 +5078,8 @@ function FacturaForm({ item, proyectos, contactos, onSave }) {
 }
 
 /* ---------- Deudas ---------- */
-function Deudas({ data, onAdd, onEdit, onRemove }) {
-  const [modal, setModal] = useState(null);
+function Deudas({ data, onAdd, onEdit, onRemove, onCrearTarea }) {
+  const [modal, setModal] = useState(null); // {item} en captura/edición | {item, paso:"tarea", origenId} tras crear
   const [orden, setOrden] = useState("default");
   const [ordenDir, setOrdenDir] = useState("asc");
   const toggleOrden = (key) => { if (orden === key) setOrdenDir((d) => (d === "asc" ? "desc" : "asc")); else { setOrden(key); setOrdenDir("asc"); } };
@@ -5108,9 +5133,25 @@ function Deudas({ data, onAdd, onEdit, onRemove }) {
         </table>
       </div>
 
-      {modal && (
+      {modal && !modal.paso && (
         <Modal title={modal.item.id ? "Editar deuda" : "Nueva deuda"} onClose={() => setModal(null)}>
-          <DeudaForm item={modal.item} proyectos={data.proyectos} onSave={(v) => { modal.item.id ? onEdit(modal.item.id, v) : onAdd(v); setModal(null); }} />
+          <DeudaForm item={modal.item} proyectos={data.proyectos} onSave={(v) => {
+            if (modal.item.id) { onEdit(modal.item.id, v); setModal(null); return; }
+            const nuevoId = uid();
+            onAdd({ ...v, id: nuevoId });
+            setModal({ item: v, paso: "tarea", origenId: nuevoId });
+          }} />
+        </Modal>
+      )}
+      {modal && modal.paso === "tarea" && (
+        <Modal title="Acción relacionada" onClose={() => setModal(null)}>
+          <PromptTareaRelacionada
+            origenTabla="deudas" origenId={modal.origenId} proyectoId={modal.item.proyectoId}
+            descripcionSugerida={`Pagar a ${modal.item.acreedor}`}
+            fechaSugerida={modal.item.fechaVencimiento}
+            onCrear={(t) => { onCrearTarea(t); setModal(null); }}
+            onOmitir={() => setModal(null)}
+          />
         </Modal>
       )}
     </div>
@@ -5318,7 +5359,7 @@ function ActividadForm({ item, proyectos, onSave }) {
 }
 
 /* ---------- Activos digitales ---------- */
-function ActivosDigitales({ data, onAdd, onEdit, onRemove }) {
+function ActivosDigitales({ data, onAdd, onEdit, onRemove, onCrearTarea }) {
   const [modal, setModal] = useState(null);
   const [orden, setOrden] = useState("default");
   const [ordenDir, setOrdenDir] = useState("asc");
@@ -5372,9 +5413,25 @@ function ActivosDigitales({ data, onAdd, onEdit, onRemove }) {
         </table>
       </div>
 
-      {modal && (
+      {modal && !modal.paso && (
         <Modal title={modal.item.id ? "Editar activo" : "Nuevo activo digital"} onClose={() => setModal(null)}>
-          <ActivoForm item={modal.item} proyectos={data.proyectos} onSave={(v) => { modal.item.id ? onEdit(modal.item.id, v) : onAdd(v); setModal(null); }} />
+          <ActivoForm item={modal.item} proyectos={data.proyectos} onSave={(v) => {
+            if (modal.item.id) { onEdit(modal.item.id, v); setModal(null); return; }
+            const nuevoId = uid();
+            onAdd({ ...v, id: nuevoId });
+            setModal({ item: v, paso: "tarea", origenId: nuevoId });
+          }} />
+        </Modal>
+      )}
+      {modal && modal.paso === "tarea" && (
+        <Modal title="Acción relacionada" onClose={() => setModal(null)}>
+          <PromptTareaRelacionada
+            origenTabla="activos" origenId={modal.origenId} proyectoId={modal.item.proyectoId}
+            descripcionSugerida={`Renovar ${modal.item.nombre}`}
+            fechaSugerida={modal.item.fechaVencimiento}
+            onCrear={(t) => { onCrearTarea(t); setModal(null); }}
+            onOmitir={() => setModal(null)}
+          />
         </Modal>
       )}
     </div>
@@ -6222,7 +6279,7 @@ function ValuacionForm({ onSave }) {
 }
 
 /* ---------- Legal y contratos ---------- */
-function Documentos({ data, onAdd, onEdit, onRemove }) {
+function Documentos({ data, onAdd, onEdit, onRemove, onCrearTarea }) {
   const [modal, setModal] = useState(null);
   const [orden, setOrden] = useState("default");
   const [ordenDir, setOrdenDir] = useState("asc");
@@ -6270,9 +6327,25 @@ function Documentos({ data, onAdd, onEdit, onRemove }) {
         </table>
       </div>
 
-      {modal && (
+      {modal && !modal.paso && (
         <Modal title={modal.item.id ? "Editar documento" : "Nuevo documento"} onClose={() => setModal(null)}>
-          <DocumentoForm item={modal.item} proyectos={data.proyectos} onSave={(v) => { modal.item.id ? onEdit(modal.item.id, v) : onAdd(v); setModal(null); }} />
+          <DocumentoForm item={modal.item} proyectos={data.proyectos} onSave={(v) => {
+            if (modal.item.id) { onEdit(modal.item.id, v); setModal(null); return; }
+            const nuevoId = uid();
+            onAdd({ ...v, id: nuevoId });
+            setModal({ item: v, paso: "tarea", origenId: nuevoId });
+          }} />
+        </Modal>
+      )}
+      {modal && modal.paso === "tarea" && (
+        <Modal title="Acción relacionada" onClose={() => setModal(null)}>
+          <PromptTareaRelacionada
+            origenTabla="documentos" origenId={modal.origenId} proyectoId={modal.item.proyectoId}
+            descripcionSugerida={`Dar seguimiento a ${modal.item.nombre}`}
+            fechaSugerida={modal.item.fechaVencimiento}
+            onCrear={(t) => { onCrearTarea(t); setModal(null); }}
+            onOmitir={() => setModal(null)}
+          />
         </Modal>
       )}
     </div>
@@ -7578,7 +7651,7 @@ function PendienteExistenteForm({ pendientes, onAsignar }) {
   );
 }
 
-function Citas({ data, onAdd, onEdit, onRemove }) {
+function Citas({ data, onAdd, onEdit, onRemove, onCrearTarea }) {
   const [modal, setModal] = useState(null);
   const empty = { titulo: "", fechaHora: localInputsAFechaHora(todayISO(), "09:00"), lugar: "", contactoId: "", notas: "" };
   const nombreContacto = (id) => data.contactos.find((c) => c.id === id)?.nombre || "—";
@@ -7632,9 +7705,25 @@ function Citas({ data, onAdd, onEdit, onRemove }) {
         </div>
       )}
 
-      {modal && (
+      {modal && !modal.paso && (
         <Modal title={modal.item.id ? "Editar cita" : "Nueva cita"} onClose={() => setModal(null)}>
-          <CitaForm item={modal.item} contactos={data.contactos} onSave={(v) => { modal.item.id ? onEdit(modal.item.id, v) : onAdd({ ...v, id: uid() }); setModal(null); }} />
+          <CitaForm item={modal.item} contactos={data.contactos} onSave={(v) => {
+            if (modal.item.id) { onEdit(modal.item.id, v); setModal(null); return; }
+            const nuevoId = uid();
+            onAdd({ ...v, id: nuevoId });
+            setModal({ item: v, paso: "tarea", origenId: nuevoId });
+          }} />
+        </Modal>
+      )}
+      {modal && modal.paso === "tarea" && (
+        <Modal title="Acción relacionada" onClose={() => setModal(null)}>
+          <PromptTareaRelacionada
+            origenTabla="citas" origenId={modal.origenId} proyectoId=""
+            descripcionSugerida={`Preparar para: ${modal.item.titulo}`}
+            fechaSugerida={modal.item.fechaHora ? modal.item.fechaHora.slice(0, 10) : ""}
+            onCrear={(t) => { onCrearTarea(t); setModal(null); }}
+            onOmitir={() => setModal(null)}
+          />
         </Modal>
       )}
     </div>
