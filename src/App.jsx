@@ -6,7 +6,7 @@ import {
   Users, Activity, Plus, X, Trash2, Pencil, Github, ChevronDown,
   ChevronRight, Bell, Lightbulb, Rocket, MessageCircle, Mail, Globe,
   Target, Contact, BarChart3, FileText, Flame, HeartPulse, Check, Menu, PieChart as PieChartIcon,
-  PiggyBank, Camera, Film, Upload, MapPin, Clock, Mic, Gift, Receipt, Megaphone, ChevronUp, Gem, Download, Sun, Moon, Shield, LogOut, ChevronLeft, Lock, Pill, CalendarClock, Zap, StickyNote, Search, Sparkles, Send, Bot, Volume2, VolumeX, Square, Settings, CalendarRange, Palette,
+  PiggyBank, Camera, Film, Upload, MapPin, Clock, Mic, Gift, Receipt, Megaphone, ChevronUp, Gem, Download, Sun, Moon, Shield, LogOut, ChevronLeft, Lock, Pill, CalendarClock, Zap, StickyNote, Search, Sparkles, Send, Bot, Volume2, VolumeX, Square, Settings, CalendarRange, Palette, Eye, EyeOff,
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
@@ -592,6 +592,38 @@ function Field({ label, children }) {
   );
 }
 
+// Input de contraseña con botón de ojo para mostrar/ocultar — se usa en todos los campos de
+// contraseña de la app (registro, cambio de contraseña, reautenticación, login de colaborador).
+function CampoPassword({ value, onChange, required, className = "gp-input", autoFocus, autoComplete, placeholder, onKeyDown }) {
+  const [visible, setVisible] = useState(false);
+  return (
+    <div className="relative">
+      <input
+        type={visible ? "text" : "password"}
+        required={required}
+        className={className}
+        style={{ paddingRight: 34 }}
+        value={value}
+        onChange={onChange}
+        onKeyDown={onKeyDown}
+        autoFocus={autoFocus}
+        autoComplete={autoComplete}
+        placeholder={placeholder}
+      />
+      <button
+        type="button"
+        onClick={() => setVisible((v) => !v)}
+        tabIndex={-1}
+        className="absolute top-1/2 -translate-y-1/2 gp-text-muted"
+        style={{ right: 8 }}
+        title={visible ? "Ocultar contraseña" : "Mostrar contraseña"}
+      >
+        {visible ? <EyeOff size={15} /> : <Eye size={15} />}
+      </button>
+    </div>
+  );
+}
+
 // Campo de captura de dinero: mientras escribes, va formateando con $ y comas (como una app de banco).
 // Por dentro sigue guardando un número plano (ej. "1234.5") para no romper nada de la base de datos;
 // solo lo que se VE en pantalla lleva el formato.
@@ -888,11 +920,11 @@ function LoginScreen({ tema, toggleTema }) {
 
         <Field label="Correo"><input type="email" required className="gp-input" value={email} onChange={(e) => setEmail(e.target.value)} /></Field>
         {modo !== "recuperar" && (
-          <Field label="Contraseña"><input type="password" required className="gp-input" value={password} onChange={(e) => setPassword(e.target.value)} /></Field>
+          <Field label="Contraseña"><CampoPassword required value={password} onChange={(e) => setPassword(e.target.value)} /></Field>
         )}
         {modo === "crear" && <MedidorPassword password={password} />}
         {modo === "crear" && (
-          <Field label="Confirmar contraseña"><input type="password" required className="gp-input" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} /></Field>
+          <Field label="Confirmar contraseña"><CampoPassword required value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} /></Field>
         )}
         {modo === "entrar" && (
           <button type="button" onClick={() => { setModo("recuperar"); setError(""); setAvisoRegistro(""); }} className="text-xs gp-text-gold mb-3 -mt-1">¿Olvidaste tu contraseña?</button>
@@ -948,9 +980,9 @@ function NuevaPasswordScreen({ onListo, tema }) {
         ) : (
           <form onSubmit={handleSubmit}>
             <p className="text-xs gp-text-muted mb-4">Pon tu contraseña nueva.</p>
-            <Field label="Contraseña nueva"><input type="password" required className="gp-input" value={password} onChange={(e) => setPassword(e.target.value)} /></Field>
+            <Field label="Contraseña nueva"><CampoPassword required value={password} onChange={(e) => setPassword(e.target.value)} /></Field>
             <MedidorPassword password={password} />
-            <Field label="Confirmar contraseña"><input type="password" required className="gp-input" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} /></Field>
+            <Field label="Confirmar contraseña"><CampoPassword required value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} /></Field>
             {error && <p className="text-xs gp-text-red mb-3">{error}</p>}
             <button type="submit" disabled={loading} className="gp-btn w-full py-2 text-sm mt-1">{loading ? "Un momento…" : "Guardar contraseña nueva"}</button>
           </form>
@@ -2270,8 +2302,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
               <h3 className="gp-serif text-lg mb-1">Confirma que eres tú</h3>
               <p className="text-sm gp-text-muted">Este módulo tiene información sensible. Escribe tu contraseña para continuar.</p>
             </div>
-            <input
-              type="password"
+            <CampoPassword
               autoFocus
               value={reauthPassword}
               onChange={(e) => setReauthPassword(e.target.value)}
@@ -2590,8 +2621,7 @@ function AdminUsuarios({ adminUid, adminEmail }) {
             {confirmar.tipo === "eliminar" && (
               <div className="mb-4">
                 <p className="text-xs gp-text-muted mb-1">Por seguridad, escribe tu contraseña para confirmar:</p>
-                <input
-                  type="password"
+                <CampoPassword
                   autoFocus
                   value={confirmarPassword}
                   onChange={(e) => { setConfirmarPassword(e.target.value); setConfirmarError(""); }}
