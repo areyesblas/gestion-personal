@@ -182,6 +182,9 @@ const TIPO_FIN = ["Ingreso", "Egreso"];
 const FORMA_PAGO = ["Efectivo", "Transferencia", "Especie", "Intercambio"];
 const OCASIONES_REGALO = ["Cumpleaños", "Navidad", "Aniversario", "Felicitación", "Otro"];
 const ESTATUS_REGALO = ["Por comprar", "Comprado", "Envuelto", "Entregado"];
+// Tipo de atención: distinto de la ocasión (Cumpleaños/Navidad/…). La ocasión es CUÁNDO/POR QUÉ;
+// el tipo es QUÉ clase de atención se dio o se dará.
+const TIPOS_ATENCION = ["Regalo", "Felicitación", "Condolencia", "Agradecimiento", "Otro"];
 const PARENTESCOS = ["Papá", "Mamá", "Hermano/a", "Hijo/a", "Esposo/a", "Abuelo/a", "Tío/a", "Primo/a", "Sobrino/a", "Cuñado/a", "Suegro/a", "Compadre/Comadre", "Amigo cercano", "Conocido"];
 const TIPO_FACTURA = ["Emitida", "Recibida"];
 const ESTATUS_FACTURA = ["Pendiente", "Pagada", "Cancelada"];
@@ -226,6 +229,37 @@ const fmtMoney = (n) => (Number(n) || 0).toLocaleString("es-MX", { style: "curre
 const todayISO = () => new Date().toISOString().slice(0, 10);
 const daysUntil = (dateStr) => Math.ceil((new Date(dateStr) - new Date(todayISO())) / 86400000);
 // Días que faltan para el próximo cumpleaños (a partir de una fecha de nacimiento cualquiera).
+const MESES_LARGO = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
+// ARKEYONE solo pide Día y Mes de cumpleaños (no la fecha de nacimiento completa) — mucha gente no
+// quiere compartir el año. Internamente se sigue guardando como fecha (columna "date" en Supabase),
+// pero con un año ficticio (2000) que diasParaCumple() ignora por completo: solo usa mes/día.
+const diaMesDeFecha = (fechaNacimiento) => {
+  if (!fechaNacimiento) return { dia: "", mes: "" };
+  const d = new Date(fechaNacimiento + "T00:00:00");
+  if (isNaN(d.getTime())) return { dia: "", mes: "" };
+  return { dia: String(d.getDate()), mes: String(d.getMonth() + 1) };
+};
+const construirFechaCumple = (dia, mes) => (dia && mes ? `2000-${String(mes).padStart(2, "0")}-${String(dia).padStart(2, "0")}` : "");
+function CumpleanosField({ value, onChange }) {
+  const inicial = diaMesDeFecha(value);
+  const [dia, setDia] = useState(inicial.dia);
+  const [mes, setMes] = useState(inicial.mes);
+  const actualizar = (d, m) => { setDia(d); setMes(m); onChange(construirFechaCumple(d, m)); };
+  return (
+    <Field label="Cumpleaños — día y mes (opcional)">
+      <div className="grid grid-cols-2 gap-2">
+        <select className="gp-input" value={dia} onChange={(e) => actualizar(e.target.value, mes)}>
+          <option value="">Día</option>
+          {Array.from({ length: 31 }, (_, i) => i + 1).map((d) => <option key={d} value={d}>{d}</option>)}
+        </select>
+        <select className="gp-input" value={mes} onChange={(e) => actualizar(dia, e.target.value)}>
+          <option value="">Mes</option>
+          {MESES_LARGO.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
+        </select>
+      </div>
+    </Field>
+  );
+}
 const diasParaCumple = (fechaNacimiento) => {
   if (!fechaNacimiento) return null;
   const hoy = new Date(todayISO());
@@ -1897,7 +1931,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
       { id: "proyectos", label: "Proyectos e ideas", icon: FolderKanban },
       { id: "pendientes", label: "Pendientes", icon: CheckSquare },
       { id: "mi-trabajo", label: "Mi trabajo", icon: CheckSquare },
-      { id: "equipo", label: "Equipo", icon: Users },
+      { id: "equipo", label: "Colaboradores", icon: Users },
     ]},
     { label: "Dinero", items: [
       { id: "finanzas", label: "Finanzas", icon: Wallet },
@@ -1913,7 +1947,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
     ]},
     { label: "Personal", items: [
       { id: "contactos", label: "Contactos", icon: Contact },
-      { id: "regalos", label: "Regalos", icon: Gift },
+      { id: "regalos", label: "Atenciones", icon: Gift },
       { id: "actividades", label: "Diario", icon: Activity },
       { id: "eventos", label: "Eventos", icon: Camera },
       { id: "habitos", label: "Hábitos", icon: Flame },
@@ -4882,7 +4916,8 @@ function DeudaForm({ item, proyectos, onSave }) {
 /* ---------- Equipo ---------- */
 function Equipo({ data, onAdd, onEdit, onRemove }) {
   const [modal, setModal] = useState(null);
-  const [orden, setOrden] = useState("default");
+  const [orden, setOrden] = useState("alfabetico");
+  const [busqueda, setBusqueda] = useState("");
   const empty = { nombre: "", whatsapp: "", correo: "", comentarios: "" };
   const tareasDe = (id) => data.pendientes.filter((p) => p.responsableId === id);
   const camposOrden = {
@@ -4893,16 +4928,25 @@ function Equipo({ data, onAdd, onEdit, onRemove }) {
     { key: "registro", label: "fecha de registro" },
     { key: "alfabetico", label: "alfabético" },
   ];
-  const listaEquipo = ordenarLista(data.equipo, orden, camposOrden);
+  // Buscador propio de esta lista (independiente del buscador global de ARKEYONE): filtra por
+  // contenido en cualquier parte del texto, no solo por inicio, e ignora acentos/mayúsculas.
+  const qn = normalizarTexto(busqueda);
+  const filtrados = !qn
+    ? data.equipo
+    : data.equipo.filter((m) => [m.nombre, m.whatsapp, m.correo, m.comentarios].some((v) => normalizarTexto(v).includes(qn)));
+  const listaEquipo = ordenarLista(filtrados, orden, camposOrden);
 
   return (
     <div>
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-1">
-        <h2 className="gp-serif text-2xl">Equipo</h2>
+        <h2 className="gp-serif text-2xl">Colaboradores</h2>
         <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm w-full sm:w-auto"><Plus size={14} /> Nuevo</button>
       </div>
       <p className="text-sm gp-text-muted mb-3">Colaboradores a los que delegas, con sus tareas y tu evaluación.</p>
-      <div className="mb-4"><OrdenSelector opciones={opcionesOrden} value={orden} onChange={setOrden} /></div>
+      <div className="flex flex-wrap items-center gap-2 mb-4">
+        <input className="gp-input text-sm flex-1 sm:max-w-xs" placeholder="Buscar en Colaboradores…" value={busqueda} onChange={(e) => setBusqueda(e.target.value)} />
+        <OrdenSelector opciones={opcionesOrden} value={orden} onChange={setOrden} />
+      </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         {listaEquipo.map((m) => {
@@ -4928,7 +4972,11 @@ function Equipo({ data, onAdd, onEdit, onRemove }) {
             </div>
           );
         })}
-        {data.equipo.length === 0 && <p className="text-sm gp-text-muted col-span-2">Aún no registras colaboradores.</p>}
+        {listaEquipo.length === 0 && (
+          <p className="text-sm gp-text-muted col-span-2">
+            {data.equipo.length === 0 ? "Aún no registras colaboradores." : "Ningún colaborador coincide con tu búsqueda."}
+          </p>
+        )}
       </div>
 
       {modal && (
@@ -5354,7 +5402,7 @@ function ContactoForm({ item, proyectos, onSave }) {
           <input className="gp-input mt-2" placeholder="Escribe el parentesco" value={v.parentesco || ""} onChange={(e) => setV({ ...v, parentesco: e.target.value })} />
         )}
       </Field>
-      <Field label="Fecha de nacimiento (opcional, para recordar su cumpleaños)"><input type="date" className="gp-input" value={v.fechaNacimiento || ""} onChange={(e) => setV({ ...v, fechaNacimiento: e.target.value })} /></Field>
+      <CumpleanosField value={v.fechaNacimiento} onChange={(f) => setV({ ...v, fechaNacimiento: f })} />
       <Field label="Dónde lo conociste"><input className="gp-input" placeholder="ej. Expo Acapulco 2026" value={v.contexto} onChange={(e) => setV({ ...v, contexto: e.target.value })} /></Field>
       <Field label="Proyecto relacionado">
         <select className="gp-input" value={v.proyectoId} onChange={(e) => setV({ ...v, proyectoId: e.target.value })}>
@@ -5384,7 +5432,7 @@ function Regalos({ data, onAdd, onEdit, onRemove, filtroContactoInicial, onLimpi
   const [ordenDir, setOrdenDir] = useState("asc");
   const toggleOrden = (key) => { if (orden === key) setOrdenDir((d) => (d === "asc" ? "desc" : "asc")); else { setOrden(key); setOrdenDir("asc"); } };
   const anioActual = new Date().getFullYear();
-  const empty = { contactoId: filtroContactoInicial || "", ocasion: "Cumpleaños", anio: anioActual, fecha: "", descripcion: "", costo: "", estatus: "Por comprar", notas: "" };
+  const empty = { contactoId: filtroContactoInicial || "", tipo: "Regalo", ocasion: "Cumpleaños", anio: anioActual, fecha: "", descripcion: "", costo: "", estatus: "Por comprar", notas: "" };
 
   const nombreContacto = (id) => data.contactos.find((c) => c.id === id)?.nombre || "—";
   const anios = [...new Set(data.regalos.map((r) => r.anio).filter(Boolean))].sort((a, b) => b - a);
@@ -5414,10 +5462,10 @@ function Regalos({ data, onAdd, onEdit, onRemove, filtroContactoInicial, onLimpi
   return (
     <div>
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-1">
-        <h2 className="gp-serif text-2xl">Regalos</h2>
+        <h2 className="gp-serif text-2xl">Atenciones</h2>
         <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm w-full sm:w-auto"><Plus size={14} /> Nuevo</button>
       </div>
-      <p className="text-sm gp-text-muted mb-3">Histórico de regalos y felicitaciones a tus contactos — incluye tu lista de Navidad por año.</p>
+      <p className="text-sm gp-text-muted mb-3">Regalos, felicitaciones, condolencias y agradecimientos a tus contactos — incluye tu lista de Navidad por año.</p>
 
       <div className="flex flex-wrap items-center gap-2 mb-4">
         <button onClick={verNavidadEsteAnio} className="gp-btn flex items-center gap-1 px-3 py-1.5 text-xs"><Gift size={13} /> Ver Navidad {anioActual}</button>
@@ -5444,11 +5492,12 @@ function Regalos({ data, onAdd, onEdit, onRemove, filtroContactoInicial, onLimpi
 
       <div className="gp-panel overflow-x-auto">
         <table className="gp-table">
-          <thead><tr><Th label="Contacto" sortKey="alfabetico" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} /><th>Ocasión</th><th>Año</th><Th label="Fecha" sortKey="fecha" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} /><th>Regalo</th><Th label="Costo" sortKey="costo" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} /><th>Estatus</th><th></th></tr></thead>
+          <thead><tr><Th label="Contacto" sortKey="alfabetico" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} /><th>Tipo</th><th>Ocasión</th><th>Año</th><Th label="Fecha" sortKey="fecha" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} /><th>Detalle</th><Th label="Costo" sortKey="costo" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} /><th>Estatus</th><th></th></tr></thead>
           <tbody>
             {ordenados.map((r) => (
               <tr key={r.id}>
                 <td>{nombreContacto(r.contactoId)}</td>
+                <td><Badge tone="gold">{r.tipo || "Regalo"}</Badge></td>
                 <td><Badge tone="muted">{r.ocasion}</Badge></td>
                 <td className="gp-mono">{r.anio || "—"}</td>
                 <td className="gp-mono">{r.fecha || "—"}</td>
@@ -5462,13 +5511,13 @@ function Regalos({ data, onAdd, onEdit, onRemove, filtroContactoInicial, onLimpi
                 <td><div className="flex gap-1"><IconBtn onClick={() => setModal({ item: r })}><Pencil size={13} /></IconBtn><IconBtn onClick={() => onRemove(r.id)}><Trash2 size={13} /></IconBtn></div></td>
               </tr>
             ))}
-            {ordenados.length === 0 && <tr><td colSpan={8} className="text-center gp-text-muted py-6">Sin regalos registrados con este filtro.</td></tr>}
+            {ordenados.length === 0 && <tr><td colSpan={9} className="text-center gp-text-muted py-6">Sin atenciones registradas con este filtro.</td></tr>}
           </tbody>
         </table>
       </div>
 
       {modal && (
-        <Modal title={modal.item.id ? "Editar regalo" : "Nuevo regalo"} onClose={() => setModal(null)}>
+        <Modal title={modal.item.id ? "Editar atención" : "Nueva atención"} onClose={() => setModal(null)}>
           <RegaloForm item={modal.item} contactos={data.contactos} onSave={(v) => { modal.item.id ? onEdit(modal.item.id, v) : onAdd(v); setModal(null); }} />
         </Modal>
       )}
@@ -5488,7 +5537,10 @@ function RegaloForm({ item, contactos, onSave }) {
         </select>
       </Field>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <Field label="Tipo de atención"><select className="gp-input" value={v.tipo || "Regalo"} onChange={(e) => setV({ ...v, tipo: e.target.value })}>{TIPOS_ATENCION.map((t) => <option key={t}>{t}</option>)}</select></Field>
         <Field label="Ocasión"><select className="gp-input" value={v.ocasion} onChange={(e) => setV({ ...v, ocasion: e.target.value })}>{OCASIONES_REGALO.map((o) => <option key={o}>{o}</option>)}</select></Field>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Field label="Año"><input type="number" className="gp-input" value={v.anio} onChange={(e) => setV({ ...v, anio: e.target.value })} /></Field>
       </div>
       <Field label="Fecha (opcional)"><input type="date" className="gp-input" value={v.fecha || ""} onChange={(e) => setV({ ...v, fecha: e.target.value })} /></Field>
@@ -7833,7 +7885,7 @@ function ContactoRapidoForm({ onSave }) {
     <div>
       <Field label="Nombre"><input className="gp-input" value={nombre} onChange={(e) => setNombre(e.target.value)} /></Field>
       <Field label="Teléfono (opcional)"><input className="gp-input" value={telefono} onChange={(e) => setTelefono(e.target.value)} /></Field>
-      <Field label="Fecha de nacimiento (opcional, para recordar su cumpleaños)"><input type="date" className="gp-input" value={fechaNacimiento} onChange={(e) => setFechaNacimiento(e.target.value)} /></Field>
+      <CumpleanosField value={fechaNacimiento} onChange={setFechaNacimiento} />
       {error && <p className="text-xs gp-text-red mb-2">{error}</p>}
       <button className="gp-btn w-full py-2 text-sm mt-1" onClick={() => {
         if (!nombre.trim()) { setError("Captura un nombre."); return; }
