@@ -6,7 +6,7 @@ import {
   Users, Activity, Plus, X, Trash2, Pencil, Github, ChevronDown,
   ChevronRight, Bell, Lightbulb, Rocket, MessageCircle, Mail, Globe,
   Target, Contact, BarChart3, FileText, Flame, HeartPulse, Check, Menu, PieChart as PieChartIcon,
-  PiggyBank, Camera, Film, Upload, MapPin, Clock, Mic, Gift, Receipt, Megaphone, ChevronUp, Gem, Download, Sun, Moon, Shield, LogOut, ChevronLeft, Lock, Pill, CalendarClock, Zap, StickyNote, Search, Sparkles, Send, Bot, Volume2, VolumeX, Square, Settings, CalendarRange, Palette, Eye, EyeOff,
+  PiggyBank, Camera, Film, Upload, MapPin, Clock, Mic, Gift, Receipt, Megaphone, ChevronUp, Gem, Download, Sun, Moon, Shield, LogOut, ChevronLeft, Lock, Pill, CalendarClock, Zap, StickyNote, Search, Sparkles, Send, Bot, Volume2, VolumeX, Square, Settings, CalendarRange, Palette, Eye, EyeOff, Sliders,
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
@@ -185,6 +185,18 @@ const ESTATUS_REGALO = ["Por comprar", "Comprado", "Envuelto", "Entregado"];
 // Tipo de atención: distinto de la ocasión (Cumpleaños/Navidad/…). La ocasión es CUÁNDO/POR QUÉ;
 // el tipo es QUÉ clase de atención se dio o se dará.
 const TIPOS_ATENCION = ["Regalo", "Felicitación", "Condolencia", "Agradecimiento", "Otro"];
+
+// Categorías de notificación configurables por el usuario (Configuración > Notificaciones).
+// Cada "tipo" concreto de notificación (medicamento, cita, deuda, etc.) pertenece a una de estas
+// categorías; el usuario activa/desactiva por categoría, no por tipo individual (serían demasiados).
+const CATEGORIAS_NOTIFICACION = ["Recordatorios", "Finanzas", "Salud", "Agenda", "Proyectos", "Colaboradores", "Activos digitales", "Legal"];
+const CATEGORIA_POR_TIPO_NOTIF = {
+  medicamento: "Salud", cita: "Agenda", deuda: "Finanzas", cobro_pendiente: "Finanzas",
+  pago_recurrente: "Finanzas", pendiente: "Recordatorios", documento: "Legal",
+  activo_digital: "Activos digitales", apartado: "Finanzas", revision_proyecto: "Proyectos",
+  cumpleanos: "Recordatorios", regalo: "Recordatorios", evento: "Agenda", factura: "Finanzas",
+  campana: "Proyectos", asignacion: "Colaboradores",
+};
 const PARENTESCOS = ["Papá", "Mamá", "Hermano/a", "Hijo/a", "Esposo/a", "Abuelo/a", "Tío/a", "Primo/a", "Sobrino/a", "Cuñado/a", "Suegro/a", "Compadre/Comadre", "Amigo cercano", "Conocido"];
 const TIPO_FACTURA = ["Emitida", "Recibida"];
 const ESTATUS_FACTURA = ["Pendiente", "Pagada", "Cancelada"];
@@ -1589,11 +1601,15 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
       const { data: colabs } = await supabase.from("colaboradores").select("*").eq("colaborador_user_id", misId).eq("estatus", "Activo");
       setMisColaboraciones((colabs || []).map((c) => ({ propietarioId: c.propietario_id, propietarioEmail: c.propietario_email, modulos: c.modulos })));
 
-      const { data: pref } = await supabase.from("preferencias").select("tema, alertas_correo_activas, color_personalizado").eq("user_id", misId).maybeSingle();
+      const { data: pref } = await supabase.from("preferencias").select("tema, alertas_correo_activas, color_personalizado, notif_tipos_desactivados, notif_silencio_activo, notif_silencio_inicio, notif_silencio_fin").eq("user_id", misId).maybeSingle();
       const temaGuardado = pref?.tema === "claro" || pref?.tema === "oscuro" ? "actual" : pref?.tema;
       if (temaGuardado && temaGuardado !== tema) setTema(temaGuardado);
       if (pref?.color_personalizado) setColorPersonalizado(pref.color_personalizado);
       if (pref && pref.alertas_correo_activas === false) setAlertasCorreoActivas(false);
+      if (pref?.notif_tipos_desactivados) setNotifTiposDesactivados(pref.notif_tipos_desactivados);
+      if (pref?.notif_silencio_activo) setNotifSilencioActivo(true);
+      if (pref?.notif_silencio_inicio) setNotifSilencioInicio(pref.notif_silencio_inicio.slice(0, 5));
+      if (pref?.notif_silencio_fin) setNotifSilencioFin(pref.notif_silencio_fin.slice(0, 5));
 
       let result = await loadAllTables(misId);
       result = await migrateFromOldBlobIfNeeded(result, misId);
@@ -1625,6 +1641,21 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
   const cambiarAlertasCorreo = async (nuevoValor) => {
     setAlertasCorreoActivas(nuevoValor);
     await supabase.from("preferencias").upsert({ user_id: misId, alertas_correo_activas: nuevoValor }, { onConflict: "user_id" });
+  };
+
+  // --- Preferencias de notificación: qué categorías recibir y horario de silencio ------------
+  // Se guarda la lista de categorías DESACTIVADAS (no las activadas), para que las categorías
+  // nuevas que se agreguen después lleguen activadas por default sin necesitar migrar nada.
+  const [notifTiposDesactivados, setNotifTiposDesactivados] = useState([]);
+  const [notifSilencioActivo, setNotifSilencioActivo] = useState(false);
+  const [notifSilencioInicio, setNotifSilencioInicio] = useState("22:00");
+  const [notifSilencioFin, setNotifSilencioFin] = useState("07:00");
+  const guardarPreferenciasNotif = async ({ tipos, silencioActivo, silencioInicio, silencioFin }) => {
+    setNotifTiposDesactivados(tipos); setNotifSilencioActivo(silencioActivo); setNotifSilencioInicio(silencioInicio); setNotifSilencioFin(silencioFin);
+    await supabase.from("preferencias").upsert({
+      user_id: misId, notif_tipos_desactivados: tipos, notif_silencio_activo: silencioActivo,
+      notif_silencio_inicio: silencioInicio, notif_silencio_fin: silencioFin,
+    }, { onConflict: "user_id" });
   };
 
   // --- Notificaciones Push -------------------------------------------------
@@ -2159,6 +2190,11 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
               esAdmin={esAdmin}
               irAAdmin={() => irAVista("admin")}
               miEmail={miEmail}
+              notifTiposDesactivados={notifTiposDesactivados}
+              notifSilencioActivo={notifSilencioActivo}
+              notifSilencioInicio={notifSilencioInicio}
+              notifSilencioFin={notifSilencioFin}
+              guardarPreferenciasNotif={guardarPreferenciasNotif}
             />
           )}
           {view === "proyectos" && (
@@ -2398,7 +2434,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
               <button onClick={() => setNotifPanelAbierto(false)} className="gp-btn-ghost p-1 rounded"><X size={16} /></button>
             </div>
 
-            {pushEstado === "activo" && (
+            {pushEstado === "activo" && esAdmin && (
               <button
                 onClick={async () => {
                   setEnviandoPrueba(true);
@@ -2415,7 +2451,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
                   }
                 }}
                 disabled={enviandoPrueba}
-                className="text-xs gp-text-gold text-left mb-3 md:hidden disabled:opacity-50"
+                className="text-xs gp-text-gold text-left mb-3 disabled:opacity-50"
               >
                 {enviandoPrueba ? "Enviando…" : "Enviar notificación de prueba →"}
               </button>
@@ -2506,7 +2542,10 @@ function Configuracion({
   pushEstado, activarPush, desactivarPush,
   esPropia, irAColaboradores, irAPapelera,
   esAdmin, irAAdmin, miEmail,
+  notifTiposDesactivados, notifSilencioActivo, notifSilencioInicio, notifSilencioFin, guardarPreferenciasNotif,
 }) {
+  const [prefsAbierto, setPrefsAbierto] = useState(false);
+  const cantidadActivas = CATEGORIAS_NOTIFICACION.length - notifTiposDesactivados.length;
   return (
     <div className="max-w-xl">
       <h1 className="text-2xl font-bold mb-1">Configuración</h1>
@@ -2529,6 +2568,9 @@ function Configuracion({
             extra={<span className="text-xs gp-text-gold shrink-0">{pushEstado === "activo" ? "Desactivar" : pushEstado === "activando" ? "" : "Activar"}</span>}
           />
         )}
+        <FilaConfig icon={Sliders} label="Preferencias de notificación"
+          sublabel={`${cantidadActivas} de ${CATEGORIAS_NOTIFICACION.length} categorías activas${notifSilencioActivo ? ` · Silencio ${notifSilencioInicio}–${notifSilencioFin}` : ""}`}
+          onClick={() => setPrefsAbierto(true)} />
       </div>
 
       <p className="text-xs gp-text-muted uppercase tracking-wide mb-2">Seguridad y datos</p>
@@ -2555,6 +2597,60 @@ function Configuracion({
           </div>
         </>
       )}
+
+      {prefsAbierto && (
+        <Modal title="Preferencias de notificación" onClose={() => setPrefsAbierto(false)}>
+          <PreferenciasNotifForm
+            tiposDesactivados={notifTiposDesactivados}
+            silencioActivo={notifSilencioActivo}
+            silencioInicio={notifSilencioInicio}
+            silencioFin={notifSilencioFin}
+            onSave={async (v) => { await guardarPreferenciasNotif(v); setPrefsAbierto(false); }}
+          />
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// Elegir qué categorías de notificación llegan (push y correo) y un horario de silencio en el
+// que no se envían — sin borrar los eventos, que siguen quedando disponibles en el Centro de
+// Notificaciones para revisar cuando el usuario quiera.
+function PreferenciasNotifForm({ tiposDesactivados, silencioActivo, silencioInicio, silencioFin, onSave }) {
+  const [desactivados, setDesactivados] = useState(tiposDesactivados);
+  const [silencio, setSilencio] = useState(silencioActivo);
+  const [inicio, setInicio] = useState(silencioInicio);
+  const [fin, setFin] = useState(silencioFin);
+  const toggle = (cat) => setDesactivados((prev) => (prev.includes(cat) ? prev.filter((c) => c !== cat) : [...prev, cat]));
+
+  return (
+    <div>
+      <p className="text-xs gp-text-muted mb-2">Elige qué tipo de avisos quieres recibir. Esto controla la entrega — los eventos siguen disponibles en tu Centro de Notificaciones aunque los desactives aquí.</p>
+      <div className="space-y-1.5 mb-4">
+        {CATEGORIAS_NOTIFICACION.map((cat) => {
+          const activa = !desactivados.includes(cat);
+          return (
+            <label key={cat} className="gp-panel flex items-center justify-between p-2.5 text-sm cursor-pointer">
+              <span>{cat}</span>
+              <input type="checkbox" checked={activa} onChange={() => toggle(cat)} className="w-4 h-4" />
+            </label>
+          );
+        })}
+      </div>
+
+      <label className="gp-panel flex items-center justify-between p-2.5 text-sm cursor-pointer mb-2">
+        <span>Horario de silencio</span>
+        <input type="checkbox" checked={silencio} onChange={(e) => setSilencio(e.target.checked)} className="w-4 h-4" />
+      </label>
+      {silencio && (
+        <div className="grid grid-cols-2 gap-2 mb-3">
+          <Field label="Desde"><input type="time" className="gp-input" value={inicio} onChange={(e) => setInicio(e.target.value)} /></Field>
+          <Field label="Hasta"><input type="time" className="gp-input" value={fin} onChange={(e) => setFin(e.target.value)} /></Field>
+        </div>
+      )}
+      <p className="text-xs gp-text-muted mb-3">{silencio ? "No se enviarán avisos entre esas horas; si el rango cruza medianoche, se aplica igual." : "El horario de silencio está desactivado — los avisos llegan a cualquier hora."}</p>
+
+      <button className="gp-btn w-full py-2 text-sm" onClick={() => onSave({ tipos: desactivados, silencioActivo: silencio, silencioInicio: inicio, silencioFin: fin })}>Guardar</button>
     </div>
   );
 }
