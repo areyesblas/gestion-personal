@@ -138,7 +138,7 @@ function hslAHex(h, s, l) {
   const aHex = (x) => Math.round(255 * x).toString(16).padStart(2, "0");
   return `#${aHex(f(0))}${aHex(f(8))}${aHex(f(4))}`;
 }
-function generarPaletaPersonalizada(hexBase) {
+function generarPaletaPersonalizada(hexBase, forzarOscuro = false) {
   let h, s, l;
   try {
     const [r, g, b] = hexARgb(hexBase);
@@ -148,7 +148,9 @@ function generarPaletaPersonalizada(hexBase) {
   // Si el color elegido ya es claro, genera una familia clara (fondo pálido, texto oscuro);
   // si es oscuro, genera una familia oscura (fondo oscuro, texto claro) — igual que los 10
   // temas fijos, solo que aquí el matiz (hue) sale del color que eligió el usuario.
-  const esClaro = l >= 55;
+  // forzarOscuro se usa para el menú lateral: el logo es claro, así que ahí SIEMPRE se genera
+  // la variante oscura (con el mismo matiz elegido) sin importar qué tan claro sea el color base.
+  const esClaro = forzarOscuro ? false : l >= 55;
   return esClaro ? {
     "--bg": hslAHex(h, Math.min(s, 35), 93),
     "--panel": hslAHex(h, Math.min(s, 28), 98),
@@ -1535,6 +1537,10 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
     setTema("personalizado");
     await supabase.from("preferencias").upsert({ user_id: misId, tema: "personalizado", color_personalizado: nuevoColor }, { onConflict: "user_id" });
   };
+  // El logo necesita fondo oscuro para verse bien, así que el menú lateral y la barra superior
+  // usan esta variante SIEMPRE oscura del mismo color elegido (no un azul fijo genérico) —
+  // el matiz sí es el que el usuario escogió, solo la claridad se fuerza oscura ahí.
+  const paletaSidebarPersonalizada = tema === "personalizado" ? generarPaletaPersonalizada(colorPersonalizado || "#12304F", true) : null;
 
   const [alertasCorreoActivas, setAlertasCorreoActivas] = useState(true);
   const cambiarAlertasCorreo = async (nuevoValor) => {
@@ -1678,18 +1684,6 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
   const [exportPaso, setExportPaso] = useState(null); // null | "confirmar" | "listo"
   const [mfaModalAbierto, setMfaModalAbierto] = useState(false);
   const [temaModalAbierto, setTemaModalAbierto] = useState(false);
-  const TEMAS = [
-    { id: "actual", label: "Actual", swatch: "#12304F" },
-    { id: "negro", label: "Negro", swatch: "#1A1A1A" },
-    { id: "oliva", label: "Verde Olivo", swatch: "#333D28" },
-    { id: "rojo", label: "Rojo", swatch: "#3D1717" },
-    { id: "naranja", label: "Naranja", swatch: "#3D200D" },
-    { id: "azul-claro", label: "Azul Claro", swatch: "#F7FBFF" },
-    { id: "gris-claro", label: "Gris Claro", swatch: "#FAFAFA" },
-    { id: "verde-claro", label: "Verde Claro", swatch: "#F7FAF2" },
-    { id: "rojo-claro", label: "Rojo Claro", swatch: "#FFF5F5" },
-    { id: "naranja-claro", label: "Naranja Claro", swatch: "#FFF7EF" },
-  ];
   const confirmarExportar = () => {
     exportarExcel(data, activeOwnerId === misId ? "mi-cuenta" : activeOwnerEmail?.split("@")[0]);
     setExportPaso("listo");
@@ -1884,6 +1878,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
             paddingTop: "calc(env(safe-area-inset-top) + 12px)",
             paddingLeft: "calc(env(safe-area-inset-left) + 16px)",
             paddingRight: "calc(env(safe-area-inset-right) + 16px)",
+            ...paletaSidebarPersonalizada,
           }}
         >
           <button onClick={() => setMobileNavOpen(true)} className="p-2 -ml-2 gp-btn-ghost rounded justify-self-start" aria-label="Abrir menú">
@@ -1910,7 +1905,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
         {/* rail lateral / cajón */}
         <div
           className={`gp-sidebar-area w-64 ${sidebarColapsado ? "md:w-20" : "md:w-56"} shrink-0 border-r gp-border p-4 flex flex-col gap-4 overflow-y-auto gp-scroll fixed md:static inset-y-0 left-0 z-50 md:z-auto transition-all duration-200 ${mobileNavOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"}`}
-          style={{ maxHeight: "100vh", background: "var(--bg)" }}
+          style={{ maxHeight: "100vh", background: "var(--bg)", ...paletaSidebarPersonalizada }}
         >
           <div className="px-2 flex flex-col items-center text-center gap-1 relative" style={{ paddingTop: "calc(env(safe-area-inset-top) + 4px)" }}>
             <button onClick={() => setMobileNavOpen(false)} className="md:hidden absolute right-0 p-1 gp-btn-ghost rounded" style={{ top: "calc(env(safe-area-inset-top) + 4px)" }} aria-label="Cerrar menú"><X size={16} /></button>
@@ -2008,7 +2003,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
           <div className="mt-auto pt-2 border-t gp-border flex flex-col gap-0.5">
             <button onClick={() => setTemaModalAbierto(true)} title="Tema"
               className={`gp-navitem flex items-center gap-2 px-3 py-2.5 md:py-2 text-sm text-left w-full ${sidebarColapsado ? "md:justify-center md:px-2" : ""}`}>
-              <Palette size={15} /> <span className={sidebarColapsado ? "md:hidden" : ""}>Tema: {tema === "personalizado" ? "Personalizado" : (TEMAS.find((t) => t.id === tema)?.label || "Actual")}</span>
+              <Palette size={15} /> <span className={sidebarColapsado ? "md:hidden" : ""}>{tema === "personalizado" ? "Tema: Personalizado" : "Personalizar color"}</span>
             </button>
             <button onClick={() => setExportPaso("confirmar")} title="Exportar mis datos"
               className={`gp-navitem flex items-center gap-2 px-3 py-2.5 md:py-2 text-sm text-left w-full ${sidebarColapsado ? "md:justify-center md:px-2" : ""}`}>
@@ -2277,35 +2272,22 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
       {temaModalAbierto && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,.6)" }} onClick={() => setTemaModalAbierto(false)}>
           <div className="gp-panel p-4 max-w-sm w-full" onClick={(e) => e.stopPropagation()}>
-            <h3 className="font-semibold mb-3">Elige un tema</h3>
-            <div className="grid grid-cols-2 gap-2">
-              {TEMAS.map((t) => (
-                <button key={t.id} onClick={() => cambiarTema(t.id)}
-                  className="flex items-center gap-2 p-2.5 rounded text-sm text-left"
-                  style={{ border: `2px solid ${tema === t.id ? "var(--gold)" : "var(--border)"}`, background: "var(--panel-2)" }}>
-                  <span className="rounded-full shrink-0" style={{ width: 18, height: 18, background: t.swatch, border: "1px solid var(--border)" }} />
-                  {t.label}
-                  {tema === t.id && <Check size={14} className="ml-auto gp-text-gold shrink-0" />}
-                </button>
-              ))}
-            </div>
-            <div className="mt-2 pt-2" style={{ borderTop: "1px solid var(--border)" }}>
-              <label
-                className="flex items-center gap-2 p-2.5 rounded text-sm cursor-pointer"
-                style={{ border: `2px solid ${tema === "personalizado" ? "var(--gold)" : "var(--border)"}`, background: "var(--panel-2)" }}
-              >
-                <input
-                  type="color"
-                  value={colorPersonalizado}
-                  onChange={(e) => cambiarColorPersonalizado(e.target.value)}
-                  className="shrink-0"
-                  style={{ width: 22, height: 22, padding: 0, border: "1px solid var(--border)", borderRadius: 4, background: "none", cursor: "pointer" }}
-                />
-                Personalizado — elige tu color
-                {tema === "personalizado" && <Check size={14} className="ml-auto gp-text-gold shrink-0" />}
-              </label>
-              <p className="text-xs gp-text-muted mt-1.5">Elige un color y el resto (fondo, paneles, texto) se genera solo, para que siempre se vea bien.</p>
-            </div>
+            <h3 className="font-semibold mb-3">Elige tu color</h3>
+            <label
+              className="flex items-center gap-3 p-3 rounded text-sm cursor-pointer"
+              style={{ border: "2px solid var(--gold)", background: "var(--panel-2)" }}
+            >
+              <input
+                type="color"
+                value={colorPersonalizado}
+                onChange={(e) => cambiarColorPersonalizado(e.target.value)}
+                className="shrink-0"
+                style={{ width: 32, height: 32, padding: 0, border: "1px solid var(--border)", borderRadius: 6, background: "none", cursor: "pointer" }}
+              />
+              <span>Toca para elegir cualquier color</span>
+              {tema === "personalizado" && <Check size={14} className="ml-auto gp-text-gold shrink-0" />}
+            </label>
+            <p className="text-xs gp-text-muted mt-2">El resto (fondo, paneles, menú lateral, texto) se genera solo a partir de ese color, para que siempre se vea bien.</p>
             <button className="gp-btn-ghost w-full px-3 py-2 text-sm rounded mt-3" onClick={() => setTemaModalAbierto(false)}>Cerrar</button>
           </div>
         </div>
