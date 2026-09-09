@@ -1845,7 +1845,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
       { id: "marketing", label: "Marketing", icon: Megaphone },
     ]},
     { label: "Vida", items: [
-      { id: "actividades", label: "Actividades y vida", icon: Activity },
+      { id: "actividades", label: "Diario", icon: Activity },
       { id: "eventos", label: "Eventos", icon: Camera },
       { id: "habitos", label: "Hábitos", icon: Flame },
       { id: "salud", label: "Salud", icon: HeartPulse },
@@ -1927,9 +1927,10 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
           <div className={`hidden md:flex gap-1 ${sidebarColapsado ? "md:flex-col" : ""}`}>
             <button
               onClick={() => setBusquedaAbierta(true)}
-              className={`gp-input flex-1 flex items-center gap-2 text-xs gp-text-muted px-3 py-2 ${sidebarColapsado ? "md:justify-center md:px-0" : ""}`}
+              title="Buscar en todo ARKEYONE"
+              className={`gp-input flex items-center justify-center px-3 py-2 ${sidebarColapsado ? "md:px-0" : ""}`}
             >
-              <Search size={14} /> <span className={sidebarColapsado ? "md:hidden" : ""}>Buscar en todo…</span>
+              <Search size={16} />
             </button>
             <button
               onClick={() => irAVista("asistente")}
@@ -4770,10 +4771,10 @@ function Actividades({ data, onAdd, onEdit, onRemove }) {
   return (
     <div>
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-1">
-        <h2 className="gp-serif text-2xl">Actividades y vida</h2>
+        <h2 className="gp-serif text-2xl">Diario</h2>
         <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm w-full sm:w-auto"><Plus size={14} /> Registrar</button>
       </div>
-      <p className="text-sm gp-text-muted mb-3">Gym, eventos, capacitación (PLC's, Vibe Coding/SDD, inglés) — un registro rápido de todo lo que construye tu semana.</p>
+      <p className="text-sm gp-text-muted mb-3">Tu diario: escribe aquí tu día a día por fecha — gym, eventos, capacitación (PLC's, Vibe Coding/SDD, inglés), o cualquier cosa que valga la pena recordar de ese día.</p>
       <div className="mb-4"><OrdenSelector opciones={opcionesOrden} value={orden} onChange={setOrden} /></div>
 
       <div className="gp-panel overflow-x-auto">
@@ -4791,13 +4792,13 @@ function Actividades({ data, onAdd, onEdit, onRemove }) {
                 <td><div className="flex gap-1"><IconBtn onClick={() => setModal({ item: a })}><Pencil size={13} /></IconBtn><IconBtn onClick={() => onRemove(a.id)}><Trash2 size={13} /></IconBtn></div></td>
               </tr>
             ))}
-            {ordenados.length === 0 && <tr><td colSpan={7} className="text-center gp-text-muted py-6">Sin actividades registradas.</td></tr>}
+            {ordenados.length === 0 && <tr><td colSpan={7} className="text-center gp-text-muted py-6">Aún no has escrito nada en tu diario.</td></tr>}
           </tbody>
         </table>
       </div>
 
       {modal && (
-        <Modal title={modal.item.id ? "Editar actividad" : "Registrar actividad"} onClose={() => setModal(null)}>
+        <Modal title={modal.item.id ? "Editar entrada del diario" : "Nueva entrada del diario"} onClose={() => setModal(null)}>
           <ActividadForm item={modal.item} proyectos={data.proyectos} onSave={(v) => { modal.item.id ? onEdit(modal.item.id, v) : onAdd(v); setModal(null); }} />
         </Modal>
       )}
