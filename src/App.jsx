@@ -1873,9 +1873,6 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
 
   const ADMIN_UID = "eca7e776-6c96-44eb-b4e0-b03c85fa5bb8";
   const esAdmin = misId === ADMIN_UID && activeOwnerId === misId;
-  if (esAdmin) {
-    navGroups.push({ label: "Administración", items: [{ id: "admin", label: "Usuarios", icon: Shield }] });
-  }
 
   const navGroupsFiltrados = modulosPermitidos === null
     ? navGroups
@@ -2021,56 +2018,16 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
             );
           })}
           <div className="mt-auto pt-2 border-t gp-border flex flex-col gap-0.5">
-            <button onClick={() => setTemaModalAbierto(true)} title="Tema"
-              className={`gp-navitem flex items-center gap-2 px-3 py-2.5 md:py-2 text-sm text-left w-full ${sidebarColapsado ? "md:justify-center md:px-2" : ""}`}>
-              <Palette size={15} /> <span className={sidebarColapsado ? "md:hidden" : ""}>{tema === "personalizado" ? "Tema: Personalizado" : "Personalizar color"}</span>
-            </button>
-            <button onClick={() => setExportPaso("confirmar")} title="Exportar mis datos"
-              className={`gp-navitem flex items-center gap-2 px-3 py-2.5 md:py-2 text-sm text-left w-full ${sidebarColapsado ? "md:justify-center md:px-2" : ""}`}>
-              <Download size={15} /> <span className={sidebarColapsado ? "md:hidden" : ""}>Exportar mis datos</span>
-            </button>
-            <button onClick={() => setMfaModalAbierto(true)} title="Verificación en dos pasos"
-              className={`gp-navitem flex items-center gap-2 px-3 py-2.5 md:py-2 text-sm text-left w-full ${sidebarColapsado ? "md:justify-center md:px-2" : ""}`}>
-              <Shield size={15} /> <span className={sidebarColapsado ? "md:hidden" : ""}>Verificación en dos pasos</span>
-            </button>
-            <button onClick={() => cambiarAlertasCorreo(!alertasCorreoActivas)} title="Alertas por correo"
-              className={`gp-navitem flex items-center gap-2 px-3 py-2.5 md:py-2 text-sm text-left w-full ${sidebarColapsado ? "md:justify-center md:px-2" : ""}`}>
-              <Bell size={15} /> <span className={sidebarColapsado ? "md:hidden" : ""}>{alertasCorreoActivas ? "Alertas por correo: activadas" : "Alertas por correo: desactivadas"}</span>
-            </button>
-            {pushEstado !== "sin-soporte" && (
-              <button
-                onClick={() => (pushEstado === "activo" ? desactivarPush() : activarPush())}
-                disabled={pushEstado === "activando"}
-                title="Notificaciones push"
-                className={`gp-navitem flex items-center gap-2 px-3 py-2.5 md:py-2 text-sm text-left w-full ${sidebarColapsado ? "md:justify-center md:px-2" : ""}`}
-              >
-                <Bell size={15} />
-                <span className={sidebarColapsado ? "md:hidden" : ""}>
-                  {pushEstado === "activo" && "Notificaciones push: activadas"}
-                  {pushEstado === "sin-activar" && "Activar notificaciones push"}
-                  {pushEstado === "activando" && "Activando…"}
-                  {pushEstado === "denegado" && "Push bloqueado (revisa permisos del navegador)"}
-                </span>
-              </button>
-            )}
             <button onClick={() => { setNotifPanelAbierto(true); setMobileNavOpen(false); }} title="Notificaciones"
               className={`gp-navitem flex items-center gap-2 px-3 py-2.5 md:py-2 text-sm text-left w-full relative ${sidebarColapsado ? "md:justify-center md:px-2" : ""}`}>
               <Bell size={15} />
               <span className={sidebarColapsado ? "md:hidden" : ""}>Notificaciones{notifNoLeidas > 0 ? ` (${notifNoLeidas})` : ""}</span>
               {notifNoLeidas > 0 && <span className="w-2 h-2 rounded-full absolute" style={{ background: "var(--red)", top: 8, left: sidebarColapsado ? 24 : 14 }} />}
             </button>
-            {activeOwnerId === misId && (
-              <>
-                <button onClick={() => { setView("colaboradores"); setMobileNavOpen(false); }} title="Colaboradores"
-                  className={`gp-navitem flex items-center gap-2 px-3 py-2.5 md:py-2 text-sm text-left w-full ${sidebarColapsado ? "md:justify-center md:px-2" : ""} ${view === "colaboradores" ? "gp-navitem-active" : ""}`}>
-                  <Users size={15} /> <span className={sidebarColapsado ? "md:hidden" : ""}>Colaboradores</span>
-                </button>
-                <button onClick={() => { setView("papelera"); setMobileNavOpen(false); }} title="Papelera"
-                  className={`gp-navitem flex items-center gap-2 px-3 py-2.5 md:py-2 text-sm text-left w-full ${sidebarColapsado ? "md:justify-center md:px-2" : ""} ${view === "papelera" ? "gp-navitem-active" : ""}`}>
-                  <Trash2 size={15} /> <span className={sidebarColapsado ? "md:hidden" : ""}>Papelera</span>
-                </button>
-              </>
-            )}
+            <button onClick={() => { irAVista("configuracion"); setMobileNavOpen(false); }} title="Configuración"
+              className={`gp-navitem flex items-center gap-2 px-3 py-2.5 md:py-2 text-sm text-left w-full ${sidebarColapsado ? "md:justify-center md:px-2" : ""} ${view === "configuracion" ? "gp-navitem-active" : ""}`}>
+              <Settings size={15} /> <span className={sidebarColapsado ? "md:hidden" : ""}>Configuración</span>
+            </button>
             <button onClick={cerrarSesion} disabled={cerrandoSesion} title="Cerrar sesión"
               className={`gp-navitem flex items-center gap-2 px-3 py-2.5 md:py-2 text-sm text-left w-full ${sidebarColapsado ? "md:justify-center md:px-2" : ""}`}
               style={cerrandoSesion ? { opacity: 0.6 } : undefined}>
@@ -2100,6 +2057,25 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
           {view === "papelera" && <Papelera onRestore={restoreItem} onPermanentDelete={permanentDelete} ownerId={activeOwnerId} />}
           {view === "colaboradores" && <Colaboradores misId={misId} miEmail={miEmail} />}
           {view === "admin" && <AdminUsuarios adminUid={ADMIN_UID} adminEmail={miEmail} />}
+          {view === "configuracion" && (
+            <Configuracion
+              tema={tema}
+              onAbrirTema={() => setTemaModalAbierto(true)}
+              onAbrirExportar={() => setExportPaso("confirmar")}
+              onAbrirMfa={() => setMfaModalAbierto(true)}
+              alertasCorreoActivas={alertasCorreoActivas}
+              cambiarAlertasCorreo={cambiarAlertasCorreo}
+              pushEstado={pushEstado}
+              activarPush={activarPush}
+              desactivarPush={desactivarPush}
+              esPropia={activeOwnerId === misId}
+              irAColaboradores={() => irAVista("colaboradores")}
+              irAPapelera={() => irAVista("papelera")}
+              esAdmin={esAdmin}
+              irAAdmin={() => irAVista("admin")}
+              miEmail={miEmail}
+            />
+          )}
           {view === "proyectos" && (
             <Proyectos data={data} onAdd={(i) => addItem("proyectos", i)} onEdit={(id, p) => editItem("proyectos", id, p)} onRemove={(id) => askDelete("proyectos", id)} onAddComentario={(i) => addItem("comentarios", i)} onRemoveComentario={(id) => askDelete("comentarios", id)} onVerDetalle={irADetalleProyecto} />
           )}
@@ -2405,6 +2381,85 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
 // Panel de administración: lista todos los usuarios registrados en ArkeyOne y permite
 // bloquearlos (les impide entrar, pero conserva su información) o eliminarlos por completo
 // (borra su cuenta y todos sus datos, sin poder deshacerse). Solo tú puedes ver esta pantalla.
+// Fila reutilizable para la pantalla de Configuración: un renglón con ícono, texto y una acción
+// a la derecha (puede ser una flecha para navegar, o un switch/estado para alternar algo aquí mismo).
+function FilaConfig({ icon: Icon, label, sublabel, onClick, extra, chevron = true }) {
+  return (
+    <button onClick={onClick} className="gp-panel w-full flex items-center gap-3 p-3.5 text-left hover:opacity-90">
+      <div className="p-2 rounded shrink-0" style={{ background: "var(--panel-2)" }}><Icon size={17} className="gp-text-gold" /></div>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-medium">{label}</p>
+        {sublabel && <p className="text-xs gp-text-muted mt-0.5">{sublabel}</p>}
+      </div>
+      {extra}
+      {chevron && <ChevronRight size={16} className="gp-text-muted shrink-0" />}
+    </button>
+  );
+}
+
+// Configuración: junta en un solo lugar todo lo que antes estaba suelto como botones apilados
+// al fondo del menú lateral (tema, exportar datos, seguridad, alertas, colaboradores, papelera,
+// y administración si aplica) — así el menú lateral queda limpio y esto se siente como una
+// verdadera pantalla de ajustes, no una lista de botones sueltos.
+function Configuracion({
+  tema, onAbrirTema, onAbrirExportar, onAbrirMfa,
+  alertasCorreoActivas, cambiarAlertasCorreo,
+  pushEstado, activarPush, desactivarPush,
+  esPropia, irAColaboradores, irAPapelera,
+  esAdmin, irAAdmin, miEmail,
+}) {
+  return (
+    <div className="max-w-xl">
+      <h1 className="text-2xl font-bold mb-1">Configuración</h1>
+      <p className="text-sm gp-text-muted mb-5">{miEmail}</p>
+
+      <p className="text-xs gp-text-muted uppercase tracking-wide mb-2">Apariencia</p>
+      <div className="space-y-2 mb-5">
+        <FilaConfig icon={Palette} label={tema === "personalizado" ? "Tema: Personalizado" : "Personalizar color"} sublabel="Elige un color y el resto de la app se adapta solo" onClick={onAbrirTema} />
+      </div>
+
+      <p className="text-xs gp-text-muted uppercase tracking-wide mb-2">Notificaciones</p>
+      <div className="space-y-2 mb-5">
+        <FilaConfig icon={Bell} label="Alertas por correo" sublabel={alertasCorreoActivas ? "Activadas" : "Desactivadas"} onClick={() => cambiarAlertasCorreo(!alertasCorreoActivas)} chevron={false}
+          extra={<span className="text-xs gp-text-gold shrink-0">{alertasCorreoActivas ? "Desactivar" : "Activar"}</span>} />
+        {pushEstado !== "sin-soporte" && (
+          <FilaConfig icon={Bell} label="Notificaciones push"
+            sublabel={pushEstado === "activo" ? "Activadas en este dispositivo" : pushEstado === "denegado" ? "Bloqueadas — revisa los permisos del navegador" : pushEstado === "activando" ? "Activando…" : "Desactivadas en este dispositivo"}
+            onClick={() => (pushEstado === "activo" ? desactivarPush() : activarPush())}
+            chevron={false}
+            extra={<span className="text-xs gp-text-gold shrink-0">{pushEstado === "activo" ? "Desactivar" : pushEstado === "activando" ? "" : "Activar"}</span>}
+          />
+        )}
+      </div>
+
+      <p className="text-xs gp-text-muted uppercase tracking-wide mb-2">Seguridad y datos</p>
+      <div className="space-y-2 mb-5">
+        <FilaConfig icon={Shield} label="Verificación en dos pasos" sublabel="Protege tu cuenta con un código además de tu contraseña" onClick={onAbrirMfa} />
+        <FilaConfig icon={Download} label="Exportar mis datos" sublabel="Descarga toda tu información en Excel" onClick={onAbrirExportar} />
+      </div>
+
+      {esPropia && (
+        <>
+          <p className="text-xs gp-text-muted uppercase tracking-wide mb-2">Cuenta</p>
+          <div className="space-y-2 mb-5">
+            <FilaConfig icon={Users} label="Colaboradores" sublabel="Invita a alguien a trabajar en tu cuenta" onClick={irAColaboradores} />
+            <FilaConfig icon={Trash2} label="Papelera" sublabel="Restaura o borra definitivamente lo que eliminaste" onClick={irAPapelera} />
+          </div>
+        </>
+      )}
+
+      {esAdmin && (
+        <>
+          <p className="text-xs gp-text-muted uppercase tracking-wide mb-2">Administración</p>
+          <div className="space-y-2 mb-5">
+            <FilaConfig icon={Shield} label="Usuarios" sublabel="Panel de administración de ARKEYONE" onClick={irAAdmin} />
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function AdminUsuarios({ adminUid, adminEmail }) {
   const [usuarios, setUsuarios] = useState(null); // null = cargando
   const [error, setError] = useState("");
