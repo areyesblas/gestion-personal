@@ -1952,8 +1952,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
 
   const navGroups = [
     { label: "Inicio", items: [
-      { id: "dashboard", label: "Panorama", icon: LayoutDashboard },
-      { id: "asistente", label: "Asistente", icon: Sparkles },
+      { id: "dashboard", label: "Centro de mando", icon: LayoutDashboard },
       { id: "agenda", label: "Agenda", icon: CalendarRange },
       { id: "citas", label: "Citas", icon: CalendarClock },
       { id: "notas", label: "Notas", icon: StickyNote },
@@ -2169,7 +2168,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
               {refrescando ? "Actualizando…" : pullDist > 60 ? "Suelta para actualizar ↓" : "Desliza hacia abajo para actualizar…"}
             </div>
           )}
-          {view === "dashboard" && <Dashboard data={data} setView={irAVista} onAddSaldo={(i) => addItem("saldoInicial", i)} />}
+          {view === "dashboard" && <Dashboard data={data} setView={irAVista} onAddSaldo={(i) => addItem("saldoInicial", i)} onVerProyecto={irADetalleProyecto} onEditPendiente={(id, p) => editItem("pendientes", id, p)} />}
           {view === "papelera" && <Papelera onRestore={restoreItem} onPermanentDelete={permanentDelete} ownerId={activeOwnerId} />}
           {view === "colaboradores" && <Colaboradores misId={misId} miEmail={miEmail} />}
           {view === "admin" && <AdminUsuarios adminUid={ADMIN_UID} adminEmail={miEmail} />}
@@ -3107,30 +3106,98 @@ function Papelera({ onRestore, onPermanentDelete, ownerId }) {
   );
 }
 
-function Dashboard({ data, setView, onAddSaldo }) {
+function Dashboard({ data, setView, onAddSaldo, onVerProyecto, onEditPendiente }) {
   const [saldoModal, setSaldoModal] = useState(false);
   const saldo = calcularSaldo(data);
-  const mesActual = todayISO().slice(0, 7);
+  const hoy = todayISO();
+  const mesActual = hoy.slice(0, 7);
   const ledgerMesActual = useMemo(() => buildMonthlyLedger(data.finanzas, [mesActual]), [data.finanzas, mesActual]);
   const ingresos = ledgerMesActual.filter((f) => f.tipo === "Ingreso").reduce((s, f) => s + f.monto, 0);
   const egresos = ledgerMesActual.filter((f) => f.tipo === "Egreso").reduce((s, f) => s + f.monto, 0);
-  const deudasAtrasadas = data.deudas.filter((d) => daysUntil(d.fechaVencimiento) < 0);
-  const deudasProximas = data.deudas.filter((d) => { const dd = daysUntil(d.fechaVencimiento); return dd >= 0 && dd <= 7; });
-  const pendientesProximos = data.pendientes
-    .filter((p) => p.estatus !== "Hecho" && p.fechaLimite && daysUntil(p.fechaLimite) <= 7)
-    .sort((a, b) => new Date(a.fechaLimite) - new Date(b.fechaLimite));
-  const activosVencidos = (data.activos || []).filter((a) => daysUntil(a.fechaVencimiento) < 0);
-  const activosProximos = (data.activos || []).filter((a) => { const dd = daysUntil(a.fechaVencimiento); return dd >= 0 && dd <= 14; });
-  const docsProximos = (data.documentos || []).filter((d) => d.fechaVencimiento && daysUntil(d.fechaVencimiento) <= 14);
   const activos = data.proyectos.filter((p) => p.estatus === "Activo").length;
   const ideas = data.proyectos.filter((p) => p.estatus === "Idea").length;
   const sinGithub = data.proyectos.filter((p) => !p.githubSubido);
-  const cobrosPendientes = data.finanzas
-    .filter((f) => f.tipo === "Ingreso" && f.estatus === "Pendiente")
-    .sort((a, b) => (a.fechaVencimiento || "9999").localeCompare(b.fechaVencimiento || "9999"));
-  const totalCobrosPendientes = cobrosPendientes.reduce((s, f) => s + (Number(f.monto) || 0), 0);
 
-  const monthKeysAmplios = useMemo(() => lastNMonthKeys(120), []); // ventana amplia (10 años) para acumulados "de siempre"
+  const saludo = (() => {
+    const h = new Date().getHours();
+    return h < 12 ? "Buenos días" : h < 19 ? "Buenas tardes" : "Buenas noches";
+  })();
+
+  const nombreProyecto = (id) => data.proyectos.find((p) => p.id === id)?.nombre || "";
+
+  // --- Unificación de "Acciones": sin importar el módulo de origen, si requiere que el usuario
+  // haga algo hoy o en los próximos días, se junta aquí en una sola vista. No es una entidad nueva
+  // ni una tabla nueva — solo lee de las entidades reales (Pendientes, Citas, Finanzas).
+  const acciones = [];
+  data.pendientes.forEach((p) => {
+    if (p.estatus === "Hecho") return;
+    if (p.fechaLimite) {
+      const dd = daysUntil(p.fechaLimite);
+      if (dd <= 7) acciones.push({ id: `pend-${p.id}`, origen: "Pendiente", tipo: "pendiente", texto: p.descripcion, sub: nombreProyecto(p.proyectoId), dd, irA: () => setView("pendientes"), pendienteId: p.id });
+    }
+    if (p.fechaRevision) {
+      const dd = daysUntil(p.fechaRevision);
+      if (dd <= 7 && (!p.fechaLimite || p.fechaRevision !== p.fechaLimite)) acciones.push({ id: `segu-${p.id}`, origen: "Seguimiento", tipo: "seguimiento", texto: p.descripcion, sub: nombreProyecto(p.proyectoId), dd, irA: () => setView("pendientes") });
+    }
+  });
+  data.citas.forEach((c) => {
+    const dd = Math.round((new Date(c.fechaHora).setHours(0, 0, 0, 0) - new Date(hoy + "T00:00:00").getTime()) / 86400000);
+    if (dd === 0) acciones.push({ id: `cita-${c.id}`, origen: "Cita", tipo: "cita", texto: c.titulo, sub: fmtFechaHora(c.fechaHora), dd, irA: () => setView("citas") });
+  });
+  data.finanzas.forEach((f) => {
+    if (f.tipo === "Ingreso" && f.estatus === "Pendiente" && f.fechaVencimiento) {
+      const dd = daysUntil(f.fechaVencimiento);
+      if (dd <= 7) acciones.push({ id: `cobro-${f.id}`, origen: "Cobro pendiente", tipo: "finanzas", texto: f.concepto || "Cobro", sub: fmtMoney(f.monto), dd, irA: () => setView("finanzas") });
+    }
+  });
+  data.deudas.forEach((d) => {
+    if (!d.fechaVencimiento) return;
+    const dd = daysUntil(d.fechaVencimiento);
+    if (dd <= 7) acciones.push({ id: `deuda-${d.id}`, origen: "Pago por hacer", tipo: "finanzas", texto: d.acreedor, sub: fmtMoney(d.monto), dd, irA: () => setView("deudas") });
+  });
+
+  const accionesHoy = acciones.filter((a) => a.dd <= 0).sort((a, b) => a.dd - b.dd);
+  const accionesProximas = acciones.filter((a) => a.dd > 0 && a.dd <= 7).sort((a, b) => a.dd - b.dd);
+  const resumenHoy = (() => {
+    const partes = [];
+    const nPend = accionesHoy.filter((a) => a.tipo === "pendiente").length;
+    const nSegu = accionesHoy.filter((a) => a.tipo === "seguimiento").length;
+    const nFin = accionesHoy.filter((a) => a.tipo === "finanzas").length;
+    const nCita = accionesHoy.filter((a) => a.tipo === "cita").length;
+    if (nPend) partes.push(`${nPend} pendiente${nPend === 1 ? "" : "s"}`);
+    if (nSegu) partes.push(`${nSegu} seguimiento${nSegu === 1 ? "" : "s"}`);
+    if (nCita) partes.push(`${nCita} cita${nCita === 1 ? "" : "s"}`);
+    if (nFin) partes.push(`${nFin} pago${nFin === 1 ? "" : "s"} por revisar`);
+    return partes.join(" · ");
+  })();
+
+  // Próximas citas: agenda de los próximos 7 días (incluye hoy, para tener el vistazo completo aquí).
+  const proximasCitas = data.citas
+    .filter((c) => { const dd = Math.round((new Date(c.fechaHora).setHours(0, 0, 0, 0) - new Date(hoy + "T00:00:00").getTime()) / 86400000); return dd >= 0 && dd <= 7; })
+    .sort((a, b) => new Date(a.fechaHora) - new Date(b.fechaHora));
+
+  // Alertas importantes: vencimientos/renovaciones que no son "tareas" en sí — documentos, activos
+  // digitales y facturas. Ventana un poco más amplia (14 días) porque son avisos tempranos, no
+  // acciones inmediatas del día.
+  const documentosProximos = (data.documentos || []).filter((d) => d.fechaVencimiento && daysUntil(d.fechaVencimiento) <= 14);
+  const activosProximos = (data.activos || []).filter((a) => a.fechaVencimiento && daysUntil(a.fechaVencimiento) <= 14);
+  const facturasPendientes = (data.facturas || []).filter((f) => f.estatus === "Pendiente");
+  const totalAlertas = documentosProximos.length + activosProximos.length + facturasPendientes.length;
+
+  // Proyectos que requieren atención: revisión vencida/próxima, o con pendientes vencidos.
+  const proyectosAtencion = data.proyectos
+    .filter((p) => p.estatus === "Activo" || p.estatus === "En desarrollo")
+    .map((p) => {
+      const revisionDd = p.fechaRevision ? daysUntil(p.fechaRevision) : null;
+      const pendVencidos = data.pendientes.filter((t) => t.proyectoId === p.id && t.estatus !== "Hecho" && t.fechaLimite && daysUntil(t.fechaLimite) < 0).length;
+      const motivo = revisionDd !== null && revisionDd <= 7 ? (revisionDd < 0 ? "Revisión vencida" : revisionDd === 0 ? "Revisión hoy" : `Revisión en ${revisionDd}d`) : pendVencidos > 0 ? `${pendVencidos} pendiente${pendVencidos === 1 ? "" : "s"} vencido${pendVencidos === 1 ? "" : "s"}` : null;
+      return { ...p, motivo };
+    })
+    .filter((p) => p.motivo);
+
+  // --- A partir de aquí: los mismos cálculos de "resumen" que ya existían (avance, ganancia por
+  // proyecto, etc.), ahora como contexto al final de la pantalla, no como protagonista.
+  const monthKeysAmplios = useMemo(() => lastNMonthKeys(120), []);
   const ledgerAmplio = useMemo(() => buildMonthlyLedger(data.finanzas, monthKeysAmplios), [data.finanzas, monthKeysAmplios]);
   const gananciaPorProyecto = data.proyectos.map((p) => {
     const propios = ledgerAmplio.filter((f) => f.proyectoId === p.id);
@@ -3139,7 +3206,6 @@ function Dashboard({ data, setView, onAddSaldo }) {
     return { nombre: p.nombre, neto: ing - eg };
   }).filter((p) => p.neto !== 0).sort((a, b) => b.neto - a.neto);
 
-  // avance general: pendientes hechos + metas cumplidas, de todo el sistema
   const pendientesTotal = data.pendientes.length;
   const pendientesHechos = data.pendientes.filter((p) => p.estatus === "Hecho").length;
   const metasTotal = data.metas.length;
@@ -3147,7 +3213,6 @@ function Dashboard({ data, setView, onAddSaldo }) {
   const pctPendientes = pendientesTotal ? Math.round((pendientesHechos / pendientesTotal) * 100) : 0;
   const pctMetas = metasTotal ? Math.round((metasCumplidas / metasTotal) * 100) : 0;
 
-  // avance por proyecto: % de pendientes hechos, de los proyectos activos con al menos un pendiente
   const avancePorProyecto = data.proyectos
     .filter((p) => p.estatus === "Activo" || p.estatus === "En desarrollo")
     .map((p) => {
@@ -3158,10 +3223,122 @@ function Dashboard({ data, setView, onAddSaldo }) {
     .filter((p) => p.total > 0)
     .sort((a, b) => b.pct - a.pct);
 
+  const badgeDia = (dd) => (dd < 0 ? <Badge tone="red">vencido</Badge> : dd === 0 ? <Badge tone="gold">Hoy</Badge> : <Badge tone="muted">{dd === 1 ? "Mañana" : `${dd}d`}</Badge>);
+
   return (
     <div>
-      <h2 className="gp-serif text-2xl mb-1">Panorama general</h2>
-      <p className="text-sm gp-text-muted mb-6">Lo que le da sentido a tus proyectos, en un vistazo.</p>
+      <h2 className="gp-serif text-2xl mb-1">Centro de mando</h2>
+      <p className="text-sm gp-text-muted mb-6">{saludo}. Esto es lo que requiere tu atención.</p>
+
+      {/* 1. ACCIONES PARA HOY — protagonista de la pantalla */}
+      <div className="gp-panel p-4 mb-5" style={{ borderColor: accionesHoy.length ? "var(--gold)" : undefined }}>
+        <div className="flex items-center gap-2 mb-1"><Zap size={15} className="gp-text-gold" /><h3 className="text-base font-medium">Acciones para hoy</h3></div>
+        {accionesHoy.length === 0 ? (
+          <p className="text-xs gp-text-muted mt-1">No tienes nada urgente hoy — buen momento para revisar lo que viene.</p>
+        ) : (
+          <>
+            <p className="text-xs gp-text-muted mb-3">{resumenHoy}</p>
+            <ul className="space-y-1.5">
+              {accionesHoy.map((a) => (
+                <li key={a.id} className="flex items-center gap-2">
+                  {a.pendienteId ? (
+                    <button onClick={() => onEditPendiente(a.pendienteId, { estatus: "Hecho" })} title="Marcar como hecho"
+                      className="w-5 h-5 rounded flex items-center justify-center shrink-0" style={{ border: "1px solid var(--border)" }}>
+                    </button>
+                  ) : <span className="w-5 shrink-0" />}
+                  <button onClick={a.irA} className="flex-1 text-left flex items-center justify-between gap-2 min-w-0 py-0.5">
+                    <span className="text-sm truncate">{a.texto || a.origen}{a.sub ? <span className="gp-text-muted"> — {a.sub}</span> : ""}</span>
+                    {badgeDia(a.dd)}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+      </div>
+
+      {/* 2. PRÓXIMAS ACCIONES */}
+      {accionesProximas.length > 0 && (
+        <div className="gp-panel p-4 mb-5">
+          <div className="flex items-center gap-2 mb-2"><CalendarClock size={14} className="gp-text-gold" /><h3 className="text-sm font-medium">Próximas acciones</h3></div>
+          <ul className="space-y-1.5">
+            {accionesProximas.slice(0, 8).map((a) => (
+              <li key={a.id}>
+                <button onClick={a.irA} className="w-full text-left flex items-center justify-between gap-2 text-sm">
+                  <span className="truncate">{a.texto || a.origen}{a.sub ? <span className="gp-text-muted text-xs"> — {a.sub}</span> : ""}</span>
+                  {badgeDia(a.dd)}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* 3. PRÓXIMAS CITAS */}
+      {proximasCitas.length > 0 && (
+        <div className="gp-panel p-4 mb-5">
+          <div className="flex items-center gap-2 mb-2"><CalendarClock size={14} className="gp-text-teal" /><h3 className="text-sm font-medium">Próximas citas</h3></div>
+          <ul className="space-y-1.5">
+            {proximasCitas.slice(0, 6).map((c) => (
+              <li key={c.id} className="flex items-center justify-between gap-2 text-sm">
+                <span className="truncate">{c.titulo}{c.lugar ? <span className="gp-text-muted text-xs"> — {c.lugar}</span> : ""}</span>
+                <span className="text-xs gp-text-muted shrink-0">{fmtFechaHora(c.fechaHora)}</span>
+              </li>
+            ))}
+          </ul>
+          <button onClick={() => setView("citas")} className="text-xs gp-text-gold mt-3">Ver toda tu agenda →</button>
+        </div>
+      )}
+
+      {/* 4. ALERTAS IMPORTANTES */}
+      {totalAlertas > 0 && (
+        <div className="gp-panel p-4 mb-5">
+          <div className="flex items-center gap-2 mb-2"><AlertTriangle size={14} className="gp-text-red" /><h3 className="text-sm font-medium">Alertas importantes</h3></div>
+          <ul className="space-y-1.5 text-sm">
+            {documentosProximos.map((d) => (
+              <li key={d.id}>
+                <button onClick={() => setView("documentos")} className="w-full text-left flex items-center justify-between gap-2">
+                  <span className="truncate">Documento — {d.nombre}</span>{badgeDia(daysUntil(d.fechaVencimiento))}
+                </button>
+              </li>
+            ))}
+            {activosProximos.map((a) => (
+              <li key={a.id}>
+                <button onClick={() => setView("activos")} className="w-full text-left flex items-center justify-between gap-2">
+                  <span className="truncate">Renovación — {a.nombre}</span>{badgeDia(daysUntil(a.fechaVencimiento))}
+                </button>
+              </li>
+            ))}
+            {facturasPendientes.map((f) => (
+              <li key={f.id}>
+                <button onClick={() => setView("finanzas")} className="w-full text-left flex items-center justify-between gap-2">
+                  <span className="truncate">Factura pendiente — {f.concepto || f.folio || "sin folio"}</span><Badge tone="gold">{fmtMoney(f.total)}</Badge>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* 5. PROYECTOS QUE REQUIEREN ATENCIÓN */}
+      {proyectosAtencion.length > 0 && (
+        <div className="gp-panel p-4 mb-6">
+          <div className="flex items-center gap-2 mb-2"><FolderKanban size={14} className="gp-text-gold" /><h3 className="text-sm font-medium">Proyectos que requieren atención</h3></div>
+          <ul className="space-y-1.5">
+            {proyectosAtencion.map((p) => (
+              <li key={p.id}>
+                <button onClick={() => onVerProyecto(p.id)} className="w-full text-left flex items-center justify-between gap-2 text-sm">
+                  <span className="truncate">{p.nombre}</span>
+                  <Badge tone={p.motivo.includes("vencid") ? "red" : "gold"}>{p.motivo}</Badge>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* 6. TU RESUMEN — indicadores y gráficas, como contexto al final, no como protagonista */}
+      <p className="text-xs gp-text-muted uppercase tracking-wide mb-2">Tu resumen</p>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
         <Stat label="Proyectos activos" value={activos} />
@@ -3197,72 +3374,15 @@ function Dashboard({ data, setView, onAddSaldo }) {
         </Modal>
       )}
 
-      {cobrosPendientes.length > 0 && (
+      {sinGithub.length > 0 && (
         <div className="gp-panel p-4 mb-6">
-          <div className="flex items-center justify-between mb-2">
-            <div className="flex items-center gap-2"><Wallet size={14} className="gp-text-gold" /><h3 className="text-sm font-medium">Cobros pendientes</h3></div>
-            <span className="gp-serif text-lg gp-text-teal">{fmtMoney(totalCobrosPendientes)}</span>
-          </div>
-          <ul className="space-y-1.5 text-xs">
-            {cobrosPendientes.slice(0, 5).map((f) => {
-              const dd = f.fechaVencimiento ? daysUntil(f.fechaVencimiento) : null;
-              return (
-                <li key={f.id} className="flex justify-between">
-                  <span>{f.concepto || f.categoria || "Cobro"}</span>
-                  <span className="flex items-center gap-2">
-                    <span className="gp-mono">{fmtMoney(f.monto)}</span>
-                    {dd !== null && <Badge tone={dd < 0 ? "red" : dd <= 7 ? "gold" : "muted"}>{dd < 0 ? "vencido" : `${dd}d`}</Badge>}
-                  </span>
-                </li>
-              );
-            })}
-          </ul>
-          <button onClick={() => setView("finanzas")} className="text-xs gp-text-gold mt-3">Ver todos los cobros →</button>
-        </div>
-      )}
-
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-        <div className="gp-panel p-4">
-          <div className="flex items-center gap-2 mb-3"><Bell size={14} className="gp-text-gold" /><h3 className="text-sm font-medium">Recordatorios</h3></div>
-          {deudasAtrasadas.length === 0 && deudasProximas.length === 0 && pendientesProximos.length === 0 && activosVencidos.length === 0 && activosProximos.length === 0 && docsProximos.length === 0 ? (
-            <p className="text-xs gp-text-muted">Nada urgente esta semana.</p>
-          ) : (
-            <ul className="space-y-2 text-xs">
-              {deudasAtrasadas.map((d) => (
-                <li key={d.id} className="flex justify-between"><span>Deuda atrasada — {d.acreedor}</span><Badge tone="red">{fmtMoney(d.monto)}</Badge></li>
-              ))}
-              {deudasProximas.map((d) => (
-                <li key={d.id} className="flex justify-between"><span>Vence pronto — {d.acreedor}</span><Badge tone="gold">{daysUntil(d.fechaVencimiento)}d</Badge></li>
-              ))}
-              {pendientesProximos.slice(0, 5).map((p) => (
-                <li key={p.id} className="flex justify-between"><span>{p.descripcion}</span><Badge tone={daysUntil(p.fechaLimite) < 0 ? "red" : "muted"}>{daysUntil(p.fechaLimite) < 0 ? "vencido" : `${daysUntil(p.fechaLimite)}d`}</Badge></li>
-              ))}
-              {activosVencidos.map((a) => (
-                <li key={a.id} className="flex justify-between"><span>Vencido — {a.nombre}</span><Badge tone="red">renovar</Badge></li>
-              ))}
-              {activosProximos.map((a) => (
-                <li key={a.id} className="flex justify-between"><span>Renovar — {a.nombre}</span><Badge tone="gold">{daysUntil(a.fechaVencimiento)}d</Badge></li>
-              ))}
-              {docsProximos.map((d) => (
-                <li key={d.id} className="flex justify-between"><span>Documento — {d.nombre}</span><Badge tone={daysUntil(d.fechaVencimiento) < 0 ? "red" : "gold"}>{daysUntil(d.fechaVencimiento) < 0 ? "vencido" : `${daysUntil(d.fechaVencimiento)}d`}</Badge></li>
-              ))}
-            </ul>
-          )}
-          <button onClick={() => setView("pendientes")} className="text-xs gp-text-gold mt-3">Ver todos los pendientes →</button>
-        </div>
-
-        <div className="gp-panel p-4">
           <div className="flex items-center gap-2 mb-3"><Github size={14} className="gp-text-gold" /><h3 className="text-sm font-medium">Pendiente: subir proyectos a GitHub</h3></div>
-          {sinGithub.length === 0 ? (
-            <p className="text-xs gp-text-teal">Todos tus proyectos están marcados como subidos.</p>
-          ) : (
-            <ul className="space-y-1.5 text-xs gp-text-muted">
-              {sinGithub.map((p) => <li key={p.id}>· {p.nombre}</li>)}
-            </ul>
-          )}
+          <ul className="space-y-1.5 text-xs gp-text-muted">
+            {sinGithub.map((p) => <li key={p.id}>· {p.nombre}</li>)}
+          </ul>
           <button onClick={() => setView("proyectos")} className="text-xs gp-text-gold mt-3">Ir a proyectos →</button>
         </div>
-      </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
         <div className="gp-panel p-4">
