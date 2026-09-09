@@ -1959,7 +1959,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
     ]},
     { label: "Trabajo", items: [
       { id: "proyectos", label: "Proyectos e ideas", icon: FolderKanban },
-      { id: "pendientes", label: "Pendientes", icon: CheckSquare },
+      { id: "pendientes", label: "Tareas", icon: CheckSquare },
       { id: "mi-trabajo", label: "Mi trabajo", icon: CheckSquare },
       { id: "equipo", label: "Colaboradores", icon: Users },
     ]},
@@ -3133,7 +3133,7 @@ function Dashboard({ data, setView, onAddSaldo, onVerProyecto, onEditPendiente }
     if (p.estatus === "Hecho") return;
     if (p.fechaLimite) {
       const dd = daysUntil(p.fechaLimite);
-      if (dd <= 7) acciones.push({ id: `pend-${p.id}`, origen: "Pendiente", tipo: "pendiente", texto: p.descripcion, sub: nombreProyecto(p.proyectoId), dd, irA: () => setView("pendientes"), pendienteId: p.id });
+      if (dd <= 7) acciones.push({ id: `pend-${p.id}`, origen: "Tarea", tipo: "pendiente", texto: p.descripcion, sub: nombreProyecto(p.proyectoId), dd, irA: () => setView("pendientes"), pendienteId: p.id });
     }
     if (p.fechaRevision) {
       const dd = daysUntil(p.fechaRevision);
@@ -3164,7 +3164,7 @@ function Dashboard({ data, setView, onAddSaldo, onVerProyecto, onEditPendiente }
     const nSegu = accionesHoy.filter((a) => a.tipo === "seguimiento").length;
     const nFin = accionesHoy.filter((a) => a.tipo === "finanzas").length;
     const nCita = accionesHoy.filter((a) => a.tipo === "cita").length;
-    if (nPend) partes.push(`${nPend} pendiente${nPend === 1 ? "" : "s"}`);
+    if (nPend) partes.push(`${nPend} tarea${nPend === 1 ? "" : "s"}`);
     if (nSegu) partes.push(`${nSegu} seguimiento${nSegu === 1 ? "" : "s"}`);
     if (nCita) partes.push(`${nCita} cita${nCita === 1 ? "" : "s"}`);
     if (nFin) partes.push(`${nFin} pago${nFin === 1 ? "" : "s"} por revisar`);
@@ -3659,7 +3659,7 @@ function Proyectos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
                                 Ver detalle completo <ChevronRight size={12} />
                               </button>
                             </div>
-                            {filasP.length === 0 && <p className="text-xs gp-text-muted">Sin pendientes registrados todavía.</p>}
+                            {filasP.length === 0 && <p className="text-xs gp-text-muted">Sin tareas registradas todavía.</p>}
                             {filasP.length > 0 && (
                               <div className="gp-panel-hi overflow-x-auto">
                                 <table className="gp-table" style={{ fontSize: 12 }}>
@@ -3804,7 +3804,7 @@ function ProyectoDetalle({ data, proyectoId, onVolver, onAddTarea, onEditTarea, 
             {proyecto.prioridad && <Badge tone={proyecto.prioridad === "Alta" ? "red" : proyecto.prioridad === "Media" ? "gold" : "muted"}>{proyecto.prioridad}</Badge>}
           </div>
         </div>
-        <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm w-full sm:w-auto"><Plus size={14} /> Nuevo pendiente</button>
+        <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm w-full sm:w-auto"><Plus size={14} /> Nueva tarea</button>
       </div>
       {proyecto.descripcion && <p className="text-sm gp-text-muted mb-4">{proyecto.descripcion}</p>}
 
@@ -3937,7 +3937,7 @@ function ProyectoDetalle({ data, proyectoId, onVolver, onAddTarea, onEditTarea, 
                 </tr>
               );
             })}
-            {filas.length === 0 && <tr><td colSpan={8} className="text-center gp-text-muted py-6">Sin pendientes registrados en este proyecto todavía.</td></tr>}
+            {filas.length === 0 && <tr><td colSpan={8} className="text-center gp-text-muted py-6">Sin tareas registradas en este proyecto todavía.</td></tr>}
           </tbody>
         </table>
       </div>
@@ -3954,7 +3954,7 @@ function ProyectoDetalle({ data, proyectoId, onVolver, onAddTarea, onEditTarea, 
       )}
 
       {modal && (
-        <Modal title={modal.item.id ? "Editar pendiente" : modal.item.parentId ? "Nueva subtarea" : "Nuevo pendiente"} onClose={() => setModal(null)}>
+        <Modal title={modal.item.id ? "Editar tarea" : modal.item.parentId ? "Nueva subtarea" : "Nueva tarea"} onClose={() => setModal(null)}>
           <PendienteForm item={modal.item} proyectos={data.proyectos} equipo={data.equipo} contactos={data.contactos} pendientes={data.pendientes} colaboradores={[]} proyectoFijoId={proyectoId}
             onSave={(v) => {
               if (modal.item.id) {
@@ -4106,7 +4106,7 @@ function MindMapPendientes({ proyecto, tareas, onNodoClick, onAgregar, onElimina
   if (posiciones.length === 1) {
     return (
       <div className="text-center py-10">
-        <p className="text-sm gp-text-muted mb-3">Este proyecto todavía no tiene pendientes registrados.</p>
+        <p className="text-sm gp-text-muted mb-3">Este proyecto todavía no tiene tareas registradas.</p>
         <button onClick={() => onAgregar && onAgregar(root)} className="gp-btn px-4 py-2 text-sm inline-flex items-center gap-1"><Plus size={14} /> Agregar el primero</button>
       </div>
     );
@@ -4243,8 +4243,8 @@ function Pendientes({ data, activeOwnerId, onAdd, onEdit, onRemove, onAddComenta
   return (
     <div>
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-1">
-        <h2 className="gp-serif text-2xl">Pendientes</h2>
-        <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm w-full sm:w-auto"><Plus size={14} /> Nuevo</button>
+        <h2 className="gp-serif text-2xl">Tareas</h2>
+        <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm w-full sm:w-auto"><Plus size={14} /> Nueva</button>
       </div>
       <p className="text-sm gp-text-muted mb-3">De todos tus proyectos, en un solo lugar. Puedes anidar subtareas sin límite con el ➕ de cada fila.</p>
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-4">
@@ -4346,7 +4346,7 @@ function Pendientes({ data, activeOwnerId, onAdd, onEdit, onRemove, onAddComenta
                 </tr>
               );
             })}
-            {filas.length === 0 && <tr><td colSpan={10} className="text-center gp-text-muted py-6">Sin pendientes registrados.</td></tr>}
+            {filas.length === 0 && <tr><td colSpan={10} className="text-center gp-text-muted py-6">Sin tareas registradas.</td></tr>}
           </tbody>
         </table>
       </div>
@@ -4359,7 +4359,7 @@ function Pendientes({ data, activeOwnerId, onAdd, onEdit, onRemove, onAddComenta
       )}
 
       {modal && (
-        <Modal title={modal.item.id ? "Editar pendiente" : modal.item.parentId ? "Nueva subtarea" : "Nuevo pendiente"} onClose={() => setModal(null)}>
+        <Modal title={modal.item.id ? "Editar tarea" : modal.item.parentId ? "Nueva subtarea" : "Nueva tarea"} onClose={() => setModal(null)}>
           <PendienteForm item={modal.item} proyectos={data.proyectos} equipo={data.equipo} contactos={data.contactos} pendientes={data.pendientes} colaboradores={colaboradores}
             onSave={(v) => {
               if (modal.item.id) {
@@ -7538,25 +7538,25 @@ function Agenda({ data, onEditPendiente, onAddCita, misId }) {
           })}
         </div>
       </div>
-      <p className="text-xs gp-text-muted mt-2">Toca un pendiente para marcarlo hecho (se queda en verde) o para regresarlo a pendiente. Lo que no cupo sigue en Pendientes normal.</p>
+      <p className="text-xs gp-text-muted mt-2">Toca una tarea para marcarla hecha (se queda en verde) o para regresarla a pendiente. Lo que no cupo sigue en Tareas normal.</p>
     </div>
   );
 }
 
 // Elegir un pendiente que ya existe (guardado en el sistema) y asignarle cuándo va, sin salir
-// de la Agenda ni tener que ir al módulo de Pendientes.
+// de la Agenda ni tener que ir al módulo de Tareas.
 function PendienteExistenteForm({ pendientes, onAsignar }) {
   const [pendienteId, setPendienteId] = useState("");
   const [fecha, setFecha] = useState(todayISO());
   return (
     <div>
-      <Field label="Pendiente guardado">
+      <Field label="Tarea guardada">
         <select className="gp-input" value={pendienteId} onChange={(e) => setPendienteId(e.target.value)}>
-          <option value="">— elige uno —</option>
+          <option value="">— elige una —</option>
           {pendientes.map((p) => <option key={p.id} value={p.id}>{p.descripcion}{p.fechaLimite ? ` (actual: ${p.fechaLimite})` : ""}</option>)}
         </select>
       </Field>
-      {pendientes.length === 0 && <p className="text-xs gp-text-muted mb-2">No tienes pendientes guardados sin marcar como hechos.</p>}
+      {pendientes.length === 0 && <p className="text-xs gp-text-muted mb-2">No tienes tareas guardadas sin marcar como hechas.</p>}
       <Field label="Fecha en la que va">
         <input type="date" className="gp-input" value={fecha} onChange={(e) => setFecha(e.target.value)} />
       </Field>
