@@ -1835,37 +1835,34 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
   }
 
   const navGroups = [
-    { label: "General", items: [
+    { label: "Inicio", items: [
       { id: "dashboard", label: "Panorama", icon: LayoutDashboard },
       { id: "asistente", label: "Asistente", icon: Sparkles },
       { id: "agenda", label: "Agenda", icon: CalendarRange },
       { id: "citas", label: "Citas", icon: CalendarClock },
       { id: "notas", label: "Notas", icon: StickyNote },
-      { id: "mi-trabajo", label: "Mi trabajo", icon: CheckSquare },
+    ]},
+    { label: "Trabajo", items: [
       { id: "proyectos", label: "Proyectos e ideas", icon: FolderKanban },
-      { id: "metas", label: "Metas por proyecto", icon: Target },
       { id: "pendientes", label: "Pendientes", icon: CheckSquare },
+      { id: "mi-trabajo", label: "Mi trabajo", icon: CheckSquare },
+      { id: "equipo", label: "Equipo", icon: Users },
     ]},
     { label: "Dinero", items: [
-      { id: "finanzas", label: "Ingresos y egresos", icon: Wallet },
-      { id: "facturas", label: "Facturas e IVA", icon: Receipt },
-      { id: "reportes", label: "Reportes", icon: PieChartIcon },
+      { id: "finanzas", label: "Finanzas", icon: Wallet },
       { id: "deudas", label: "Deudas", icon: AlertTriangle },
       { id: "apartados", label: "Apartados", icon: PiggyBank },
       { id: "patrimonio", label: "Patrimonio", icon: Gem },
       { id: "activos", label: "Activos digitales", icon: Globe },
+      { id: "reportes", label: "Reportes", icon: PieChartIcon },
+    ]},
+    { label: "Negocio", items: [
+      { id: "marketing", label: "Marketing", icon: Megaphone },
       { id: "documentos", label: "Legal y contratos", icon: FileText },
     ]},
-    { label: "Gente", items: [
-      { id: "equipo", label: "Equipo", icon: Users },
+    { label: "Personal", items: [
       { id: "contactos", label: "Contactos", icon: Contact },
       { id: "regalos", label: "Regalos", icon: Gift },
-    ]},
-    { label: "Presencia", items: [
-      { id: "redes", label: "Redes sociales", icon: BarChart3 },
-      { id: "marketing", label: "Marketing", icon: Megaphone },
-    ]},
-    { label: "Vida", items: [
       { id: "actividades", label: "Diario", icon: Activity },
       { id: "eventos", label: "Eventos", icon: Camera },
       { id: "habitos", label: "Hábitos", icon: Flame },
@@ -2116,10 +2113,10 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
               onRemoveTarea={(id, extraIds, mensaje) => askDelete("pendientes", id, { extraIds, mensaje })}
               onAddComentario={(i) => addItem("comentarios", i)}
               onRemoveComentario={(id) => askDelete("comentarios", id)}
+              onAddMeta={(i) => addItem("metas", i)}
+              onEditMeta={(id, p) => editItem("metas", id, p)}
+              onRemoveMeta={(id) => askDelete("metas", id)}
             />
-          )}
-          {view === "metas" && (
-            <Metas data={data} onAdd={(i) => addItem("metas", i)} onEdit={(id, p) => editItem("metas", id, p)} onRemove={(id) => askDelete("metas", id)} />
           )}
           {view === "pendientes" && (
             <Pendientes data={data} activeOwnerId={activeOwnerId} onAdd={(i) => addItem("pendientes", i)} onEdit={(id, p) => editItem("pendientes", id, p)} onRemove={(id, extraIds, mensaje) => askDelete("pendientes", id, { extraIds, mensaje })} onAddComentario={(i) => addItem("comentarios", i)} onRemoveComentario={(id) => askDelete("comentarios", id)}
@@ -2137,11 +2134,14 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
               }}
             />
           )}
-          {view === "finanzas" && (
-            <Finanzas data={data} onAdd={(i) => addItem("finanzas", i)} onEdit={(id, p) => editItem("finanzas", id, p)} onRemove={(id) => askDelete("finanzas", id)} />
-          )}
-          {view === "facturas" && (
-            <Facturas data={data} onAdd={(i) => addItem("facturas", i)} onEdit={(id, p) => editItem("facturas", id, p)} onRemove={(id) => askDelete("facturas", id)} onAddComentario={(i) => addItem("comentarios", i)} onRemoveComentario={(id) => askDelete("comentarios", id)} />
+          {(view === "finanzas" || view === "facturas") && (
+            <FinanzasYFacturas
+              key={view}
+              data={data}
+              tabInicial={view === "facturas" ? "facturas" : "movimientos"}
+              finanzasProps={{ onAdd: (i) => addItem("finanzas", i), onEdit: (id, p) => editItem("finanzas", id, p), onRemove: (id) => askDelete("finanzas", id) }}
+              facturasProps={{ onAdd: (i) => addItem("facturas", i), onEdit: (id, p) => editItem("facturas", id, p), onRemove: (id) => askDelete("facturas", id), onAddComentario: (i) => addItem("comentarios", i), onRemoveComentario: (id) => askDelete("comentarios", id) }}
+            />
           )}
           {view === "reportes" && <Reportes data={data} />}
           {view === "deudas" && (
@@ -2165,11 +2165,14 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
           {view === "regalos" && (
             <Regalos data={data} onAdd={(i) => addItem("regalos", i)} onEdit={(id, p) => editItem("regalos", id, p)} onRemove={(id) => askDelete("regalos", id)} filtroContactoInicial={regalosFiltroContacto} onLimpiarFiltro={() => setRegalosFiltroContacto("")} />
           )}
-          {view === "redes" && (
-            <RedesSociales data={data} onAdd={(i) => addItem("redesMetricas", i)} onEdit={(id, p) => editItem("redesMetricas", id, p)} onRemove={(id) => askDelete("redesMetricas", id)} />
-          )}
-          {view === "marketing" && (
-            <Marketing data={data} onAdd={(i) => addItem("campanas", i)} onEdit={(id, p) => editItem("campanas", id, p)} onRemove={(id) => askDelete("campanas", id)} onAddComentario={(i) => addItem("comentarios", i)} onRemoveComentario={(id) => askDelete("comentarios", id)} />
+          {(view === "marketing" || view === "redes") && (
+            <MarketingYRedes
+              key={view}
+              data={data}
+              tabInicial={view === "redes" ? "redes" : "campanas"}
+              marketingProps={{ onAdd: (i) => addItem("campanas", i), onEdit: (id, p) => editItem("campanas", id, p), onRemove: (id) => askDelete("campanas", id), onAddComentario: (i) => addItem("comentarios", i), onRemoveComentario: (id) => askDelete("comentarios", id) }}
+              redesProps={{ onAdd: (i) => addItem("redesMetricas", i), onEdit: (id, p) => editItem("redesMetricas", id, p), onRemove: (id) => askDelete("redesMetricas", id) }}
+            />
           )}
           {view === "actividades" && (
             <Actividades data={data} onAdd={(i) => addItem("actividades", i)} onEdit={(id, p) => editItem("actividades", id, p)} onRemove={(id) => askDelete("actividades", id)} />
@@ -3379,9 +3382,10 @@ function ProyectoForm({ item, onSave }) {
 /* ---------- Detalle de proyecto (Fase: navegación con breadcrumb) ---------- */
 // Pantalla completa de un solo proyecto: todos sus pendientes con subtareas anidadas,
 // porcentaje de avance (manual en tareas finales, calculado en tareas con hijos), y comentarios.
-function ProyectoDetalle({ data, proyectoId, onVolver, onAddTarea, onEditTarea, onRemoveTarea, onAddComentario, onRemoveComentario }) {
+function ProyectoDetalle({ data, proyectoId, onVolver, onAddTarea, onEditTarea, onRemoveTarea, onAddComentario, onRemoveComentario, onAddMeta, onEditMeta, onRemoveMeta }) {
   const proyecto = data.proyectos.find((p) => p.id === proyectoId);
   const [modal, setModal] = useState(null);
+  const [modalMeta, setModalMeta] = useState(null);
   const [comentariosDe, setComentariosDe] = useState(null);
 
   if (!proyecto) {
@@ -3399,6 +3403,7 @@ function ProyectoDetalle({ data, proyectoId, onVolver, onAddTarea, onEditTarea, 
   const filas = flattenTareas(arbol);
   const avanceGeneral = arbol.length ? Math.round(arbol.reduce((s, n) => s + calcAvanceTarea(n), 0) / arbol.length) : 0;
   const r = rentabilidadProyecto(data, proyectoId);
+  const metasProyecto = (data.metas || []).filter((m) => m.proyectoId === proyectoId);
   const nComentarios = (id) => (data.comentarios || []).filter((c) => c.entidadTipo === "pendientes" && c.entidadId === id).length;
   const nombreResp = (id) => data.equipo.find((e) => e.id === id)?.nombre || "Tú";
   const nombreCliente = (id) => data.contactos.find((c) => c.id === id)?.nombre || "—";
@@ -3469,6 +3474,44 @@ function ProyectoDetalle({ data, proyectoId, onVolver, onAddTarea, onEditTarea, 
           </div>
         );
       })()}
+
+      <div className="mb-4">
+        <div className="flex items-center justify-between mb-2">
+          <p className="text-sm font-medium">Metas — qué define el éxito de este proyecto</p>
+          <button onClick={() => setModalMeta({ item: { proyectoId, descripcion: "", fechaObjetivo: todayISO(), fechaRevision: "", prioridad: "Media", estatus: "No iniciada" } })} className="gp-btn-ghost px-2.5 py-1 text-xs flex items-center gap-1"><Plus size={12} /> Nueva meta</button>
+        </div>
+        {metasProyecto.length === 0 ? (
+          <p className="text-xs gp-text-muted">Sin metas todavía — agrega una para darle rumbo a este proyecto.</p>
+        ) : (
+          <div className="space-y-1.5">
+            {metasProyecto.map((m) => {
+              const cumplida = m.estatus === "Cumplida";
+              return (
+                <div key={m.id} className="gp-panel p-2.5 flex items-center gap-2" style={cumplida ? { background: "var(--teal-tint)", color: "var(--teal-text)" } : undefined}>
+                  <input
+                    type="checkbox"
+                    checked={cumplida}
+                    title="Marcar como cumplida"
+                    onChange={(e) => onEditMeta(m.id, { estatus: e.target.checked ? "Cumplida" : "En progreso" })}
+                    style={{ width: 15, height: 15, accentColor: "var(--gold)", cursor: "pointer" }}
+                  />
+                  <span className="text-sm flex-1">{m.descripcion}</span>
+                  <Badge tone={m.prioridad === "Alta" ? "red" : m.prioridad === "Media" ? "gold" : "muted"}>{m.prioridad || "Media"}</Badge>
+                  {m.fechaObjetivo && <span className="text-xs gp-mono gp-text-muted">{m.fechaObjetivo}</span>}
+                  <IconBtn onClick={() => setModalMeta({ item: m })}><Pencil size={12} /></IconBtn>
+                  <IconBtn onClick={() => onRemoveMeta(m.id)}><Trash2 size={12} /></IconBtn>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {modalMeta && (
+        <Modal title={modalMeta.item.id ? "Editar meta" : "Nueva meta"} onClose={() => setModalMeta(null)}>
+          <MetaForm item={modalMeta.item} proyectos={data.proyectos} onSave={(v) => { modalMeta.item.id ? onEditMeta(modalMeta.item.id, v) : onAddMeta(v); setModalMeta(null); }} />
+        </Modal>
+      )}
 
       <div className="gp-panel overflow-x-auto">
         <table className="gp-table">
@@ -4157,6 +4200,21 @@ function fmtMesLabel(mes) {
   return txt.charAt(0).toUpperCase() + txt.slice(1);
 }
 
+// Envoltura de pestañas: Movimientos (Finanzas) y Facturas e IVA viven en la misma pantalla
+// ahora, porque son la misma cosa vista desde dos ángulos (dinero que entra/sale, y el papeleo
+// fiscal de ese dinero). No se tocó nada de la lógica interna de cada una, solo se agruparon.
+function FinanzasYFacturas({ data, tabInicial, finanzasProps, facturasProps }) {
+  const [tab, setTab] = useState(tabInicial || "movimientos");
+  return (
+    <div>
+      <div className="flex gap-1 mb-4">
+        <button onClick={() => setTab("movimientos")} className={`text-sm px-3 py-1.5 rounded-full border ${tab === "movimientos" ? "gp-btn" : "gp-btn-ghost"}`}>Movimientos</button>
+        <button onClick={() => setTab("facturas")} className={`text-sm px-3 py-1.5 rounded-full border ${tab === "facturas" ? "gp-btn" : "gp-btn-ghost"}`}>Facturas e IVA</button>
+      </div>
+      {tab === "movimientos" ? <Finanzas data={data} {...finanzasProps} /> : <Facturas data={data} {...facturasProps} />}
+    </div>
+  );
+}
 function Finanzas({ data, onAdd, onEdit, onRemove }) {
   const [modal, setModal] = useState(null);
   const [vista, setVista] = useState("todos");
@@ -4216,7 +4274,7 @@ function Finanzas({ data, onAdd, onEdit, onRemove }) {
   return (
     <div>
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-1">
-        <h2 className="gp-serif text-2xl">Ingresos y egresos</h2>
+        <h2 className="gp-serif text-2xl">Movimientos</h2>
         <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm w-full sm:w-auto"><Plus size={14} /> Nuevo</button>
       </div>
       <p className="text-sm gp-text-muted mb-4">Incluye pagos recurrentes (luz, agua, compras a meses) con fecha de inicio y fin, o indefinidos.</p>
@@ -5412,6 +5470,20 @@ function RedesForm({ item, proyectos, onSave }) {
 }
 
 /* ---------- Marketing (calendario de campañas, presupuesto, métricas, retorno) ---------- */
+// Igual que Finanzas+Facturas: Marketing y Redes sociales se agrupan en pestañas de una misma
+// pantalla porque las redes alimentan las campañas — sin tocar la lógica interna de ninguna.
+function MarketingYRedes({ data, tabInicial, marketingProps, redesProps }) {
+  const [tab, setTab] = useState(tabInicial || "campanas");
+  return (
+    <div>
+      <div className="flex gap-1 mb-4">
+        <button onClick={() => setTab("campanas")} className={`text-sm px-3 py-1.5 rounded-full border ${tab === "campanas" ? "gp-btn" : "gp-btn-ghost"}`}>Campañas</button>
+        <button onClick={() => setTab("redes")} className={`text-sm px-3 py-1.5 rounded-full border ${tab === "redes" ? "gp-btn" : "gp-btn-ghost"}`}>Redes sociales</button>
+      </div>
+      {tab === "campanas" ? <Marketing data={data} {...marketingProps} /> : <RedesSociales data={data} {...redesProps} />}
+    </div>
+  );
+}
 function Marketing({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveComentario }) {
   const [modal, setModal] = useState(null);
   const [comentariosDe, setComentariosDe] = useState(null);
