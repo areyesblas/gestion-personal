@@ -457,6 +457,9 @@ const TABLES = ["proyectos", "pendientes", "equipo", "finanzas", "actividades", 
 // calculada sobre Finanzas (egresos no recurrentes con saldo pendiente). Esta función se usa
 // en cualquier lugar que antes leía `data.deudas`.
 const deudasDeFinanzas = (finanzas) => (finanzas || []).filter((f) => f.tipo === "Egreso" && !f.esRecurrente && (f.estatus === "Pendiente" || f.estatus === "Parcial"));
+// Catálogo abierto de tags de Citas (Grupo C): junta los tags ya usados en todas las citas para
+// sugerirlos en el combobox, sin imponer una lista fija — cualquiera puede escribir uno nuevo.
+const tagsUnicos = (citas) => [...new Set((citas || []).flatMap((c) => c.tags || []))].sort((a, b) => a.localeCompare(b));
 const OLD_STORAGE_KEY = "gestion_personal_data"; // localStorage, versión muy vieja
 const OLD_BLOB_TABLE = "gestion_data"; // tabla única jsonb, versión anterior a este modelo relacional
 
@@ -882,6 +885,75 @@ function Modal({ title, onClose, children }) {
                 <button onClick={onClose} className="flex-1 py-1.5 text-xs rounded" style={{ background: "var(--red)", color: "#fff" }}>Descartar</button>
               </div>
             </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Combobox reutilizable de "buscar y agregar": escribe para filtrar entre opciones existentes,
+// toca una para agregarla como chip, o si no existe aparece "Crear ..." al fondo para darla de
+// alta al vuelo (Grupo C — multi-contacto y tags en Citas, pensado para reusarse en otras
+// pantallas después). `opciones` y `seleccionados` son {id, label}. `onCrear` es opcional: si no
+// se pasa, no se ofrece crear (por ejemplo, si algún día se usa solo para elegir entre existentes).
+function ComboboxMultiBuscar({ seleccionados, opciones, onAgregar, onQuitar, onCrear, placeholder, crearLabel }) {
+  const [query, setQuery] = useState("");
+  const [abierto, setAbierto] = useState(false);
+  const idsSeleccionados = new Set(seleccionados.map((s) => s.id));
+  const q = query.trim().toLowerCase();
+  const filtradas = opciones.filter((o) => !idsSeleccionados.has(o.id) && o.label.toLowerCase().includes(q));
+  const coincideExacto = opciones.some((o) => o.label.toLowerCase() === q);
+
+  return (
+    <div className="mb-3">
+      {seleccionados.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 mb-2">
+          {seleccionados.map((s) => (
+            <span key={s.id} className="text-xs pl-2.5 pr-1.5 py-1 rounded-full flex items-center gap-1" style={{ background: "var(--panel-2)" }}>
+              {s.label}
+              <button type="button" onClick={() => onQuitar(s.id)} className="gp-text-muted"><X size={11} /></button>
+            </span>
+          ))}
+        </div>
+      )}
+      <div className="relative">
+        <input
+          className="gp-input"
+          placeholder={placeholder}
+          value={query}
+          onChange={(e) => { setQuery(e.target.value); setAbierto(true); }}
+          onFocus={() => setAbierto(true)}
+          onBlur={() => setTimeout(() => setAbierto(false), 150)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && q && !coincideExacto && onCrear) {
+              e.preventDefault();
+              onCrear(query.trim());
+              setQuery("");
+            }
+          }}
+        />
+        {abierto && (q || filtradas.length > 0) && (
+          <div className="absolute z-10 mt-1 w-full gp-panel overflow-y-auto gp-scroll" style={{ maxHeight: 200 }}>
+            {filtradas.slice(0, 8).map((o) => (
+              <button
+                type="button" key={o.id}
+                className="w-full text-left px-3 py-2 text-sm gp-panel-hi"
+                onMouseDown={(e) => { e.preventDefault(); onAgregar(o); setQuery(""); }}
+              >
+                {o.label}
+              </button>
+            ))}
+            {q && !coincideExacto && onCrear && (
+              <button
+                type="button"
+                className="w-full text-left px-3 py-2 text-sm gp-text-gold flex items-center gap-1.5"
+                style={filtradas.length ? { borderTop: "1px solid var(--border)" } : undefined}
+                onMouseDown={(e) => { e.preventDefault(); onCrear(query.trim()); setQuery(""); }}
+              >
+                <Plus size={13} /> {crearLabel ? crearLabel(query.trim()) : `Crear "${query.trim()}"`}
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -2555,6 +2627,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
             <Agenda data={data} misId={misId}
               onEditPendiente={(id, p) => editItem("pendientes", id, p)}
               onAddCita={(c) => addItem("citas", c)}
+              onCrearContacto={(nombre) => { const nid = uid(); addItem("contactos", { id: nid, nombre, tipo: "Otro" }); return nid; }}
               onEditCita={async (id, p) => {
                 await editItem("citas", id, p);
                 // Etapa 6 (Agenda interactiva, secc. 23.6): "al mover una tarea deben actualizarse
@@ -2566,7 +2639,8 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
             />
           )}
           {view === "citas" && (
-            <Citas data={data} onAdd={(i) => addItem("citas", i)} onEdit={(id, p) => editItem("citas", id, p)} onRemove={(id) => askDelete("citas", id)} onCrearTarea={(t) => addItem("pendientes", t)} />
+            <Citas data={data} onAdd={(i) => addItem("citas", i)} onEdit={(id, p) => editItem("citas", id, p)} onRemove={(id) => askDelete("citas", id)} onCrearTarea={(t) => addItem("pendientes", t)}
+              onCrearContacto={(nombre) => { const nid = uid(); addItem("contactos", { id: nid, nombre, tipo: "Otro" }); return nid; }} />
           )}
           {view === "notas" && (
             <Notas data={data} onAdd={(i) => addItem("notas", i)} onEdit={(id, p) => editItem("notas", id, p)} onRemove={(id) => askDelete("notas", id)} />
@@ -8539,7 +8613,7 @@ function calcularBloquesAgenda({ dias, citas, pendientes, horaInicio, horasDiari
   return bloquesPorDia;
 }
 
-function Agenda({ data, onEditPendiente, onAddCita, onEditCita, misId }) {
+function Agenda({ data, onEditPendiente, onAddCita, onEditCita, onCrearContacto, misId }) {
   const [vista, setVista] = useState("semana"); // "dia" | "semana"
   const [base, setBase] = useState(() => new Date());
   const [config, setConfig] = useState({
@@ -8760,7 +8834,8 @@ function Agenda({ data, onEditPendiente, onAddCita, onEditCita, misId }) {
             </button>
           </div>
           {modalAgregar === "nueva" && (
-            <CitaForm item={{ titulo: "", fechaHora: localInputsAFechaHora(todayISO(), "09:00"), lugar: "", contactoId: "", notas: "" }} contactos={data.contactos}
+            <CitaForm item={{ titulo: "", fechaHora: localInputsAFechaHora(todayISO(), "09:00"), lugar: "", contactoIds: [], tags: [], notas: "" }} contactos={data.contactos}
+              tagsExistentes={tagsUnicos(data.citas)} onCrearContacto={onCrearContacto}
               onSave={(v) => { onAddCita({ ...v, id: uid() }); setModalAgregar(null); }} />
           )}
           {modalAgregar === "existente" && (
@@ -8928,21 +9003,22 @@ function PendienteExistenteForm({ pendientes, onAsignar }) {
   );
 }
 
-function Citas({ data, onAdd, onEdit, onRemove, onCrearTarea }) {
+function Citas({ data, onAdd, onEdit, onRemove, onCrearTarea, onCrearContacto }) {
   const [modal, setModal] = useState(null);
   const [busqueda, setBusqueda] = useState("");
-  const empty = { titulo: "", fechaHora: localInputsAFechaHora(todayISO(), "09:00"), lugar: "", contactoId: "", notas: "" };
+  const empty = { titulo: "", fechaHora: localInputsAFechaHora(todayISO(), "09:00"), lugar: "", contactoIds: [], tags: [], notas: "" };
   const nombreContacto = (id) => data.contactos.find((c) => c.id === id)?.nombre || "—";
+  const nombresContactos = (c) => (c.contactoIds && c.contactoIds.length ? c.contactoIds : (c.contactoId ? [c.contactoId] : [])).map(nombreContacto);
   const ahora = new Date();
-  const citasBuscadas = filtrarPorBusqueda(data.citas, busqueda, [(c) => c.titulo, (c) => c.lugar, (c) => c.notas, (c) => nombreContacto(c.contactoId)]);
+  const citasBuscadas = filtrarPorBusqueda(data.citas, busqueda, [(c) => c.titulo, (c) => c.lugar, (c) => c.notas, (c) => nombresContactos(c).join(" "), (c) => (c.tags || []).join(" ")]);
   const ordenadas = [...citasBuscadas].sort((a, b) => (a.fechaHora || "").localeCompare(b.fechaHora || ""));
   const proximas = ordenadas.filter((c) => new Date(c.fechaHora) >= ahora);
   const pasadas = ordenadas.filter((c) => new Date(c.fechaHora) < ahora).reverse();
   const [mostrarPasadas, setMostrarPasadas] = useState(false);
   const columnasExport = [
     { label: "Título", get: (c) => c.titulo }, { label: "Fecha y hora", get: (c) => fmtFechaHora(c.fechaHora) },
-    { label: "Lugar", get: (c) => c.lugar }, { label: "Contacto", get: (c) => nombreContacto(c.contactoId) },
-    { label: "Notas", get: (c) => c.notas },
+    { label: "Lugar", get: (c) => c.lugar }, { label: "Contactos", get: (c) => nombresContactos(c).join(", ") },
+    { label: "Tags", get: (c) => (c.tags || []).join(", ") }, { label: "Notas", get: (c) => c.notas },
   ];
 
   // Rango de fechas específico para exportar Citas (Grupo B, punto 7): con miles de registros,
@@ -8971,6 +9047,7 @@ function Citas({ data, onAdd, onEdit, onRemove, onCrearTarea }) {
   const Fila = (c) => {
     const esHoy = new Date(c.fechaHora).toDateString() === ahora.toDateString();
     const tareasRelacionadas = data.pendientes.filter((p) => p.origenTabla === "citas" && p.origenId === c.id);
+    const nombres = nombresContactos(c);
     return (
       <div key={c.id} className="gp-panel p-3 flex items-start justify-between gap-3">
         <div className="min-w-0">
@@ -8981,8 +9058,19 @@ function Citas({ data, onAdd, onEdit, onRemove, onCrearTarea }) {
           <div className="flex items-center gap-3 flex-wrap mt-1 text-xs gp-text-muted">
             <span className="flex items-center gap-1"><Clock size={11} /> {fmtFechaHora(c.fechaHora)}</span>
             {c.lugar && <span className="flex items-center gap-1"><MapPin size={11} /> {c.lugar}</span>}
-            {c.contactoId && <span>{nombreContacto(c.contactoId)}</span>}
           </div>
+          {nombres.length > 0 && (
+            <div className="flex flex-wrap gap-1 mt-1.5">
+              {nombres.map((n, i) => (
+                <span key={i} className="text-xs px-2 py-0.5 rounded-full" style={{ background: "var(--panel-2)" }}>{n}</span>
+              ))}
+            </div>
+          )}
+          {c.tags && c.tags.length > 0 && (
+            <div className="flex flex-wrap gap-1 mt-1">
+              {c.tags.map((t) => <Badge key={t} tone="muted">{t}</Badge>)}
+            </div>
+          )}
           {c.notas && <p className="text-xs gp-text-muted mt-1">{c.notas}</p>}
           {tareasRelacionadas.length > 0 && (
             <div className="mt-2 pt-2" style={{ borderTop: "1px solid var(--border)" }}>
@@ -9014,7 +9102,7 @@ function Citas({ data, onAdd, onEdit, onRemove, onCrearTarea }) {
       </div>
       <p className="text-sm gp-text-muted mb-4">Agenda con hora y recordatorio push antes de la hora. Para shows de tu negocio usa Eventos; para bitácora personal, Actividades.</p>
 
-      <BarraListaEstandar busqueda={busqueda} onBusqueda={setBusqueda} placeholder="Buscar por título, lugar o contacto…"
+      <BarraListaEstandar busqueda={busqueda} onBusqueda={setBusqueda} placeholder="Buscar por título, lugar, contacto o tag…"
         rangoExport={{ opciones: RANGOS_EXPORT_CITAS, contar: (rangoKey, desde, hasta) => filtrarCitasPorRango(rangoKey, desde, hasta).length }}
         onExportExcel={(opts) => exportarFilasExcel(filtrarCitasPorRango(opts?.rango, opts?.desde, opts?.hasta), columnasExport, "citas")}
         onExportPDF={(opts) => exportarFilasPDF(filtrarCitasPorRango(opts?.rango, opts?.desde, opts?.hasta), columnasExport, "citas", "Citas",
@@ -9034,7 +9122,7 @@ function Citas({ data, onAdd, onEdit, onRemove, onCrearTarea }) {
 
       {modal && !modal.paso && (
         <Modal title={modal.item.id ? "Editar cita" : "Nueva cita"} onClose={() => setModal(null)}>
-          <CitaForm item={modal.item} contactos={data.contactos} onSave={(v) => {
+          <CitaForm item={modal.item} contactos={data.contactos} tagsExistentes={tagsUnicos(data.citas)} onCrearContacto={onCrearContacto} onSave={(v) => {
             if (modal.item.id) { onEdit(modal.item.id, v); setModal(null); return; }
             const nuevoId = uid();
             onAdd({ ...v, id: nuevoId });
@@ -9057,16 +9145,22 @@ function Citas({ data, onAdd, onEdit, onRemove, onCrearTarea }) {
   );
 }
 
-function CitaForm({ item, contactos, onSave }) {
+function CitaForm({ item, contactos, tagsExistentes, onCrearContacto, onSave }) {
   const inicial = fechaHoraALocalInputs(item.fechaHora);
   const [titulo, setTitulo] = useState(item.titulo || "");
   const [fecha, setFecha] = useState(inicial.fecha);
   const [hora, setHora] = useState(inicial.hora);
   const [duracionHoras, setDuracionHoras] = useState(item.duracionHoras || 1);
   const [lugar, setLugar] = useState(item.lugar || "");
-  const [contactoId, setContactoId] = useState(item.contactoId || "");
+  const [contactoIds, setContactoIds] = useState(item.contactoIds && item.contactoIds.length ? item.contactoIds : (item.contactoId ? [item.contactoId] : []));
+  const [tags, setTags] = useState(item.tags || []);
   const [notas, setNotas] = useState(item.notas || "");
   const [error, setError] = useState("");
+
+  const contactosSeleccionados = contactoIds.map((id) => ({ id, label: contactos.find((c) => c.id === id)?.nombre || "—" }));
+  const opcionesContactos = contactos.map((c) => ({ id: c.id, label: c.nombre }));
+  const tagsSeleccionados = tags.map((t) => ({ id: t, label: t }));
+  const opcionesTags = (tagsExistentes || []).map((t) => ({ id: t, label: t }));
 
   return (
     <div>
@@ -9078,10 +9172,26 @@ function CitaForm({ item, contactos, onSave }) {
       </div>
       <Field label="Lugar (opcional)"><input className="gp-input" value={lugar} onChange={(e) => setLugar(e.target.value)} /></Field>
       <Field label="Con quién (opcional)">
-        <select className="gp-input" value={contactoId} onChange={(e) => setContactoId(e.target.value)}>
-          <option value="">— sin contacto —</option>
-          {contactos.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
-        </select>
+        <ComboboxMultiBuscar
+          seleccionados={contactosSeleccionados}
+          opciones={opcionesContactos}
+          onAgregar={(o) => setContactoIds((ids) => [...ids, o.id])}
+          onQuitar={(id) => setContactoIds((ids) => ids.filter((x) => x !== id))}
+          onCrear={(nombre) => setContactoIds((ids) => [...ids, onCrearContacto(nombre)])}
+          placeholder="Buscar o agregar contacto…"
+          crearLabel={(texto) => `Crear contacto "${texto}"`}
+        />
+      </Field>
+      <Field label="Tags (opcional)">
+        <ComboboxMultiBuscar
+          seleccionados={tagsSeleccionados}
+          opciones={opcionesTags}
+          onAgregar={(o) => setTags((ts) => [...ts, o.id])}
+          onQuitar={(id) => setTags((ts) => ts.filter((x) => x !== id))}
+          onCrear={(texto) => setTags((ts) => [...ts, texto])}
+          placeholder="Agregar tag…"
+          crearLabel={(texto) => `Crear tag "${texto}"`}
+        />
       </Field>
       <Field label="Notas (opcional)"><textarea className="gp-input" rows={2} value={notas} onChange={(e) => setNotas(e.target.value)} /></Field>
       {error && <p className="text-xs gp-text-red mb-2">{error}</p>}
@@ -9090,7 +9200,7 @@ function CitaForm({ item, contactos, onSave }) {
         onClick={() => {
           if (!titulo.trim()) { setError("Captura un título."); return; }
           if (!fecha) { setError("Elige una fecha."); return; }
-          onSave({ titulo: titulo.trim(), fechaHora: localInputsAFechaHora(fecha, hora), duracionHoras: duracionHoras || 1, lugar: lugar.trim(), contactoId, notas: notas.trim() });
+          onSave({ titulo: titulo.trim(), fechaHora: localInputsAFechaHora(fecha, hora), duracionHoras: duracionHoras || 1, lugar: lugar.trim(), contactoIds, tags, notas: notas.trim() });
         }}
       >
         Guardar
@@ -9668,7 +9778,8 @@ function QuickCapture({ data, onAdd, onCrearRecordatorio, irAVista }) {
 
       {tipo === "cita" && (
         <Modal title="Nueva cita" onClose={cerrar}>
-          <CitaForm item={{ titulo: "", fechaHora: localInputsAFechaHora(todayISO(), "09:00"), lugar: "", contactoId: "", notas: "" }} contactos={data.contactos}
+          <CitaForm item={{ titulo: "", fechaHora: localInputsAFechaHora(todayISO(), "09:00"), lugar: "", contactoIds: [], tags: [], notas: "" }} contactos={data.contactos}
+            tagsExistentes={tagsUnicos(data.citas)} onCrearContacto={(nombre) => { const nid = uid(); onAdd("contactos", { id: nid, nombre, tipo: "Otro" }); return nid; }}
             onSave={(v) => { onAdd("citas", { ...v, id: uid() }); cerrar(); irAVista("citas"); }} />
         </Modal>
       )}
