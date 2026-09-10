@@ -243,7 +243,7 @@ const seed = () => ({
   documentos: [],
   habitos: [],
   salud: [],
-  perfilSalud: { alturaCm: "" },
+  perfilSalud: {},
 });
 
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2, 10) + Date.now().toString(36));
@@ -593,8 +593,8 @@ async function fetchPapelera(ownerId) {
 async function loadAllTables(ownerId) {
   const entries = await Promise.all(TABLES.map(async (key) => [key, await fetchTable(key, ownerId)]));
   const result = Object.fromEntries(entries);
-  const { data: perfilRow } = await supabase.from("perfil_salud").select("*").eq("user_id", ownerId).limit(1).maybeSingle();
-  result.perfilSalud = { alturaCm: perfilRow?.altura_cm ?? "" };
+  const { data: perfilRows } = await supabase.from("perfil_salud").select("*").eq("user_id", ownerId);
+  result.perfilSalud = Object.fromEntries((perfilRows || []).map((r) => [r.contacto_id || "yo", { alturaCm: r.altura_cm ?? "" }]));
   return result;
 }
 
@@ -1955,10 +1955,11 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
   };
   // opts puede traer { extraIds: [...ids de subtareas que también se van a borrar], mensaje: "texto de advertencia" }
   const askDelete = (key, id, opts = {}) => setConfirmDelete({ key, id, ...opts });
-  const updatePerfilSalud = async (patch) => {
-    const { error } = await supabase.from("perfil_salud").upsert({ altura_cm: patch.alturaCm || null }, { onConflict: "user_id" });
-    if (error) { console.error("Error al guardar tu estatura:", error); return; }
-    setData((prev) => ({ ...prev, perfilSalud: { ...(prev.perfilSalud || {}), ...patch } }));
+  const updatePerfilSalud = async (contactoId, patch) => {
+    const row = { user_id: activeOwnerId, contacto_id: contactoId || null, altura_cm: patch.alturaCm || null };
+    const { error } = await supabase.from("perfil_salud").upsert(row, { onConflict: contactoId ? "user_id,contacto_id" : "user_id" });
+    if (error) { console.error("Error al guardar la estatura:", error); return; }
+    setData((prev) => ({ ...prev, perfilSalud: { ...(prev.perfilSalud || {}), [contactoId || "yo"]: { ...(prev.perfilSalud?.[contactoId || "yo"] || {}), ...patch } } }));
   };
   const moverFondosApartado = async (apartado, { monto, proyectoId, concepto, nuevoMontoActual }) => {
     await editItem("apartados", apartado.id, { montoActual: nuevoMontoActual });
@@ -6674,10 +6675,11 @@ function HabitoDetalle({ habito: h, hoy, onToggleDia, onSave }) {
 /* ---------- Medicamentos ---------- */
 const DIAS_SEMANA_LABELS = ["D", "L", "M", "M", "J", "V", "S"]; // 0=domingo … 6=sábado
 
-function MedicamentoForm({ inicial, onSave, onCancel }) {
+function MedicamentoForm({ inicial, contactos, onSave, onCancel }) {
   const [form, setForm] = useState(inicial || {
-    nombre: "", dosis: "", paraQuien: "Yo", horarios: ["08:00"], diasSemana: [0, 1, 2, 3, 4, 5, 6],
+    nombre: "", dosis: "", contactoId: null, horarios: ["08:00"], diasSemana: [0, 1, 2, 3, 4, 5, 6],
     fechaInicio: todayISO(), fechaFin: "", instrucciones: "", activo: true,
+    motivo: "", medico: "", viaAdministracion: "", observaciones: "",
   });
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
@@ -6690,7 +6692,12 @@ function MedicamentoForm({ inicial, onSave, onCancel }) {
     <div>
       <Field label="Nombre del medicamento"><input className="gp-input" value={form.nombre} onChange={(e) => set("nombre", e.target.value)} /></Field>
       <Field label="Dosis"><input className="gp-input" placeholder="ej. 1 tableta, 5ml" value={form.dosis} onChange={(e) => set("dosis", e.target.value)} /></Field>
-      <Field label="¿Para quién es?"><input className="gp-input" placeholder="ej. Yo, Mamá, Papá" value={form.paraQuien} onChange={(e) => set("paraQuien", e.target.value)} /></Field>
+      <Field label="¿Para quién es?">
+        <select className="gp-input" value={form.contactoId || ""} onChange={(e) => set("contactoId", e.target.value || null)}>
+          <option value="">Yo</option>
+          {(contactos || []).map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+        </select>
+      </Field>
 
       <p className="text-xs gp-text-muted mb-1">Horarios de toma</p>
       <div className="space-y-1.5 mb-3">
@@ -6720,11 +6727,25 @@ function MedicamentoForm({ inicial, onSave, onCancel }) {
       </div>
       <Field label="Instrucciones (opcional)"><input className="gp-input" placeholder="ej. Tomar con alimentos" value={form.instrucciones} onChange={(e) => set("instrucciones", e.target.value)} /></Field>
 
+      <details className="mb-3">
+        <summary className="text-xs gp-text-gold cursor-pointer">+ Datos complementarios (opcionales)</summary>
+        <div className="mt-2 space-y-2">
+          <Field label="Motivo / indicación"><input className="gp-input" placeholder="ej. Presión alta" value={form.motivo} onChange={(e) => set("motivo", e.target.value)} /></Field>
+          <Field label="Médico que lo indicó"><input className="gp-input" value={form.medico} onChange={(e) => set("medico", e.target.value)} /></Field>
+          <Field label="Vía de administración"><input className="gp-input" placeholder="ej. Oral, sublingual, tópica" value={form.viaAdministracion} onChange={(e) => set("viaAdministracion", e.target.value)} /></Field>
+          <Field label="Observaciones"><textarea className="gp-input" rows={2} value={form.observaciones} onChange={(e) => set("observaciones", e.target.value)} /></Field>
+        </div>
+      </details>
+
       <div className="flex gap-2 mt-3">
         <button className="gp-btn-ghost flex-1 py-2 text-sm" onClick={onCancel}>Cancelar</button>
         <button
           className="gp-btn flex-1 py-2 text-sm"
-          onClick={() => { if (form.nombre.trim() && form.horarios.length) onSave({ ...form, diasSemana: form.diasSemana.length ? form.diasSemana : [0, 1, 2, 3, 4, 5, 6] }); }}
+          onClick={() => {
+            if (!form.nombre.trim() || !form.horarios.length) return;
+            const nombrePersona = form.contactoId ? (contactos || []).find((c) => c.id === form.contactoId)?.nombre : "Yo";
+            onSave({ ...form, diasSemana: form.diasSemana.length ? form.diasSemana : [0, 1, 2, 3, 4, 5, 6], paraQuien: nombrePersona || "Yo" });
+          }}
         >Guardar</button>
       </div>
     </div>
@@ -6735,6 +6756,7 @@ function Medicamentos({ data, onAdd, onEdit, onRemove }) {
   const [modal, setModal] = useState(null); // null | "nuevo" | medicamento a editar
 
   const lista = [...(data.medicamentos || [])].sort((a, b) => (a.activo === b.activo ? 0 : a.activo ? -1 : 1));
+  const nombrePersona = (m) => (m.contactoId ? data.contactos.find((c) => c.id === m.contactoId)?.nombre || m.paraQuien || "—" : "Yo");
 
   return (
     <div>
@@ -6752,7 +6774,7 @@ function Medicamentos({ data, onAdd, onEdit, onRemove }) {
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="text-sm font-medium">{m.nombre}</span>
                   {m.dosis && <Badge tone="muted">{m.dosis}</Badge>}
-                  <Badge tone="gold">{m.paraQuien}</Badge>
+                  <Badge tone="gold">{nombrePersona(m)}</Badge>
                   {!m.activo && <Badge tone="red">Pausado</Badge>}
                 </div>
                 <div className="flex flex-wrap gap-1 mt-2">
@@ -6761,7 +6783,13 @@ function Medicamentos({ data, onAdd, onEdit, onRemove }) {
                 <p className="text-xs gp-text-muted mt-1.5">
                   {(m.diasSemana || []).length === 7 ? "Todos los días" : (m.diasSemana || []).map((d) => DIAS_SEMANA_LABELS[d]).join(" ")}
                   {m.instrucciones ? ` · ${m.instrucciones}` : ""}
+                  {m.motivo ? ` · ${m.motivo}` : ""}
                 </p>
+                {(m.medico || m.viaAdministracion || m.observaciones) && (
+                  <p className="text-xs gp-text-muted mt-1">
+                    {[m.medico && `Dr(a). ${m.medico}`, m.viaAdministracion, m.observaciones].filter(Boolean).join(" · ")}
+                  </p>
+                )}
               </div>
               <div className="flex gap-1 shrink-0">
                 <IconBtn onClick={() => onEdit(m.id, { activo: !m.activo })} title={m.activo ? "Pausar" : "Reactivar"}>
@@ -6780,6 +6808,7 @@ function Medicamentos({ data, onAdd, onEdit, onRemove }) {
         <Modal title={modal === "nuevo" ? "Nuevo medicamento" : "Editar medicamento"} onClose={() => setModal(null)}>
           <MedicamentoForm
             inicial={modal === "nuevo" ? null : modal}
+            contactos={data.contactos}
             onCancel={() => setModal(null)}
             onSave={(vals) => { modal === "nuevo" ? onAdd(vals) : onEdit(modal.id, vals); setModal(null); }}
           />
@@ -6793,11 +6822,24 @@ function Medicamentos({ data, onAdd, onEdit, onRemove }) {
 function Salud({ data, onAdd, onEdit, onRemove, onUpdatePerfil }) {
   const [modal, setModal] = useState(null);
   const [tab, setTab] = useState("historial"); // "historial" | "tendencias"
-  const [altura, setAltura] = useState(data.perfilSalud?.alturaCm || "");
+  const [personaId, setPersonaId] = useState(null); // null = "Yo"; si no, id de un Contacto
+  const [agregandoPersona, setAgregandoPersona] = useState(false);
   const [orden, setOrden] = useState("default");
   const [ordenDir, setOrdenDir] = useState("asc");
   const toggleOrden = (key) => { if (orden === key) setOrdenDir((d) => (d === "asc" ? "desc" : "asc")); else { setOrden(key); setOrdenDir("asc"); } };
-  const empty = { fecha: todayISO(), hora: horaActualHHMM(), peso: "", glucosa: "", sistolica: "", diastolica: "", colesterol: "", trigliceridos: "", notas: "", estudio: null, origen: "completo" };
+
+  // Personas con seguimiento de Salud: "Yo" + cualquier Contacto que ya tenga al menos un
+  // registro de Salud o un medicamento — nunca una ficha duplicada, siempre viene de Contactos.
+  const idsConSeguimiento = [...new Set([
+    ...data.salud.map((s) => s.contactoId).filter(Boolean),
+    ...(data.medicamentos || []).map((m) => m.contactoId).filter(Boolean),
+  ])];
+  const nombreContacto = (id) => data.contactos.find((c) => c.id === id)?.nombre || "—";
+  const personas = [{ id: null, nombre: "Yo" }, ...idsConSeguimiento.map((id) => ({ id, nombre: nombreContacto(id) }))];
+  const contactosDisponiblesParaAgregar = data.contactos.filter((c) => !idsConSeguimiento.includes(c.id));
+
+  const saludPersona = data.salud.filter((s) => (s.contactoId || null) === personaId);
+  const empty = { fecha: todayISO(), hora: horaActualHHMM(), peso: "", glucosa: "", sistolica: "", diastolica: "", colesterol: "", trigliceridos: "", notas: "", estudio: null, origen: "completo", contactoId: personaId };
   const camposOrden = {
     fecha: { get: (s) => s.fecha, tipo: "fecha" },
     registro: { get: (s) => s.createdAt, tipo: "fecha" },
@@ -6808,9 +6850,11 @@ function Salud({ data, onAdd, onEdit, onRemove, onUpdatePerfil }) {
     { key: "registro", label: "fecha de registro" },
     { key: "peso", label: "peso" },
   ];
-  const base = orden === "default" ? [...data.salud].sort((a, b) => (b.fecha || "").localeCompare(a.fecha || "")) : data.salud;
+  const base = orden === "default" ? [...saludPersona].sort((a, b) => (b.fecha || "").localeCompare(a.fecha || "")) : saludPersona;
   const ordenados = ordenarLista(base, orden, camposOrden, ordenDir);
-  const alturaCm = data.perfilSalud?.alturaCm;
+  const alturaCm = data.perfilSalud?.[personaId || "yo"]?.alturaCm;
+  const [altura, setAltura] = useState(alturaCm || "");
+  useEffect(() => { setAltura(alturaCm || ""); }, [personaId, alturaCm]);
 
   const toneCategoria = (cat) => (cat === "Normal" ? "teal" : cat === "Bajo peso" ? "gold" : cat === "Sobrepeso" ? "gold" : cat === "Obesidad" ? "red" : "muted");
 
@@ -6822,6 +6866,27 @@ function Salud({ data, onAdd, onEdit, onRemove, onUpdatePerfil }) {
       </div>
       <p className="text-sm gp-text-muted mb-4">Peso, glucosa, presión arterial, colesterol, triglicéridos y tus estudios en PDF, todo en un mismo historial.</p>
 
+      <div className="flex flex-wrap items-center gap-1 mb-4">
+        {personas.map((p) => (
+          <button key={p.id || "yo"} onClick={() => setPersonaId(p.id)} className={`text-xs px-3 py-1.5 rounded-full border ${personaId === p.id ? "gp-btn" : "gp-text-muted"}`}>{p.nombre}</button>
+        ))}
+        <button onClick={() => setAgregandoPersona(true)} className="text-xs px-3 py-1.5 rounded-full border gp-text-muted flex items-center gap-1"><Plus size={12} /> Otra persona</button>
+      </div>
+      {agregandoPersona && (
+        <Modal title="Seguimiento de Salud para otra persona" onClose={() => setAgregandoPersona(false)}>
+          <p className="text-xs gp-text-muted mb-3">Selecciona un contacto ya existente — no se crea una ficha nueva, se reutiliza su expediente de Contactos.</p>
+          {contactosDisponiblesParaAgregar.length === 0 ? (
+            <p className="text-sm gp-text-muted">No tienes otros contactos disponibles. Puedes crear uno primero desde Contactos.</p>
+          ) : (
+            <div className="flex flex-col gap-1">
+              {contactosDisponiblesParaAgregar.map((c) => (
+                <button key={c.id} onClick={() => { setPersonaId(c.id); setAgregandoPersona(false); }} className="gp-btn-ghost text-left px-3 py-2 rounded text-sm">{c.nombre}</button>
+              ))}
+            </div>
+          )}
+        </Modal>
+      )}
+
       <div className="flex gap-1 mb-4">
         {[{ key: "historial", label: "Historial" }, { key: "tendencias", label: "Tendencias" }].map((t) => (
           <button key={t.key} onClick={() => setTab(t.key)} className={`text-xs px-3 py-1.5 rounded-full border ${tab === t.key ? "gp-btn" : "gp-text-muted"}`}>{t.label}</button>
@@ -6829,14 +6894,14 @@ function Salud({ data, onAdd, onEdit, onRemove, onUpdatePerfil }) {
       </div>
 
       {tab === "tendencias" ? (
-        <SaludTendencias salud={data.salud} />
+        <SaludTendencias salud={saludPersona} />
       ) : (
       <>
       <div className="gp-panel p-3 mb-4 flex flex-wrap items-center gap-3">
         <span className="text-xs gp-text-muted">Tu estatura (para calcular IMC):</span>
         <input type="number" className="gp-input" style={{ maxWidth: 100 }} value={altura}
           onChange={(e) => setAltura(e.target.value)}
-          onBlur={() => onUpdatePerfil({ alturaCm: altura })} />
+          onBlur={() => onUpdatePerfil(personaId, { alturaCm: altura })} />
         <span className="text-xs gp-text-muted">cm</span>
         {!alturaCm && <span className="text-xs gp-text-gold">Captúrala para ver tu categoría de peso.</span>}
       </div>
