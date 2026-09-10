@@ -2380,6 +2380,8 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
               onAddMeta={(i) => addItem("metas", i)}
               onEditMeta={(id, p) => editItem("metas", id, p)}
               onRemoveMeta={(id) => askDelete("metas", id)}
+              onIrAVista={irAVista}
+              sensibleDesbloqueadoHasta={sensibleDesbloqueadoHasta}
             />
           )}
           {view === "pendientes" && (
@@ -3976,11 +3978,24 @@ function ProyectoForm({ item, onSave }) {
 /* ---------- Detalle de proyecto (Fase: navegación con breadcrumb) ---------- */
 // Pantalla completa de un solo proyecto: todos sus pendientes con subtareas anidadas,
 // porcentaje de avance (manual en tareas finales, calculado en tareas con hijos), y comentarios.
-function ProyectoDetalle({ data, proyectoId, onVolver, onAddTarea, onEditTarea, onRemoveTarea, onAddComentario, onRemoveComentario, onAddMeta, onEditMeta, onRemoveMeta }) {
+function ProyectoDetalle({ data, proyectoId, onVolver, onAddTarea, onEditTarea, onRemoveTarea, onAddComentario, onRemoveComentario, onAddMeta, onEditMeta, onRemoveMeta, onIrAVista, sensibleDesbloqueadoHasta }) {
   const proyecto = data.proyectos.find((p) => p.id === proyectoId);
   const [modal, setModal] = useState(null);
   const [modalMeta, setModalMeta] = useState(null);
   const [comentariosDe, setComentariosDe] = useState(null);
+  // Etapa 7 (Centro de Proyecto, secc. 24.1): vista integral con pestañas — no crea tablas nuevas,
+  // solo consulta y filtra las entidades reales por proyectoId y permite navegar al módulo fuente.
+  const [tab, setTab] = useState("resumen");
+
+  // Mismo enmascarado que Centro de Mando y Notificaciones (secc. 23.8): Finanzas y Legal/
+  // Documentos son módulos sensibles — verlos resumidos aquí sin candado sería el mismo hueco que
+  // ya se corrigió ahí. Se protege mientras la ventana de 15 min no esté vigente.
+  const [, forceTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => forceTick((t) => t + 1), 15000);
+    return () => clearInterval(id);
+  }, []);
+  const sensibleDesbloqueado = Date.now() < (sensibleDesbloqueadoHasta || 0);
 
   if (!proyecto) {
     return (
@@ -4011,6 +4026,24 @@ function ProyectoDetalle({ data, proyectoId, onVolver, onAddTarea, onEditTarea, 
     }
   };
 
+  // Datos de los demás módulos relacionados a este proyecto — solo se consultan y filtran, nada
+  // se duplica; "Ver en <módulo>" navega a la fuente real (secc. 24.1: "permitir navegación al
+  // registro fuente").
+  const finanzasProyecto = (data.finanzas || []).filter((f) => f.proyectoId === proyectoId).sort((a, b) => (b.fecha || "").localeCompare(a.fecha || ""));
+  const facturasProyecto = (data.facturas || []).filter((f) => f.proyectoId === proyectoId);
+  const campanasProyecto = (data.campanas || []).filter((c) => c.proyectoId === proyectoId);
+  const redesProyecto = (data.redesMetricas || []).filter((r2) => r2.proyectoId === proyectoId);
+  const documentosProyecto = (data.documentos || []).filter((d) => d.proyectoId === proyectoId);
+  const contactosProyecto = (data.contactos || []).filter((c) => c.proyectoId === proyectoId);
+
+  const TABS = [
+    { key: "resumen", label: "Resumen" },
+    { key: "finanzas", label: `Finanzas${finanzasProyecto.length + facturasProyecto.length ? ` (${finanzasProyecto.length + facturasProyecto.length})` : ""}` },
+    { key: "marketing", label: `Marketing${campanasProyecto.length ? ` (${campanasProyecto.length})` : ""}` },
+    { key: "legal", label: `Documentos y legal${documentosProyecto.length ? ` (${documentosProyecto.length})` : ""}` },
+    { key: "contactos", label: `Contactos${contactosProyecto.length ? ` (${contactosProyecto.length})` : ""}` },
+  ];
+
   return (
     <div>
       {/* breadcrumb: para siempre saber en dónde estás navegando dentro de la app */}
@@ -4033,144 +4066,323 @@ function ProyectoDetalle({ data, proyectoId, onVolver, onAddTarea, onEditTarea, 
       </div>
       {proyecto.descripcion && <p className="text-sm gp-text-muted mb-4">{proyecto.descripcion}</p>}
 
-      <div className="gp-panel-hi p-3 mb-4 grid grid-cols-2 sm:grid-cols-6 gap-2 text-xs">
-        <div><p className="gp-text-muted">Avance general</p><p className="gp-mono gp-text-gold">{avanceGeneral}%</p></div>
-        <div><p className="gp-text-muted">Ingresos</p><p className="gp-mono gp-text-teal">{fmtMoney(r.ingresos)}</p></div>
-        <div><p className="gp-text-muted">Egresos</p><p className="gp-mono gp-text-red">{fmtMoney(r.egresos)}</p></div>
-        <div><p className="gp-text-muted">Neto</p><p className={`gp-mono ${r.neto >= 0 ? "gp-text-teal" : "gp-text-red"}`}>{fmtMoney(r.neto)}</p></div>
-        <div><p className="gp-text-muted">Pagado a colaboradores</p><p className="gp-mono gp-text-gold">{fmtMoney(r.pagosColab)}</p></div>
-        <div><p className="gp-text-muted">Costo estimado total</p><p className="gp-mono">{fmtMoney(r.costoEstimadoTotal)}</p></div>
+      {/* Pestañas del Centro de Proyecto */}
+      <div className="flex gap-1 mb-4 flex-wrap">
+        {TABS.map((t) => (
+          <button key={t.key} onClick={() => setTab(t.key)} className="px-3 py-1.5 text-xs rounded-full border"
+            style={{ background: tab === t.key ? "var(--gold)" : "transparent", color: tab === t.key ? "#0B2341" : "inherit", borderColor: tab === t.key ? "var(--gold)" : "var(--border)" }}>
+            {t.label}
+          </button>
+        ))}
       </div>
 
-      {(() => {
-        const reparto = repartoCostosProyecto(data, proyectoId);
-        if (reparto.length === 0) return null;
-        return (
-          <div className="mb-4">
-            <p className="text-sm font-medium mb-2">Reparto de costos por participante</p>
-            <div className="gp-panel overflow-x-auto">
-              <table className="gp-table">
-                <thead><tr><th>Participante</th><th>Tareas con precio</th><th>Ya generado</th><th>Por hacer</th><th>Total pactado</th></tr></thead>
-                <tbody>
-                  {reparto.map((g) => (
-                    <tr key={g.key}>
-                      <td>{g.esYo ? "Tú" : g.nombre}</td>
-                      <td className="gp-mono">{g.tareas}</td>
-                      <td className="gp-mono gp-text-teal">{fmtMoney(g.generado)}</td>
-                      <td className="gp-mono gp-text-gold">{fmtMoney(g.pendiente)}</td>
-                      <td className="gp-mono">{fmtMoney(g.total)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <p className="text-xs gp-text-muted mt-1">Es un estimado según el precio pactado en cada tarea (columna "Precio" del pendiente). Lo tuyo ("Tú") es ingreso potencial y no se suma solo a Ingresos y egresos; para eso registra el movimiento ahí cuando lo cobres.</p>
+      {tab === "resumen" && (
+        <>
+          <div className="gp-panel-hi p-3 mb-4 grid grid-cols-2 sm:grid-cols-6 gap-2 text-xs">
+            <div><p className="gp-text-muted">Avance general</p><p className="gp-mono gp-text-gold">{avanceGeneral}%</p></div>
+            {sensibleDesbloqueado ? (
+              <>
+                <div><p className="gp-text-muted">Ingresos</p><p className="gp-mono gp-text-teal">{fmtMoney(r.ingresos)}</p></div>
+                <div><p className="gp-text-muted">Egresos</p><p className="gp-mono gp-text-red">{fmtMoney(r.egresos)}</p></div>
+                <div><p className="gp-text-muted">Neto</p><p className={`gp-mono ${r.neto >= 0 ? "gp-text-teal" : "gp-text-red"}`}>{fmtMoney(r.neto)}</p></div>
+                <div><p className="gp-text-muted">Pagado a colaboradores</p><p className="gp-mono gp-text-gold">{fmtMoney(r.pagosColab)}</p></div>
+                <div><p className="gp-text-muted">Costo estimado total</p><p className="gp-mono">{fmtMoney(r.costoEstimadoTotal)}</p></div>
+              </>
+            ) : (
+              <button onClick={() => onIrAVista("finanzas")} className="col-span-2 sm:col-span-5 text-left">
+                <p className="text-xs gp-text-gold">🔒 Verifica tu contraseña para ver los números de este proyecto</p>
+              </button>
+            )}
           </div>
-        );
-      })()}
 
-      <div className="mb-4">
-        <div className="flex items-center justify-between mb-2">
-          <p className="text-sm font-medium">Metas — qué define el éxito de este proyecto</p>
-          <button onClick={() => setModalMeta({ item: { proyectoId, descripcion: "", fechaObjetivo: todayISO(), fechaRevision: "", prioridad: "Media", estatus: "No iniciada" } })} className="gp-btn-ghost px-2.5 py-1 text-xs flex items-center gap-1"><Plus size={12} /> Nueva meta</button>
-        </div>
-        {metasProyecto.length === 0 ? (
-          <p className="text-xs gp-text-muted">Sin metas todavía — agrega una para darle rumbo a este proyecto.</p>
-        ) : (
-          <div className="space-y-1.5">
-            {metasProyecto.map((m) => {
-              const cumplida = m.estatus === "Cumplida";
-              return (
-                <div key={m.id} className="gp-panel p-2.5 flex items-center gap-2" style={cumplida ? { background: "var(--teal-tint)", color: "var(--teal-text)" } : undefined}>
-                  <input
-                    type="checkbox"
-                    checked={cumplida}
-                    title="Marcar como cumplida"
-                    onChange={(e) => onEditMeta(m.id, { estatus: e.target.checked ? "Cumplida" : "En progreso" })}
-                    style={{ width: 15, height: 15, accentColor: "var(--gold)", cursor: "pointer" }}
-                  />
-                  <span className="text-sm flex-1">{m.descripcion}</span>
-                  <Badge tone={m.prioridad === "Alta" ? "red" : m.prioridad === "Media" ? "gold" : "muted"}>{m.prioridad || "Media"}</Badge>
-                  {m.fechaObjetivo && <span className="text-xs gp-mono gp-text-muted">{m.fechaObjetivo}</span>}
-                  <IconBtn onClick={() => setModalMeta({ item: m })}><Pencil size={12} /></IconBtn>
-                  <IconBtn onClick={() => onRemoveMeta(m.id)}><Trash2 size={12} /></IconBtn>
+          {sensibleDesbloqueado && (() => {
+            const reparto = repartoCostosProyecto(data, proyectoId);
+            if (reparto.length === 0) return null;
+            return (
+              <div className="mb-4">
+                <p className="text-sm font-medium mb-2">Reparto de costos por participante</p>
+                <div className="gp-panel overflow-x-auto">
+                  <table className="gp-table">
+                    <thead><tr><th>Participante</th><th>Tareas con precio</th><th>Ya generado</th><th>Por hacer</th><th>Total pactado</th></tr></thead>
+                    <tbody>
+                      {reparto.map((g) => (
+                        <tr key={g.key}>
+                          <td>{g.esYo ? "Tú" : g.nombre}</td>
+                          <td className="gp-mono">{g.tareas}</td>
+                          <td className="gp-mono gp-text-teal">{fmtMoney(g.generado)}</td>
+                          <td className="gp-mono gp-text-gold">{fmtMoney(g.pendiente)}</td>
+                          <td className="gp-mono">{fmtMoney(g.total)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
+                <p className="text-xs gp-text-muted mt-1">Es un estimado según el precio pactado en cada tarea (columna "Precio" del pendiente). Lo tuyo ("Tú") es ingreso potencial y no se suma solo a Ingresos y egresos; para eso registra el movimiento ahí cuando lo cobres.</p>
+              </div>
+            );
+          })()}
 
-      {modalMeta && (
-        <Modal title={modalMeta.item.id ? "Editar meta" : "Nueva meta"} onClose={() => setModalMeta(null)}>
-          <MetaForm item={modalMeta.item} proyectos={data.proyectos} onSave={(v) => { modalMeta.item.id ? onEditMeta(modalMeta.item.id, v) : onAddMeta(v); setModalMeta(null); }} />
-        </Modal>
+          <div className="mb-4">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-sm font-medium">Metas — qué define el éxito de este proyecto</p>
+              <button onClick={() => setModalMeta({ item: { proyectoId, descripcion: "", fechaObjetivo: todayISO(), fechaRevision: "", prioridad: "Media", estatus: "No iniciada" } })} className="gp-btn-ghost px-2.5 py-1 text-xs flex items-center gap-1"><Plus size={12} /> Nueva meta</button>
+            </div>
+            {metasProyecto.length === 0 ? (
+              <p className="text-xs gp-text-muted">Sin metas todavía — agrega una para darle rumbo a este proyecto.</p>
+            ) : (
+              <div className="space-y-1.5">
+                {metasProyecto.map((m) => {
+                  const cumplida = m.estatus === "Cumplida";
+                  return (
+                    <div key={m.id} className="gp-panel p-2.5 flex items-center gap-2" style={cumplida ? { background: "var(--teal-tint)", color: "var(--teal-text)" } : undefined}>
+                      <input
+                        type="checkbox"
+                        checked={cumplida}
+                        title="Marcar como cumplida"
+                        onChange={(e) => onEditMeta(m.id, { estatus: e.target.checked ? "Cumplida" : "En progreso" })}
+                        style={{ width: 15, height: 15, accentColor: "var(--gold)", cursor: "pointer" }}
+                      />
+                      <span className="text-sm flex-1">{m.descripcion}</span>
+                      <Badge tone={m.prioridad === "Alta" ? "red" : m.prioridad === "Media" ? "gold" : "muted"}>{m.prioridad || "Media"}</Badge>
+                      {m.fechaObjetivo && <span className="text-xs gp-mono gp-text-muted">{m.fechaObjetivo}</span>}
+                      <IconBtn onClick={() => setModalMeta({ item: m })}><Pencil size={12} /></IconBtn>
+                      <IconBtn onClick={() => onRemoveMeta(m.id)}><Trash2 size={12} /></IconBtn>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {modalMeta && (
+            <Modal title={modalMeta.item.id ? "Editar meta" : "Nueva meta"} onClose={() => setModalMeta(null)}>
+              <MetaForm item={modalMeta.item} proyectos={data.proyectos} onSave={(v) => { modalMeta.item.id ? onEditMeta(modalMeta.item.id, v) : onAddMeta(v); setModalMeta(null); }} />
+            </Modal>
+          )}
+
+          <div className="gp-panel overflow-x-auto">
+            <table className="gp-table">
+              <thead><tr><th>Pendiente</th><th>Cliente</th><th>Responsable</th><th>Fecha</th><th>Prioridad</th><th>Avance</th><th>Precio</th><th></th></tr></thead>
+              <tbody>
+                {filas.map(({ item: p, nivel }) => {
+                  const vencido = p.estatus !== "Completada" && p.fechaLimite && daysUntil(p.fechaLimite) < 0;
+                  const nc = nComentarios(p.id);
+                  const tieneHijos = p.hijos && p.hijos.length > 0;
+                  const avance = Math.round(calcAvanceTarea(p));
+                  return (
+                    <tr key={p.id}>
+                      <td>
+                        <span style={{ paddingLeft: nivel * 18 }} className="flex items-center gap-1">
+                          {nivel > 0 && <span className="gp-text-muted">└</span>}
+                          {p.descripcion}
+                        </span>
+                      </td>
+                      <td className="gp-text-muted">{p.contactoId ? nombreCliente(p.contactoId) : "—"}</td>
+                      <td className="gp-text-muted">{nombreResp(p.responsableId)}</td>
+                      <td className="gp-mono" style={{ color: vencido ? "var(--red)" : undefined }}>{p.fechaLimite}</td>
+                      <td><Badge tone={p.prioridad === "Alta" ? "red" : p.prioridad === "Media" ? "gold" : "muted"}>{p.prioridad}</Badge></td>
+                      <td>
+                        <div className="flex items-center gap-1.5" style={{ minWidth: 130 }}>
+                          <div className="h-1.5 rounded flex-1" style={{ background: "var(--border)" }}>
+                            <div className="h-1.5 rounded" style={{ width: `${avance}%`, background: avance === 100 ? "var(--teal)" : "var(--gold)" }} />
+                          </div>
+                          {tieneHijos ? (
+                            <span className="gp-mono" style={{ fontSize: 10 }}>{avance}%</span>
+                          ) : (
+                            <input
+                              type="number" min={0} max={100} value={p.avance ?? ""} placeholder={String(avance)}
+                              onChange={(e) => {
+                                const val = e.target.value === "" ? null : Math.max(0, Math.min(100, Number(e.target.value)));
+                                onEditTarea(p.id, { avance: val });
+                              }}
+                              className="gp-input gp-mono" style={{ width: 48, padding: "1px 4px", fontSize: 10 }}
+                            />
+                          )}
+                          {!tieneHijos && (
+                            <select className="gp-input" style={{ padding: "1px 4px", fontSize: 10, width: 88 }} value={p.estatus} onChange={(e) => onEditTarea(p.id, { estatus: e.target.value })}>
+                              {ESTATUS_TAREA.map((s) => <option key={s}>{s}</option>)}
+                            </select>
+                          )}
+                        </div>
+                      </td>
+                      <td className="gp-mono">{sensibleDesbloqueado ? (p.precio ? fmtMoney(p.precio) : "—") : (p.precio ? "🔒" : "—")}</td>
+                      <td><div className="flex gap-1">
+                        <IconBtn onClick={() => setModal({ item: { ...empty, parentId: p.id } })}><Plus size={13} /></IconBtn>
+                        <IconBtn onClick={() => setComentariosDe(p)}><MessageCircle size={13} />{nc > 0 && <span className="gp-mono" style={{ fontSize: 9, marginLeft: 2 }}>{nc}</span>}</IconBtn>
+                        <IconBtn onClick={() => setModal({ item: paraEditar(p) })}><Pencil size={13} /></IconBtn>
+                        <IconBtn onClick={() => confirmarBorrado(p)}><Trash2 size={13} /></IconBtn>
+                      </div></td>
+                    </tr>
+                  );
+                })}
+                {filas.length === 0 && <tr><td colSpan={8} className="text-center gp-text-muted py-6">Sin tareas registradas en este proyecto todavía.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="border-t gp-border pt-4 mt-6">
+            <p className="text-sm font-medium mb-2">Actividad — comentarios del proyecto</p>
+            <Bitacora data={data} entidadTipo="proyectos" entidadId={proyecto.id} onAdd={onAddComentario} onRemove={onRemoveComentario} />
+          </div>
+        </>
       )}
 
-      <div className="gp-panel overflow-x-auto">
-        <table className="gp-table">
-          <thead><tr><th>Pendiente</th><th>Cliente</th><th>Responsable</th><th>Fecha</th><th>Prioridad</th><th>Avance</th><th>Precio</th><th></th></tr></thead>
-          <tbody>
-            {filas.map(({ item: p, nivel }) => {
-              const vencido = p.estatus !== "Completada" && p.fechaLimite && daysUntil(p.fechaLimite) < 0;
-              const nc = nComentarios(p.id);
-              const tieneHijos = p.hijos && p.hijos.length > 0;
-              const avance = Math.round(calcAvanceTarea(p));
-              return (
-                <tr key={p.id}>
-                  <td>
-                    <span style={{ paddingLeft: nivel * 18 }} className="flex items-center gap-1">
-                      {nivel > 0 && <span className="gp-text-muted">└</span>}
-                      {p.descripcion}
-                    </span>
-                  </td>
-                  <td className="gp-text-muted">{p.contactoId ? nombreCliente(p.contactoId) : "—"}</td>
-                  <td className="gp-text-muted">{nombreResp(p.responsableId)}</td>
-                  <td className="gp-mono" style={{ color: vencido ? "var(--red)" : undefined }}>{p.fechaLimite}</td>
-                  <td><Badge tone={p.prioridad === "Alta" ? "red" : p.prioridad === "Media" ? "gold" : "muted"}>{p.prioridad}</Badge></td>
-                  <td>
-                    <div className="flex items-center gap-1.5" style={{ minWidth: 130 }}>
-                      <div className="h-1.5 rounded flex-1" style={{ background: "var(--border)" }}>
-                        <div className="h-1.5 rounded" style={{ width: `${avance}%`, background: avance === 100 ? "var(--teal)" : "var(--gold)" }} />
-                      </div>
-                      {tieneHijos ? (
-                        <span className="gp-mono" style={{ fontSize: 10 }}>{avance}%</span>
-                      ) : (
-                        <input
-                          type="number" min={0} max={100} value={p.avance ?? ""} placeholder={String(avance)}
-                          onChange={(e) => {
-                            const val = e.target.value === "" ? null : Math.max(0, Math.min(100, Number(e.target.value)));
-                            onEditTarea(p.id, { avance: val });
-                          }}
-                          className="gp-input gp-mono" style={{ width: 48, padding: "1px 4px", fontSize: 10 }}
-                        />
-                      )}
-                      {!tieneHijos && (
-                        <select className="gp-input" style={{ padding: "1px 4px", fontSize: 10, width: 88 }} value={p.estatus} onChange={(e) => onEditTarea(p.id, { estatus: e.target.value })}>
-                          {ESTATUS_TAREA.map((s) => <option key={s}>{s}</option>)}
-                        </select>
-                      )}
-                    </div>
-                  </td>
-                  <td className="gp-mono">{p.precio ? fmtMoney(p.precio) : "—"}</td>
-                  <td><div className="flex gap-1">
-                    <IconBtn onClick={() => setModal({ item: { ...empty, parentId: p.id } })}><Plus size={13} /></IconBtn>
-                    <IconBtn onClick={() => setComentariosDe(p)}><MessageCircle size={13} />{nc > 0 && <span className="gp-mono" style={{ fontSize: 9, marginLeft: 2 }}>{nc}</span>}</IconBtn>
-                    <IconBtn onClick={() => setModal({ item: paraEditar(p) })}><Pencil size={13} /></IconBtn>
-                    <IconBtn onClick={() => confirmarBorrado(p)}><Trash2 size={13} /></IconBtn>
-                  </div></td>
-                </tr>
-              );
-            })}
-            {filas.length === 0 && <tr><td colSpan={8} className="text-center gp-text-muted py-6">Sin tareas registradas en este proyecto todavía.</td></tr>}
-          </tbody>
-        </table>
-      </div>
+      {tab === "finanzas" && (
+        <div>
+          {!sensibleDesbloqueado ? (
+            <button onClick={() => onIrAVista("finanzas")} className="text-left">
+              <p className="text-sm gp-text-gold">🔒 Verifica tu contraseña para ver Finanzas de este proyecto</p>
+            </button>
+          ) : (
+            <>
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-sm font-medium">Movimientos financieros de este proyecto</p>
+                <button onClick={() => onIrAVista("finanzas")} className="text-xs gp-text-gold">Ver en Finanzas →</button>
+              </div>
+              {finanzasProyecto.length === 0 ? (
+                <p className="text-xs gp-text-muted mb-4">Sin movimientos registrados con este proyecto todavía.</p>
+              ) : (
+                <div className="gp-panel overflow-x-auto mb-4">
+                  <table className="gp-table">
+                    <thead><tr><th>Concepto</th><th>Tipo</th><th>Fecha</th><th>Estatus</th><th>Monto</th></tr></thead>
+                    <tbody>
+                      {finanzasProyecto.map((f) => (
+                        <tr key={f.id}>
+                          <td>{f.concepto || "—"}{f.eventoId && <span className="gp-text-muted text-xs"> · Eventos</span>}{f.activoId && <span className="gp-text-muted text-xs"> · Activos digitales</span>}</td>
+                          <td><Badge tone={f.tipo === "Ingreso" ? "teal" : "red"}>{f.tipo}</Badge></td>
+                          <td className="gp-mono">{f.fecha}</td>
+                          <td><Badge tone={f.estatus === "Cobrado" ? "teal" : "gold"}>{f.estatus}</Badge></td>
+                          <td className={`gp-mono ${f.tipo === "Ingreso" ? "gp-text-teal" : "gp-text-red"}`}>{f.tipo === "Ingreso" ? "+" : "−"}{fmtMoney(f.monto)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
 
-      <div className="border-t gp-border pt-4 mt-6">
-        <p className="text-sm font-medium mb-2">Comentarios del proyecto</p>
-        <Bitacora data={data} entidadTipo="proyectos" entidadId={proyecto.id} onAdd={onAddComentario} onRemove={onRemoveComentario} />
-      </div>
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-sm font-medium">Facturas de este proyecto</p>
+                <button onClick={() => onIrAVista("facturas")} className="text-xs gp-text-gold">Ver en Finanzas →</button>
+              </div>
+              {facturasProyecto.length === 0 ? (
+                <p className="text-xs gp-text-muted">Sin facturas ligadas a este proyecto.</p>
+              ) : (
+                <div className="gp-panel overflow-x-auto">
+                  <table className="gp-table">
+                    <thead><tr><th>Concepto</th><th>Fecha</th><th>Estatus</th><th>Total</th></tr></thead>
+                    <tbody>
+                      {facturasProyecto.map((f) => (
+                        <tr key={f.id}>
+                          <td>{f.concepto || f.folio || "—"}</td>
+                          <td className="gp-mono">{f.fecha}</td>
+                          <td><Badge tone={f.estatus === "Pagada" || f.estatus === "Cobrado" ? "teal" : "gold"}>{f.estatus}</Badge></td>
+                          <td className="gp-mono">{fmtMoney(f.total)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+
+      {tab === "marketing" && (
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-sm font-medium">Campañas de este proyecto</p>
+            <button onClick={() => onIrAVista("marketing")} className="text-xs gp-text-gold">Ver en Marketing →</button>
+          </div>
+          {campanasProyecto.length === 0 ? (
+            <p className="text-xs gp-text-muted mb-4">Sin campañas ligadas a este proyecto.</p>
+          ) : (
+            <div className="space-y-1.5 mb-4">
+              {campanasProyecto.map((c) => (
+                <div key={c.id} className="gp-panel p-2.5 flex items-center justify-between gap-2 text-sm">
+                  <span>{c.nombre}</span>
+                  <div className="flex items-center gap-2">
+                    <Badge tone="muted">{c.plataforma}</Badge>
+                    <Badge tone={c.estatus === "Activa" ? "teal" : c.estatus === "Planeada" ? "gold" : "muted"}>{c.estatus}</Badge>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-sm font-medium">Cuentas y métricas de redes</p>
+            <button onClick={() => onIrAVista("redes")} className="text-xs gp-text-gold">Ver en Marketing →</button>
+          </div>
+          {redesProyecto.length === 0 ? (
+            <p className="text-xs gp-text-muted">Sin cuentas de redes ligadas a este proyecto.</p>
+          ) : (
+            <div className="space-y-1.5">
+              {redesProyecto.map((rm) => (
+                <div key={rm.id} className="gp-panel p-2.5 flex items-center justify-between gap-2 text-sm">
+                  <span>{rm.plataforma}</span>
+                  <span className="text-xs gp-text-muted">{rm.seguidores ? `${rm.seguidores} seguidores` : ""}{rm.fecha ? ` · ${rm.fecha}` : ""}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {tab === "legal" && (
+        <div>
+          {!sensibleDesbloqueado ? (
+            <button onClick={() => onIrAVista("documentos")} className="text-left">
+              <p className="text-sm gp-text-gold">🔒 Verifica tu contraseña para ver Documentos y legal de este proyecto</p>
+            </button>
+          ) : (
+            <>
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-sm font-medium">Documentos y contratos de este proyecto</p>
+                <button onClick={() => onIrAVista("documentos")} className="text-xs gp-text-gold">Ver en Legal y contratos →</button>
+              </div>
+              {documentosProyecto.length === 0 ? (
+                <p className="text-xs gp-text-muted">Sin documentos o contratos ligados a este proyecto.</p>
+              ) : (
+                <div className="space-y-1.5">
+                  {documentosProyecto.map((doc) => {
+                    const dd = doc.fechaVencimiento ? daysUntil(doc.fechaVencimiento) : null;
+                    return (
+                      <div key={doc.id} className="gp-panel p-2.5 flex items-center justify-between gap-2 text-sm">
+                        <div>
+                          <span>{doc.nombre}</span>
+                          <span className="gp-text-muted text-xs ml-2">{doc.tipo}</span>
+                        </div>
+                        {doc.fechaVencimiento && <Badge tone={dd < 0 ? "red" : dd <= 14 ? "gold" : "muted"}>{dd < 0 ? "Vencido" : `Vence ${doc.fechaVencimiento}`}</Badge>}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+
+      {tab === "contactos" && (
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-sm font-medium">Personas relacionadas con este proyecto</p>
+            <button onClick={() => onIrAVista("contactos")} className="text-xs gp-text-gold">Ver en Contactos →</button>
+          </div>
+          {contactosProyecto.length === 0 ? (
+            <p className="text-xs gp-text-muted">Sin contactos ligados a este proyecto todavía. Desde la ficha de un contacto puedes relacionarlo a este proyecto.</p>
+          ) : (
+            <div className="space-y-1.5">
+              {contactosProyecto.map((c) => (
+                <div key={c.id} className="gp-panel p-2.5 flex items-center justify-between gap-2 text-sm">
+                  <span>{c.nombre}</span>
+                  <span className="text-xs gp-text-muted">{c.correo || c.whatsapp || ""}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {comentariosDe && (
         <Modal title={`Comentarios — ${comentariosDe.descripcion}`} onClose={() => setComentariosDe(null)}>
