@@ -65,6 +65,31 @@ async function debeEnviarPush(userId: string, tipoNotif: string, ahoraMin: numbe
   return true;
 }
 
+// Categorías que ArkeyOne trata como sensibles (mismo criterio que VISTAS_SENSIBLES del
+// frontend: dinero, legal y activos digitales). Para estos tipos, el texto que se guarda en
+// Notifications y el que se manda por Push NUNCA debe llevar montos, nombres de acreedores/
+// clientes ni nombres de documentos/activos — esos canales no tienen candado de 15 min (la
+// campanita se puede abrir sin contraseña, y el Push puede aparecer en la pantalla de bloqueo).
+// El detalle completo solo se ve dentro del módulo correspondiente, ya protegido por reautenticación.
+const CATEGORIAS_SENSIBLES = new Set(["Finanzas", "Legal", "Activos digitales"]);
+const TEXTO_GENERICO: Record<string, string> = {
+  deuda: "Pago pendiente por hacer — toca para ver el detalle",
+  cobro_pendiente: "Cobro pendiente por revisar",
+  pago_recurrente: "Pago recurrente próximo a vencer",
+  factura: "Factura pendiente por revisar",
+  documento: "Documento o contrato próximo a vencer",
+  activo_digital: "Activo digital próximo a renovación",
+  apartado: "Meta de ahorro próxima a su fecha objetivo",
+};
+// Aplica el enmascarado cuando el tipo pertenece a una categoría sensible; el resto de tipos
+// (medicamento, cita, pendiente, agenda, colaboradores…) conservan su texto informativo normal,
+// porque ahí sí es necesario ver el detalle en la notificación/push para que sea útil.
+function textoSeguro(tipo: string, textoDetallado: string): string {
+  const categoria = CATEGORIA_POR_TIPO[tipo];
+  if (categoria && CATEGORIAS_SENSIBLES.has(categoria)) return TEXTO_GENERICO[tipo] || "Tienes un pendiente por revisar";
+  return textoDetallado;
+}
+
 function ahoraMexico() {
   const fmt = new Intl.DateTimeFormat("en-US", {
     timeZone: "America/Mexico_City", year: "numeric", month: "2-digit", day: "2-digit",
@@ -218,25 +243,25 @@ Deno.serve(async (_req) => {
       const nombreContacto = (id: string | null) => contactosUsr?.find((c) => c.id === id)?.nombre || "\u2014";
 
       { const { data } = await admin.from("deudas").select("id, acreedor, monto, fecha_vencimiento").eq("user_id", uid).is("deleted_at", null).gte("fecha_vencimiento", hoy).lte("fecha_vencimiento", limite);
-        (data || []).forEach((r) => items.push({ tipo: "deuda", tabla: "deudas", id: r.id, texto: `${r.acreedor} \u2014 ${fmtMoney(r.monto)}, vence ${fmtFecha(r.fecha_vencimiento)}` })); }
+        (data || []).forEach((r) => items.push({ tipo: "deuda", tabla: "deudas", id: r.id, texto: textoSeguro("deuda", `${r.acreedor} \u2014 ${fmtMoney(r.monto)}, vence ${fmtFecha(r.fecha_vencimiento)}`) })); }
       { const { data } = await admin.from("finanzas").select("id, concepto, monto, fecha, fecha_vencimiento, contacto_id, es_recurrente, tipo, estatus").eq("user_id", uid).is("deleted_at", null);
         (data || []).forEach((r) => {
           if (r.tipo === "Ingreso" && r.estatus === "Pendiente") {
             const f = r.fecha_vencimiento || r.fecha;
-            if (f && f >= hoy && f <= limite) items.push({ tipo: "cobro_pendiente", tabla: "finanzas", id: r.id, texto: `${r.concepto || "Cobro"} \u2014 ${fmtMoney(r.monto)}, de ${nombreContacto(r.contacto_id)}` });
+            if (f && f >= hoy && f <= limite) items.push({ tipo: "cobro_pendiente", tabla: "finanzas", id: r.id, texto: textoSeguro("cobro_pendiente", `${r.concepto || "Cobro"} \u2014 ${fmtMoney(r.monto)}, de ${nombreContacto(r.contacto_id)}`) });
           }
           if (r.es_recurrente && r.tipo === "Egreso" && r.fecha_vencimiento >= hoy && r.fecha_vencimiento <= limite) {
-            items.push({ tipo: "pago_recurrente", tabla: "finanzas", id: r.id, texto: `${r.concepto || "Pago recurrente"} \u2014 ${fmtMoney(r.monto)}, vence ${fmtFecha(r.fecha_vencimiento)}` });
+            items.push({ tipo: "pago_recurrente", tabla: "finanzas", id: r.id, texto: textoSeguro("pago_recurrente", `${r.concepto || "Pago recurrente"} \u2014 ${fmtMoney(r.monto)}, vence ${fmtFecha(r.fecha_vencimiento)}`) });
           }
         }); }
       { const { data } = await admin.from("pendientes").select("id, descripcion, fecha_limite").eq("user_id", uid).is("deleted_at", null).not("estatus", "in", "(Completada,Cancelada)").gte("fecha_limite", hoy).lte("fecha_limite", limite);
         (data || []).forEach((r) => items.push({ tipo: "pendiente", tabla: "pendientes", id: r.id, texto: `${r.descripcion} \u2014 vence ${fmtFecha(r.fecha_limite)}` })); }
       { const { data } = await admin.from("documentos").select("id, nombre, fecha_vencimiento").eq("user_id", uid).is("deleted_at", null).gte("fecha_vencimiento", hoy).lte("fecha_vencimiento", limite);
-        (data || []).forEach((r) => items.push({ tipo: "documento", tabla: "documentos", id: r.id, texto: `${r.nombre} \u2014 vence ${fmtFecha(r.fecha_vencimiento)}` })); }
+        (data || []).forEach((r) => items.push({ tipo: "documento", tabla: "documentos", id: r.id, texto: textoSeguro("documento", `${r.nombre} \u2014 vence ${fmtFecha(r.fecha_vencimiento)}`) })); }
       { const { data } = await admin.from("activos").select("id, nombre, fecha_vencimiento").eq("user_id", uid).is("deleted_at", null).gte("fecha_vencimiento", hoy).lte("fecha_vencimiento", limite);
-        (data || []).forEach((r) => items.push({ tipo: "activo_digital", tabla: "activos", id: r.id, texto: `${r.nombre} \u2014 renovaci\u00f3n ${fmtFecha(r.fecha_vencimiento)}` })); }
+        (data || []).forEach((r) => items.push({ tipo: "activo_digital", tabla: "activos", id: r.id, texto: textoSeguro("activo_digital", `${r.nombre} \u2014 renovaci\u00f3n ${fmtFecha(r.fecha_vencimiento)}`) })); }
       { const { data } = await admin.from("apartados").select("id, nombre, fecha_objetivo").eq("user_id", uid).is("deleted_at", null).gte("fecha_objetivo", hoy).lte("fecha_objetivo", limite);
-        (data || []).forEach((r) => items.push({ tipo: "apartado", tabla: "apartados", id: r.id, texto: `${r.nombre} \u2014 meta ${fmtFecha(r.fecha_objetivo)}` })); }
+        (data || []).forEach((r) => items.push({ tipo: "apartado", tabla: "apartados", id: r.id, texto: textoSeguro("apartado", `${r.nombre} \u2014 meta ${fmtFecha(r.fecha_objetivo)}`) })); }
       { const { data } = await admin.from("proyectos").select("id, nombre, fecha_revision, estatus").eq("user_id", uid).is("deleted_at", null).not("estatus", "in", "(Finalizado,Archivado)").gte("fecha_revision", hoy).lte("fecha_revision", limite);
         (data || []).forEach((r) => items.push({ tipo: "revision_proyecto", tabla: "proyectos", id: r.id, texto: `${r.nombre} \u2014 revisi\u00f3n ${fmtFecha(r.fecha_revision)}` })); }
       { const { data } = await admin.from("contactos").select("id, nombre, fecha_nacimiento").eq("user_id", uid).is("deleted_at", null).not("fecha_nacimiento", "is", null);
@@ -252,7 +277,7 @@ Deno.serve(async (_req) => {
       { const { data } = await admin.from("eventos").select("id, nombre, fecha").eq("user_id", uid).is("deleted_at", null).gte("fecha", hoy).lte("fecha", limite);
         (data || []).forEach((r) => items.push({ tipo: "evento", tabla: "eventos", id: r.id, texto: `${r.nombre} \u2014 ${fmtFecha(r.fecha)}` })); }
       { const { data } = await admin.from("facturas").select("id, concepto, total, fecha, estatus").eq("user_id", uid).is("deleted_at", null).eq("estatus", "Pendiente").gte("fecha", hoy).lte("fecha", limite);
-        (data || []).forEach((r) => items.push({ tipo: "factura", tabla: "facturas", id: r.id, texto: `${r.concepto || "Factura"} \u2014 ${fmtMoney(r.total)}` })); }
+        (data || []).forEach((r) => items.push({ tipo: "factura", tabla: "facturas", id: r.id, texto: textoSeguro("factura", `${r.concepto || "Factura"} \u2014 ${fmtMoney(r.total)}`) })); }
       { const { data } = await admin.from("campanas").select("id, nombre, plataforma, fecha_inicio, fecha_fin, estatus").eq("user_id", uid).is("deleted_at", null);
         (data || []).forEach((r) => {
           if (r.estatus === "Planeada" && r.fecha_inicio >= hoy && r.fecha_inicio <= limite) items.push({ tipo: "campana", tabla: "campanas", id: r.id, texto: `${r.nombre} \u2014 inicia ${fmtFecha(r.fecha_inicio)}` });
