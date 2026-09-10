@@ -2041,6 +2041,27 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
     else await addItem("finanzas", campos);
   };
 
+  // Mismo patrón de movimiento "espejo": un Activo digital con Renovación automática y costo de
+  // renovación genera/actualiza un Egreso recurrente en Finanzas (categoría "Activos digitales",
+  // ligado por activo_id) para que su costo cuente en Reportes/Estimaciones sin capturarlo dos
+  // veces. Si se apaga la renovación automática o se borra el costo, el espejo se elimina — no
+  // queda un pago recurrente huérfano (secc. 23.15).
+  const sincronizarFinanzasDeActivo = async (activo) => {
+    const existente = data.finanzas.find((f) => f.activoId === activo.id);
+    const monto = Number(activo.costoRenovacion) || 0;
+    if (!activo.renovacionAutomatica || monto <= 0) {
+      if (existente) await removeItem("finanzas", existente.id);
+      return;
+    }
+    const campos = {
+      tipo: "Egreso", categoria: "Activos digitales", monto, concepto: activo.nombre,
+      fecha: activo.fechaVencimiento, estatus: "Pendiente", esRecurrente: true,
+      frecuencia: activo.frecuenciaRenovacion || "Anual", fechaFin: "", activoId: activo.id,
+    };
+    if (existente) await editItem("finanzas", existente.id, campos);
+    else await addItem("finanzas", campos);
+  };
+
   const permanentDelete = async (key, id) => {
     const { error } = await supabase.from(tableName(key)).delete().eq("id", id);
     if (error) { console.error(`Error al borrar definitivamente en ${tableName(key)}:`, error); alert("No se pudo borrar definitivamente."); return false; }
@@ -2438,7 +2459,10 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
             <Medicamentos data={data} onAdd={(i) => addItem("medicamentos", i)} onEdit={(id, p) => editItem("medicamentos", id, p)} onRemove={(id) => askDelete("medicamentos", id)} />
           )}
           {view === "activos" && (
-            <ActivosDigitales data={data} onAdd={(i) => addItem("activos", i)} onEdit={(id, p) => editItem("activos", id, p)} onRemove={(id) => askDelete("activos", id)} onCrearTarea={(t) => addItem("pendientes", t)} />
+            <ActivosDigitales data={data}
+              onAdd={async (i) => { const id = i.id || uid(); await addItem("activos", { ...i, id }); await sincronizarFinanzasDeActivo({ ...i, id }); }}
+              onEdit={async (id, p) => { await editItem("activos", id, p); const actual = data.activos.find((a) => a.id === id); await sincronizarFinanzasDeActivo({ ...actual, ...p, id }); }}
+              onRemove={(id) => askDelete("activos", id)} onCrearTarea={(t) => addItem("pendientes", t)} />
           )}
           {view === "asistente" && <Asistente onDatosCreados={recargarModulos} />}
           {view === "agenda" && <Agenda data={data} misId={misId} onEditPendiente={(id, p) => editItem("pendientes", id, p)} onAddCita={(c) => addItem("citas", c)} />}
@@ -2468,6 +2492,10 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
                 onClick={() => {
                   if (confirmDelete.key === "eventos") {
                     const espejo = data.finanzas.find((f) => f.eventoId === confirmDelete.id);
+                    if (espejo) removeItem("finanzas", espejo.id);
+                  }
+                  if (confirmDelete.key === "activos") {
+                    const espejo = data.finanzas.find((f) => f.activoId === confirmDelete.id);
                     if (espejo) removeItem("finanzas", espejo.id);
                   }
                   removeItem(confirmDelete.key, confirmDelete.id, confirmDelete.extraIds || []);
@@ -4905,6 +4933,7 @@ function Finanzas({ data, onAdd, onEdit, onRemove }) {
                     <Badge tone={f.estatus === "Cobrado" ? "teal" : "gold"}>{f.estatus}</Badge>
                     {f.esRecurrente && <Badge tone="gold">{f.frecuencia || "Mensual"}{f.fechaFin ? ` · hasta ${f.fechaFin}` : " · indefinido"}</Badge>}
                     {f.eventoId && <Badge tone="muted">🔗 Desde Eventos</Badge>}
+                    {f.activoId && <Badge tone="muted">🔗 Desde Activos digitales</Badge>}
                   </div>
                   <p className="text-xs gp-text-muted mt-0.5">
                     {f.esRecurrente ? `Día de pago: ${f.fecha ? Number(f.fecha.slice(8, 10)) : "—"}` : (f.fecha || "—")}
@@ -4916,6 +4945,7 @@ function Finanzas({ data, onAdd, onEdit, onRemove }) {
               {abierta && (
                 <div className="mt-2.5 pt-2.5 border-t gp-border pl-5">
                   {f.eventoId && <p className="text-xs gp-text-gold mb-2">Este movimiento se generó solo desde un Evento — para cambiarlo, edita el evento en el módulo Eventos (si lo cambias aquí, se sobrescribe la próxima vez que se guarde ese evento).</p>}
+                  {f.activoId && <p className="text-xs gp-text-gold mb-2">Este movimiento se generó solo desde un Activo digital con renovación automática — para cambiarlo, edita el activo en el módulo Activos digitales (si lo cambias aquí, se sobrescribe la próxima vez que se guarde ese activo).</p>}
                   <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-xs gp-text-muted mb-3">
                     <div>Proyecto: <span className="gp-text-teal">{nombreProyecto(f.proyectoId)}</span></div>
                     <div>Cliente: <span className="gp-text-teal">{f.contactoId ? nombreCliente(f.contactoId) : "—"}</span></div>
@@ -5562,7 +5592,7 @@ function ActivosDigitales({ data, onAdd, onEdit, onRemove, onCrearTarea }) {
   const [ordenDir, setOrdenDir] = useState("asc");
   const [busqueda, setBusqueda] = useState("");
   const toggleOrden = (key) => { if (orden === key) setOrdenDir((d) => (d === "asc" ? "desc" : "asc")); else { setOrden(key); setOrdenDir("asc"); } };
-  const empty = { tipo: "Dominio", nombre: "", proyectoId: "", fechaVencimiento: todayISO(), costoRenovacion: "", notas: "", proveedor: "", urlIdentificador: "", cuentaPropietaria: "", renovacionAutomatica: false };
+  const empty = { tipo: "Dominio", nombre: "", proyectoId: "", fechaVencimiento: todayISO(), costoRenovacion: "", notas: "", proveedor: "", urlIdentificador: "", cuentaPropietaria: "", renovacionAutomatica: false, frecuenciaRenovacion: "Anual" };
   const camposOrden = {
     vencimiento: { get: (a) => a.fechaVencimiento, tipo: "fecha" },
     registro: { get: (a) => a.createdAt, tipo: "fecha" },
@@ -5683,6 +5713,16 @@ function ActivoForm({ item, proyectos, onSave }) {
         <input type="checkbox" checked={!!v.renovacionAutomatica} onChange={(e) => setV({ ...v, renovacionAutomatica: e.target.checked })} style={{ width: 16, height: 16, accentColor: "var(--gold)" }} />
         Renovación automática
       </label>
+      {v.renovacionAutomatica && (
+        <div className="mb-3">
+          <Field label="Frecuencia de renovación">
+            <select className="gp-input" value={v.frecuenciaRenovacion || "Anual"} onChange={(e) => setV({ ...v, frecuenciaRenovacion: e.target.value })}>{FRECUENCIA.map((c) => <option key={c}>{c}</option>)}</select>
+          </Field>
+          {Number(v.costoRenovacion) > 0 && (
+            <p className="text-xs gp-text-muted">ARKEYONE creará/actualizará un egreso recurrente en Finanzas por {fmtMoney(v.costoRenovacion)} ({(v.frecuenciaRenovacion || "Anual").toLowerCase()}), ligado a este activo.</p>
+          )}
+        </div>
+      )}
       <Field label="Notas"><textarea className="gp-input" rows={2} value={v.notas} onChange={(e) => setV({ ...v, notas: e.target.value })} /></Field>
       {error && <p className="text-xs gp-text-red mb-2">{error}</p>}
 
