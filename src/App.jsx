@@ -1680,6 +1680,10 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
   // entrar/seguir en el módulo — independiente del cierre general de sesión a los 30 min.
   const SENSIBLE_MS = 15 * 60 * 1000;
   const VISTAS_SENSIBLES = ["finanzas", "facturas", "reportes", "estimaciones", "deudas", "apartados", "patrimonio", "activos", "documentos", "salud", "medicamentos"];
+  // Sentinel para "solo desbloquear, sin navegar a ningún lado" — se usa cuando el candado
+  // aparece dentro de otra pantalla (Centro de Mando, pestañas de un proyecto) para revelar
+  // información ya enmascarada ahí mismo, en vez de mandar al usuario al módulo completo.
+  const SOLO_DESBLOQUEAR = "__solo_desbloquear__";
   const [sensibleDesbloqueadoHasta, setSensibleDesbloqueadoHasta] = useState(0);
   // Diario (secc. 24.5) usa la misma idea pero con una ventana propia de 10 min, independiente
   // de la de Dinero/Salud — se maneja aparte para no tocar ese flujo ya probado.
@@ -1707,6 +1711,15 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
     if (VISTAS_SENSIBLES.includes(id)) setSensibleDesbloqueadoHasta(Date.now() + SENSIBLE_MS);
     if (VISTAS_SENSIBLES_DIARIO.includes(id)) setDiarioDesbloqueadoHasta(Date.now() + DIARIO_MS);
     setView(id);
+  };
+
+  // Para los candados que aparecen DENTRO de otra pantalla (Centro de Mando, pestañas de un
+  // proyecto) y que solo deben revelar la info ahí mismo, sin mandar a nadie al módulo completo.
+  const desbloquearSensibleAqui = () => {
+    if (Date.now() < sensibleDesbloqueadoHasta) return; // ya desbloqueado, no hace falta pedir nada
+    setReauthPendiente(SOLO_DESBLOQUEAR);
+    setReauthPassword("");
+    setReauthError("");
   };
 
   // Cerrar sesión "a prueba de fallos": antes solo llamábamos a signOut() sin esperar su
@@ -1782,7 +1795,9 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
     if (error) { setReauthError("Contraseña incorrecta."); return; }
     if (VISTAS_SENSIBLES_DIARIO.includes(reauthPendiente)) setDiarioDesbloqueadoHasta(Date.now() + DIARIO_MS);
     else setSensibleDesbloqueadoHasta(Date.now() + SENSIBLE_MS);
-    setView(reauthPendiente);
+    // Si el candado se abrió solo para revelar información en el mismo lugar (Centro de Mando,
+    // pestañas de un proyecto), no navegamos — la info ya enmascarada se muestra ahí mismo.
+    if (reauthPendiente !== SOLO_DESBLOQUEAR) setView(reauthPendiente);
     setReauthPendiente(null);
     setReauthPassword("");
   };
@@ -2403,7 +2418,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
               {refrescando ? "Actualizando…" : pullDist > 60 ? "Suelta para actualizar ↓" : "Desliza hacia abajo para actualizar…"}
             </div>
           )}
-          {view === "dashboard" && <Dashboard data={data} setView={irAVista} onAddSaldo={(i) => addItem("saldoInicial", i)} onVerProyecto={irADetalleProyecto} onEditPendiente={(id, p) => editItem("pendientes", id, p)} sensibleDesbloqueadoHasta={sensibleDesbloqueadoHasta} />}
+          {view === "dashboard" && <Dashboard data={data} setView={irAVista} onAddSaldo={(i) => addItem("saldoInicial", i)} onVerProyecto={irADetalleProyecto} onEditPendiente={(id, p) => editItem("pendientes", id, p)} sensibleDesbloqueadoHasta={sensibleDesbloqueadoHasta} onDesbloquear={desbloquearSensibleAqui} />}
           {view === "papelera" && <Papelera onRestore={restoreItem} onPermanentDelete={permanentDelete} ownerId={activeOwnerId} />}
           {view === "colaboradores" && <Colaboradores misId={misId} miEmail={miEmail} />}
           {view === "admin" && <AdminUsuarios adminUid={ADMIN_UID} adminEmail={miEmail} />}
@@ -2449,6 +2464,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
               onRemoveMeta={(id) => askDelete("metas", id)}
               onIrAVista={irAVista}
               sensibleDesbloqueadoHasta={sensibleDesbloqueadoHasta}
+              onDesbloquear={desbloquearSensibleAqui}
             />
           )}
           {view === "pendientes" && (
@@ -3364,7 +3380,7 @@ function Papelera({ onRestore, onPermanentDelete, ownerId }) {
   );
 }
 
-function Dashboard({ data, setView, onAddSaldo, onVerProyecto, onEditPendiente, sensibleDesbloqueadoHasta }) {
+function Dashboard({ data, setView, onAddSaldo, onVerProyecto, onEditPendiente, sensibleDesbloqueadoHasta, onDesbloquear }) {
   const [saldoModal, setSaldoModal] = useState(false);
   const saldo = calcularSaldo(data);
   const hoy = todayISO();
@@ -3645,7 +3661,7 @@ function Dashboard({ data, setView, onAddSaldo, onVerProyecto, onEditPendiente, 
           )}
         </div>
         {!sensibleDesbloqueado ? (
-          <button onClick={() => setView("finanzas")} className="text-left w-full mt-2">
+          <button onClick={onDesbloquear} className="text-left w-full mt-2">
             <p className="text-sm gp-text-gold">🔒 Verifica tu contraseña para ver tu saldo</p>
             <p className="text-xs gp-text-muted mt-1">Finanzas es un módulo protegido — toca aquí para desbloquearlo.</p>
           </button>
@@ -3715,7 +3731,7 @@ function Dashboard({ data, setView, onAddSaldo, onVerProyecto, onEditPendiente, 
       <div className="gp-panel p-4">
         <h3 className="text-sm font-medium mb-3">Ganancia neta por proyecto</h3>
         {!sensibleDesbloqueado ? (
-          <button onClick={() => setView("finanzas")} className="text-left w-full">
+          <button onClick={onDesbloquear} className="text-left w-full">
             <p className="text-sm gp-text-gold">🔒 Verifica tu contraseña para ver este reporte</p>
           </button>
         ) : gananciaPorProyecto.length === 0 ? (
@@ -4061,7 +4077,7 @@ function ProyectoForm({ item, onSave }) {
 /* ---------- Detalle de proyecto (Fase: navegación con breadcrumb) ---------- */
 // Pantalla completa de un solo proyecto: todos sus pendientes con subtareas anidadas,
 // porcentaje de avance (manual en tareas finales, calculado en tareas con hijos), y comentarios.
-function ProyectoDetalle({ data, proyectoId, onVolver, onAddTarea, onEditTarea, onRemoveTarea, onAddComentario, onRemoveComentario, onAddMeta, onEditMeta, onRemoveMeta, onIrAVista, sensibleDesbloqueadoHasta }) {
+function ProyectoDetalle({ data, proyectoId, onVolver, onAddTarea, onEditTarea, onRemoveTarea, onAddComentario, onRemoveComentario, onAddMeta, onEditMeta, onRemoveMeta, onIrAVista, sensibleDesbloqueadoHasta, onDesbloquear }) {
   const proyecto = data.proyectos.find((p) => p.id === proyectoId);
   const [modal, setModal] = useState(null);
   const [modalMeta, setModalMeta] = useState(null);
@@ -4172,7 +4188,7 @@ function ProyectoDetalle({ data, proyectoId, onVolver, onAddTarea, onEditTarea, 
                 <div><p className="gp-text-muted">Costo estimado total</p><p className="gp-mono">{fmtMoney(r.costoEstimadoTotal)}</p></div>
               </>
             ) : (
-              <button onClick={() => onIrAVista("finanzas")} className="col-span-2 sm:col-span-5 text-left">
+              <button onClick={onDesbloquear} className="col-span-2 sm:col-span-5 text-left">
                 <p className="text-xs gp-text-gold">🔒 Verifica tu contraseña para ver los números de este proyecto</p>
               </button>
             )}
@@ -4313,7 +4329,7 @@ function ProyectoDetalle({ data, proyectoId, onVolver, onAddTarea, onEditTarea, 
       {tab === "finanzas" && (
         <div>
           {!sensibleDesbloqueado ? (
-            <button onClick={() => onIrAVista("finanzas")} className="text-left">
+            <button onClick={onDesbloquear} className="text-left">
               <p className="text-sm gp-text-gold">🔒 Verifica tu contraseña para ver Finanzas de este proyecto</p>
             </button>
           ) : (
@@ -4414,7 +4430,7 @@ function ProyectoDetalle({ data, proyectoId, onVolver, onAddTarea, onEditTarea, 
       {tab === "legal" && (
         <div>
           {!sensibleDesbloqueado ? (
-            <button onClick={() => onIrAVista("documentos")} className="text-left">
+            <button onClick={onDesbloquear} className="text-left">
               <p className="text-sm gp-text-gold">🔒 Verifica tu contraseña para ver Documentos y legal de este proyecto</p>
             </button>
           ) : (
