@@ -235,7 +235,6 @@ const seed = () => ({
   pendientes: [],
   equipo: [],
   finanzas: [],
-  deudas: [],
   actividades: [],
   activos: [],
   metas: [],
@@ -448,7 +447,11 @@ const categoriaIMC = (imc) => {
 };
 
 /* ---------- persistencia relacional ---------- */
-const TABLES = ["proyectos", "pendientes", "equipo", "finanzas", "deudas", "actividades", "activos", "metas", "contactos", "redesMetricas", "documentos", "habitos", "salud", "apartados", "eventos", "comentarios", "saldoInicial", "regalos", "facturas", "campanas", "patrimonio", "patrimonioValuaciones", "medicamentos", "citas", "notas"];
+const TABLES = ["proyectos", "pendientes", "equipo", "finanzas", "actividades", "activos", "metas", "contactos", "redesMetricas", "documentos", "habitos", "salud", "apartados", "eventos", "comentarios", "saldoInicial", "regalos", "facturas", "campanas", "patrimonio", "patrimonioValuaciones", "medicamentos", "citas", "notas"];
+// Deudas ya NO es una tabla propia (Documento Maestro v1.2, secc. 23.11/40): es una vista
+// calculada sobre Finanzas (egresos no recurrentes con saldo pendiente). Esta función se usa
+// en cualquier lugar que antes leía `data.deudas`.
+const deudasDeFinanzas = (finanzas) => (finanzas || []).filter((f) => f.tipo === "Egreso" && !f.esRecurrente && (f.estatus === "Pendiente" || f.estatus === "Parcial"));
 const OLD_STORAGE_KEY = "gestion_personal_data"; // localStorage, versión muy vieja
 const OLD_BLOB_TABLE = "gestion_data"; // tabla única jsonb, versión anterior a este modelo relacional
 
@@ -460,7 +463,7 @@ const normalizarTexto = (s) => (s || "").toString().toLowerCase().normalize("NFD
 
 const ETIQUETA_TABLA = {
   proyectos: "Proyecto", pendientes: "Pendiente", equipo: "Equipo", finanzas: "Movimiento financiero",
-  deudas: "Deuda", actividades: "Actividad", activos: "Activo digital", metas: "Meta",
+  actividades: "Actividad", activos: "Activo digital", metas: "Meta",
   contactos: "Contacto", redesMetricas: "Métrica de red social", documentos: "Documento",
   habitos: "Hábito", salud: "Registro de salud", apartados: "Apartado", eventos: "Evento",
   comentarios: "Comentario", saldoInicial: "Saldo inicial", regalos: "Regalo",
@@ -510,8 +513,6 @@ function labelFor(key, item) {
       return item.descripcion || "(sin descripción)";
     case "finanzas":
       return item.concepto || item.categoria || "(sin concepto)";
-    case "deudas":
-      return item.acreedor || "(sin acreedor)";
     case "citas":
       return item.titulo || "(sin título)";
     case "notas":
@@ -2272,12 +2273,12 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
               data={data}
               tabInicial={view === "facturas" ? "facturas" : "movimientos"}
               finanzasProps={{ onAdd: (i) => addItem("finanzas", i), onEdit: (id, p) => editItem("finanzas", id, p), onRemove: (id) => askDelete("finanzas", id) }}
-              facturasProps={{ onAdd: (i) => addItem("facturas", i), onEdit: (id, p) => editItem("facturas", id, p), onRemove: (id) => askDelete("facturas", id), onAddComentario: (i) => addItem("comentarios", i), onRemoveComentario: (id) => askDelete("comentarios", id) }}
+              facturasProps={{ onAdd: (i) => addItem("facturas", i), onEdit: (id, p) => editItem("facturas", id, p), onRemove: (id) => askDelete("facturas", id), onAddComentario: (i) => addItem("comentarios", i), onRemoveComentario: (id) => askDelete("comentarios", id), onAddFinanzas: (i) => addItem("finanzas", i) }}
             />
           )}
           {view === "reportes" && <Reportes data={data} />}
           {view === "deudas" && (
-            <Deudas data={data} onAdd={(i) => addItem("deudas", i)} onEdit={(id, p) => editItem("deudas", id, p)} onRemove={(id) => askDelete("deudas", id)} onCrearTarea={(t) => addItem("pendientes", t)} />
+            <Deudas data={data} onAddFinanzas={(i) => addItem("finanzas", i)} onEditFinanzas={(id, p) => editItem("finanzas", id, p)} onRemoveFinanzas={(id) => askDelete("finanzas", id)} onCrearTarea={(t) => addItem("pendientes", t)} />
           )}
           {view === "apartados" && (
             <Apartados data={data} onAdd={(i) => addItem("apartados", i)} onEdit={(id, p) => editItem("apartados", id, p)} onRemove={(id) => askDelete("apartados", id)} onMoverFondos={moverFondosApartado} />
@@ -3186,10 +3187,10 @@ function Dashboard({ data, setView, onAddSaldo, onVerProyecto, onEditPendiente }
       if (dd <= 7) acciones.push({ id: `cobro-${f.id}`, origen: "Cobro pendiente", tipo: "finanzas", texto: f.concepto || "Cobro", sub: fmtMoney(f.monto), dd, irA: () => setView("finanzas") });
     }
   });
-  data.deudas.forEach((d) => {
+  deudasDeFinanzas(data.finanzas).forEach((d) => {
     if (!d.fechaVencimiento) return;
     const dd = daysUntil(d.fechaVencimiento);
-    if (dd <= 7) acciones.push({ id: `deuda-${d.id}`, origen: "Pago por hacer", tipo: "finanzas", texto: d.acreedor, sub: fmtMoney(d.monto), dd, irA: () => setView("deudas") });
+    if (dd <= 7) acciones.push({ id: `deuda-${d.id}`, origen: "Pago por hacer", tipo: "finanzas", texto: d.concepto, sub: fmtMoney(d.monto), dd, irA: () => setView("deudas") });
   });
 
   const accionesHoy = acciones.filter((a) => a.dd <= 0).sort((a, b) => a.dd - b.dd);
@@ -4908,7 +4909,7 @@ function FinanzaForm({ item, proyectos, contactos, onSave }) {
 }
 
 /* ---------- Facturas e IVA ---------- */
-function Facturas({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveComentario }) {
+function Facturas({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveComentario, onAddFinanzas }) {
   const [modal, setModal] = useState(null);
   const [comentariosDe, setComentariosDe] = useState(null);
   const [filtroTipo, setFiltroTipo] = useState("Todas");
@@ -4916,7 +4917,7 @@ function Facturas({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCome
   const [orden, setOrden] = useState("default");
   const [ordenDir, setOrdenDir] = useState("asc");
   const toggleOrden = (key) => { if (orden === key) setOrdenDir((d) => (d === "asc" ? "desc" : "asc")); else { setOrden(key); setOrdenDir("asc"); } };
-  const empty = { tipo: "Recibida", proyectoId: "", contactoId: "", folio: "", fecha: todayISO(), concepto: "", subtotal: "", iva: "", total: "", estatus: "Pendiente", notas: "" };
+  const empty = { tipo: "Recibida", proyectoId: "", contactoId: "", folio: "", fecha: todayISO(), concepto: "", subtotal: "", iva: "", total: "", estatus: "Pendiente", notas: "", finanzasId: "" };
 
   const nombreProyecto = (id) => data.proyectos.find((p) => p.id === id)?.nombre || "—";
   const nombreContacto = (id) => data.contactos.find((c) => c.id === id)?.nombre || "—";
@@ -4982,7 +4983,7 @@ function Facturas({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCome
 
       <div className="gp-panel overflow-x-auto">
         <table className="gp-table">
-          <thead><tr><Th label="Folio" sortKey="alfabetico" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} /><th>Tipo</th><Th label="Fecha" sortKey="fecha" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} /><th>Proyecto</th><th>Contacto</th><th>Subtotal</th><th>IVA</th><Th label="Total" sortKey="total" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} /><th>Estatus</th><th></th></tr></thead>
+          <thead><tr><Th label="Folio" sortKey="alfabetico" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} /><th>Tipo</th><Th label="Fecha" sortKey="fecha" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} /><th>Proyecto</th><th>Contacto</th><th>Subtotal</th><th>IVA</th><Th label="Total" sortKey="total" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} /><th>Estatus</th><th>Movimiento</th><th></th></tr></thead>
           <tbody>
             {ordenadas.map((f) => {
               const nc = nComentarios(f.id);
@@ -5001,6 +5002,7 @@ function Facturas({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCome
                       {ESTATUS_FACTURA.map((s) => <option key={s}>{s}</option>)}
                     </select>
                   </td>
+                  <td>{f.finanzasId ? <Badge tone="teal">🔗 Vinculada</Badge> : <Badge tone="muted">Sin vincular</Badge>}</td>
                   <td><div className="flex gap-1">
                     <IconBtn onClick={() => setComentariosDe(f)}><MessageCircle size={13} />{nc > 0 && <span className="gp-mono" style={{ fontSize: 9, marginLeft: 2 }}>{nc}</span>}</IconBtn>
                     <IconBtn onClick={() => setModal({ item: f })}><Pencil size={13} /></IconBtn><IconBtn onClick={() => onRemove(f.id)}><Trash2 size={13} /></IconBtn>
@@ -5008,7 +5010,7 @@ function Facturas({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCome
                 </tr>
               );
             })}
-            {ordenadas.length === 0 && <tr><td colSpan={10} className="text-center gp-text-muted py-6">Sin facturas registradas con este filtro.</td></tr>}
+            {ordenadas.length === 0 && <tr><td colSpan={11} className="text-center gp-text-muted py-6">Sin facturas registradas con este filtro.</td></tr>}
           </tbody>
         </table>
       </div>
@@ -5021,16 +5023,17 @@ function Facturas({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCome
 
       {modal && (
         <Modal title={modal.item.id ? "Editar factura" : "Nueva factura"} onClose={() => setModal(null)}>
-          <FacturaForm item={modal.item} proyectos={data.proyectos} contactos={data.contactos} onSave={(v) => { modal.item.id ? onEdit(modal.item.id, v) : onAdd(v); setModal(null); }} />
+          <FacturaForm item={modal.item} proyectos={data.proyectos} contactos={data.contactos} finanzas={data.finanzas} onAddFinanzas={onAddFinanzas} onSave={(v) => { modal.item.id ? onEdit(modal.item.id, v) : onAdd(v); setModal(null); }} />
         </Modal>
       )}
     </div>
   );
 }
 
-function FacturaForm({ item, proyectos, contactos, onSave }) {
+function FacturaForm({ item, proyectos, contactos, finanzas, onAddFinanzas, onSave }) {
   const [v, setV] = useState(item);
   const [error, setError] = useState("");
+  const [creandoMov, setCreandoMov] = useState(false);
 
   const setSubtotal = (val) => {
     const subtotal = Number(val) || 0;
@@ -5069,6 +5072,38 @@ function FacturaForm({ item, proyectos, contactos, onSave }) {
         <Field label="Total"><MoneyInput className="gp-input" value={v.total} onChange={(val) => setV({ ...v, total: val })} /></Field>
       </div>
       <Field label="Notas"><textarea className="gp-input" rows={2} value={v.notas} onChange={(e) => setV({ ...v, notas: e.target.value })} /></Field>
+
+      <div className="gp-panel p-3 mb-3">
+        <p className="text-xs font-medium mb-2">Movimiento en Finanzas relacionado</p>
+        <p className="text-xs gp-text-muted mb-2">El importe real vive en Finanzas; esta factura solo es su información fiscal relacionada (secc. 23.10).</p>
+        <Field label={`Vincular a un ${v.tipo === "Emitida" ? "ingreso" : "egreso"} existente`}>
+          <select className="gp-input" value={v.finanzasId || ""} onChange={(e) => setV({ ...v, finanzasId: e.target.value })}>
+            <option value="">— sin vincular —</option>
+            {(finanzas || []).filter((f) => f.tipo === (v.tipo === "Emitida" ? "Ingreso" : "Egreso"))
+              .sort((a, b) => (b.fecha || "").localeCompare(a.fecha || ""))
+              .map((f) => <option key={f.id} value={f.id}>{f.concepto || f.categoria || "(sin concepto)"} · {f.fecha} · {fmtMoney(f.monto)}</option>)}
+          </select>
+        </Field>
+        {v.finanzasId ? (
+          <p className="text-xs gp-text-teal mt-1">🔗 Vinculada a un movimiento de Finanzas.</p>
+        ) : (
+          <button type="button" disabled={creandoMov} className="text-xs px-2.5 py-1.5 rounded gp-btn-ghost mt-1"
+            onClick={async () => {
+              if (!onAddFinanzas) return;
+              setCreandoMov(true);
+              const nuevoId = uid();
+              await onAddFinanzas({
+                id: nuevoId, tipo: v.tipo === "Emitida" ? "Ingreso" : "Egreso", categoria: "Factura",
+                concepto: v.concepto || v.folio || "Factura", monto: v.total || 0, fecha: v.fecha,
+                proyectoId: v.proyectoId, contactoId: v.contactoId, forma: "Transferencia",
+                estatus: v.estatus === "Pagada" ? "Cobrado" : "Pendiente", esRecurrente: false,
+              });
+              setCreandoMov(false);
+              setV((prev) => ({ ...prev, finanzasId: nuevoId }));
+            }}>{creandoMov ? "Creando…" : "＋ Crear movimiento en Finanzas con estos datos"}</button>
+        )}
+      </div>
+
       <p className="text-xs gp-text-muted mb-3">Esta información es de referencia para tu control interno — no sustituye a un contador ni a tu declaración fiscal real.</p>
       {error && <p className="text-xs gp-text-red mb-2">{error}</p>}
 
@@ -5078,16 +5113,21 @@ function FacturaForm({ item, proyectos, contactos, onSave }) {
 }
 
 /* ---------- Deudas ---------- */
-function Deudas({ data, onAdd, onEdit, onRemove, onCrearTarea }) {
+// Deudas ya no es su propia tabla (Documento Maestro v1.2, secc. 23.11/40): es una vista
+// especializada de Finanzas, filtrando egresos no recurrentes con saldo pendiente. Crear,
+// editar, marcar como pagada o borrar una "deuda" aquí en realidad opera sobre `finanzas`
+// (categoria="Deuda"), para que el movimiento real viva en un solo lugar.
+function Deudas({ data, onAddFinanzas, onEditFinanzas, onRemoveFinanzas, onCrearTarea }) {
   const [modal, setModal] = useState(null); // {item} en captura/edición | {item, paso:"tarea", origenId} tras crear
   const [orden, setOrden] = useState("default");
   const [ordenDir, setOrdenDir] = useState("asc");
   const toggleOrden = (key) => { if (orden === key) setOrdenDir((d) => (d === "asc" ? "desc" : "asc")); else { setOrden(key); setOrdenDir("asc"); } };
-  const empty = { acreedor: "", proyectoId: "", monto: "", fechaVencimiento: todayISO() };
+  const empty = { concepto: "", proyectoId: "", monto: "", fechaVencimiento: todayISO() };
+  const deudas = deudasDeFinanzas(data.finanzas);
   const camposOrden = {
     vencimiento: { get: (d) => d.fechaVencimiento, tipo: "fecha" },
     registro: { get: (d) => d.createdAt, tipo: "fecha" },
-    alfabetico: { get: (d) => d.acreedor, tipo: "texto" },
+    alfabetico: { get: (d) => d.concepto, tipo: "texto" },
     monto: { get: (d) => Number(d.monto) || 0, tipo: "numero" },
   };
   const opcionesOrden = [
@@ -5096,7 +5136,7 @@ function Deudas({ data, onAdd, onEdit, onRemove, onCrearTarea }) {
     { key: "alfabetico", label: "alfabético" },
     { key: "monto", label: "monto" },
   ];
-  const base = orden === "default" ? [...data.deudas].sort((a, b) => (a.fechaVencimiento || "").localeCompare(b.fechaVencimiento || "")) : data.deudas;
+  const base = orden === "default" ? [...deudas].sort((a, b) => (a.fechaVencimiento || "").localeCompare(b.fechaVencimiento || "")) : deudas;
   const ordenados = ordenarLista(base, orden, camposOrden, ordenDir);
   const nombreProyecto = (id) => data.proyectos.find((p) => p.id === id)?.nombre || "—";
 
@@ -5106,7 +5146,7 @@ function Deudas({ data, onAdd, onEdit, onRemove, onCrearTarea }) {
         <h2 className="gp-serif text-2xl">Deudas</h2>
         <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm w-full sm:w-auto"><Plus size={14} /> Nueva</button>
       </div>
-      <p className="text-sm gp-text-muted mb-3">Atrasadas, próximas a vencer y al corriente, todo calculado por fecha.</p>
+      <p className="text-sm gp-text-muted mb-3">Atrasadas, próximas a vencer y al corriente, todo calculado por fecha. Al marcarse como pagada, el movimiento sigue en Finanzas y desaparece de aquí.</p>
       <div className="mb-4"><OrdenSelector opciones={opcionesOrden} value={orden} onChange={setOrden} /></div>
 
       <div className="gp-panel overflow-x-auto">
@@ -5115,16 +5155,19 @@ function Deudas({ data, onAdd, onEdit, onRemove, onCrearTarea }) {
           <tbody>
             {ordenados.map((d) => {
               const dd = daysUntil(d.fechaVencimiento);
-              const tone = dd < 0 ? "red" : dd <= 7 ? "gold" : "teal";
-              const label = dd < 0 ? `Atrasada (${Math.abs(dd)}d)` : dd <= 7 ? `Vence en ${dd}d` : "Al corriente";
+              const tone = !d.fechaVencimiento ? "muted" : dd < 0 ? "red" : dd <= 7 ? "gold" : "teal";
+              const label = !d.fechaVencimiento ? "Sin fecha" : dd < 0 ? `Atrasada (${Math.abs(dd)}d)` : dd <= 7 ? `Vence en ${dd}d` : "Al corriente";
               return (
                 <tr key={d.id}>
-                  <td>{d.acreedor}</td>
+                  <td>{d.concepto}</td>
                   <td className="gp-text-muted">{nombreProyecto(d.proyectoId)}</td>
-                  <td className="gp-mono">{d.fechaVencimiento}</td>
+                  <td className="gp-mono">{d.fechaVencimiento || "—"}</td>
                   <td><Badge tone={tone}>{label}</Badge></td>
                   <td className="gp-mono">{fmtMoney(d.monto)}</td>
-                  <td><div className="flex gap-1"><IconBtn onClick={() => setModal({ item: d })}><Pencil size={13} /></IconBtn><IconBtn onClick={() => onRemove(d.id)}><Trash2 size={13} /></IconBtn></div></td>
+                  <td><div className="flex gap-1">
+                    <button title="Marcar como pagada" onClick={() => onEditFinanzas(d.id, { estatus: "Cobrado", fecha: todayISO() })} className="text-xs px-2 py-1 rounded gp-btn-ghost gp-text-teal">Pagada</button>
+                    <IconBtn onClick={() => setModal({ item: d })}><Pencil size={13} /></IconBtn><IconBtn onClick={() => onRemoveFinanzas(d.id)}><Trash2 size={13} /></IconBtn>
+                  </div></td>
                 </tr>
               );
             })}
@@ -5136,9 +5179,13 @@ function Deudas({ data, onAdd, onEdit, onRemove, onCrearTarea }) {
       {modal && !modal.paso && (
         <Modal title={modal.item.id ? "Editar deuda" : "Nueva deuda"} onClose={() => setModal(null)}>
           <DeudaForm item={modal.item} proyectos={data.proyectos} onSave={(v) => {
-            if (modal.item.id) { onEdit(modal.item.id, v); setModal(null); return; }
+            if (modal.item.id) { onEditFinanzas(modal.item.id, v); setModal(null); return; }
             const nuevoId = uid();
-            onAdd({ ...v, id: nuevoId });
+            onAddFinanzas({
+              id: nuevoId, tipo: "Egreso", categoria: "Deuda", forma: "Transferencia", estatus: "Pendiente",
+              esRecurrente: false, fecha: todayISO(), contactoId: "",
+              concepto: v.concepto, proyectoId: v.proyectoId, monto: v.monto, fechaVencimiento: v.fechaVencimiento,
+            });
             setModal({ item: v, paso: "tarea", origenId: nuevoId });
           }} />
         </Modal>
@@ -5146,8 +5193,8 @@ function Deudas({ data, onAdd, onEdit, onRemove, onCrearTarea }) {
       {modal && modal.paso === "tarea" && (
         <Modal title="Acción relacionada" onClose={() => setModal(null)}>
           <PromptTareaRelacionada
-            origenTabla="deudas" origenId={modal.origenId} proyectoId={modal.item.proyectoId}
-            descripcionSugerida={`Pagar a ${modal.item.acreedor}`}
+            origenTabla="finanzas" origenId={modal.origenId} proyectoId={modal.item.proyectoId}
+            descripcionSugerida={`Pagar a ${modal.item.concepto}`}
             fechaSugerida={modal.item.fechaVencimiento}
             onCrear={(t) => { onCrearTarea(t); setModal(null); }}
             onOmitir={() => setModal(null)}
@@ -5163,7 +5210,7 @@ function DeudaForm({ item, proyectos, onSave }) {
   const [error, setError] = useState("");
   return (
     <div>
-      <Field label="Acreedor"><input className="gp-input" value={v.acreedor} onChange={(e) => setV({ ...v, acreedor: e.target.value })} /></Field>
+      <Field label="Acreedor"><input className="gp-input" value={v.concepto} onChange={(e) => setV({ ...v, concepto: e.target.value })} /></Field>
       <Field label="Proyecto relacionado">
         <select className="gp-input" value={v.proyectoId} onChange={(e) => setV({ ...v, proyectoId: e.target.value })}>
           <option value="">— personal / sin proyecto —</option>
@@ -5176,7 +5223,7 @@ function DeudaForm({ item, proyectos, onSave }) {
       </div>
       {error && <p className="text-xs gp-text-red mb-2">{error}</p>}
 
-      <button className="gp-btn w-full py-2 text-sm mt-2" onClick={() => { if (!v.acreedor?.toString().trim()) { setError("El acreedor es obligatorio."); return; } setError(""); onSave(v); }}>Guardar</button>
+      <button className="gp-btn w-full py-2 text-sm mt-2" onClick={() => { if (!v.concepto?.toString().trim()) { setError("El acreedor es obligatorio."); return; } setError(""); onSave(v); }}>Guardar</button>
     </div>
   );
 }
@@ -7774,14 +7821,14 @@ function CitaForm({ item, contactos, onSave }) {
 // Deliberadamente NO incluye "comentarios", "saldoInicial" ni "patrimonioValuaciones": no tienen
 // pantalla propia a la que navegar, así que un resultado ahí no le serviría de nada al usuario.
 const ICONO_MODULO_BUSQUEDA = {
-  proyectos: FolderKanban, pendientes: CheckSquare, equipo: Users, finanzas: Wallet, deudas: AlertTriangle,
+  proyectos: FolderKanban, pendientes: CheckSquare, equipo: Users, finanzas: Wallet,
   actividades: Activity, activos: Globe, metas: Target, contactos: Contact, redesMetricas: BarChart3,
   documentos: FileText, habitos: Flame, salud: HeartPulse, apartados: PiggyBank, eventos: Camera,
   regalos: Gift, facturas: Receipt, campanas: Megaphone, patrimonio: Gem, medicamentos: Pill,
   citas: CalendarClock, notas: StickyNote,
 };
 const KEY_TO_VIEW_BUSQUEDA = {
-  proyectos: "proyectos", pendientes: "pendientes", equipo: "equipo", finanzas: "finanzas", deudas: "deudas",
+  proyectos: "proyectos", pendientes: "pendientes", equipo: "equipo", finanzas: "finanzas",
   actividades: "actividades", activos: "activos", metas: "metas", contactos: "contactos", redesMetricas: "redes",
   documentos: "documentos", habitos: "habitos", salud: "salud", apartados: "apartados", eventos: "eventos",
   regalos: "regalos", facturas: "facturas", campanas: "marketing", patrimonio: "patrimonio", medicamentos: "medicamentos",
@@ -7795,7 +7842,6 @@ function subtituloResultadoBusqueda(key, item) {
     case "contactos": return item.correo || item.telefono || "";
     case "notas": return (item.contenido || "").slice(0, 90);
     case "proyectos": return item.categoria || "";
-    case "deudas": return item.monto ? fmtMoney(item.monto) : "";
     default: return "";
   }
 }
