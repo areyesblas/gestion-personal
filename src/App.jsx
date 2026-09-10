@@ -249,6 +249,7 @@ const seed = () => ({
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2, 10) + Date.now().toString(36));
 const fmtMoney = (n) => (Number(n) || 0).toLocaleString("es-MX", { style: "currency", currency: "MXN" });
 const todayISO = () => new Date().toISOString().slice(0, 10);
+const horaActualHHMM = () => { const d = new Date(); return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`; };
 const daysUntil = (dateStr) => Math.ceil((new Date(dateStr) - new Date(todayISO())) / 86400000);
 // Días que faltan para el próximo cumpleaños (a partir de una fecha de nacimiento cualquiera).
 const MESES_LARGO = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
@@ -1978,6 +1979,17 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
     });
   };
 
+  // Recordatorio manual creado desde el botón de acciones rápidas (⚡). No pasa por addItem()
+  // porque `recordatorios` no es una tabla que se cargue completa al estado `data` (se consume
+  // vía notificaciones/push, no tiene una vista propia de lista todavía) — así que es una
+  // inserción directa. El motor-recordatorios (cron cada 5 min) lo recoge solo.
+  const onCrearRecordatorio = async ({ titulo, fechaHora }) => {
+    const { error } = await supabase.from("recordatorios").insert({
+      user_id: activeOwnerId, tipo: "manual", titulo, fecha_hora: fechaHora, recurrencia: "ninguna", prioridad: "normal", estado: "pendiente",
+    });
+    if (error) { console.error("Error al crear recordatorio:", error); alert("No se pudo guardar el recordatorio."); }
+  };
+
   if (loading || !data) {
     return (
       <div className={`gp-root min-h-screen flex items-center justify-center ${claseTema(tema)}`}>
@@ -2341,7 +2353,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
         </div>
       </div>
 
-      <QuickCapture data={data} onAdd={addItem} irAVista={irAVista} />
+      <QuickCapture data={data} onAdd={addItem} onCrearRecordatorio={onCrearRecordatorio} irAVista={irAVista} />
       {busquedaAbierta && <BusquedaGlobal data={data} onNavigate={buscarNavegarA} onClose={() => setBusquedaAbierta(false)} />}
 
       {confirmDelete && (
@@ -6780,11 +6792,12 @@ function Medicamentos({ data, onAdd, onEdit, onRemove }) {
 /* ---------- Salud ---------- */
 function Salud({ data, onAdd, onEdit, onRemove, onUpdatePerfil }) {
   const [modal, setModal] = useState(null);
+  const [tab, setTab] = useState("historial"); // "historial" | "tendencias"
   const [altura, setAltura] = useState(data.perfilSalud?.alturaCm || "");
   const [orden, setOrden] = useState("default");
   const [ordenDir, setOrdenDir] = useState("asc");
   const toggleOrden = (key) => { if (orden === key) setOrdenDir((d) => (d === "asc" ? "desc" : "asc")); else { setOrden(key); setOrdenDir("asc"); } };
-  const empty = { fecha: todayISO(), peso: "", glucosa: "", colesterol: "", trigliceridos: "", notas: "", estudio: null };
+  const empty = { fecha: todayISO(), hora: horaActualHHMM(), peso: "", glucosa: "", sistolica: "", diastolica: "", colesterol: "", trigliceridos: "", notas: "", estudio: null, origen: "completo" };
   const camposOrden = {
     fecha: { get: (s) => s.fecha, tipo: "fecha" },
     registro: { get: (s) => s.createdAt, tipo: "fecha" },
@@ -6807,8 +6820,18 @@ function Salud({ data, onAdd, onEdit, onRemove, onUpdatePerfil }) {
         <h2 className="gp-serif text-2xl">Salud</h2>
         <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm w-full sm:w-auto"><Plus size={14} /> Registrar</button>
       </div>
-      <p className="text-sm gp-text-muted mb-4">Peso, glucosa, colesterol, triglicéridos y tus estudios en PDF, todo en un mismo historial.</p>
+      <p className="text-sm gp-text-muted mb-4">Peso, glucosa, presión arterial, colesterol, triglicéridos y tus estudios en PDF, todo en un mismo historial.</p>
 
+      <div className="flex gap-1 mb-4">
+        {[{ key: "historial", label: "Historial" }, { key: "tendencias", label: "Tendencias" }].map((t) => (
+          <button key={t.key} onClick={() => setTab(t.key)} className={`text-xs px-3 py-1.5 rounded-full border ${tab === t.key ? "gp-btn" : "gp-text-muted"}`}>{t.label}</button>
+        ))}
+      </div>
+
+      {tab === "tendencias" ? (
+        <SaludTendencias salud={data.salud} />
+      ) : (
+      <>
       <div className="gp-panel p-3 mb-4 flex flex-wrap items-center gap-3">
         <span className="text-xs gp-text-muted">Tu estatura (para calcular IMC):</span>
         <input type="number" className="gp-input" style={{ maxWidth: 100 }} value={altura}
@@ -6821,18 +6844,19 @@ function Salud({ data, onAdd, onEdit, onRemove, onUpdatePerfil }) {
 
       <div className="gp-panel overflow-x-auto">
         <table className="gp-table">
-          <thead><tr><Th label="Fecha" sortKey="fecha" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} /><Th label="Peso (kg)" sortKey="peso" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} /><th>IMC</th><th>Categoría</th><th>Glucosa</th><th>Colesterol</th><th>Triglicéridos</th><th>Estudio</th><th>Notas</th><th></th></tr></thead>
+          <thead><tr><Th label="Fecha" sortKey="fecha" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} /><Th label="Peso (kg)" sortKey="peso" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} /><th>IMC</th><th>Categoría</th><th>Glucosa</th><th>Presión</th><th>Colesterol</th><th>Triglicéridos</th><th>Estudio</th><th>Notas</th><th></th></tr></thead>
           <tbody>
             {ordenados.map((s) => {
               const imc = calcIMC(s.peso, alturaCm);
               const cat = categoriaIMC(imc);
               return (
                 <tr key={s.id}>
-                  <td className="gp-mono">{s.fecha}</td>
+                  <td className="gp-mono">{s.fecha}{s.hora ? <span className="gp-text-muted"> {s.hora.slice(0, 5)}</span> : ""}</td>
                   <td className="gp-mono">{s.peso || "—"}</td>
                   <td className="gp-mono">{imc ? imc.toFixed(1) : "—"}</td>
                   <td>{cat ? <Badge tone={toneCategoria(cat)}>{cat}</Badge> : "—"}</td>
                   <td className="gp-mono">{s.glucosa || "—"}</td>
+                  <td className="gp-mono">{s.sistolica && s.diastolica ? `${s.sistolica}/${s.diastolica}` : "—"}</td>
                   <td className="gp-mono">{s.colesterol || "—"}</td>
                   <td className="gp-mono">{s.trigliceridos || "—"}</td>
                   <td>
@@ -6847,16 +6871,100 @@ function Salud({ data, onAdd, onEdit, onRemove, onUpdatePerfil }) {
                 </tr>
               );
             })}
-            {ordenados.length === 0 && <tr><td colSpan={10} className="text-center gp-text-muted py-6">Sin registros de salud.</td></tr>}
+            {ordenados.length === 0 && <tr><td colSpan={11} className="text-center gp-text-muted py-6">Sin registros de salud.</td></tr>}
           </tbody>
         </table>
       </div>
+      </>
+      )}
 
       {modal && (
         <Modal title={modal.item.id ? "Editar registro" : "Nuevo registro"} onClose={() => setModal(null)}>
           <SaludForm item={modal.item} onSave={(v) => { modal.item.id ? onEdit(modal.item.id, v) : onAdd(v); setModal(null); }} />
         </Modal>
       )}
+    </div>
+  );
+}
+
+const PERIODOS_TENDENCIA = [
+  { key: "7d", label: "7 días", dias: 7 },
+  { key: "30d", label: "30 días", dias: 30 },
+  { key: "3m", label: "3 meses", dias: 90 },
+  { key: "6m", label: "6 meses", dias: 180 },
+  { key: "1a", label: "1 año", dias: 365 },
+  { key: "todo", label: "Todo", dias: null },
+];
+
+// Una gráfica de línea para un indicador de Salud. Solo usa registros que SÍ tienen ese valor
+// capturado (nunca interpola ni inventa puntos para rellenar huecos, tal como pide la secc. 27).
+function GraficaSalud({ titulo, unidad, puntos, series }) {
+  if (puntos.length === 0) {
+    return (
+      <div className="gp-panel p-4">
+        <p className="text-sm font-medium mb-1">{titulo}</p>
+        <p className="text-xs gp-text-muted py-6 text-center">Sin datos suficientes en este periodo.</p>
+      </div>
+    );
+  }
+  return (
+    <div className="gp-panel p-4">
+      <p className="text-sm font-medium mb-2">{titulo}{unidad ? <span className="gp-text-muted"> ({unidad})</span> : ""}</p>
+      <div style={{ width: "100%", height: 220 }}>
+        <ResponsiveContainer>
+          <LineChart data={puntos} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,.08)" />
+            <XAxis dataKey="etiqueta" tick={{ fontSize: 10, fill: "var(--muted)" }} />
+            <YAxis tick={{ fontSize: 10, fill: "var(--muted)" }} domain={["auto", "auto"]} />
+            <Tooltip
+              contentStyle={{ background: "var(--panel-hi)", border: "1px solid var(--border)", fontSize: 12 }}
+              labelFormatter={(label, payload) => payload?.[0]?.payload?.tooltipLabel || label}
+            />
+            {series.length > 1 && <Legend wrapperStyle={{ fontSize: 11 }} />}
+            {series.map((s) => (
+              <Line key={s.key} type="monotone" dataKey={s.key} name={s.label} stroke={s.color} strokeWidth={2} dot={{ r: 3 }} connectNulls={false} />
+            ))}
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
+}
+
+function SaludTendencias({ salud }) {
+  const [periodo, setPeriodo] = useState("3m");
+  const diasPeriodo = PERIODOS_TENDENCIA.find((p) => p.key === periodo)?.dias;
+  const desde = diasPeriodo ? new Date(Date.now() - diasPeriodo * 86400000).toISOString().slice(0, 10) : null;
+
+  const enRango = [...(salud || [])]
+    .filter((s) => s.fecha && (!desde || s.fecha >= desde))
+    .sort((a, b) => (a.fecha + (a.hora || "")).localeCompare(b.fecha + (b.hora || "")));
+
+  const etiqueta = (s) => `${s.fecha.slice(5)}${s.hora ? " " + s.hora.slice(0, 5) : ""}`;
+  const tooltipLabel = (s) => `${s.fecha}${s.hora ? " · " + s.hora.slice(0, 5) : ""}`;
+
+  const puntosDe = (campo) => enRango.filter((s) => s[campo] !== null && s[campo] !== undefined && s[campo] !== "")
+    .map((s) => ({ etiqueta: etiqueta(s), tooltipLabel: tooltipLabel(s), [campo]: Number(s[campo]) }));
+
+  const puntosPresion = enRango.filter((s) => s.sistolica != null && s.sistolica !== "" && s.diastolica != null && s.diastolica !== "")
+    .map((s) => ({ etiqueta: etiqueta(s), tooltipLabel: tooltipLabel(s), sistolica: Number(s.sistolica), diastolica: Number(s.diastolica) }));
+
+  return (
+    <div>
+      <div className="flex flex-wrap gap-1 mb-4">
+        {PERIODOS_TENDENCIA.map((p) => (
+          <button key={p.key} onClick={() => setPeriodo(p.key)} className={`text-xs px-2.5 py-1 rounded-full border ${periodo === p.key ? "gp-btn" : "gp-text-muted"}`}>{p.label}</button>
+        ))}
+      </div>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <GraficaSalud titulo="Peso" unidad="kg" puntos={puntosDe("peso")} series={[{ key: "peso", label: "Peso", color: "var(--teal)" }]} />
+        <GraficaSalud titulo="Glucosa" unidad="mg/dL" puntos={puntosDe("glucosa")} series={[{ key: "glucosa", label: "Glucosa", color: "var(--gold)" }]} />
+        <GraficaSalud titulo="Presión arterial" unidad="mmHg" puntos={puntosPresion}
+          series={[{ key: "sistolica", label: "Sistólica", color: "var(--red)" }, { key: "diastolica", label: "Diastólica", color: "var(--teal)" }]} />
+        <GraficaSalud titulo="Colesterol" unidad="mg/dL" puntos={puntosDe("colesterol")} series={[{ key: "colesterol", label: "Colesterol", color: "var(--gold)" }]} />
+        <GraficaSalud titulo="Triglicéridos" unidad="mg/dL" puntos={puntosDe("trigliceridos")} series={[{ key: "trigliceridos", label: "Triglicéridos", color: "var(--red)" }]} />
+      </div>
+      <p className="text-xs gp-text-muted mt-3">Solo se muestran las mediciones que realmente capturaste — no se inventan ni interpolan valores para rellenar huecos.</p>
     </div>
   );
 }
@@ -6887,12 +6995,23 @@ function SaludForm({ item, onSave }) {
 
   return (
     <div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <Field label="Fecha"><input type="date" className="gp-input" value={v.fecha} onChange={(e) => setV({ ...v, fecha: e.target.value })} /></Field>
+        <Field label="Hora"><input type="time" className="gp-input" value={v.hora || ""} onChange={(e) => setV({ ...v, hora: e.target.value })} /></Field>
         <Field label="Peso (kg)"><input type="number" className="gp-input" value={v.peso} onChange={(e) => setV({ ...v, peso: e.target.value })} /></Field>
       </div>
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Field label="Glucosa (mg/dL)"><input type="number" className="gp-input" value={v.glucosa} onChange={(e) => setV({ ...v, glucosa: e.target.value })} /></Field>
+        <Field label="Presión arterial (sistólica/diastólica)">
+          <div className="flex items-center gap-2">
+            <input type="number" placeholder="120" className="gp-input" value={v.sistolica || ""} onChange={(e) => setV({ ...v, sistolica: e.target.value })} />
+            <span className="gp-text-muted">/</span>
+            <input type="number" placeholder="80" className="gp-input" value={v.diastolica || ""} onChange={(e) => setV({ ...v, diastolica: e.target.value })} />
+            <span className="text-xs gp-text-muted">mmHg</span>
+          </div>
+        </Field>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Field label="Colesterol (mg/dL)"><input type="number" className="gp-input" value={v.colesterol} onChange={(e) => setV({ ...v, colesterol: e.target.value })} /></Field>
         <Field label="Triglicéridos (mg/dL)"><input type="number" className="gp-input" value={v.trigliceridos} onChange={(e) => setV({ ...v, trigliceridos: e.target.value })} /></Field>
       </div>
@@ -8230,7 +8349,7 @@ function Asistente({ onDatosCreados }) {
   );
 }
 
-function QuickCapture({ data, onAdd, irAVista }) {
+function QuickCapture({ data, onAdd, onCrearRecordatorio, irAVista }) {
   const [abierto, setAbierto] = useState(false);
   const [tipo, setTipo] = useState(null); // "cita" | "contacto" | "idea" | "ingreso" | "egreso"
 
@@ -8287,8 +8406,13 @@ function QuickCapture({ data, onAdd, irAVista }) {
   };
 
   const OPCIONES = [
+    { key: "glucosa", label: "Glucosa", icon: HeartPulse },
+    { key: "presion", label: "Presión arterial", icon: HeartPulse },
+    { key: "tarea", label: "Tarea", icon: CheckSquare },
     { key: "cita", label: "Cita", icon: CalendarClock },
+    { key: "recordatorio", label: "Recordatorio", icon: Clock },
     { key: "nota", label: "Nota", icon: StickyNote },
+    { key: "diario", label: "Diario", icon: Activity },
     { key: "contacto", label: "Contacto", icon: Contact },
     { key: "idea", label: "Idea", icon: Lightbulb },
     { key: "ingreso", label: "Ingreso", icon: Wallet },
@@ -8400,6 +8524,31 @@ function QuickCapture({ data, onAdd, irAVista }) {
             onSave={(v) => { onAdd("finanzas", { ...v, id: uid() }); cerrar(); irAVista("finanzas"); }} />
         </Modal>
       )}
+      {tipo === "glucosa" && (
+        <Modal title="Registrar glucosa" onClose={cerrar}>
+          <GlucosaRapidaForm onSave={(v) => { onAdd("salud", { ...v, id: uid() }); cerrar(); irAVista("salud"); }} />
+        </Modal>
+      )}
+      {tipo === "presion" && (
+        <Modal title="Registrar presión arterial" onClose={cerrar}>
+          <PresionRapidaForm onSave={(v) => { onAdd("salud", { ...v, id: uid() }); cerrar(); irAVista("salud"); }} />
+        </Modal>
+      )}
+      {tipo === "tarea" && (
+        <Modal title="Nueva tarea" onClose={cerrar}>
+          <TareaRapidaForm onSave={(v) => { onAdd("pendientes", { ...v, id: uid() }); cerrar(); irAVista("pendientes"); }} />
+        </Modal>
+      )}
+      {tipo === "recordatorio" && (
+        <Modal title="Nuevo recordatorio" onClose={cerrar}>
+          <RecordatorioRapidoForm onSave={(v) => { onCrearRecordatorio(v); cerrar(); }} />
+        </Modal>
+      )}
+      {tipo === "diario" && (
+        <Modal title="Nueva entrada del diario" onClose={cerrar}>
+          <DiarioRapidoForm onSave={(v) => { onAdd("actividades", { ...v, id: uid() }); cerrar(); irAVista("actividades"); }} />
+        </Modal>
+      )}
     </>
   );
 }
@@ -8471,6 +8620,120 @@ function MovimientoRapidoForm({ tipoInicial, onSave }) {
         });
       }}>
         Guardar (puedes agregar proyecto, categoría, etc. después desde Ingresos y egresos)
+      </button>
+    </div>
+  );
+}
+
+function GlucosaRapidaForm({ onSave }) {
+  const [valor, setValor] = useState("");
+  const [fecha, setFecha] = useState(todayISO());
+  const [hora, setHora] = useState(horaActualHHMM());
+  const [error, setError] = useState("");
+  return (
+    <div>
+      <Field label="Glucosa (mg/dL)"><input type="number" autoFocus className="gp-input" value={valor} onChange={(e) => setValor(e.target.value)} /></Field>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Fecha"><input type="date" className="gp-input" value={fecha} onChange={(e) => setFecha(e.target.value)} /></Field>
+        <Field label="Hora"><input type="time" className="gp-input" value={hora} onChange={(e) => setHora(e.target.value)} /></Field>
+      </div>
+      {error && <p className="text-xs gp-text-red mb-2">{error}</p>}
+      <button className="gp-btn w-full py-2 text-sm mt-1" onClick={() => {
+        if (!valor) { setError("Captura el valor de glucosa."); return; }
+        onSave({ fecha, hora, glucosa: valor, origen: "rapido" });
+      }}>
+        Guardar (queda en tu historial de Salud)
+      </button>
+    </div>
+  );
+}
+
+function PresionRapidaForm({ onSave }) {
+  const [sistolica, setSistolica] = useState("");
+  const [diastolica, setDiastolica] = useState("");
+  const [fecha, setFecha] = useState(todayISO());
+  const [hora, setHora] = useState(horaActualHHMM());
+  const [error, setError] = useState("");
+  return (
+    <div>
+      <Field label="Presión arterial (mmHg)">
+        <div className="flex items-center gap-2">
+          <input type="number" autoFocus placeholder="Sistólica" className="gp-input" value={sistolica} onChange={(e) => setSistolica(e.target.value)} />
+          <span className="gp-text-muted">/</span>
+          <input type="number" placeholder="Diastólica" className="gp-input" value={diastolica} onChange={(e) => setDiastolica(e.target.value)} />
+        </div>
+      </Field>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Fecha"><input type="date" className="gp-input" value={fecha} onChange={(e) => setFecha(e.target.value)} /></Field>
+        <Field label="Hora"><input type="time" className="gp-input" value={hora} onChange={(e) => setHora(e.target.value)} /></Field>
+      </div>
+      {error && <p className="text-xs gp-text-red mb-2">{error}</p>}
+      <button className="gp-btn w-full py-2 text-sm mt-1" onClick={() => {
+        if (!sistolica || !diastolica) { setError("Captura ambos valores."); return; }
+        onSave({ fecha, hora, sistolica, diastolica, origen: "rapido" });
+      }}>
+        Guardar (queda en tu historial de Salud)
+      </button>
+    </div>
+  );
+}
+
+function TareaRapidaForm({ onSave }) {
+  const [descripcion, setDescripcion] = useState("");
+  const [fechaLimite, setFechaLimite] = useState(todayISO());
+  const [error, setError] = useState("");
+  return (
+    <div>
+      <Field label="Descripción"><input autoFocus className="gp-input" value={descripcion} onChange={(e) => setDescripcion(e.target.value)} /></Field>
+      <Field label="Fecha límite"><input type="date" className="gp-input" value={fechaLimite} onChange={(e) => setFechaLimite(e.target.value)} /></Field>
+      {error && <p className="text-xs gp-text-red mb-2">{error}</p>}
+      <button className="gp-btn w-full py-2 text-sm mt-1" onClick={() => {
+        if (!descripcion.trim()) { setError("Captura una descripción."); return; }
+        onSave({ descripcion: descripcion.trim(), fechaLimite, estatus: "Pendiente", prioridad: "Media", proyectoId: "", responsableId: "", contactoId: "" });
+      }}>
+        Guardar (puedes agregar proyecto, prioridad, etc. después desde Tareas)
+      </button>
+    </div>
+  );
+}
+
+function RecordatorioRapidoForm({ onSave }) {
+  const [titulo, setTitulo] = useState("");
+  const [fecha, setFecha] = useState(todayISO());
+  const [hora, setHora] = useState(horaActualHHMM());
+  const [error, setError] = useState("");
+  return (
+    <div>
+      <Field label="¿Qué quieres recordar?"><input autoFocus className="gp-input" value={titulo} onChange={(e) => setTitulo(e.target.value)} /></Field>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Fecha"><input type="date" className="gp-input" value={fecha} onChange={(e) => setFecha(e.target.value)} /></Field>
+        <Field label="Hora"><input type="time" className="gp-input" value={hora} onChange={(e) => setHora(e.target.value)} /></Field>
+      </div>
+      {error && <p className="text-xs gp-text-red mb-2">{error}</p>}
+      <button className="gp-btn w-full py-2 text-sm mt-1" onClick={() => {
+        if (!titulo.trim()) { setError("Captura qué quieres recordar."); return; }
+        onSave({ titulo: titulo.trim(), fechaHora: localInputsAFechaHora(fecha, hora) });
+      }}>
+        Guardar recordatorio
+      </button>
+    </div>
+  );
+}
+
+function DiarioRapidoForm({ onSave }) {
+  const [nombre, setNombre] = useState("");
+  const [fecha, setFecha] = useState(todayISO());
+  const [error, setError] = useState("");
+  return (
+    <div>
+      <Field label="¿Qué pasó hoy?"><textarea autoFocus rows={3} className="gp-input" value={nombre} onChange={(e) => setNombre(e.target.value)} /></Field>
+      <Field label="Fecha"><input type="date" className="gp-input" value={fecha} onChange={(e) => setFecha(e.target.value)} /></Field>
+      {error && <p className="text-xs gp-text-red mb-2">{error}</p>}
+      <button className="gp-btn w-full py-2 text-sm mt-1" onClick={() => {
+        if (!nombre.trim()) { setError("Escribe algo primero."); return; }
+        onSave({ tipo: "Diario", nombre: nombre.trim(), fecha, proyectoId: "", ganancia: "", notas: "" });
+      }}>
+        Guardar (puedes editarlo después desde Diario)
       </button>
     </div>
   );
