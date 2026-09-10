@@ -1613,6 +1613,11 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
   const SENSIBLE_MS = 15 * 60 * 1000;
   const VISTAS_SENSIBLES = ["finanzas", "facturas", "reportes", "deudas", "apartados", "patrimonio", "activos", "documentos", "salud", "medicamentos"];
   const [sensibleDesbloqueadoHasta, setSensibleDesbloqueadoHasta] = useState(0);
+  // Diario (secc. 24.5) usa la misma idea pero con una ventana propia de 10 min, independiente
+  // de la de Dinero/Salud — se maneja aparte para no tocar ese flujo ya probado.
+  const DIARIO_MS = 10 * 60 * 1000;
+  const VISTAS_SENSIBLES_DIARIO = ["actividades"];
+  const [diarioDesbloqueadoHasta, setDiarioDesbloqueadoHasta] = useState(0);
   const [reauthPendiente, setReauthPendiente] = useState(null); // id de la vista esperando reautenticación
   const [reauthPassword, setReauthPassword] = useState("");
   const [reauthError, setReauthError] = useState("");
@@ -1625,7 +1630,14 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
       setReauthError("");
       return;
     }
+    if (VISTAS_SENSIBLES_DIARIO.includes(id) && Date.now() > diarioDesbloqueadoHasta) {
+      setReauthPendiente(id);
+      setReauthPassword("");
+      setReauthError("");
+      return;
+    }
     if (VISTAS_SENSIBLES.includes(id)) setSensibleDesbloqueadoHasta(Date.now() + SENSIBLE_MS);
+    if (VISTAS_SENSIBLES_DIARIO.includes(id)) setDiarioDesbloqueadoHasta(Date.now() + DIARIO_MS);
     setView(id);
   };
 
@@ -1673,6 +1685,26 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
     };
   }, [view, sensibleDesbloqueadoHasta]);
 
+  // Mismo mecanismo para Diario, con su propia ventana de 10 min (secc. 24.5): "si sale y
+  // vuelve antes de vencer, no pide clave y reinicia los 10 minutos desde la nueva consulta".
+  useEffect(() => {
+    if (!VISTAS_SENSIBLES_DIARIO.includes(view)) return;
+    const extender = () => setDiarioDesbloqueadoHasta(Date.now() + DIARIO_MS);
+    const eventos = ["mousemove", "keydown", "mousedown", "click", "scroll", "touchstart"];
+    eventos.forEach((ev) => window.addEventListener(ev, extender));
+    const interval = setInterval(() => {
+      if (Date.now() > diarioDesbloqueadoHasta) {
+        setReauthPendiente(view);
+        setReauthPassword("");
+        setReauthError("");
+      }
+    }, 15000);
+    return () => {
+      eventos.forEach((ev) => window.removeEventListener(ev, extender));
+      clearInterval(interval);
+    };
+  }, [view, diarioDesbloqueadoHasta]);
+
   const confirmarReauth = async () => {
     if (!reauthPassword) { setReauthError("Escribe tu contraseña."); return; }
     setReauthCargando(true);
@@ -1680,7 +1712,8 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
     const { error } = await supabase.auth.signInWithPassword({ email: miEmail, password: reauthPassword });
     setReauthCargando(false);
     if (error) { setReauthError("Contraseña incorrecta."); return; }
-    setSensibleDesbloqueadoHasta(Date.now() + SENSIBLE_MS);
+    if (VISTAS_SENSIBLES_DIARIO.includes(reauthPendiente)) setDiarioDesbloqueadoHasta(Date.now() + DIARIO_MS);
+    else setSensibleDesbloqueadoHasta(Date.now() + SENSIBLE_MS);
     setView(reauthPendiente);
     setReauthPendiente(null);
     setReauthPassword("");
