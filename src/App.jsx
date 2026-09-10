@@ -452,7 +452,7 @@ const categoriaIMC = (imc) => {
 };
 
 /* ---------- persistencia relacional ---------- */
-const TABLES = ["proyectos", "pendientes", "equipo", "finanzas", "actividades", "activos", "metas", "contactos", "redesMetricas", "documentos", "habitos", "salud", "apartados", "apartadosMovimientos", "eventos", "comentarios", "saldoInicial", "regalos", "facturas", "campanas", "patrimonio", "patrimonioValuaciones", "medicamentos", "citas", "notas"];
+const TABLES = ["proyectos", "pendientes", "equipo", "finanzas", "actividades", "activos", "metas", "contactos", "redesMetricas", "documentos", "habitos", "salud", "apartados", "apartadosMovimientos", "eventos", "comentarios", "saldoInicial", "regalos", "facturas", "campanas", "patrimonio", "patrimonioValuaciones", "medicamentos", "citas", "notas", "pagosFinanzas"];
 // Deudas ya NO es una tabla propia (Documento Maestro v1.2, secc. 23.11/40): es una vista
 // calculada sobre Finanzas (egresos no recurrentes con saldo pendiente). Esta función se usa
 // en cualquier lugar que antes leía `data.deudas`.
@@ -511,14 +511,38 @@ async function exportarFilasPDF(filas, columnas, nombreArchivo, titulo, resumenF
 // Barra reutilizable: campo de búsqueda por contenido (independiente del buscador global) +
 // botones de exportar Excel/PDF, para el estándar transversal de listas.
 function BarraListaEstandar({ busqueda, onBusqueda, placeholder, onExportExcel, onExportPDF }) {
+  const [confirmando, setConfirmando] = useState(null); // null | "excel" | "pdf"
   return (
     <div className="flex flex-wrap items-center gap-2 mb-4">
       <div className="relative flex-1" style={{ minWidth: 180, maxWidth: 320 }}>
         <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 gp-text-muted" style={{ pointerEvents: "none" }} />
         <input className="gp-input text-sm" style={{ paddingLeft: 32 }} placeholder={placeholder || "Buscar en esta lista…"} value={busqueda} onChange={(e) => onBusqueda(e.target.value)} />
       </div>
-      <button onClick={onExportExcel} className="text-xs px-2.5 py-1.5 rounded gp-btn-ghost flex items-center gap-1"><Download size={12} /> Excel</button>
-      <button onClick={onExportPDF} className="text-xs px-2.5 py-1.5 rounded gp-btn-ghost flex items-center gap-1"><Download size={12} /> PDF</button>
+      <button onClick={() => setConfirmando("excel")} className="text-xs px-2.5 py-1.5 rounded gp-btn-ghost flex items-center gap-1"><Download size={12} /> Excel</button>
+      <button onClick={() => setConfirmando("pdf")} className="text-xs px-2.5 py-1.5 rounded gp-btn-ghost flex items-center gap-1"><Download size={12} /> PDF</button>
+
+      {confirmando && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,.6)" }} onClick={() => setConfirmando(null)}>
+          <div className="gp-panel w-full max-w-sm p-5" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-2 mb-2">
+              <Download size={16} className="gp-text-gold" />
+              <h3 className="gp-serif text-lg">¿Exportar a {confirmando === "excel" ? "Excel" : "PDF"}?</h3>
+            </div>
+            <p className="text-sm gp-text-muted mb-5">
+              Se descargará {confirmando === "excel" ? "un archivo .xlsx" : "un archivo .pdf"} con lo que estás viendo ahora mismo (búsqueda, filtros y orden aplicados).
+            </p>
+            <div className="flex gap-2">
+              <button onClick={() => setConfirmando(null)} className="gp-btn-ghost flex-1 py-2 text-sm">Cancelar</button>
+              <button
+                onClick={() => { (confirmando === "excel" ? onExportExcel : onExportPDF)(); setConfirmando(null); }}
+                className="gp-btn flex-1 py-2 text-sm"
+              >
+                Exportar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -532,6 +556,7 @@ const ETIQUETA_TABLA = {
   comentarios: "Comentario", saldoInicial: "Saldo inicial", regalos: "Regalo",
   facturas: "Factura", campanas: "Campaña", patrimonio: "Bien patrimonial",
   patrimonioValuaciones: "Valuación de patrimonio", medicamentos: "Medicamento", citas: "Cita", notas: "Nota",
+  pagosFinanzas: "Pago registrado",
 };
 
 // Exporta toda la información visible del usuario a un archivo Excel, un módulo por hoja.
@@ -594,6 +619,8 @@ function labelFor(key, item) {
       return `Valuación del ${item.fecha || "—"}`;
     case "apartadosMovimientos":
       return `${item.tipo === "retiro" ? "Retiro" : "Aporte"} del ${item.fecha || "—"}`;
+    case "pagosFinanzas":
+      return `Pago del ${item.fecha || "—"} · ${fmtMoney(item.monto)}`;
     default:
       return item.id;
   }
@@ -2417,7 +2444,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
           {view === "reportes" && <Reportes data={data} />}
           {view === "estimaciones" && <Estimaciones data={data} />}
           {view === "deudas" && (
-            <Deudas data={data} onAddFinanzas={(i) => addItem("finanzas", i)} onEditFinanzas={(id, p) => editItem("finanzas", id, p)} onRemoveFinanzas={(id) => askDelete("finanzas", id)} onCrearTarea={(t) => addItem("pendientes", t)} />
+            <Deudas data={data} onAddFinanzas={(i) => addItem("finanzas", i)} onEditFinanzas={(id, p) => editItem("finanzas", id, p)} onRemoveFinanzas={(id) => askDelete("finanzas", id)} onAddPago={(i) => addItem("pagosFinanzas", i)} onCrearTarea={(t) => addItem("pendientes", t)} />
           )}
           {view === "apartados" && (
             <Apartados data={data} onAdd={(i) => addItem("apartados", i)} onEdit={(id, p) => editItem("apartados", id, p)} onRemove={(id) => askDelete("apartados", id)} onAportar={aportarApartado} onRetirar={retirarApartado} />
@@ -5561,15 +5588,18 @@ function FacturaForm({ item, proyectos, contactos, finanzas, onAddFinanzas, onSa
 // especializada de Finanzas, filtrando egresos no recurrentes con saldo pendiente. Crear,
 // editar, marcar como pagada o borrar una "deuda" aquí en realidad opera sobre `finanzas`
 // (categoria="Deuda"), para que el movimiento real viva en un solo lugar.
-function Deudas({ data, onAddFinanzas, onEditFinanzas, onRemoveFinanzas, onCrearTarea }) {
-  const [modal, setModal] = useState(null); // {item} en captura/edición | {item, paso:"tarea", origenId} tras crear
+function Deudas({ data, onAddFinanzas, onEditFinanzas, onRemoveFinanzas, onAddPago, onCrearTarea }) {
+  const [modal, setModal] = useState(null); // {item} en captura/edición | {item, paso:"tarea", origenId} tras crear | {item, paso:"pagar"}
   const [orden, setOrden] = useState("default");
   const [ordenDir, setOrdenDir] = useState("asc");
   const [busqueda, setBusqueda] = useState("");
   const toggleOrden = (key) => { if (orden === key) setOrdenDir((d) => (d === "asc" ? "desc" : "asc")); else { setOrden(key); setOrdenDir("asc"); } };
-  const empty = { concepto: "", proyectoId: "", monto: "", fechaVencimiento: todayISO() };
+  const empty = { concepto: "", proyectoId: "", monto: "", fechaVencimiento: todayISO(), notas: "" };
   const nombreProyecto = (id) => data.proyectos.find((p) => p.id === id)?.nombre || "—";
   const deudas = filtrarPorBusqueda(deudasDeFinanzas(data.finanzas), busqueda, [(d) => d.concepto, (d) => nombreProyecto(d.proyectoId)]);
+  // Saldo pendiente = monto original de la deuda menos la suma de pagos ya registrados en pagos_finanzas.
+  const totalPagado = (finanzasId) => (data.pagosFinanzas || []).filter((p) => p.finanzasId === finanzasId).reduce((s, p) => s + (Number(p.monto) || 0), 0);
+  const saldoPendiente = (d) => Math.max(0, (Number(d.monto) || 0) - totalPagado(d.id));
   const camposOrden = {
     vencimiento: { get: (d) => d.fechaVencimiento, tipo: "fecha" },
     registro: { get: (d) => d.createdAt, tipo: "fecha" },
@@ -5587,7 +5617,17 @@ function Deudas({ data, onAddFinanzas, onEditFinanzas, onRemoveFinanzas, onCrear
   const columnasExport = [
     { label: "Acreedor", get: (d) => d.concepto }, { label: "Proyecto", get: (d) => nombreProyecto(d.proyectoId) },
     { label: "Vence", get: (d) => d.fechaVencimiento }, { label: "Monto", get: (d) => d.monto },
+    { label: "Saldo pendiente", get: (d) => saldoPendiente(d) },
   ];
+
+  // Registra un pago (total o parcial) en pagos_finanzas y recalcula el estatus del movimiento:
+  // si el saldo llega a 0, queda Cobrado; si queda algo pendiente, Parcial.
+  const registrarPago = async (d, { monto, fecha }) => {
+    await onAddPago({ id: uid(), finanzasId: d.id, fecha, monto, comentario: "" });
+    const restante = saldoPendiente(d) - monto;
+    onEditFinanzas(d.id, { estatus: restante <= 0 ? "Cobrado" : "Parcial" });
+    setModal(null);
+  };
 
   return (
     <div>
@@ -5595,7 +5635,7 @@ function Deudas({ data, onAddFinanzas, onEditFinanzas, onRemoveFinanzas, onCrear
         <h2 className="gp-serif text-2xl">Deudas</h2>
         <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm w-full sm:w-auto"><Plus size={14} /> Nueva</button>
       </div>
-      <p className="text-sm gp-text-muted mb-3">Atrasadas, próximas a vencer y al corriente, todo calculado por fecha. Al marcarse como pagada, el movimiento sigue en Finanzas y desaparece de aquí.</p>
+      <p className="text-sm gp-text-muted mb-3">Atrasadas, próximas a vencer y al corriente, todo calculado por fecha. Puedes registrar pagos parciales — el saldo pendiente se calcula solo, y al llegar a $0 desaparece de aquí.</p>
       <div className="mb-2"><OrdenSelector opciones={opcionesOrden} value={orden} onChange={setOrden} /></div>
       <BarraListaEstandar busqueda={busqueda} onBusqueda={setBusqueda} placeholder="Buscar por acreedor o proyecto…"
         onExportExcel={() => exportarFilasExcel(ordenados, columnasExport, "deudas")}
@@ -5603,21 +5643,25 @@ function Deudas({ data, onAddFinanzas, onEditFinanzas, onRemoveFinanzas, onCrear
 
       <div className="gp-panel overflow-x-auto">
         <table className="gp-table">
-          <thead><tr><Th label="Acreedor" sortKey="alfabetico" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} /><th>Proyecto</th><Th label="Vence" sortKey="vencimiento" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} /><th>Estatus</th><Th label="Monto" sortKey="monto" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} /><th></th></tr></thead>
+          <thead><tr><Th label="Acreedor" sortKey="alfabetico" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} /><th>Proyecto</th><Th label="Vence" sortKey="vencimiento" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} /><th>Estatus</th><Th label="Saldo pendiente" sortKey="monto" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} /><th></th></tr></thead>
           <tbody>
             {ordenados.map((d) => {
               const dd = daysUntil(d.fechaVencimiento);
               const tone = !d.fechaVencimiento ? "muted" : dd < 0 ? "red" : dd <= 7 ? "gold" : "teal";
               const label = !d.fechaVencimiento ? "Sin fecha" : dd < 0 ? `Atrasada (${Math.abs(dd)}d)` : dd <= 7 ? `Vence en ${dd}d` : "Al corriente";
+              const pagado = totalPagado(d.id);
               return (
                 <tr key={d.id}>
                   <td>{d.concepto}</td>
                   <td className="gp-text-muted">{nombreProyecto(d.proyectoId)}</td>
                   <td className="gp-mono">{d.fechaVencimiento || "—"}</td>
-                  <td><Badge tone={tone}>{label}</Badge></td>
-                  <td className="gp-mono">{fmtMoney(d.monto)}</td>
+                  <td>
+                    <Badge tone={tone}>{label}</Badge>
+                    {pagado > 0 && <span className="block text-xs gp-text-muted mt-1">Pagado: {fmtMoney(pagado)} de {fmtMoney(d.monto)}</span>}
+                  </td>
+                  <td className="gp-mono">{fmtMoney(saldoPendiente(d))}</td>
                   <td><div className="flex gap-1">
-                    <button title="Marcar como pagada" onClick={() => onEditFinanzas(d.id, { estatus: "Cobrado", fecha: todayISO() })} className="text-xs px-2 py-1 rounded gp-btn-ghost gp-text-teal">Pagada</button>
+                    <button title="Registrar un pago" onClick={() => setModal({ item: d, paso: "pagar" })} className="text-xs px-2 py-1 rounded gp-btn-ghost gp-text-teal">Pagar</button>
                     <IconBtn onClick={() => setModal({ item: d })}><Pencil size={13} /></IconBtn><IconBtn onClick={() => onRemoveFinanzas(d.id)}><Trash2 size={13} /></IconBtn>
                   </div></td>
                 </tr>
@@ -5630,16 +5674,26 @@ function Deudas({ data, onAddFinanzas, onEditFinanzas, onRemoveFinanzas, onCrear
 
       {modal && !modal.paso && (
         <Modal title={modal.item.id ? "Editar deuda" : "Nueva deuda"} onClose={() => setModal(null)}>
-          <DeudaForm item={modal.item} proyectos={data.proyectos} onSave={(v) => {
-            if (modal.item.id) { onEditFinanzas(modal.item.id, v); setModal(null); return; }
-            const nuevoId = uid();
-            onAddFinanzas({
-              id: nuevoId, tipo: "Egreso", categoria: "Deuda", forma: "Transferencia", estatus: "Pendiente",
-              esRecurrente: false, fecha: todayISO(), contactoId: "",
-              concepto: v.concepto, proyectoId: v.proyectoId, monto: v.monto, fechaVencimiento: v.fechaVencimiento,
-            });
-            setModal({ item: v, paso: "tarea", origenId: nuevoId });
-          }} />
+          <DeudaForm
+            item={modal.item} proyectos={data.proyectos}
+            saldoPendiente={modal.item.id ? saldoPendiente(modal.item) : null}
+            onAbrirPago={() => setModal({ item: modal.item, paso: "pagar" })}
+            onSave={(v) => {
+              if (modal.item.id) { onEditFinanzas(modal.item.id, v); setModal(null); return; }
+              const nuevoId = uid();
+              onAddFinanzas({
+                id: nuevoId, tipo: "Egreso", categoria: "Deuda", forma: "Transferencia", estatus: "Pendiente",
+                esRecurrente: false, fecha: todayISO(), contactoId: "",
+                concepto: v.concepto, proyectoId: v.proyectoId, monto: v.monto, fechaVencimiento: v.fechaVencimiento, notas: v.notas,
+              });
+              setModal({ item: v, paso: "tarea", origenId: nuevoId });
+            }}
+          />
+        </Modal>
+      )}
+      {modal && modal.paso === "pagar" && (
+        <Modal title={`Registrar pago — ${modal.item.concepto}`} onClose={() => setModal(null)}>
+          <PagoDeudaForm saldoPendiente={saldoPendiente(modal.item)} onPagar={(p) => registrarPago(modal.item, p)} />
         </Modal>
       )}
       {modal && modal.paso === "tarea" && (
@@ -5657,7 +5711,34 @@ function Deudas({ data, onAddFinanzas, onEditFinanzas, onRemoveFinanzas, onCrear
   );
 }
 
-function DeudaForm({ item, proyectos, onSave }) {
+function PagoDeudaForm({ saldoPendiente, onPagar }) {
+  const [monto, setMonto] = useState(saldoPendiente);
+  const [fecha, setFecha] = useState(todayISO());
+  const [error, setError] = useState("");
+  const montoNum = Number(monto) || 0;
+  const saldoRestante = Math.max(0, (saldoPendiente || 0) - montoNum);
+  return (
+    <div>
+      <p className="text-xs gp-text-muted mb-3">Saldo pendiente actual: <span className="gp-mono">{fmtMoney(saldoPendiente)}</span></p>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <Field label="Monto pagado"><MoneyInput className="gp-input" value={monto} onChange={setMonto} /></Field>
+        <Field label="Fecha del pago"><input type="date" className="gp-input" value={fecha} onChange={(e) => setFecha(e.target.value)} /></Field>
+      </div>
+      <p className="text-xs gp-text-muted mb-3">
+        {montoNum > 0 && (saldoRestante <= 0 ? "Con este pago la deuda queda saldada." : `Saldo pendiente después de este pago: ${fmtMoney(saldoRestante)}`)}
+      </p>
+      {error && <p className="text-xs gp-text-red mb-2">{error}</p>}
+      <button className="gp-btn w-full py-2 text-sm mt-1" onClick={() => {
+        if (!montoNum || montoNum <= 0) { setError("Captura un monto válido."); return; }
+        onPagar({ monto: montoNum, fecha });
+      }}>
+        Registrar pago
+      </button>
+    </div>
+  );
+}
+
+function DeudaForm({ item, proyectos, saldoPendiente, onAbrirPago, onSave }) {
   const [v, setV] = useState(item);
   const [error, setError] = useState("");
   return (
@@ -5673,6 +5754,16 @@ function DeudaForm({ item, proyectos, onSave }) {
         <Field label="Monto"><MoneyInput className="gp-input" value={v.monto} onChange={(val) => setV({ ...v, monto: val })} /></Field>
         <Field label="Fecha de vencimiento"><input type="date" className="gp-input" value={v.fechaVencimiento} onChange={(e) => setV({ ...v, fechaVencimiento: e.target.value })} /></Field>
       </div>
+      <Field label="Nota (opcional)"><textarea className="gp-input" rows={2} value={v.notas || ""} onChange={(e) => setV({ ...v, notas: e.target.value })} /></Field>
+      {item.id && (
+        <div className="gp-panel-hi p-3 mb-3 flex items-center justify-between gap-2" style={{ border: "1px solid var(--border)", borderRadius: 6 }}>
+          <div>
+            <p className="text-xs gp-text-muted">Saldo pendiente</p>
+            <p className="gp-serif text-lg">{fmtMoney(saldoPendiente)}</p>
+          </div>
+          <button type="button" className="gp-btn-ghost px-3 py-1.5 text-xs rounded" onClick={onAbrirPago}>Registrar pago</button>
+        </div>
+      )}
       {error && <p className="text-xs gp-text-red mb-2">{error}</p>}
 
       <button className="gp-btn w-full py-2 text-sm mt-2" onClick={() => { if (!v.concepto?.toString().trim()) { setError("El acreedor es obligatorio."); return; } setError(""); onSave(v); }}>Guardar</button>
@@ -8805,6 +8896,7 @@ function Citas({ data, onAdd, onEdit, onRemove, onCrearTarea }) {
 
   const Fila = (c) => {
     const esHoy = new Date(c.fechaHora).toDateString() === ahora.toDateString();
+    const tareasRelacionadas = data.pendientes.filter((p) => p.origenTabla === "citas" && p.origenId === c.id);
     return (
       <div key={c.id} className="gp-panel p-3 flex items-start justify-between gap-3">
         <div className="min-w-0">
@@ -8818,8 +8910,21 @@ function Citas({ data, onAdd, onEdit, onRemove, onCrearTarea }) {
             {c.contactoId && <span>{nombreContacto(c.contactoId)}</span>}
           </div>
           {c.notas && <p className="text-xs gp-text-muted mt-1">{c.notas}</p>}
+          {tareasRelacionadas.length > 0 && (
+            <div className="mt-2 pt-2" style={{ borderTop: "1px solid var(--border)" }}>
+              <p className="text-xs gp-text-muted mb-1">Qué preparar:</p>
+              <ul className="space-y-0.5">
+                {tareasRelacionadas.map((t) => (
+                  <li key={t.id} className={`text-xs flex items-center gap-1.5 ${t.estatus === "Completada" ? "line-through gp-text-muted" : ""}`}>
+                    <CheckSquare size={11} className={t.estatus === "Completada" ? "gp-text-teal shrink-0" : "gp-text-muted shrink-0"} /> <span className="truncate">{t.descripcion}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
         <div className="flex gap-1 shrink-0">
+          <IconBtn onClick={() => setModal({ item: c, paso: "tarea", origenId: c.id })} title="Agregar tarea relacionada"><CheckSquare size={13} /></IconBtn>
           <IconBtn onClick={() => setModal({ item: c })}><Pencil size={13} /></IconBtn>
           <IconBtn onClick={() => onRemove(c.id)}><Trash2 size={13} /></IconBtn>
         </div>
@@ -9514,12 +9619,14 @@ function QuickCapture({ data, onAdd, onCrearRecordatorio, irAVista }) {
       )}
       {tipo === "glucosa" && (
         <Modal title="Registrar glucosa" onClose={cerrar}>
-          <GlucosaRapidaForm onSave={(v) => { onAdd("salud", { ...v, id: uid() }); cerrar(); irAVista("salud"); }} />
+          <GlucosaRapidaForm contactos={data.contactos} onCrearContacto={(nombre) => { const nid = uid(); onAdd("contactos", { id: nid, nombre, tipo: "Otro" }); return nid; }}
+            onSave={(v) => { onAdd("salud", { ...v, id: uid() }); cerrar(); irAVista("salud"); }} />
         </Modal>
       )}
       {tipo === "presion" && (
         <Modal title="Registrar presión arterial" onClose={cerrar}>
-          <PresionRapidaForm onSave={(v) => { onAdd("salud", { ...v, id: uid() }); cerrar(); irAVista("salud"); }} />
+          <PresionRapidaForm contactos={data.contactos} onCrearContacto={(nombre) => { const nid = uid(); onAdd("contactos", { id: nid, nombre, tipo: "Otro" }); return nid; }}
+            onSave={(v) => { onAdd("salud", { ...v, id: uid() }); cerrar(); irAVista("salud"); }} />
         </Modal>
       )}
       {tipo === "tarea" && (
@@ -9617,14 +9724,36 @@ function MovimientoRapidoForm({ tipoInicial, onSave }) {
   );
 }
 
-function GlucosaRapidaForm({ onSave }) {
+function GlucosaRapidaForm({ contactos, onCrearContacto, onSave }) {
   const [valor, setValor] = useState("");
   const [fecha, setFecha] = useState(todayISO());
   const [hora, setHora] = useState(horaActualHHMM());
+  const [contactoId, setContactoId] = useState("");
+  const [nuevoAbierto, setNuevoAbierto] = useState(false);
+  const [nombreNuevo, setNombreNuevo] = useState("");
   const [error, setError] = useState("");
   return (
     <div>
       <Field label="Glucosa (mg/dL)"><input type="number" autoFocus className="gp-input" value={valor} onChange={(e) => setValor(e.target.value)} /></Field>
+      <Field label="¿De quién es esta medición?">
+        <select className="gp-input" value={contactoId} onChange={(e) => setContactoId(e.target.value)}>
+          <option value="">Yo</option>
+          {(contactos || []).map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+        </select>
+        <button type="button" className="text-xs gp-text-gold mt-1" onClick={() => setNuevoAbierto((v) => !v)}>
+          {nuevoAbierto ? "Cancelar" : "+ Agregar contacto"}
+        </button>
+        {nuevoAbierto && (
+          <div className="flex gap-2 mt-2">
+            <input className="gp-input" placeholder="Nombre del contacto" value={nombreNuevo} onChange={(e) => setNombreNuevo(e.target.value)} />
+            <button type="button" className="gp-btn px-3 text-xs shrink-0" onClick={() => {
+              if (!nombreNuevo.trim()) return;
+              setContactoId(onCrearContacto(nombreNuevo.trim()));
+              setNombreNuevo(""); setNuevoAbierto(false);
+            }}>Guardar</button>
+          </div>
+        )}
+      </Field>
       <div className="grid grid-cols-2 gap-3">
         <Field label="Fecha"><input type="date" className="gp-input" value={fecha} onChange={(e) => setFecha(e.target.value)} /></Field>
         <Field label="Hora"><input type="time" className="gp-input" value={hora} onChange={(e) => setHora(e.target.value)} /></Field>
@@ -9632,7 +9761,7 @@ function GlucosaRapidaForm({ onSave }) {
       {error && <p className="text-xs gp-text-red mb-2">{error}</p>}
       <button className="gp-btn w-full py-2 text-sm mt-1" onClick={() => {
         if (!valor) { setError("Captura el valor de glucosa."); return; }
-        onSave({ fecha, hora, glucosa: valor, origen: "rapido" });
+        onSave({ fecha, hora, glucosa: valor, origen: "rapido", contactoId: contactoId || null });
       }}>
         Guardar (queda en tu historial de Salud)
       </button>
@@ -9640,11 +9769,14 @@ function GlucosaRapidaForm({ onSave }) {
   );
 }
 
-function PresionRapidaForm({ onSave }) {
+function PresionRapidaForm({ contactos, onCrearContacto, onSave }) {
   const [sistolica, setSistolica] = useState("");
   const [diastolica, setDiastolica] = useState("");
   const [fecha, setFecha] = useState(todayISO());
   const [hora, setHora] = useState(horaActualHHMM());
+  const [contactoId, setContactoId] = useState("");
+  const [nuevoAbierto, setNuevoAbierto] = useState(false);
+  const [nombreNuevo, setNombreNuevo] = useState("");
   const [error, setError] = useState("");
   return (
     <div>
@@ -9655,6 +9787,25 @@ function PresionRapidaForm({ onSave }) {
           <input type="number" placeholder="Diastólica" className="gp-input" value={diastolica} onChange={(e) => setDiastolica(e.target.value)} />
         </div>
       </Field>
+      <Field label="¿De quién es esta medición?">
+        <select className="gp-input" value={contactoId} onChange={(e) => setContactoId(e.target.value)}>
+          <option value="">Yo</option>
+          {(contactos || []).map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+        </select>
+        <button type="button" className="text-xs gp-text-gold mt-1" onClick={() => setNuevoAbierto((v) => !v)}>
+          {nuevoAbierto ? "Cancelar" : "+ Agregar contacto"}
+        </button>
+        {nuevoAbierto && (
+          <div className="flex gap-2 mt-2">
+            <input className="gp-input" placeholder="Nombre del contacto" value={nombreNuevo} onChange={(e) => setNombreNuevo(e.target.value)} />
+            <button type="button" className="gp-btn px-3 text-xs shrink-0" onClick={() => {
+              if (!nombreNuevo.trim()) return;
+              setContactoId(onCrearContacto(nombreNuevo.trim()));
+              setNombreNuevo(""); setNuevoAbierto(false);
+            }}>Guardar</button>
+          </div>
+        )}
+      </Field>
       <div className="grid grid-cols-2 gap-3">
         <Field label="Fecha"><input type="date" className="gp-input" value={fecha} onChange={(e) => setFecha(e.target.value)} /></Field>
         <Field label="Hora"><input type="time" className="gp-input" value={hora} onChange={(e) => setHora(e.target.value)} /></Field>
@@ -9662,7 +9813,7 @@ function PresionRapidaForm({ onSave }) {
       {error && <p className="text-xs gp-text-red mb-2">{error}</p>}
       <button className="gp-btn w-full py-2 text-sm mt-1" onClick={() => {
         if (!sistolica || !diastolica) { setError("Captura ambos valores."); return; }
-        onSave({ fecha, hora, sistolica, diastolica, origen: "rapido" });
+        onSave({ fecha, hora, sistolica, diastolica, origen: "rapido", contactoId: contactoId || null });
       }}>
         Guardar (queda en tu historial de Salud)
       </button>
