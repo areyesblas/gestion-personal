@@ -2336,7 +2336,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
               {refrescando ? "Actualizando…" : pullDist > 60 ? "Suelta para actualizar ↓" : "Desliza hacia abajo para actualizar…"}
             </div>
           )}
-          {view === "dashboard" && <Dashboard data={data} setView={irAVista} onAddSaldo={(i) => addItem("saldoInicial", i)} onVerProyecto={irADetalleProyecto} onEditPendiente={(id, p) => editItem("pendientes", id, p)} />}
+          {view === "dashboard" && <Dashboard data={data} setView={irAVista} onAddSaldo={(i) => addItem("saldoInicial", i)} onVerProyecto={irADetalleProyecto} onEditPendiente={(id, p) => editItem("pendientes", id, p)} sensibleDesbloqueadoHasta={sensibleDesbloqueadoHasta} />}
           {view === "papelera" && <Papelera onRestore={restoreItem} onPermanentDelete={permanentDelete} ownerId={activeOwnerId} />}
           {view === "colaboradores" && <Colaboradores misId={misId} miEmail={miEmail} />}
           {view === "admin" && <AdminUsuarios adminUid={ADMIN_UID} adminEmail={miEmail} />}
@@ -3281,11 +3281,26 @@ function Papelera({ onRestore, onPermanentDelete, ownerId }) {
   );
 }
 
-function Dashboard({ data, setView, onAddSaldo, onVerProyecto, onEditPendiente }) {
+function Dashboard({ data, setView, onAddSaldo, onVerProyecto, onEditPendiente, sensibleDesbloqueadoHasta }) {
   const [saldoModal, setSaldoModal] = useState(false);
   const saldo = calcularSaldo(data);
   const hoy = todayISO();
   const mesActual = hoy.slice(0, 7);
+
+  // Centro de Mando no es una pantalla sensible en sí (no pide contraseña para entrar), pero
+  // resume información que SÍ lo es (montos, deudas, facturas, activos, documentos/legal). Antes,
+  // el candado de 15 min solo protegía el clic hacia el módulo completo — el resumen ya mostraba
+  // montos y conceptos reales sin pedir nada. Aquí se enmascara ese contenido sensible mientras la
+  // ventana de 15 min no esté vigente; el candado del módulo completo (irAVista) sigue intacto.
+  // Se usa un "tick" propio para que la máscara se active sola si el usuario se queda parado en
+  // esta pantalla y la ventana de 15 min vence mientras tanto.
+  const [, forceTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => forceTick((t) => t + 1), 15000);
+    return () => clearInterval(id);
+  }, []);
+  const sensibleDesbloqueado = Date.now() < (sensibleDesbloqueadoHasta || 0);
+
   const ledgerMesActual = useMemo(() => buildMonthlyLedger(data.finanzas, [mesActual]), [data.finanzas, mesActual]);
   const ingresos = ledgerMesActual.filter((f) => f.tipo === "Ingreso").reduce((s, f) => s + f.monto, 0);
   const egresos = ledgerMesActual.filter((f) => f.tipo === "Egreso").reduce((s, f) => s + f.monto, 0);
@@ -3322,13 +3337,13 @@ function Dashboard({ data, setView, onAddSaldo, onVerProyecto, onEditPendiente }
   data.finanzas.forEach((f) => {
     if (f.tipo === "Ingreso" && f.estatus === "Pendiente" && f.fechaVencimiento) {
       const dd = daysUntil(f.fechaVencimiento);
-      if (dd <= 7) acciones.push({ id: `cobro-${f.id}`, origen: "Cobro pendiente", tipo: "finanzas", texto: f.concepto || "Cobro", sub: fmtMoney(f.monto), dd, irA: () => setView("finanzas") });
+      if (dd <= 7) acciones.push({ id: `cobro-${f.id}`, origen: "Cobro pendiente", tipo: "finanzas", texto: sensibleDesbloqueado ? (f.concepto || "Cobro") : "Cobro pendiente", sub: sensibleDesbloqueado ? fmtMoney(f.monto) : "🔒 Verifica tu contraseña para ver el detalle", dd, irA: () => setView("finanzas") });
     }
   });
   deudasDeFinanzas(data.finanzas).forEach((d) => {
     if (!d.fechaVencimiento) return;
     const dd = daysUntil(d.fechaVencimiento);
-    if (dd <= 7) acciones.push({ id: `deuda-${d.id}`, origen: "Pago por hacer", tipo: "finanzas", texto: d.concepto, sub: fmtMoney(d.monto), dd, irA: () => setView("deudas") });
+    if (dd <= 7) acciones.push({ id: `deuda-${d.id}`, origen: "Pago por hacer", tipo: "finanzas", texto: sensibleDesbloqueado ? d.concepto : "Pago por hacer", sub: sensibleDesbloqueado ? fmtMoney(d.monto) : "🔒 Verifica tu contraseña para ver el detalle", dd, irA: () => setView("deudas") });
   });
 
   const accionesHoy = acciones.filter((a) => a.dd <= 0).sort((a, b) => a.dd - b.dd);
@@ -3473,21 +3488,21 @@ function Dashboard({ data, setView, onAddSaldo, onVerProyecto, onEditPendiente }
             {documentosProximos.map((d) => (
               <li key={d.id}>
                 <button onClick={() => setView("documentos")} className="w-full text-left flex items-center justify-between gap-2">
-                  <span className="truncate">Documento — {d.nombre}</span>{badgeDia(daysUntil(d.fechaVencimiento))}
+                  <span className="truncate">{sensibleDesbloqueado ? `Documento — ${d.nombre}` : "🔒 Documento/contrato próximo a vencer"}</span>{badgeDia(daysUntil(d.fechaVencimiento))}
                 </button>
               </li>
             ))}
             {activosProximos.map((a) => (
               <li key={a.id}>
                 <button onClick={() => setView("activos")} className="w-full text-left flex items-center justify-between gap-2">
-                  <span className="truncate">Renovación — {a.nombre}</span>{badgeDia(daysUntil(a.fechaVencimiento))}
+                  <span className="truncate">{sensibleDesbloqueado ? `Renovación — ${a.nombre}` : "🔒 Renovación de activo digital próxima"}</span>{badgeDia(daysUntil(a.fechaVencimiento))}
                 </button>
               </li>
             ))}
             {facturasPendientes.map((f) => (
               <li key={f.id}>
                 <button onClick={() => setView("finanzas")} className="w-full text-left flex items-center justify-between gap-2">
-                  <span className="truncate">Factura pendiente — {f.concepto || f.folio || "sin folio"}</span><Badge tone="gold">{fmtMoney(f.total)}</Badge>
+                  <span className="truncate">{sensibleDesbloqueado ? `Factura pendiente — ${f.concepto || f.folio || "sin folio"}` : "🔒 Factura pendiente"}</span>{sensibleDesbloqueado ? <Badge tone="gold">{fmtMoney(f.total)}</Badge> : <Badge tone="muted">Protegida</Badge>}
                 </button>
               </li>
             ))}
@@ -3518,18 +3533,25 @@ function Dashboard({ data, setView, onAddSaldo, onVerProyecto, onEditPendiente }
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
         <Stat label="Proyectos activos" value={activos} />
         <Stat label="Ideas por validar" value={ideas} />
-        <Stat label="Ingresos del mes" value={fmtMoney(ingresos)} tone="teal" />
-        <Stat label="Egresos del mes" value={fmtMoney(egresos)} tone="red" />
+        <Stat label="Ingresos del mes" value={sensibleDesbloqueado ? fmtMoney(ingresos) : "🔒 •••••"} tone="teal" />
+        <Stat label="Egresos del mes" value={sensibleDesbloqueado ? fmtMoney(egresos) : "🔒 •••••"} tone="red" />
       </div>
 
       <div className="gp-panel p-4 mb-6">
         <div className="flex items-center justify-between mb-1">
           <div className="flex items-center gap-2"><Wallet size={14} className="gp-text-teal" /><h3 className="text-sm font-medium">Saldo actual</h3></div>
-          <button onClick={() => setSaldoModal(true)} className="text-xs gp-text-gold">
-            {saldo ? "Redefinir punto de partida" : "Definir saldo inicial"}
-          </button>
+          {sensibleDesbloqueado && (
+            <button onClick={() => setSaldoModal(true)} className="text-xs gp-text-gold">
+              {saldo ? "Redefinir punto de partida" : "Definir saldo inicial"}
+            </button>
+          )}
         </div>
-        {saldo ? (
+        {!sensibleDesbloqueado ? (
+          <button onClick={() => setView("finanzas")} className="text-left w-full mt-2">
+            <p className="text-sm gp-text-gold">🔒 Verifica tu contraseña para ver tu saldo</p>
+            <p className="text-xs gp-text-muted mt-1">Finanzas es un módulo protegido — toca aquí para desbloquearlo.</p>
+          </button>
+        ) : saldo ? (
           <>
             <div className="grid grid-cols-3 gap-3 mt-3">
               <div><p className="text-xs gp-text-muted">Efectivo</p><p className="gp-serif text-lg">{fmtMoney(saldo.efectivo)}</p></div>
@@ -3543,7 +3565,7 @@ function Dashboard({ data, setView, onAddSaldo, onVerProyecto, onEditPendiente }
         )}
       </div>
 
-      {saldoModal && (
+      {saldoModal && sensibleDesbloqueado && (
         <Modal title="Punto de partida de saldo" onClose={() => setSaldoModal(false)}>
           <SaldoInicialForm ultimo={saldo} onSave={(v) => { onAddSaldo(v); setSaldoModal(false); }} />
         </Modal>
@@ -3594,7 +3616,11 @@ function Dashboard({ data, setView, onAddSaldo, onVerProyecto, onEditPendiente }
 
       <div className="gp-panel p-4">
         <h3 className="text-sm font-medium mb-3">Ganancia neta por proyecto</h3>
-        {gananciaPorProyecto.length === 0 ? (
+        {!sensibleDesbloqueado ? (
+          <button onClick={() => setView("finanzas")} className="text-left w-full">
+            <p className="text-sm gp-text-gold">🔒 Verifica tu contraseña para ver este reporte</p>
+          </button>
+        ) : gananciaPorProyecto.length === 0 ? (
           <p className="text-xs gp-text-muted">Registra movimientos en Finanzas para ver este reporte.</p>
         ) : (
           <div className="space-y-2">
