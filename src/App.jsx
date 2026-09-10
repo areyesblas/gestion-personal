@@ -5224,9 +5224,11 @@ function Deudas({ data, onAddFinanzas, onEditFinanzas, onRemoveFinanzas, onCrear
   const [modal, setModal] = useState(null); // {item} en captura/edición | {item, paso:"tarea", origenId} tras crear
   const [orden, setOrden] = useState("default");
   const [ordenDir, setOrdenDir] = useState("asc");
+  const [busqueda, setBusqueda] = useState("");
   const toggleOrden = (key) => { if (orden === key) setOrdenDir((d) => (d === "asc" ? "desc" : "asc")); else { setOrden(key); setOrdenDir("asc"); } };
   const empty = { concepto: "", proyectoId: "", monto: "", fechaVencimiento: todayISO() };
-  const deudas = deudasDeFinanzas(data.finanzas);
+  const nombreProyecto = (id) => data.proyectos.find((p) => p.id === id)?.nombre || "—";
+  const deudas = filtrarPorBusqueda(deudasDeFinanzas(data.finanzas), busqueda, [(d) => d.concepto, (d) => nombreProyecto(d.proyectoId)]);
   const camposOrden = {
     vencimiento: { get: (d) => d.fechaVencimiento, tipo: "fecha" },
     registro: { get: (d) => d.createdAt, tipo: "fecha" },
@@ -5241,7 +5243,10 @@ function Deudas({ data, onAddFinanzas, onEditFinanzas, onRemoveFinanzas, onCrear
   ];
   const base = orden === "default" ? [...deudas].sort((a, b) => (a.fechaVencimiento || "").localeCompare(b.fechaVencimiento || "")) : deudas;
   const ordenados = ordenarLista(base, orden, camposOrden, ordenDir);
-  const nombreProyecto = (id) => data.proyectos.find((p) => p.id === id)?.nombre || "—";
+  const columnasExport = [
+    { label: "Acreedor", get: (d) => d.concepto }, { label: "Proyecto", get: (d) => nombreProyecto(d.proyectoId) },
+    { label: "Vence", get: (d) => d.fechaVencimiento }, { label: "Monto", get: (d) => d.monto },
+  ];
 
   return (
     <div>
@@ -5250,7 +5255,10 @@ function Deudas({ data, onAddFinanzas, onEditFinanzas, onRemoveFinanzas, onCrear
         <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm w-full sm:w-auto"><Plus size={14} /> Nueva</button>
       </div>
       <p className="text-sm gp-text-muted mb-3">Atrasadas, próximas a vencer y al corriente, todo calculado por fecha. Al marcarse como pagada, el movimiento sigue en Finanzas y desaparece de aquí.</p>
-      <div className="mb-4"><OrdenSelector opciones={opcionesOrden} value={orden} onChange={setOrden} /></div>
+      <div className="mb-2"><OrdenSelector opciones={opcionesOrden} value={orden} onChange={setOrden} /></div>
+      <BarraListaEstandar busqueda={busqueda} onBusqueda={setBusqueda} placeholder="Buscar por acreedor o proyecto…"
+        onExportExcel={() => exportarFilasExcel(ordenados, columnasExport, "deudas")}
+        onExportPDF={() => exportarFilasPDF(ordenados, columnasExport, "deudas", "Deudas", busqueda ? `búsqueda: "${busqueda}"` : "")} />
 
       <div className="gp-panel overflow-x-auto">
         <table className="gp-table">
@@ -5885,6 +5893,7 @@ function Regalos({ data, onAdd, onEdit, onRemove, filtroContactoInicial, onLimpi
   const [filtroAnio, setFiltroAnio] = useState("Todos");
   const [orden, setOrden] = useState("default");
   const [ordenDir, setOrdenDir] = useState("asc");
+  const [busqueda, setBusqueda] = useState("");
   const toggleOrden = (key) => { if (orden === key) setOrdenDir((d) => (d === "asc" ? "desc" : "asc")); else { setOrden(key); setOrdenDir("asc"); } };
   const anioActual = new Date().getFullYear();
   const empty = { contactoId: filtroContactoInicial || "", tipo: "Regalo", ocasion: "Cumpleaños", anio: anioActual, fecha: "", descripcion: "", costo: "", estatus: "Por comprar", notas: "" };
@@ -5909,8 +5918,15 @@ function Regalos({ data, onAdd, onEdit, onRemove, filtroContactoInicial, onLimpi
   if (filtroContacto) filtrados = filtrados.filter((r) => r.contactoId === filtroContacto);
   if (filtroOcasion !== "Todos") filtrados = filtrados.filter((r) => r.ocasion === filtroOcasion);
   if (filtroAnio !== "Todos") filtrados = filtrados.filter((r) => String(r.anio) === String(filtroAnio));
+  filtrados = filtrarPorBusqueda(filtrados, busqueda, [(r) => r.descripcion, (r) => r.ocasion, (r) => r.notas, (r) => nombreContacto(r.contactoId)]);
   const ordenados = ordenarLista(filtrados, orden, camposOrden, ordenDir);
   const totalGastado = ordenados.reduce((s, r) => s + (Number(r.costo) || 0), 0);
+  const columnasExport = [
+    { label: "Contacto", get: (r) => nombreContacto(r.contactoId) }, { label: "Tipo", get: (r) => r.tipo },
+    { label: "Ocasión", get: (r) => r.ocasion }, { label: "Año", get: (r) => r.anio },
+    { label: "Fecha", get: (r) => r.fecha }, { label: "Descripción", get: (r) => r.descripcion },
+    { label: "Costo", get: (r) => r.costo }, { label: "Estatus", get: (r) => r.estatus },
+  ];
 
   const verNavidadEsteAnio = () => { setFiltroOcasion("Navidad"); setFiltroAnio(anioActual); setFiltroContacto(""); };
 
@@ -5922,7 +5938,7 @@ function Regalos({ data, onAdd, onEdit, onRemove, filtroContactoInicial, onLimpi
       </div>
       <p className="text-sm gp-text-muted mb-3">Regalos, felicitaciones, condolencias y agradecimientos a tus contactos — incluye tu lista de Navidad por año.</p>
 
-      <div className="flex flex-wrap items-center gap-2 mb-4">
+      <div className="flex flex-wrap items-center gap-2 mb-2">
         <button onClick={verNavidadEsteAnio} className="gp-btn flex items-center gap-1 px-3 py-1.5 text-xs"><Gift size={13} /> Ver Navidad {anioActual}</button>
         {filtroContacto && (
           <span className="text-xs px-2.5 py-1 rounded-full border flex items-center gap-1">
@@ -5940,6 +5956,9 @@ function Regalos({ data, onAdd, onEdit, onRemove, filtroContactoInicial, onLimpi
         </select>
         <OrdenSelector opciones={opcionesOrden} value={orden} onChange={setOrden} />
       </div>
+      <BarraListaEstandar busqueda={busqueda} onBusqueda={setBusqueda} placeholder="Buscar por contacto, ocasión o descripción…"
+        onExportExcel={() => exportarFilasExcel(ordenados, columnasExport, "atenciones")}
+        onExportPDF={() => exportarFilasPDF(ordenados, columnasExport, "atenciones", "Atenciones", busqueda ? `búsqueda: "${busqueda}"` : "")} />
 
       {totalGastado > 0 && (
         <p className="text-xs gp-text-muted mb-3">Total en esta vista: <span className="gp-mono gp-text-gold">{fmtMoney(totalGastado)}</span></p>
@@ -6116,6 +6135,7 @@ function Marketing({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
   const [filtroProyecto, setFiltroProyecto] = useState("Todos");
   const [filtroEstatus, setFiltroEstatus] = useState("Todas");
   const [orden, setOrden] = useState("default");
+  const [busqueda, setBusqueda] = useState("");
   const empty = { proyectoId: "", nombre: "", plataforma: "Meta", fechaInicio: todayISO(), fechaFin: "", presupuesto: "", gastado: "", alcance: "", clics: "", conversiones: "", ingresoGenerado: "", estatus: "Planeada", idExterno: "", notas: "" };
 
   const nombreProyecto = (id) => data.proyectos.find((p) => p.id === id)?.nombre || "—";
@@ -6145,12 +6165,20 @@ function Marketing({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
   let filtradas = data.campanas;
   if (filtroProyecto !== "Todos") filtradas = filtradas.filter((c) => c.proyectoId === filtroProyecto);
   if (filtroEstatus !== "Todas") filtradas = filtradas.filter((c) => c.estatus === filtroEstatus);
+  filtradas = filtrarPorBusqueda(filtradas, busqueda, [(c) => c.nombre, (c) => c.plataforma, (c) => c.notas, (c) => nombreProyecto(c.proyectoId)]);
   const base = orden === "default" ? [...filtradas].sort((a, b) => (a.fechaInicio || "9999").localeCompare(b.fechaInicio || "9999")) : filtradas;
   const ordenadas = ordenarLista(base, orden, camposOrden);
 
   const totalPresupuesto = ordenadas.reduce((s, c) => s + (Number(c.presupuesto) || 0), 0);
   const totalGastado = ordenadas.reduce((s, c) => s + (Number(c.gastado) || 0), 0);
   const totalIngreso = ordenadas.reduce((s, c) => s + (Number(c.ingresoGenerado) || 0), 0);
+  const columnasExport = [
+    { label: "Nombre", get: (c) => c.nombre }, { label: "Proyecto", get: (c) => nombreProyecto(c.proyectoId) },
+    { label: "Plataforma", get: (c) => c.plataforma }, { label: "Estatus", get: (c) => c.estatus },
+    { label: "Inicio", get: (c) => c.fechaInicio }, { label: "Fin", get: (c) => c.fechaFin },
+    { label: "Presupuesto", get: (c) => c.presupuesto }, { label: "Gastado", get: (c) => c.gastado },
+    { label: "Ingreso atribuido", get: (c) => c.ingresoGenerado }, { label: "ROI %", get: (c) => { const r = retorno(c); return r === null ? "" : Math.round(r); } },
+  ];
 
   return (
     <div>
@@ -6166,7 +6194,7 @@ function Marketing({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
         <div><p className="text-xs gp-text-muted">Ingreso atribuido</p><p className="gp-serif text-lg gp-text-teal">{fmtMoney(totalIngreso)}</p></div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2 mb-4">
+      <div className="flex flex-wrap items-center gap-2 mb-2">
         <select className="gp-input text-xs py-1.5" style={{ width: "auto" }} value={filtroProyecto} onChange={(e) => setFiltroProyecto(e.target.value)}>
           <option value="Todos">Todos los proyectos</option>
           {data.proyectos.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
@@ -6177,6 +6205,9 @@ function Marketing({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
         </select>
         <OrdenSelector opciones={opcionesOrden} value={orden} onChange={setOrden} />
       </div>
+      <BarraListaEstandar busqueda={busqueda} onBusqueda={setBusqueda} placeholder="Buscar por nombre, plataforma o proyecto…"
+        onExportExcel={() => exportarFilasExcel(ordenadas, columnasExport, "campanas")}
+        onExportPDF={() => exportarFilasPDF(ordenadas, columnasExport, "campañas de marketing", `proyecto: ${filtroProyecto === "Todos" ? "todos" : nombreProyecto(filtroProyecto)} · estatus: ${filtroEstatus}${busqueda ? ` · búsqueda: "${busqueda}"` : ""}`)} />
 
       <div className="space-y-2">
         {ordenadas.map((c) => {
@@ -6634,6 +6665,7 @@ const porcentajeCumplimiento = (h, dias = 30) => {
 function Habitos({ data, onAdd, onEdit, onRemove }) {
   const [nuevo, setNuevo] = useState("");
   const [orden, setOrden] = useState("default");
+  const [busqueda, setBusqueda] = useState("");
   const [detalleDe, setDetalleDe] = useState(null); // hábito abierto en el modal de detalle
   const hoy = todayISO();
 
@@ -6653,7 +6685,13 @@ function Habitos({ data, onAdd, onEdit, onRemove }) {
     { key: "registro", label: "fecha de registro" },
     { key: "racha", label: "racha actual" },
   ];
-  const listaHabitos = ordenarLista(data.habitos, orden, camposOrden);
+  const buscados = filtrarPorBusqueda(data.habitos, busqueda, [(h) => h.nombre]);
+  const listaHabitos = ordenarLista(buscados, orden, camposOrden);
+  const columnasExport = [
+    { label: "Nombre", get: (h) => h.nombre }, { label: "Frecuencia", get: (h) => textoFrecuencia(h) },
+    { label: "Racha actual", get: (h) => rachaHabito(h, hoy) }, { label: "Mejor racha", get: (h) => mejorRachaHabito(h) },
+    { label: "% cumplimiento (30d)", get: (h) => porcentajeCumplimiento(h, 30) },
+  ];
 
   // Resumen del día: cuenta solo los hábitos que aplican hoy según su frecuencia.
   const habitosHoy = data.habitos.filter((h) => aplicaHoy(h, hoy));
@@ -6674,7 +6712,10 @@ function Habitos({ data, onAdd, onEdit, onRemove }) {
         </div>
       )}
 
-      <div className="mb-3"><OrdenSelector opciones={opcionesOrden} value={orden} onChange={setOrden} /></div>
+      <div className="mb-2"><OrdenSelector opciones={opcionesOrden} value={orden} onChange={setOrden} /></div>
+      <BarraListaEstandar busqueda={busqueda} onBusqueda={setBusqueda} placeholder="Buscar hábito por nombre…"
+        onExportExcel={() => exportarFilasExcel(listaHabitos, columnasExport, "habitos")}
+        onExportPDF={() => exportarFilasPDF(listaHabitos, columnasExport, "habitos", "Hábitos", busqueda ? `búsqueda: "${busqueda}"` : "")} />
 
       <div className="flex flex-col sm:flex-row gap-2 mb-5">
         <input className="gp-input flex-1 sm:max-w-xs" placeholder="ej. Leer 20 min, Practicar inglés" value={nuevo} onChange={(e) => setNuevo(e.target.value)} onKeyDown={(e) => e.key === "Enter" && nuevo.trim() && (onAdd({ nombre: nuevo, fechas: [], frecuenciaTipo: "diario" }), setNuevo(""))} />
@@ -6703,7 +6744,7 @@ function Habitos({ data, onAdd, onEdit, onRemove }) {
             </div>
           );
         })}
-        {data.habitos.length === 0 && <p className="text-sm gp-text-muted">Aún no tienes hábitos registrados.</p>}
+        {listaHabitos.length === 0 && <p className="text-sm gp-text-muted">{busqueda ? "Sin hábitos que coincidan con la búsqueda." : "Aún no tienes hábitos registrados."}</p>}
       </div>
 
       {detalleDe && (
@@ -7479,6 +7520,7 @@ function Apartados({ data, onAdd, onEdit, onRemove, onMoverFondos }) {
   const [fondoModal, setFondoModal] = useState(null); // { apartado }
   const [moverModal, setMoverModal] = useState(null); // { apartado }
   const [orden, setOrden] = useState("default");
+  const [busqueda, setBusqueda] = useState("");
   const empty = { nombre: "", proyectoId: "", montoObjetivo: "", montoActual: "0", fechaObjetivo: "", notas: "" };
   const nombreProyecto = (id) => data.proyectos.find((p) => p.id === id)?.nombre || "—";
   const pctAvance = (a) => { const obj = Number(a.montoObjetivo) || 0; const act = Number(a.montoActual) || 0; return obj ? Math.min(100, (act / obj) * 100) : 0; };
@@ -7494,7 +7536,14 @@ function Apartados({ data, onAdd, onEdit, onRemove, onMoverFondos }) {
     { key: "alfabetico", label: "alfabético" },
     { key: "avance", label: "% de avance" },
   ];
-  const listaApartados = ordenarLista(data.apartados, orden, camposOrden);
+  const buscados = filtrarPorBusqueda(data.apartados, busqueda, [(a) => a.nombre, (a) => a.notas, (a) => nombreProyecto(a.proyectoId)]);
+  const listaApartados = ordenarLista(buscados, orden, camposOrden);
+  const columnasExport = [
+    { label: "Nombre", get: (a) => a.nombre }, { label: "Proyecto", get: (a) => nombreProyecto(a.proyectoId) },
+    { label: "Monto objetivo", get: (a) => a.montoObjetivo }, { label: "Ahorrado", get: (a) => a.montoActual },
+    { label: "% de avance", get: (a) => Math.round(pctAvance(a)) }, { label: "Fecha objetivo", get: (a) => a.fechaObjetivo },
+    { label: "Notas", get: (a) => a.notas },
+  ];
 
   return (
     <div>
@@ -7503,7 +7552,10 @@ function Apartados({ data, onAdd, onEdit, onRemove, onMoverFondos }) {
         <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm w-full sm:w-auto"><Plus size={14} /> Nuevo</button>
       </div>
       <p className="text-sm gp-text-muted mb-3">Dinero apartado para un proyecto o una meta específica, como un viaje.</p>
-      <div className="mb-4"><OrdenSelector opciones={opcionesOrden} value={orden} onChange={setOrden} /></div>
+      <div className="mb-2"><OrdenSelector opciones={opcionesOrden} value={orden} onChange={setOrden} /></div>
+      <BarraListaEstandar busqueda={busqueda} onBusqueda={setBusqueda} placeholder="Buscar por nombre, proyecto o notas…"
+        onExportExcel={() => exportarFilasExcel(listaApartados, columnasExport, "apartados")}
+        onExportPDF={() => exportarFilasPDF(listaApartados, columnasExport, "apartados", "Apartados", busqueda ? `búsqueda: "${busqueda}"` : "")} />
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         {listaApartados.map((a) => {
@@ -8015,13 +8067,20 @@ function PendienteExistenteForm({ pendientes, onAsignar }) {
 
 function Citas({ data, onAdd, onEdit, onRemove, onCrearTarea }) {
   const [modal, setModal] = useState(null);
+  const [busqueda, setBusqueda] = useState("");
   const empty = { titulo: "", fechaHora: localInputsAFechaHora(todayISO(), "09:00"), lugar: "", contactoId: "", notas: "" };
   const nombreContacto = (id) => data.contactos.find((c) => c.id === id)?.nombre || "—";
   const ahora = new Date();
-  const ordenadas = [...data.citas].sort((a, b) => (a.fechaHora || "").localeCompare(b.fechaHora || ""));
+  const citasBuscadas = filtrarPorBusqueda(data.citas, busqueda, [(c) => c.titulo, (c) => c.lugar, (c) => c.notas, (c) => nombreContacto(c.contactoId)]);
+  const ordenadas = [...citasBuscadas].sort((a, b) => (a.fechaHora || "").localeCompare(b.fechaHora || ""));
   const proximas = ordenadas.filter((c) => new Date(c.fechaHora) >= ahora);
   const pasadas = ordenadas.filter((c) => new Date(c.fechaHora) < ahora).reverse();
   const [mostrarPasadas, setMostrarPasadas] = useState(false);
+  const columnasExport = [
+    { label: "Título", get: (c) => c.titulo }, { label: "Fecha y hora", get: (c) => fmtFechaHora(c.fechaHora) },
+    { label: "Lugar", get: (c) => c.lugar }, { label: "Contacto", get: (c) => nombreContacto(c.contactoId) },
+    { label: "Notas", get: (c) => c.notas },
+  ];
 
   const Fila = (c) => {
     const esHoy = new Date(c.fechaHora).toDateString() === ahora.toDateString();
@@ -8054,6 +8113,10 @@ function Citas({ data, onAdd, onEdit, onRemove, onCrearTarea }) {
         <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm w-full sm:w-auto"><Plus size={14} /> Nueva</button>
       </div>
       <p className="text-sm gp-text-muted mb-4">Agenda con hora y recordatorio push antes de la hora. Para shows de tu negocio usa Eventos; para bitácora personal, Actividades.</p>
+
+      <BarraListaEstandar busqueda={busqueda} onBusqueda={setBusqueda} placeholder="Buscar por título, lugar o contacto…"
+        onExportExcel={() => exportarFilasExcel(ordenadas, columnasExport, "citas")}
+        onExportPDF={() => exportarFilasPDF(ordenadas, columnasExport, "citas", "Citas", busqueda ? `búsqueda: "${busqueda}"` : "")} />
 
       {proximas.length === 0 && <p className="text-sm gp-text-muted mb-4">No tienes citas próximas.</p>}
       <div className="space-y-2 mb-4">{proximas.map(Fila)}</div>
@@ -8218,11 +8281,15 @@ function Notas({ data, onAdd, onEdit, onRemove }) {
   const [busqueda, setBusqueda] = useState("");
   const empty = { titulo: "", contenido: "" };
 
-  const filtradas = [...data.notas]
-    .filter((n) => !busqueda.trim() || normalizarTexto(n.titulo).includes(normalizarTexto(busqueda)) || normalizarTexto(n.contenido).includes(normalizarTexto(busqueda)))
+  const filtradas = filtrarPorBusqueda(data.notas, busqueda, [(n) => n.titulo, (n) => n.contenido])
+    .slice()
     .sort((a, b) => (b.updatedAt || b.createdAt || "").localeCompare(a.updatedAt || a.createdAt || ""));
 
   const fmtFechaCorta = (iso) => iso ? new Date(iso).toLocaleDateString("es-MX", { day: "numeric", month: "short" }) : "";
+  const columnasExport = [
+    { label: "Título", get: (n) => n.titulo }, { label: "Contenido", get: (n) => n.contenido },
+    { label: "Última edición", get: (n) => n.updatedAt || n.createdAt },
+  ];
 
   return (
     <div>
@@ -8232,7 +8299,9 @@ function Notas({ data, onAdd, onEdit, onRemove }) {
       </div>
       <p className="text-sm gp-text-muted mb-4">Texto libre, sin ligar a ningún proyecto, tarea ni nada — para anotar cualquier cosa rápido.</p>
 
-      <input className="gp-input mb-4" placeholder="Buscar en tus notas…" value={busqueda} onChange={(e) => setBusqueda(e.target.value)} />
+      <BarraListaEstandar busqueda={busqueda} onBusqueda={setBusqueda} placeholder="Buscar en tus notas…"
+        onExportExcel={() => exportarFilasExcel(filtradas, columnasExport, "notas")}
+        onExportPDF={() => exportarFilasPDF(filtradas, columnasExport, "notas", "Notas", busqueda ? `búsqueda: "${busqueda}"` : "")} />
 
       {filtradas.length === 0 && <p className="text-sm gp-text-muted text-center py-6">{busqueda ? "Sin resultados." : "Aún no tienes notas."}</p>}
 
