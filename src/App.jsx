@@ -448,7 +448,7 @@ const categoriaIMC = (imc) => {
 };
 
 /* ---------- persistencia relacional ---------- */
-const TABLES = ["proyectos", "pendientes", "equipo", "finanzas", "actividades", "activos", "metas", "contactos", "redesMetricas", "documentos", "habitos", "salud", "apartados", "eventos", "comentarios", "saldoInicial", "regalos", "facturas", "campanas", "patrimonio", "patrimonioValuaciones", "medicamentos", "citas", "notas"];
+const TABLES = ["proyectos", "pendientes", "equipo", "finanzas", "actividades", "activos", "metas", "contactos", "redesMetricas", "documentos", "habitos", "salud", "apartados", "apartadosMovimientos", "eventos", "comentarios", "saldoInicial", "regalos", "facturas", "campanas", "patrimonio", "patrimonioValuaciones", "medicamentos", "citas", "notas"];
 // Deudas ya NO es una tabla propia (Documento Maestro v1.2, secc. 23.11/40): es una vista
 // calculada sobre Finanzas (egresos no recurrentes con saldo pendiente). Esta función se usa
 // en cualquier lugar que antes leía `data.deudas`.
@@ -524,7 +524,7 @@ const ETIQUETA_TABLA = {
   proyectos: "Proyecto", pendientes: "Pendiente", equipo: "Equipo", finanzas: "Movimiento financiero",
   actividades: "Actividad", activos: "Activo digital", metas: "Meta",
   contactos: "Contacto", redesMetricas: "Métrica de red social", documentos: "Documento",
-  habitos: "Hábito", salud: "Registro de salud", apartados: "Apartado", eventos: "Evento",
+  habitos: "Hábito", salud: "Registro de salud", apartados: "Apartado", apartadosMovimientos: "Movimiento de apartado", eventos: "Evento",
   comentarios: "Comentario", saldoInicial: "Saldo inicial", regalos: "Regalo",
   facturas: "Factura", campanas: "Campaña", patrimonio: "Bien patrimonial",
   patrimonioValuaciones: "Valuación de patrimonio", medicamentos: "Medicamento", citas: "Cita", notas: "Nota",
@@ -588,6 +588,8 @@ function labelFor(key, item) {
       return item.folio || item.concepto || "(sin folio)";
     case "patrimonioValuaciones":
       return `Valuación del ${item.fecha || "—"}`;
+    case "apartadosMovimientos":
+      return `${item.tipo === "retiro" ? "Retiro" : "Aporte"} del ${item.fecha || "—"}`;
     default:
       return item.id;
   }
@@ -2052,22 +2054,26 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
     if (error) { console.error("Error al guardar la estatura:", error); return; }
     setData((prev) => ({ ...prev, perfilSalud: { ...(prev.perfilSalud || {}), [contactoId || "yo"]: { ...(prev.perfilSalud?.[contactoId || "yo"] || {}), ...patch } } }));
   };
-  const moverFondosApartado = async (apartado, { monto, proyectoId, concepto, nuevoMontoActual }) => {
+  // Apartar dinero: registra el aporte en el historial de movimientos del apartado y actualiza
+  // el caché de "ahorrado" — nunca se captura el monto ahorrado directamente. No toca Finanzas:
+  // apartar no es un egreso, es una transferencia interna entre "bolsas" (secc. 23.13).
+  const aportarApartado = async (apartado, { monto }) => {
+    const nuevoMontoActual = String((Number(apartado.montoActual) || 0) + Number(monto));
+    await addItem("apartadosMovimientos", { apartadoId: apartado.id, tipo: "aporte", monto: String(monto), fecha: todayISO(), concepto: `Aporte a "${apartado.nombre}"` });
+    await editItem("apartados", apartado.id, { montoActual: nuevoMontoActual });
+  };
+
+  // Retirar dinero: se registra como retiro en el historial del apartado (reduce el caché de
+  // "ahorrado") y, cuando el dinero se libera hacia un proyecto o gasto concreto, también se
+  // refleja como Ingreso en Finanzas para dejar el rastro de a dónde fue.
+  const retirarApartado = async (apartado, { monto, proyectoId, concepto }) => {
+    const nuevoMontoActual = String((Number(apartado.montoActual) || 0) - Number(monto));
+    await addItem("apartadosMovimientos", { apartadoId: apartado.id, tipo: "retiro", monto: String(monto), fecha: todayISO(), concepto, proyectoId: proyectoId || "" });
     await editItem("apartados", apartado.id, { montoActual: nuevoMontoActual });
     await addItem("finanzas", {
-      concepto,
-      tipo: "Ingreso",
-      proyectoId: proyectoId || "",
-      contactoId: "",
-      fecha: todayISO(),
-      monto: String(monto),
-      categoria: "Movimiento de apartado",
-      forma: "Transferencia",
-      estatus: "Cobrado",
-      pautando: false,
-      esRecurrente: false,
-      frecuencia: "Mensual",
-      fechaFin: "",
+      concepto, tipo: "Ingreso", proyectoId: proyectoId || "", contactoId: "",
+      fecha: todayISO(), monto: String(monto), categoria: "Movimiento de apartado",
+      forma: "Transferencia", estatus: "Cobrado", pautando: false, esRecurrente: false, frecuencia: "Mensual", fechaFin: "",
     });
   };
 
@@ -2385,7 +2391,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
             <Deudas data={data} onAddFinanzas={(i) => addItem("finanzas", i)} onEditFinanzas={(id, p) => editItem("finanzas", id, p)} onRemoveFinanzas={(id) => askDelete("finanzas", id)} onCrearTarea={(t) => addItem("pendientes", t)} />
           )}
           {view === "apartados" && (
-            <Apartados data={data} onAdd={(i) => addItem("apartados", i)} onEdit={(id, p) => editItem("apartados", id, p)} onRemove={(id) => askDelete("apartados", id)} onMoverFondos={moverFondosApartado} />
+            <Apartados data={data} onAdd={(i) => addItem("apartados", i)} onEdit={(id, p) => editItem("apartados", id, p)} onRemove={(id) => askDelete("apartados", id)} onAportar={aportarApartado} onRetirar={retirarApartado} />
           )}
           {view === "patrimonio" && (
             <Patrimonio data={data} onAdd={(i) => addItem("patrimonio", i)} onEdit={(id, p) => editItem("patrimonio", id, p)} onRemove={(id) => askDelete("patrimonio", id)} onAddValuacion={(i) => addItem("patrimonioValuaciones", i)} onRemoveValuacion={(id) => askDelete("patrimonioValuaciones", id)} onAddComentario={(i) => addItem("comentarios", i)} onRemoveComentario={(id) => askDelete("comentarios", id)} />
@@ -7548,15 +7554,17 @@ function Reportes({ data }) {
 }
 
 /* ---------- Apartados / metas de ahorro ---------- */
-function Apartados({ data, onAdd, onEdit, onRemove, onMoverFondos }) {
+function Apartados({ data, onAdd, onEdit, onRemove, onAportar, onRetirar }) {
   const [modal, setModal] = useState(null);
-  const [fondoModal, setFondoModal] = useState(null); // { apartado }
-  const [moverModal, setMoverModal] = useState(null); // { apartado }
+  const [aportarModal, setAportarModal] = useState(null); // { apartado }
+  const [retirarModal, setRetirarModal] = useState(null); // { apartado }
+  const [historialDe, setHistorialDe] = useState(null); // { apartado }
   const [orden, setOrden] = useState("default");
   const [busqueda, setBusqueda] = useState("");
   const empty = { nombre: "", proyectoId: "", montoObjetivo: "", montoActual: "0", fechaObjetivo: "", notas: "" };
   const nombreProyecto = (id) => data.proyectos.find((p) => p.id === id)?.nombre || "—";
   const pctAvance = (a) => { const obj = Number(a.montoObjetivo) || 0; const act = Number(a.montoActual) || 0; return obj ? Math.min(100, (act / obj) * 100) : 0; };
+  const movimientosDe = (id) => (data.apartadosMovimientos || []).filter((m) => m.apartadoId === id).sort((a, b) => (b.fecha || "").localeCompare(a.fecha || ""));
   const camposOrden = {
     objetivo: { get: (a) => a.fechaObjetivo, tipo: "fecha" },
     registro: { get: (a) => a.createdAt, tipo: "fecha" },
@@ -7584,7 +7592,7 @@ function Apartados({ data, onAdd, onEdit, onRemove, onMoverFondos }) {
         <h2 className="gp-serif text-2xl">Apartados</h2>
         <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm w-full sm:w-auto"><Plus size={14} /> Nuevo</button>
       </div>
-      <p className="text-sm gp-text-muted mb-3">Dinero apartado para un proyecto o una meta específica, como un viaje.</p>
+      <p className="text-sm gp-text-muted mb-3">Dinero apartado para un proyecto o una meta específica, como un viaje. Lo ahorrado se calcula solo, a partir de tus aportes y retiros.</p>
       <div className="mb-2"><OrdenSelector opciones={opcionesOrden} value={orden} onChange={setOrden} /></div>
       <BarraListaEstandar busqueda={busqueda} onBusqueda={setBusqueda} placeholder="Buscar por nombre, proyecto o notas…"
         onExportExcel={() => exportarFilasExcel(listaApartados, columnasExport, "apartados")}
@@ -7596,6 +7604,7 @@ function Apartados({ data, onAdd, onEdit, onRemove, onMoverFondos }) {
           const actual = Number(a.montoActual) || 0;
           const pct = objetivo ? Math.min(100, (actual / objetivo) * 100) : 0;
           const completo = objetivo > 0 && actual >= objetivo;
+          const faltante = Math.max(0, objetivo - actual);
           return (
             <div key={a.id} className="gp-panel p-4">
               <div className="flex items-start justify-between">
@@ -7613,16 +7622,16 @@ function Apartados({ data, onAdd, onEdit, onRemove, onMoverFondos }) {
                 <div className="h-2 rounded" style={{ background: "var(--border)" }}>
                   <div className="h-2 rounded" style={{ width: `${pct}%`, background: completo ? "var(--teal)" : "var(--gold)" }} />
                 </div>
+                <p className="text-xs gp-text-muted mt-1">{completo ? "Meta alcanzada 🎉" : `Faltan ${fmtMoney(faltante)} · ${Math.round(pct)}%`}</p>
               </div>
               {a.notas && <p className="text-xs gp-text-muted mt-3">{a.notas}</p>}
               <div className="flex gap-2 mt-3">
-                <button onClick={() => setFondoModal({ apartado: a })} className="gp-btn-ghost flex-1 py-1.5 text-xs">
-                  {completo ? "Meta alcanzada — ajustar" : "Agregar fondos"}
-                </button>
-                <button onClick={() => setMoverModal({ apartado: a })} disabled={actual <= 0} className="gp-btn-ghost flex-1 py-1.5 text-xs disabled:opacity-40">
-                  Mover a proyecto
-                </button>
+                <button onClick={() => setAportarModal({ apartado: a })} className="gp-btn-ghost flex-1 py-1.5 text-xs">Apartar dinero</button>
+                <button onClick={() => setRetirarModal({ apartado: a })} disabled={actual <= 0} className="gp-btn-ghost flex-1 py-1.5 text-xs disabled:opacity-40">Retirar dinero</button>
               </div>
+              {movimientosDe(a.id).length > 0 && (
+                <button onClick={() => setHistorialDe({ apartado: a })} className="text-xs gp-text-gold mt-2">Ver historial ({movimientosDe(a.id).length})</button>
+              )}
             </div>
           );
         })}
@@ -7634,23 +7643,85 @@ function Apartados({ data, onAdd, onEdit, onRemove, onMoverFondos }) {
           <ApartadoForm item={modal.item} proyectos={data.proyectos} onSave={(v) => { modal.item.id ? onEdit(modal.item.id, v) : onAdd(v); setModal(null); }} />
         </Modal>
       )}
-      {fondoModal && (
-        <Modal title={`Agregar fondos — ${fondoModal.apartado.nombre}`} onClose={() => setFondoModal(null)}>
-          <AgregarFondosForm
-            apartado={fondoModal.apartado}
-            onSave={(nuevoMonto) => { onEdit(fondoModal.apartado.id, { montoActual: nuevoMonto }); setFondoModal(null); }}
+      {aportarModal && (
+        <Modal title={`Apartar dinero — ${aportarModal.apartado.nombre}`} onClose={() => setAportarModal(null)}>
+          <AportarFondosForm
+            apartado={aportarModal.apartado}
+            onSave={(monto) => { onAportar(aportarModal.apartado, { monto }); setAportarModal(null); }}
           />
         </Modal>
       )}
-      {moverModal && (
-        <Modal title={`Mover fondos — ${moverModal.apartado.nombre}`} onClose={() => setMoverModal(null)}>
-          <MoverFondosForm
-            apartado={moverModal.apartado}
+      {retirarModal && (
+        <Modal title={`Retirar dinero — ${retirarModal.apartado.nombre}`} onClose={() => setRetirarModal(null)}>
+          <RetirarFondosForm
+            apartado={retirarModal.apartado}
             proyectos={data.proyectos}
-            onSave={(payload) => { onMoverFondos(moverModal.apartado, payload); setMoverModal(null); }}
+            onSave={(payload) => { onRetirar(retirarModal.apartado, payload); setRetirarModal(null); }}
           />
         </Modal>
       )}
+      {historialDe && (
+        <Modal title={`Historial — ${historialDe.apartado.nombre}`} onClose={() => setHistorialDe(null)}>
+          <div className="space-y-2">
+            {movimientosDe(historialDe.apartado.id).map((m) => (
+              <div key={m.id} className="flex items-center justify-between text-sm gp-panel p-2.5">
+                <div>
+                  <Badge tone={m.tipo === "retiro" ? "red" : "teal"}>{m.tipo === "retiro" ? "Retiro" : "Aporte"}</Badge>
+                  <span className="ml-2 gp-text-muted text-xs">{m.fecha}</span>
+                  {m.concepto && <p className="text-xs gp-text-muted mt-1">{m.concepto}</p>}
+                </div>
+                <span className={`gp-mono ${m.tipo === "retiro" ? "gp-text-red" : "gp-text-teal"}`}>{m.tipo === "retiro" ? "−" : "+"}{fmtMoney(m.monto)}</span>
+              </div>
+            ))}
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+function AportarFondosForm({ apartado, onSave }) {
+  const [monto, setMonto] = useState("");
+  const actual = Number(apartado.montoActual) || 0;
+  const montoNum = Number(monto) || 0;
+  return (
+    <div>
+      <p className="text-xs gp-text-muted mb-3">Llevas {fmtMoney(actual)} de {fmtMoney(apartado.montoObjetivo)}.</p>
+      <Field label="Cuánto vas a apartar"><MoneyInput autoFocus className="gp-input" value={monto} onChange={(val) => setMonto(val)} /></Field>
+      <p className="text-xs gp-text-muted mb-3">Esto no se registra como gasto en Finanzas — es solo una transferencia interna hacia esta meta.</p>
+      <button className="gp-btn w-full py-2 text-sm mt-2 disabled:opacity-40" disabled={!montoNum} onClick={() => onSave(montoNum)}>Apartar</button>
+    </div>
+  );
+}
+
+function RetirarFondosForm({ apartado, proyectos, onSave }) {
+  const actual = Number(apartado.montoActual) || 0;
+  const [monto, setMonto] = useState("");
+  const [proyectoId, setProyectoId] = useState(apartado.proyectoId || "");
+  const [concepto, setConcepto] = useState(`Fondos de "${apartado.nombre}"`);
+  const montoNum = Number(monto) || 0;
+  const excede = montoNum > actual;
+
+  return (
+    <div>
+      <p className="text-xs gp-text-muted mb-3">Disponible en este apartado: <span className="gp-mono gp-text-gold">{fmtMoney(actual)}</span></p>
+      <Field label="Cuánto vas a retirar"><MoneyInput autoFocus className="gp-input" value={monto} onChange={(val) => setMonto(val)} /></Field>
+      {excede && <p className="text-xs gp-text-red mb-2">Ese monto es mayor al disponible en el apartado.</p>}
+      <Field label="Destino (proyecto o rubro)">
+        <select className="gp-input" value={proyectoId} onChange={(e) => setProyectoId(e.target.value)}>
+          <option value="">— sin proyecto (personal) —</option>
+          {proyectos.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+        </select>
+      </Field>
+      <Field label="Concepto"><input className="gp-input" value={concepto} onChange={(e) => setConcepto(e.target.value)} /></Field>
+      <p className="text-xs gp-text-muted mb-3">Esto resta el monto del apartado y lo registra como un ingreso en Finanzas, para que quede el rastro de a dónde fue el dinero.</p>
+      <button
+        className="gp-btn w-full py-2 text-sm mt-2 disabled:opacity-40"
+        disabled={!montoNum || excede}
+        onClick={() => onSave({ monto: montoNum, proyectoId, concepto })}
+      >
+        Retirar fondos
+      </button>
     </div>
   );
 }
@@ -7676,50 +7747,6 @@ function ApartadoForm({ item, proyectos, onSave }) {
       {error && <p className="text-xs gp-text-red mb-2">{error}</p>}
 
       <button className="gp-btn w-full py-2 text-sm mt-2" onClick={() => { if (!v.nombre?.toString().trim()) { setError("El nombre del apartado es obligatorio."); return; } setError(""); onSave(v); }}>Guardar</button>
-    </div>
-  );
-}
-
-function AgregarFondosForm({ apartado, onSave }) {
-  const [monto, setMonto] = useState("");
-  const actual = Number(apartado.montoActual) || 0;
-  return (
-    <div>
-      <p className="text-xs gp-text-muted mb-3">Llevas {fmtMoney(actual)} de {fmtMoney(apartado.montoObjetivo)}.</p>
-      <Field label="Cuánto vas a agregar"><MoneyInput autoFocus className="gp-input" value={monto} onChange={(val) => setMonto(val)} /></Field>
-      <button className="gp-btn w-full py-2 text-sm mt-2" onClick={() => onSave(String(actual + (Number(monto) || 0)))}>Agregar</button>
-    </div>
-  );
-}
-
-function MoverFondosForm({ apartado, proyectos, onSave }) {
-  const actual = Number(apartado.montoActual) || 0;
-  const [monto, setMonto] = useState("");
-  const [proyectoId, setProyectoId] = useState(apartado.proyectoId || "");
-  const [concepto, setConcepto] = useState(`Fondos de "${apartado.nombre}"`);
-  const montoNum = Number(monto) || 0;
-  const excede = montoNum > actual;
-
-  return (
-    <div>
-      <p className="text-xs gp-text-muted mb-3">Disponible en este apartado: <span className="gp-mono gp-text-gold">{fmtMoney(actual)}</span></p>
-      <Field label="Cuánto vas a mover"><MoneyInput autoFocus className="gp-input" value={monto} onChange={(val) => setMonto(val)} /></Field>
-      {excede && <p className="text-xs gp-text-red mb-2">Ese monto es mayor al disponible en el apartado.</p>}
-      <Field label="Destino (proyecto o rubro)">
-        <select className="gp-input" value={proyectoId} onChange={(e) => setProyectoId(e.target.value)}>
-          <option value="">— sin proyecto (personal) —</option>
-          {proyectos.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
-        </select>
-      </Field>
-      <Field label="Concepto"><input className="gp-input" value={concepto} onChange={(e) => setConcepto(e.target.value)} /></Field>
-      <p className="text-xs gp-text-muted mb-3">Esto resta el monto del apartado y lo registra como un ingreso en Finanzas, para que quede el rastro de a dónde fue el dinero.</p>
-      <button
-        className="gp-btn w-full py-2 text-sm mt-2 disabled:opacity-40"
-        disabled={!montoNum || excede}
-        onClick={() => onSave({ monto: montoNum, proyectoId, concepto, nuevoMontoActual: String(actual - montoNum) })}
-      >
-        Mover fondos
-      </button>
     </div>
   );
 }
