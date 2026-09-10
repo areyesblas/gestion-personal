@@ -2465,7 +2465,20 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
               onRemove={(id) => askDelete("activos", id)} onCrearTarea={(t) => addItem("pendientes", t)} />
           )}
           {view === "asistente" && <Asistente onDatosCreados={recargarModulos} />}
-          {view === "agenda" && <Agenda data={data} misId={misId} onEditPendiente={(id, p) => editItem("pendientes", id, p)} onAddCita={(c) => addItem("citas", c)} />}
+          {view === "agenda" && (
+            <Agenda data={data} misId={misId}
+              onEditPendiente={(id, p) => editItem("pendientes", id, p)}
+              onAddCita={(c) => addItem("citas", c)}
+              onEditCita={async (id, p) => {
+                await editItem("citas", id, p);
+                // Etapa 6 (Agenda interactiva, secc. 23.6): "al mover una tarea deben actualizarse
+                // automáticamente ... los recordatorios relacionados". Si cambió la hora, se borra
+                // el recordatorio ya disparado (si existía) para que el motor lo vuelva a evaluar
+                // y avise en el horario nuevo, en vez de quedarse callado por haber avisado antes.
+                if (p.fechaHora) await supabase.from("recordatorios").delete().eq("tabla_origen", "citas").eq("registro_origen_id", id);
+              }}
+            />
+          )}
           {view === "citas" && (
             <Citas data={data} onAdd={(i) => addItem("citas", i)} onEdit={(id, p) => editItem("citas", id, p)} onRemove={(id) => askDelete("citas", id)} onCrearTarea={(t) => addItem("pendientes", t)} />
           )}
@@ -7852,6 +7865,14 @@ function fmtFechaHora(iso) {
   if (!iso) return "—";
   return new Date(iso).toLocaleString("es-MX", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit", hour12: true });
 }
+// Etapa 6 (Agenda interactiva): convierte una hora decimal (9.5) a "HH:MM" (09:30), redondeando
+// al cuarto de hora más cercano — es el "snap" al soltar un bloque arrastrado.
+function horaDecimalAHHMM(dec) {
+  const totalMin = Math.round(dec * 60 / 15) * 15;
+  const hh = Math.floor(totalMin / 60);
+  const mm = totalMin % 60;
+  return `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+}
 
 // --- Agenda visual (día/semana) ---------------------------------------------------------------
 // Muestra en una cuadrícula de horario las citas (bloques fijos, a su hora) y los pendientes con
@@ -7894,10 +7915,25 @@ function calcularBloquesAgenda({ dias, citas, pendientes, horaInicio, horasDiari
     const key = dateStr(d);
     if (!bloquesPorDia[key]) return;
     const horaDecimal = d.getHours() + d.getMinutes() / 60;
-    bloquesPorDia[key].push({ tipo: "cita", inicio: horaDecimal, duracion: 1, item: c });
+    const duracion = Number(c.duracionHoras) > 0 ? Number(c.duracionHoras) : 1;
+    bloquesPorDia[key].push({ tipo: "cita", inicio: horaDecimal, duracion, item: c });
   });
 
-  const pendientesOrdenados = [...pendientes].sort((a, b) =>
+  // Etapa 6 (Agenda interactiva): una tarea con horaInicio ya fue anclada a mano (arrastrada o
+  // asignada manualmente) — se coloca directo ahí, sin pasar por el acomodo automático de huecos
+  // libres. Las que no tienen horaInicio siguen el comportamiento de siempre (bin-packing).
+  const pendientesFijos = pendientes.filter((p) => p.horaInicio);
+  const pendientesAuto = pendientes.filter((p) => !p.horaInicio);
+
+  pendientesFijos.forEach((p) => {
+    if (!p.fechaLimite || !bloquesPorDia[p.fechaLimite]) return;
+    const [hh, mm] = String(p.horaInicio).split(":").map(Number);
+    const inicio = hh + (mm || 0) / 60;
+    const duracion = Number(p.tiempoEstimado) > 0 ? Number(p.tiempoEstimado) : 1;
+    bloquesPorDia[p.fechaLimite].push({ tipo: "pendiente", inicio, duracion, item: p });
+  });
+
+  const pendientesOrdenados = [...pendientesAuto].sort((a, b) =>
     (PRIORIDAD_ORDEN[a.prioridad] ?? 1) - (PRIORIDAD_ORDEN[b.prioridad] ?? 1) ||
     (a.fechaLimite || "").localeCompare(b.fechaLimite || "")
   );
@@ -7930,10 +7966,11 @@ function calcularBloquesAgenda({ dias, citas, pendientes, horaInicio, horasDiari
     }
   });
 
+  Object.values(bloquesPorDia).forEach((arr) => arr.sort((a, b) => a.inicio - b.inicio));
   return bloquesPorDia;
 }
 
-function Agenda({ data, onEditPendiente, onAddCita, misId }) {
+function Agenda({ data, onEditPendiente, onAddCita, onEditCita, misId }) {
   const [vista, setVista] = useState("semana"); // "dia" | "semana"
   const [base, setBase] = useState(() => new Date());
   const [config, setConfig] = useState({
@@ -7946,9 +7983,18 @@ function Agenda({ data, onEditPendiente, onAddCita, misId }) {
   // El acomodo automático de pendientes no corre solo — hay que confirmarlo con este botón cada
   // vez que se entra a la Agenda. Los que el usuario asigna a mano desde el "+" (pestaña "Desde
   // lo guardado") se muestran de inmediato sin esperar esa confirmación, porque elegirlos a mano
-  // YA es la confirmación.
+  // YA es la confirmación. Una tarea con horaInicio (arrastrada, o asignada a mano) es manual para
+  // siempre, aunque se recargue la página — a diferencia de idsManualesSesion, que solo dura la sesión.
   const [acomodoConfirmado, setAcomodoConfirmado] = useState(false);
   const [idsManualesSesion, setIdsManualesSesion] = useState(() => new Set());
+  const esManual = (p) => idsManualesSesion.has(p.id) || !!p.horaInicio;
+
+  // --- Etapa 6: Agenda interactiva (arrastrar para mover, arrastrar el borde para redimensionar) ---
+  const PX_POR_HORA = 56;
+  const SNAP_HORAS = 0.25; // 15 minutos
+  const colRefs = useRef([]);
+  const huboMovimientoRef = useRef(false);
+  const [drag, setDrag] = useState(null); // { tipo, id, modo: 'mover'|'redimensionar', inicioOrig, duracionOrig, diaIdxOrig, startX, startY, curInicio, curDuracion, curDiaIdx }
 
   useEffect(() => {
     (async () => {
@@ -8003,8 +8049,8 @@ function Agenda({ data, onEditPendiente, onAddCita, misId }) {
   const citasEnRango = (data.citas || []).filter((c) => c.fechaHora && dateStr(new Date(c.fechaHora)) >= rangoStr.desde && dateStr(new Date(c.fechaHora)) <= rangoStr.hasta);
   const pendientesEnRango = (data.pendientes || []).filter((p) => p.fechaLimite && p.fechaLimite >= rangoStr.desde && p.fechaLimite <= rangoStr.hasta);
   const pendientesHechos = pendientesEnRango.filter((p) => p.estatus === "Completada");
-  const pendientesPendientesDeAcomodo = pendientesEnRango.filter((p) => p.estatus !== "Completada" && !idsManualesSesion.has(p.id));
-  const pendientesManuales = pendientesEnRango.filter((p) => p.estatus !== "Completada" && idsManualesSesion.has(p.id));
+  const pendientesPendientesDeAcomodo = pendientesEnRango.filter((p) => p.estatus !== "Completada" && !esManual(p));
+  const pendientesManuales = pendientesEnRango.filter((p) => p.estatus !== "Completada" && esManual(p));
   // Lo que sí se manda a acomodar en el horario: los ya hechos (se quedan visibles siempre), los
   // que el usuario agregó a mano, y el resto SOLO si ya se confirmó el acomodo automático.
   const pendientesParaBloques = [
@@ -8026,7 +8072,76 @@ function Agenda({ data, onEditPendiente, onAddCita, misId }) {
     setModalAgregar(null);
   };
 
-  const PX_POR_HORA = 56;
+  // Arranca un arrastre. modo "mover" viene del cuerpo del bloque; modo "redimensionar" viene de
+  // la franja inferior (el "borde" que se jala para cambiar la duración, secc. 23.6).
+  const iniciarDrag = (e, tipo, item, bloque, diaIdxOrig, modo) => {
+    if (tipo === "comida") return; // la comida no se arrastra, es un bloque fijo informativo
+    e.stopPropagation();
+    e.preventDefault();
+    huboMovimientoRef.current = false;
+    const clientX = e.clientX ?? e.touches?.[0]?.clientX;
+    const clientY = e.clientY ?? e.touches?.[0]?.clientY;
+    setDrag({
+      tipo, id: item.id, modo, diaIdxOrig,
+      inicioOrig: bloque.inicio, duracionOrig: bloque.duracion,
+      startX: clientX, startY: clientY,
+      curInicio: bloque.inicio, curDuracion: bloque.duracion, curDiaIdx: diaIdxOrig,
+    });
+  };
+
+  useEffect(() => {
+    if (!drag) return;
+    const onMove = (e) => {
+      const clientX = e.clientX ?? e.touches?.[0]?.clientX;
+      const clientY = e.clientY ?? e.touches?.[0]?.clientY;
+      if (clientX == null || clientY == null) return;
+      const deltaY = clientY - drag.startY;
+      const deltaHoras = deltaY / PX_POR_HORA;
+      const jornadaFin = horaInicioDec + config.horasLaboralesDiarias;
+      if (Math.abs(deltaY) > 4 || Math.abs(clientX - drag.startX) > 4) huboMovimientoRef.current = true;
+
+      if (drag.modo === "redimensionar") {
+        let nuevaDuracion = Math.round((drag.duracionOrig + deltaHoras) / SNAP_HORAS) * SNAP_HORAS;
+        nuevaDuracion = Math.max(SNAP_HORAS, Math.min(nuevaDuracion, jornadaFin - drag.inicioOrig));
+        setDrag((d) => (d ? { ...d, curDuracion: nuevaDuracion } : d));
+      } else {
+        let nuevoInicio = Math.round((drag.inicioOrig + deltaHoras) / SNAP_HORAS) * SNAP_HORAS;
+        nuevoInicio = Math.max(horaInicioDec, Math.min(nuevoInicio, jornadaFin - drag.duracionOrig));
+        const colWidth = colRefs.current[0]?.getBoundingClientRect().width || 1;
+        const deltaX = clientX - drag.startX;
+        const deltaCols = vista === "semana" ? Math.round(deltaX / colWidth) : 0;
+        const nuevoIdx = Math.max(0, Math.min(diasVisibles.length - 1, drag.diaIdxOrig + deltaCols));
+        setDrag((d) => (d ? { ...d, curInicio: nuevoInicio, curDiaIdx: nuevoIdx } : d));
+      }
+    };
+    const onUp = () => {
+      setDrag((d) => {
+        if (!d) return null;
+        const cambioReal = d.curInicio !== d.inicioOrig || d.curDuracion !== d.duracionOrig || d.curDiaIdx !== d.diaIdxOrig;
+        if (cambioReal) {
+          const nuevoDiaKey = dateStr(diasVisibles[d.curDiaIdx]);
+          if (d.tipo === "cita") {
+            if (d.modo === "redimensionar") onEditCita(d.id, { duracionHoras: d.curDuracion });
+            else onEditCita(d.id, { fechaHora: localInputsAFechaHora(nuevoDiaKey, horaDecimalAHHMM(d.curInicio)) });
+          } else if (d.tipo === "pendiente") {
+            if (d.modo === "redimensionar") onEditPendiente(d.id, { tiempoEstimado: d.curDuracion });
+            else onEditPendiente(d.id, { fechaLimite: nuevoDiaKey, horaInicio: horaDecimalAHHMM(d.curInicio) });
+          }
+        }
+        return null;
+      });
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [drag, horaInicioDec, config.horasLaboralesDiarias, vista, diasVisibles]);
+
   const horas = Array.from({ length: Math.ceil(config.horasLaboralesDiarias) + 1 }, (_, i) => horaInicioDec + i);
 
   if (cargando) return <p className="text-sm gp-text-muted">Cargando tu agenda…</p>;
@@ -8140,7 +8255,7 @@ function Agenda({ data, onEditPendiente, onAddCita, misId }) {
               </div>
             ))}
           </div>
-          {diasVisibles.map((d) => {
+          {diasVisibles.map((d, di) => {
             const key = dateStr(d);
             const esHoy = key === todayISO();
             return (
@@ -8148,12 +8263,14 @@ function Agenda({ data, onEditPendiente, onAddCita, misId }) {
                 <div className="text-center text-xs mb-1 pb-1" style={{ height: 28, fontWeight: esHoy ? 700 : 400, color: esHoy ? "var(--gold)" : undefined }}>
                   {DIA_ISO_LABEL[d.getDay() === 0 ? 7 : d.getDay()]} {d.getDate()}
                 </div>
-                <div className="relative" style={{ height: PX_POR_HORA * config.horasLaboralesDiarias, borderLeft: "1px solid var(--border)" }}>
+                <div ref={(el) => (colRefs.current[di] = el)} className="relative" style={{ height: PX_POR_HORA * config.horasLaboralesDiarias, borderLeft: "1px solid var(--border)" }}>
                   {horas.slice(0, -1).map((h) => (
                     <div key={h} style={{ position: "absolute", top: (h - horaInicioDec) * PX_POR_HORA, left: 0, right: 0, borderTop: "1px solid var(--border)" }} />
                   ))}
                   {(bloques[key] || []).map((b, i) => {
                     const hecho = b.tipo === "pendiente" && b.item.estatus === "Completada";
+                    const arrastrable = b.tipo === "cita" || b.tipo === "pendiente";
+                    const siendoArrastrado = !!(drag && b.item && drag.tipo === b.tipo && drag.id === b.item.id);
                     return (
                       <div key={i}
                         className="absolute rounded px-1.5 py-0.5 text-[11px] overflow-hidden"
@@ -8165,13 +8282,21 @@ function Agenda({ data, onEditPendiente, onAddCita, misId }) {
                           color: b.tipo === "cita" ? "#0B2341" : hecho ? "var(--teal-text)" : "inherit",
                           border: b.tipo === "pendiente" ? `1px solid ${hecho ? "var(--teal)" : "var(--border)"}` : "none",
                           textDecoration: hecho ? "line-through" : "none",
-                          opacity: b.tipo === "comida" ? 0.7 : 1,
-                          cursor: b.tipo === "pendiente" ? "pointer" : "default",
+                          opacity: siendoArrastrado ? 0.3 : b.tipo === "comida" ? 0.7 : 1,
+                          cursor: arrastrable ? "grab" : "default",
+                          touchAction: arrastrable ? "none" : undefined,
                         }}
-                        title={b.tipo === "cita" ? b.item.titulo : b.tipo === "comida" ? "Comida" : b.item.descripcion}
-                        onClick={() => { if (b.tipo === "pendiente") alternarHecho(b.item); }}
+                        title={b.tipo === "cita" ? `${b.item.titulo} — mantén presionado para mover, jala el borde inferior para cambiar la duración` : b.tipo === "comida" ? "Comida" : `${b.item.descripcion} — mantén presionado para mover, jala el borde inferior para cambiar la duración`}
+                        onPointerDown={(e) => arrastrable && iniciarDrag(e, b.tipo, b.item, b, di, "mover")}
+                        onClick={() => { if (huboMovimientoRef.current) { huboMovimientoRef.current = false; return; } if (b.tipo === "pendiente") alternarHecho(b.item); }}
                       >
                         <span className="font-medium">{b.tipo === "cita" ? b.item.titulo : b.tipo === "comida" ? "Comida" : b.item.descripcion}</span>
+                        {arrastrable && (
+                          <div
+                            onPointerDown={(e) => iniciarDrag(e, b.tipo, b.item, b, di, "redimensionar")}
+                            style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: 6, cursor: "ns-resize", touchAction: "none" }}
+                          />
+                        )}
                       </div>
                     );
                   })}
@@ -8181,7 +8306,31 @@ function Agenda({ data, onEditPendiente, onAddCita, misId }) {
           })}
         </div>
       </div>
-      <p className="text-xs gp-text-muted mt-2">Toca una tarea para marcarla hecha (se queda en verde) o para regresarla a pendiente. Lo que no cupo sigue en Tareas normal.</p>
+      {drag && (() => {
+        const colEl = colRefs.current[drag.curDiaIdx];
+        if (!colEl) return null;
+        const rect = colEl.getBoundingClientRect();
+        const item = drag.tipo === "cita" ? data.citas.find((c) => c.id === drag.id) : data.pendientes.find((p) => p.id === drag.id);
+        const diaGhost = diasVisibles[drag.curDiaIdx];
+        const etiquetaDia = diaGhost ? `${DIA_ISO_LABEL[diaGhost.getDay() === 0 ? 7 : diaGhost.getDay()]} ${diaGhost.getDate()}` : "";
+        return (
+          <div style={{
+            position: "fixed", left: rect.left + 2, width: Math.max(rect.width - 4, 40),
+            top: rect.top + (drag.curInicio - horaInicioDec) * PX_POR_HORA,
+            height: Math.max(drag.curDuracion * PX_POR_HORA - 2, 18),
+            background: drag.tipo === "cita" ? "var(--gold)" : "var(--panel-2)",
+            color: drag.tipo === "cita" ? "#0B2341" : "inherit",
+            border: "2px dashed var(--teal)", borderRadius: 4, zIndex: 90, pointerEvents: "none",
+            padding: "2px 6px", fontSize: 11, overflow: "hidden", boxShadow: "0 4px 12px rgba(0,0,0,.25)",
+          }}>
+            <span className="font-medium">{item?.titulo || item?.descripcion || "…"}</span>
+            <div className="text-[10px] opacity-80">
+              {drag.modo === "redimensionar" ? `${drag.curDuracion}h` : `${etiquetaDia} · ${horaDecimalAHHMM(drag.curInicio)}`}
+            </div>
+          </div>
+        );
+      })()}
+      <p className="text-xs gp-text-muted mt-2">Mantén presionada una tarea o cita para moverla a otro día u horario; jala su borde inferior para cambiar la duración. Toca una tarea (sin arrastrar) para marcarla hecha. Lo que no cupo sigue en Tareas normal.</p>
     </div>
   );
 }
@@ -8305,6 +8454,7 @@ function CitaForm({ item, contactos, onSave }) {
   const [titulo, setTitulo] = useState(item.titulo || "");
   const [fecha, setFecha] = useState(inicial.fecha);
   const [hora, setHora] = useState(inicial.hora);
+  const [duracionHoras, setDuracionHoras] = useState(item.duracionHoras || 1);
   const [lugar, setLugar] = useState(item.lugar || "");
   const [contactoId, setContactoId] = useState(item.contactoId || "");
   const [notas, setNotas] = useState(item.notas || "");
@@ -8313,9 +8463,10 @@ function CitaForm({ item, contactos, onSave }) {
   return (
     <div>
       <Field label="Título"><input className="gp-input" value={titulo} onChange={(e) => setTitulo(e.target.value)} /></Field>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-3 gap-3">
         <Field label="Fecha"><input type="date" className="gp-input" value={fecha} onChange={(e) => setFecha(e.target.value)} /></Field>
         <Field label="Hora"><input type="time" className="gp-input" value={hora} onChange={(e) => setHora(e.target.value)} /></Field>
+        <Field label="Duración (h)"><input type="number" min="0.25" step="0.25" className="gp-input" value={duracionHoras} onChange={(e) => setDuracionHoras(Number(e.target.value) || 1)} /></Field>
       </div>
       <Field label="Lugar (opcional)"><input className="gp-input" value={lugar} onChange={(e) => setLugar(e.target.value)} /></Field>
       <Field label="Con quién (opcional)">
@@ -8331,7 +8482,7 @@ function CitaForm({ item, contactos, onSave }) {
         onClick={() => {
           if (!titulo.trim()) { setError("Captura un título."); return; }
           if (!fecha) { setError("Elige una fecha."); return; }
-          onSave({ titulo: titulo.trim(), fechaHora: localInputsAFechaHora(fecha, hora), lugar: lugar.trim(), contactoId, notas: notas.trim() });
+          onSave({ titulo: titulo.trim(), fechaHora: localInputsAFechaHora(fecha, hora), duracionHoras: duracionHoras || 1, lugar: lugar.trim(), contactoId, notas: notas.trim() });
         }}
       >
         Guardar
