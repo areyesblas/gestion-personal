@@ -462,6 +462,64 @@ const tableName = (key) => camelToSnake(key);
 // Quita acentos y pasa a minúsculas, para que buscar "cancion" también encuentre "canción".
 const normalizarTexto = (s) => (s || "").toString().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 
+// Búsqueda por contenido (contiene, no solo empieza-con) e insensible a acentos, para el
+// estándar transversal de listas (Documento Maestro v1.2, secc. 23.5/38). `getters` es un
+// arreglo de funciones (item) => texto; basta que la búsqueda coincida con cualquiera de ellas.
+const filtrarPorBusqueda = (lista, query, getters) => {
+  const q = normalizarTexto(query).trim();
+  if (!q) return lista;
+  return lista.filter((item) => getters.some((get) => normalizarTexto(get(item)).includes(q)));
+};
+
+// Exporta una lista YA filtrada/ordenada tal como el usuario la está viendo (secc. 23.5: la
+// exportación debe respetar exactamente los filtros, búsqueda y orden actuales).
+function exportarFilasExcel(filas, columnas, nombreArchivo) {
+  if (filas.length === 0) { alert("No hay filas para exportar con los filtros actuales."); return; }
+  const limpias = filas.map((item) => Object.fromEntries(columnas.map((c) => [c.label, c.get(item) ?? ""])));
+  const hoja = XLSX.utils.json_to_sheet(limpias);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, hoja, "Datos".slice(0, 31));
+  XLSX.writeFile(wb, `arkeyone_${nombreArchivo}_${todayISO()}.xlsx`);
+}
+
+// Mismo criterio que exportarFilasExcel, pero a PDF (tabla con jspdf-autotable), incluyendo
+// fecha de generación y el resumen de filtros aplicados, como pide la secc. 23.5.
+async function exportarFilasPDF(filas, columnas, nombreArchivo, titulo, resumenFiltros) {
+  if (filas.length === 0) { alert("No hay filas para exportar con los filtros actuales."); return; }
+  const { jsPDF } = await import("jspdf");
+  const autoTable = (await import("jspdf-autotable")).default;
+  const doc = new jsPDF({ orientation: columnas.length > 5 ? "landscape" : "portrait" });
+  doc.setFontSize(14);
+  doc.text(titulo, 14, 15);
+  doc.setFontSize(9);
+  doc.setTextColor(120);
+  doc.text(`Generado el ${new Date().toLocaleString("es-MX")}${resumenFiltros ? ` · ${resumenFiltros}` : ""}`, 14, 21);
+  autoTable(doc, {
+    startY: 26,
+    head: [columnas.map((c) => c.label)],
+    body: filas.map((item) => columnas.map((c) => String(c.get(item) ?? ""))),
+    styles: { fontSize: 8 },
+    headStyles: { fillColor: [11, 35, 65] },
+  });
+  doc.save(`arkeyone_${nombreArchivo}_${todayISO()}.pdf`);
+}
+
+// Barra reutilizable: campo de búsqueda por contenido (independiente del buscador global) +
+// botones de exportar Excel/PDF, para el estándar transversal de listas.
+function BarraListaEstandar({ busqueda, onBusqueda, placeholder, onExportExcel, onExportPDF }) {
+  return (
+    <div className="flex flex-wrap items-center gap-2 mb-4">
+      <div className="relative flex-1" style={{ minWidth: 180, maxWidth: 320 }}>
+        <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 gp-text-muted" />
+        <input className="gp-input pl-8 text-sm" placeholder={placeholder || "Buscar en esta lista…"} value={busqueda} onChange={(e) => onBusqueda(e.target.value)} />
+      </div>
+      <button onClick={onExportExcel} className="text-xs px-2.5 py-1.5 rounded gp-btn-ghost flex items-center gap-1"><Download size={12} /> Excel</button>
+      <button onClick={onExportPDF} className="text-xs px-2.5 py-1.5 rounded gp-btn-ghost flex items-center gap-1"><Download size={12} /> PDF</button>
+    </div>
+  );
+}
+
+
 const ETIQUETA_TABLA = {
   proyectos: "Proyecto", pendientes: "Pendiente", equipo: "Equipo", finanzas: "Movimiento financiero",
   actividades: "Actividad", activos: "Activo digital", metas: "Meta",
@@ -3587,6 +3645,7 @@ function Proyectos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
   const [expanded, setExpanded] = useState(null);
   const [notaTexto, setNotaTexto] = useState("");
   const [orden, setOrden] = useState("default");
+  const [busqueda, setBusqueda] = useState("");
 
   const empty = { nombre: "", categoria: CATS[0], estatus: "Idea", modo: "Finito", monetizacion: MONETIZACION[0], descripcion: "", github: "", githubSubido: false, notas: [], prioridad: "Media", fechaRevision: "" };
 
@@ -3603,7 +3662,14 @@ function Proyectos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
     { key: "revision", label: "fecha de revisión" },
   ];
 
-  const grouped = ESTATUS_PROYECTO.map((e) => ({ estatus: e, items: ordenarLista(data.proyectos.filter((p) => p.estatus === e), orden, camposOrden) }));
+  const proyectosFiltrados = filtrarPorBusqueda(data.proyectos, busqueda, [(p) => p.nombre, (p) => p.categoria, (p) => p.descripcion]);
+  const grouped = ESTATUS_PROYECTO.map((e) => ({ estatus: e, items: ordenarLista(proyectosFiltrados.filter((p) => p.estatus === e), orden, camposOrden) }));
+  const columnasExport = [
+    { label: "Nombre", get: (p) => p.nombre }, { label: "Categoría", get: (p) => p.categoria },
+    { label: "Estatus", get: (p) => p.estatus }, { label: "Prioridad", get: (p) => p.prioridad },
+    { label: "Fecha de revisión", get: (p) => p.fechaRevision }, { label: "Descripción", get: (p) => p.descripcion },
+  ];
+  const todosVisibles = grouped.flatMap((g) => g.items);
 
   const addNota = (proyecto) => {
     if (!notaTexto.trim()) return;
@@ -3620,7 +3686,10 @@ function Proyectos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
         <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm w-full sm:w-auto"><Plus size={14} /> Nuevo</button>
       </div>
       <p className="text-sm gp-text-muted mb-3">De idea a proyecto activo — edita el estatus cuando avance.</p>
-      <div className="mb-4"><OrdenSelector opciones={opcionesOrden} value={orden} onChange={setOrden} /></div>
+      <div className="mb-2"><OrdenSelector opciones={opcionesOrden} value={orden} onChange={setOrden} /></div>
+      <BarraListaEstandar busqueda={busqueda} onBusqueda={setBusqueda} placeholder="Buscar por nombre, categoría o descripción…"
+        onExportExcel={() => exportarFilasExcel(todosVisibles, columnasExport, "proyectos")}
+        onExportPDF={() => exportarFilasPDF(todosVisibles, columnasExport, "proyectos", "Proyectos e ideas", busqueda ? `búsqueda: "${busqueda}"` : "")} />
 
       <div className="space-y-6">
         {grouped.filter((g) => g.items.length).map((g) => (
@@ -4641,6 +4710,7 @@ function Finanzas({ data, onAdd, onEdit, onRemove }) {
   const [filtroVigencia, setFiltroVigencia] = useState("Vigentes");
   const [orden, setOrden] = useState("default");
   const [ordenDir, setOrdenDir] = useState("asc");
+  const [busqueda, setBusqueda] = useState("");
   const toggleOrden = (key) => { if (orden === key) setOrdenDir((d) => (d === "asc" ? "desc" : "asc")); else { setOrden(key); setOrdenDir("asc"); } };
   const empty = { concepto: "", tipo: "Ingreso", proyectoId: "", contactoId: "", fecha: todayISO(), fechaVencimiento: "", monto: "", categoria: "", forma: "Transferencia", estatus: "Cobrado", pautando: false, esRecurrente: false, frecuencia: "Mensual", fechaFin: "" };
   const nombreProyecto = (id) => data.proyectos.find((p) => p.id === id)?.nombre || "—";
@@ -4649,12 +4719,17 @@ function Finanzas({ data, onAdd, onEdit, onRemove }) {
   const mesActual = hoy.slice(0, 7);
   const esVigente = (f) => !f.fechaFin || f.fechaFin >= hoy;
 
-  const cobrosPendientes = data.finanzas
+  // La búsqueda por contenido filtra las listas de abajo; los KPIs de arriba (ingresos/egresos/
+  // neto del mes) se quedan globales para no confundir con un resumen "recortado".
+  const finanzasFiltradas = filtrarPorBusqueda(data.finanzas, busqueda,
+    [(f) => f.concepto, (f) => f.categoria, (f) => f.forma, (f) => nombreProyecto(f.proyectoId), (f) => nombreCliente(f.contactoId)]);
+
+  const cobrosPendientes = finanzasFiltradas
     .filter((f) => f.tipo === "Ingreso" && f.estatus === "Pendiente")
     .sort((a, b) => (a.fechaVencimiento || "9999").localeCompare(b.fechaVencimiento || "9999"));
   const totalCobrosPendientes = cobrosPendientes.reduce((s, f) => s + (Number(f.monto) || 0), 0);
 
-  let recurrentes = data.finanzas.filter((f) => f.esRecurrente);
+  let recurrentes = finanzasFiltradas.filter((f) => f.esRecurrente);
   if (filtroTipoRecurrente !== "Todos") recurrentes = recurrentes.filter((f) => f.tipo === filtroTipoRecurrente);
   if (filtroVigencia !== "Todos") recurrentes = recurrentes.filter((f) => (filtroVigencia === "Vigentes" ? esVigente(f) : !esVigente(f)));
   const totalRecurrentes = recurrentes.reduce((s, f) => s + (Number(f.monto) || 0) * (f.tipo === "Ingreso" ? 1 : -1), 0);
@@ -4682,13 +4757,24 @@ function Finanzas({ data, onAdd, onEdit, onRemove }) {
     { key: "alfabetico", label: "alfabético" },
     { key: "monto", label: "monto" },
   ];
-  const movsPuntuales = data.finanzas.filter((f) => !f.esRecurrente);
+  const movsPuntuales = finanzasFiltradas.filter((f) => !f.esRecurrente);
   const gruposMes = agruparFinanzasPorMes(movsPuntuales);
   const [mesesAbiertos, setMesesAbiertos] = useState(() => new Set([mesActual]));
   const toggleMes = (mes) => setMesesAbiertos((prev) => { const next = new Set(prev); next.has(mes) ? next.delete(mes) : next.add(mes); return next; });
   const [expandido, setExpandido] = useState(null);
 
   const recurrentesOrdenados = ordenarLista(recurrentes, orden, camposOrden, ordenDir);
+
+  const columnasExport = [
+    { label: "Concepto", get: (f) => f.concepto }, { label: "Tipo", get: (f) => f.tipo },
+    { label: "Fecha", get: (f) => f.fecha }, { label: "Monto", get: (f) => f.monto },
+    { label: "Categoría", get: (f) => f.categoria }, { label: "Forma", get: (f) => f.forma },
+    { label: "Estatus", get: (f) => f.estatus }, { label: "Proyecto", get: (f) => nombreProyecto(f.proyectoId) },
+    { label: "Contacto", get: (f) => nombreCliente(f.contactoId) },
+  ];
+  const filasVisiblesExport = vista === "cobros" ? cobrosPendientes : vista === "recurrentes" ? recurrentesOrdenados : gruposMes.flatMap(([, movs]) => movs);
+  const nombreVista = vista === "cobros" ? "cobros_pendientes" : vista === "recurrentes" ? "pagos_recurrentes" : "movimientos";
+  const tituloVista = vista === "cobros" ? "Cobros pendientes" : vista === "recurrentes" ? "Pagos recurrentes" : "Movimientos financieros";
 
   return (
     <div>
@@ -4717,6 +4803,10 @@ function Finanzas({ data, onAdd, onEdit, onRemove }) {
           <p className="gp-serif text-xl gp-text-gold">{fmtMoney(totalCobrosPendientes)}</p>
         </div>
       </div>
+
+      <BarraListaEstandar busqueda={busqueda} onBusqueda={setBusqueda} placeholder="Buscar por concepto, categoría, proyecto o contacto…"
+        onExportExcel={() => exportarFilasExcel(filasVisiblesExport, columnasExport, nombreVista)}
+        onExportPDF={() => exportarFilasPDF(filasVisiblesExport, columnasExport, nombreVista, tituloVista, busqueda ? `búsqueda: "${busqueda}"` : "")} />
 
       <div className="flex flex-wrap items-center gap-2 mb-4">
         <button onClick={() => setVista("todos")} className={`text-xs px-3 py-1.5 rounded-full border ${vista === "todos" ? "gp-btn" : "gp-text-muted"}`}>Todos los movimientos</button>
@@ -5423,6 +5513,7 @@ function ActivosDigitales({ data, onAdd, onEdit, onRemove, onCrearTarea }) {
   const [modal, setModal] = useState(null);
   const [orden, setOrden] = useState("default");
   const [ordenDir, setOrdenDir] = useState("asc");
+  const [busqueda, setBusqueda] = useState("");
   const toggleOrden = (key) => { if (orden === key) setOrdenDir((d) => (d === "asc" ? "desc" : "asc")); else { setOrden(key); setOrdenDir("asc"); } };
   const empty = { tipo: "Dominio", nombre: "", proyectoId: "", fechaVencimiento: todayISO(), costoRenovacion: "", notas: "" };
   const camposOrden = {
@@ -5435,9 +5526,15 @@ function ActivosDigitales({ data, onAdd, onEdit, onRemove, onCrearTarea }) {
     { key: "registro", label: "fecha de registro" },
     { key: "alfabetico", label: "alfabético" },
   ];
-  const base = orden === "default" ? [...(data.activos || [])].sort((a, b) => (a.fechaVencimiento || "").localeCompare(b.fechaVencimiento || "")) : (data.activos || []);
-  const ordenados = ordenarLista(base, orden, camposOrden, ordenDir);
   const nombreProyecto = (id) => data.proyectos.find((p) => p.id === id)?.nombre || "—";
+  const buscados = filtrarPorBusqueda(data.activos || [], busqueda, [(a) => a.nombre, (a) => a.tipo, (a) => a.notas, (a) => nombreProyecto(a.proyectoId)]);
+  const base = orden === "default" ? [...buscados].sort((a, b) => (a.fechaVencimiento || "").localeCompare(b.fechaVencimiento || "")) : buscados;
+  const ordenados = ordenarLista(base, orden, camposOrden, ordenDir);
+  const columnasExport = [
+    { label: "Activo", get: (a) => a.nombre }, { label: "Tipo", get: (a) => a.tipo },
+    { label: "Proyecto", get: (a) => nombreProyecto(a.proyectoId) }, { label: "Vence", get: (a) => a.fechaVencimiento },
+    { label: "Costo renovación", get: (a) => a.costoRenovacion }, { label: "Notas", get: (a) => a.notas },
+  ];
 
   return (
     <div>
@@ -5446,7 +5543,10 @@ function ActivosDigitales({ data, onAdd, onEdit, onRemove, onCrearTarea }) {
         <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm w-full sm:w-auto"><Plus size={14} /> Nuevo</button>
       </div>
       <p className="text-sm gp-text-muted mb-3">Dominios, hosting, marcas ante IMPI y redes — para que ningún vencimiento te tome por sorpresa.</p>
-      <div className="mb-4"><OrdenSelector opciones={opcionesOrden} value={orden} onChange={setOrden} /></div>
+      <div className="mb-2"><OrdenSelector opciones={opcionesOrden} value={orden} onChange={setOrden} /></div>
+      <BarraListaEstandar busqueda={busqueda} onBusqueda={setBusqueda} placeholder="Buscar por nombre, tipo, proyecto o notas…"
+        onExportExcel={() => exportarFilasExcel(ordenados, columnasExport, "activos_digitales")}
+        onExportPDF={() => exportarFilasPDF(ordenados, columnasExport, "activos_digitales", "Activos digitales", busqueda ? `búsqueda: "${busqueda}"` : "")} />
 
       <div className="gp-panel overflow-x-auto">
         <table className="gp-table">
@@ -5636,6 +5736,7 @@ function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
   const [comentariosDe, setComentariosDe] = useState(null);
   const [filtroTipo, setFiltroTipo] = useState("Todos");
   const [orden, setOrden] = useState("default");
+  const [busqueda, setBusqueda] = useState("");
   const empty = { nombre: "", tipo: "Cliente", parentesco: "", fechaNacimiento: "", contexto: "", proyectoId: "", whatsapp: "", correo: "", notas: "" };
   const nombreProyecto = (id) => data.proyectos.find((p) => p.id === id)?.nombre || "—";
   const toneTipo = { Cliente: "teal", Proveedor: "gold", Colaborador: "red", Otro: "" };
@@ -5648,7 +5749,14 @@ function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
     { key: "registro", label: "fecha de registro" },
   ];
   const filtrados = filtroTipo === "Todos" ? data.contactos : data.contactos.filter((c) => (c.tipo || "Otro") === filtroTipo);
-  const visibles = ordenarLista(filtrados, orden, camposOrden);
+  const buscados = filtrarPorBusqueda(filtrados, busqueda, [(c) => c.nombre, (c) => c.contexto, (c) => c.whatsapp, (c) => c.correo, (c) => c.parentesco, (c) => c.notas]);
+  const visibles = ordenarLista(buscados, orden, camposOrden);
+  const columnasExport = [
+    { label: "Nombre", get: (c) => c.nombre }, { label: "Tipo", get: (c) => c.tipo },
+    { label: "Parentesco", get: (c) => c.parentesco }, { label: "WhatsApp", get: (c) => c.whatsapp },
+    { label: "Correo", get: (c) => c.correo }, { label: "Proyecto", get: (c) => nombreProyecto(c.proyectoId) },
+    { label: "Notas", get: (c) => c.notas },
+  ];
 
   return (
     <div>
@@ -5658,7 +5766,7 @@ function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
       </div>
       <p className="text-sm gp-text-muted mb-4">Clientes, proveedores, colaboradores y gente que conoces en eventos — para que no se pierdan.</p>
 
-      <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
         <div className="flex flex-wrap gap-1">
           {["Todos", "Cliente", "Proveedor", "Colaborador", "Otro"].map((t) => (
             <button key={t} onClick={() => setFiltroTipo(t)} className={`text-xs px-2.5 py-1 rounded-full border ${filtroTipo === t ? "gp-btn" : "gp-text-muted"}`}>{t}</button>
@@ -5666,6 +5774,9 @@ function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
         </div>
         <OrdenSelector opciones={opcionesOrden} value={orden} onChange={setOrden} />
       </div>
+      <BarraListaEstandar busqueda={busqueda} onBusqueda={setBusqueda} placeholder="Buscar por nombre, contexto, WhatsApp, correo…"
+        onExportExcel={() => exportarFilasExcel(visibles, columnasExport, "contactos")}
+        onExportPDF={() => exportarFilasPDF(visibles, columnasExport, "contactos", "Contactos", `filtro: ${filtroTipo}${busqueda ? ` · búsqueda: "${busqueda}"` : ""}`)} />
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         {visibles.map((c) => (
@@ -6167,6 +6278,7 @@ function Patrimonio({ data, onAdd, onEdit, onRemove, onAddValuacion, onRemoveVal
   const [filtroCategoria, setFiltroCategoria] = useState("Todas");
   const [orden, setOrden] = useState("default");
   const [ordenDir, setOrdenDir] = useState("asc");
+  const [busqueda, setBusqueda] = useState("");
   const toggleOrden = (key) => { if (orden === key) setOrdenDir((d) => (d === "asc" ? "desc" : "asc")); else { setOrden(key); setOrdenDir("asc"); } };
   const empty = { nombre: "", categoria: "Inmueble", fechaAdquisicion: todayISO(), valorAdquisicion: "", notas: "" };
 
@@ -6192,9 +6304,15 @@ function Patrimonio({ data, onAdd, onEdit, onRemove, onAddValuacion, onRemoveVal
 
   let bienes = data.patrimonio;
   if (filtroCategoria !== "Todas") bienes = bienes.filter((b) => b.categoria === filtroCategoria);
+  bienes = filtrarPorBusqueda(bienes, busqueda, [(b) => b.nombre, (b) => b.categoria, (b) => b.notas]);
   const ordenados = ordenarLista(bienes, orden, camposOrden, ordenDir);
   const totalPatrimonio = ordenados.reduce((s, b) => s + valorActual(b), 0);
   const totalAdquisicion = ordenados.reduce((s, b) => s + (Number(b.valorAdquisicion) || 0), 0);
+  const columnasExport = [
+    { label: "Nombre", get: (b) => b.nombre }, { label: "Categoría", get: (b) => b.categoria },
+    { label: "Fecha de adquisición", get: (b) => b.fechaAdquisicion }, { label: "Valor de adquisición", get: (b) => b.valorAdquisicion },
+    { label: "Valor actual", get: (b) => valorActual(b) }, { label: "Notas", get: (b) => b.notas },
+  ];
 
   return (
     <div>
@@ -6213,13 +6331,16 @@ function Patrimonio({ data, onAdd, onEdit, onRemove, onAddValuacion, onRemoveVal
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2 mb-4">
+      <div className="flex flex-wrap items-center gap-2 mb-2">
         <select className="gp-input text-xs py-1.5" style={{ width: "auto" }} value={filtroCategoria} onChange={(e) => setFiltroCategoria(e.target.value)}>
           <option value="Todas">Todas las categorías</option>
           {CATEGORIAS_PATRIMONIO.map((c) => <option key={c}>{c}</option>)}
         </select>
         <OrdenSelector opciones={opcionesOrden} value={orden} onChange={setOrden} />
       </div>
+      <BarraListaEstandar busqueda={busqueda} onBusqueda={setBusqueda} placeholder="Buscar por nombre, categoría o notas…"
+        onExportExcel={() => exportarFilasExcel(ordenados, columnasExport, "patrimonio")}
+        onExportPDF={() => exportarFilasPDF(ordenados, columnasExport, "patrimonio", "Patrimonio", `categoría: ${filtroCategoria}${busqueda ? ` · búsqueda: "${busqueda}"` : ""}`)} />
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         {ordenados.map((b) => {
@@ -6343,6 +6464,7 @@ function Documentos({ data, onAdd, onEdit, onRemove, onCrearTarea }) {
   const [modal, setModal] = useState(null);
   const [orden, setOrden] = useState("default");
   const [ordenDir, setOrdenDir] = useState("asc");
+  const [busqueda, setBusqueda] = useState("");
   const toggleOrden = (key) => { if (orden === key) setOrdenDir((d) => (d === "asc" ? "desc" : "asc")); else { setOrden(key); setOrdenDir("asc"); } };
   const empty = { tipo: "Contrato", nombre: "", proyectoId: "", fechaVencimiento: "", notas: "" };
   const camposOrden = {
@@ -6355,9 +6477,15 @@ function Documentos({ data, onAdd, onEdit, onRemove, onCrearTarea }) {
     { key: "registro", label: "fecha de registro" },
     { key: "alfabetico", label: "alfabético" },
   ];
-  const base = orden === "default" ? [...data.documentos].sort((a, b) => (a.fechaVencimiento || "").localeCompare(b.fechaVencimiento || "")) : data.documentos;
-  const ordenados = ordenarLista(base, orden, camposOrden, ordenDir);
   const nombreProyecto = (id) => data.proyectos.find((p) => p.id === id)?.nombre || "—";
+  const buscados = filtrarPorBusqueda(data.documentos, busqueda, [(d) => d.nombre, (d) => d.tipo, (d) => d.notas, (d) => nombreProyecto(d.proyectoId)]);
+  const base = orden === "default" ? [...buscados].sort((a, b) => (a.fechaVencimiento || "").localeCompare(b.fechaVencimiento || "")) : buscados;
+  const ordenados = ordenarLista(base, orden, camposOrden, ordenDir);
+  const columnasExport = [
+    { label: "Documento", get: (d) => d.nombre }, { label: "Tipo", get: (d) => d.tipo },
+    { label: "Proyecto", get: (d) => nombreProyecto(d.proyectoId) }, { label: "Vencimiento", get: (d) => d.fechaVencimiento },
+    { label: "Notas", get: (d) => d.notas },
+  ];
 
   return (
     <div>
@@ -6366,7 +6494,10 @@ function Documentos({ data, onAdd, onEdit, onRemove, onCrearTarea }) {
         <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm w-full sm:w-auto"><Plus size={14} /> Nuevo</button>
       </div>
       <p className="text-sm gp-text-muted mb-3">Contratos, registros de marca ante IMPI y demás documentos, por proyecto.</p>
-      <div className="mb-4"><OrdenSelector opciones={opcionesOrden} value={orden} onChange={setOrden} /></div>
+      <div className="mb-2"><OrdenSelector opciones={opcionesOrden} value={orden} onChange={setOrden} /></div>
+      <BarraListaEstandar busqueda={busqueda} onBusqueda={setBusqueda} placeholder="Buscar por nombre, tipo, proyecto o notas…"
+        onExportExcel={() => exportarFilasExcel(ordenados, columnasExport, "legal_y_contratos")}
+        onExportPDF={() => exportarFilasPDF(ordenados, columnasExport, "legal_y_contratos", "Legal y contratos", busqueda ? `búsqueda: "${busqueda}"` : "")} />
 
       <div className="gp-panel overflow-x-auto">
         <table className="gp-table">
