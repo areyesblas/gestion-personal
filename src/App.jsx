@@ -5562,7 +5562,7 @@ function ActivosDigitales({ data, onAdd, onEdit, onRemove, onCrearTarea }) {
   const [ordenDir, setOrdenDir] = useState("asc");
   const [busqueda, setBusqueda] = useState("");
   const toggleOrden = (key) => { if (orden === key) setOrdenDir((d) => (d === "asc" ? "desc" : "asc")); else { setOrden(key); setOrdenDir("asc"); } };
-  const empty = { tipo: "Dominio", nombre: "", proyectoId: "", fechaVencimiento: todayISO(), costoRenovacion: "", notas: "" };
+  const empty = { tipo: "Dominio", nombre: "", proyectoId: "", fechaVencimiento: todayISO(), costoRenovacion: "", notas: "", proveedor: "", urlIdentificador: "", cuentaPropietaria: "", renovacionAutomatica: false };
   const camposOrden = {
     vencimiento: { get: (a) => a.fechaVencimiento, tipo: "fecha" },
     registro: { get: (a) => a.createdAt, tipo: "fecha" },
@@ -5574,13 +5574,17 @@ function ActivosDigitales({ data, onAdd, onEdit, onRemove, onCrearTarea }) {
     { key: "alfabetico", label: "alfabético" },
   ];
   const nombreProyecto = (id) => data.proyectos.find((p) => p.id === id)?.nombre || "—";
-  const buscados = filtrarPorBusqueda(data.activos || [], busqueda, [(a) => a.nombre, (a) => a.tipo, (a) => a.notas, (a) => nombreProyecto(a.proyectoId)]);
+  const buscados = filtrarPorBusqueda(data.activos || [], busqueda, [(a) => a.nombre, (a) => a.tipo, (a) => a.notas, (a) => nombreProyecto(a.proyectoId), (a) => a.proveedor, (a) => a.cuentaPropietaria]);
   const base = orden === "default" ? [...buscados].sort((a, b) => (a.fechaVencimiento || "").localeCompare(b.fechaVencimiento || "")) : buscados;
   const ordenados = ordenarLista(base, orden, camposOrden, ordenDir);
   const columnasExport = [
     { label: "Activo", get: (a) => a.nombre }, { label: "Tipo", get: (a) => a.tipo },
     { label: "Proyecto", get: (a) => nombreProyecto(a.proyectoId) }, { label: "Vence", get: (a) => a.fechaVencimiento },
-    { label: "Costo renovación", get: (a) => a.costoRenovacion }, { label: "Notas", get: (a) => a.notas },
+    { label: "Costo renovación", get: (a) => a.costoRenovacion },
+    { label: "Proveedor", get: (a) => a.proveedor }, { label: "URL/identificador", get: (a) => a.urlIdentificador },
+    { label: "Cuenta propietaria", get: (a) => a.cuentaPropietaria },
+    { label: "Renovación automática", get: (a) => (a.renovacionAutomatica ? "Sí" : "No") },
+    { label: "Notas", get: (a) => a.notas },
   ];
 
   return (
@@ -5597,7 +5601,7 @@ function ActivosDigitales({ data, onAdd, onEdit, onRemove, onCrearTarea }) {
 
       <div className="gp-panel overflow-x-auto">
         <table className="gp-table">
-          <thead><tr><Th label="Activo" sortKey="alfabetico" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} /><th>Tipo</th><th>Proyecto</th><Th label="Vence" sortKey="vencimiento" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} /><th>Estatus</th><th>Costo renovación</th><th></th></tr></thead>
+          <thead><tr><Th label="Activo" sortKey="alfabetico" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} /><th>Tipo</th><th>Proyecto</th><Th label="Vence" sortKey="vencimiento" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} /><th>Estatus</th><th>Costo renovación</th><th>Auto</th><th></th></tr></thead>
           <tbody>
             {ordenados.map((a) => {
               const dd = daysUntil(a.fechaVencimiento);
@@ -5605,17 +5609,23 @@ function ActivosDigitales({ data, onAdd, onEdit, onRemove, onCrearTarea }) {
               const label = dd < 0 ? `Vencido (${Math.abs(dd)}d)` : dd <= 14 ? `Renovar en ${dd}d` : "Vigente";
               return (
                 <tr key={a.id}>
-                  <td>{a.nombre}</td>
+                  <td>
+                    {a.nombre}
+                    {(a.proveedor || a.cuentaPropietaria) && (
+                      <div className="text-xs gp-text-muted">{[a.proveedor, a.cuentaPropietaria].filter(Boolean).join(" · ")}</div>
+                    )}
+                  </td>
                   <td className="gp-text-muted">{a.tipo}</td>
                   <td className="gp-text-muted">{nombreProyecto(a.proyectoId)}</td>
                   <td className="gp-mono">{a.fechaVencimiento}</td>
                   <td><Badge tone={tone}>{label}</Badge></td>
                   <td className="gp-mono">{a.costoRenovacion ? fmtMoney(a.costoRenovacion) : "—"}</td>
+                  <td>{a.renovacionAutomatica ? <Badge tone="teal">Sí</Badge> : <span className="gp-text-muted text-xs">No</span>}</td>
                   <td><div className="flex gap-1"><IconBtn onClick={() => setModal({ item: a })}><Pencil size={13} /></IconBtn><IconBtn onClick={() => onRemove(a.id)}><Trash2 size={13} /></IconBtn></div></td>
                 </tr>
               );
             })}
-            {ordenados.length === 0 && <tr><td colSpan={7} className="text-center gp-text-muted py-6">Sin activos digitales registrados.</td></tr>}
+            {ordenados.length === 0 && <tr><td colSpan={8} className="text-center gp-text-muted py-6">Sin activos digitales registrados.</td></tr>}
           </tbody>
         </table>
       </div>
@@ -5664,6 +5674,15 @@ function ActivoForm({ item, proyectos, onSave }) {
         <Field label="Fecha de vencimiento"><input type="date" className="gp-input" value={v.fechaVencimiento} onChange={(e) => setV({ ...v, fechaVencimiento: e.target.value })} /></Field>
         <Field label="Costo de renovación"><MoneyInput className="gp-input" value={v.costoRenovacion} onChange={(val) => setV({ ...v, costoRenovacion: val })} /></Field>
       </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <Field label="Proveedor"><input className="gp-input" placeholder="ej. AKKY, GoDaddy, IMPI" value={v.proveedor || ""} onChange={(e) => setV({ ...v, proveedor: e.target.value })} /></Field>
+        <Field label="Cuenta propietaria"><input className="gp-input" placeholder="ej. cuenta principal, cuenta ARKEYMEDIA" value={v.cuentaPropietaria || ""} onChange={(e) => setV({ ...v, cuentaPropietaria: e.target.value })} /></Field>
+      </div>
+      <Field label="URL o identificador"><input className="gp-input" placeholder="ej. https://... o número de expediente" value={v.urlIdentificador || ""} onChange={(e) => setV({ ...v, urlIdentificador: e.target.value })} /></Field>
+      <label className="flex items-center gap-2 mb-3 text-sm cursor-pointer select-none">
+        <input type="checkbox" checked={!!v.renovacionAutomatica} onChange={(e) => setV({ ...v, renovacionAutomatica: e.target.checked })} style={{ width: 16, height: 16, accentColor: "var(--gold)" }} />
+        Renovación automática
+      </label>
       <Field label="Notas"><textarea className="gp-input" rows={2} value={v.notas} onChange={(e) => setV({ ...v, notas: e.target.value })} /></Field>
       {error && <p className="text-xs gp-text-red mb-2">{error}</p>}
 
