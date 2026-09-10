@@ -40,7 +40,11 @@ const Tokens = ({ tema = "oscuro" }) => (
     .gp-panel-hi:hover{ background:var(--panel-hi); }
     .gp-border{ border-color:var(--border); }
     .gp-input{ background:var(--bg); border:1px solid var(--border); color:var(--text);
-      border-radius:4px; padding:6px 10px; font-size:13px; width:100%; }
+      border-radius:4px; padding:6px 10px; font-size:13px; width:100%; box-sizing:border-box; }
+    /* input/select comparten una altura fija para que en filas de grid (p.ej. Fecha/Hora/Duración)
+       todos los campos queden alineados — los inputs nativos de fecha/hora traen su propio
+       ícono interno que si no se fija la altura, los hace ver más altos/bajos que sus vecinos. */
+    input.gp-input, select.gp-input{ height:34px; }
     .gp-input:focus{ outline:1px solid var(--gold); border-color:var(--gold); }
     /* En celular, un input con letra menor a 16px hace que iOS/Android le hagan zoom
        automático al enfocarlo (y a veces no regresa bien al tamaño normal al desenfocar).
@@ -510,8 +514,8 @@ function BarraListaEstandar({ busqueda, onBusqueda, placeholder, onExportExcel, 
   return (
     <div className="flex flex-wrap items-center gap-2 mb-4">
       <div className="relative flex-1" style={{ minWidth: 180, maxWidth: 320 }}>
-        <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 gp-text-muted" />
-        <input className="gp-input pl-8 text-sm" placeholder={placeholder || "Buscar en esta lista…"} value={busqueda} onChange={(e) => onBusqueda(e.target.value)} />
+        <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 gp-text-muted" style={{ pointerEvents: "none" }} />
+        <input className="gp-input text-sm" style={{ paddingLeft: 32 }} placeholder={placeholder || "Buscar en esta lista…"} value={busqueda} onChange={(e) => onBusqueda(e.target.value)} />
       </div>
       <button onClick={onExportExcel} className="text-xs px-2.5 py-1.5 rounded gp-btn-ghost flex items-center gap-1"><Download size={12} /> Excel</button>
       <button onClick={onExportPDF} className="text-xs px-2.5 py-1.5 rounded gp-btn-ghost flex items-center gap-1"><Download size={12} /> PDF</button>
@@ -2326,7 +2330,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
           onTouchStart={onTouchStartContenido}
           onTouchMove={onTouchMoveContenido}
           onTouchEnd={onTouchEndContenido}
-          className="flex-1 p-4 pt-[calc(env(safe-area-inset-top)+4rem)] md:p-6 md:pt-6 overflow-y-auto gp-scroll w-full"
+          className="flex-1 p-4 pt-[calc(env(safe-area-inset-top)+4.75rem)] md:p-6 md:pt-6 overflow-y-auto gp-scroll w-full"
           style={{ maxHeight: "100vh" }}
         >
           {(pullDist > 0 || refrescando) && (
@@ -3335,9 +3339,10 @@ function Dashboard({ data, setView, onAddSaldo, onVerProyecto, onEditPendiente, 
   // --- Unificación de "Acciones": sin importar el módulo de origen, si requiere que el usuario
   // haga algo hoy o en los próximos días, se junta aquí en una sola vista. No es una entidad nueva
   // ni una tabla nueva — solo lee de las entidades reales (Pendientes, Citas, Finanzas).
+  const [tachadas, setTachadas] = useState(new Set());
   const acciones = [];
   data.pendientes.forEach((p) => {
-    if (p.estatus === "Completada") return;
+    if (p.estatus === "Completada" && !tachadas.has(p.id)) return;
     if (p.fechaLimite) {
       const dd = daysUntil(p.fechaLimite);
       if (dd <= 7) acciones.push({ id: `pend-${p.id}`, origen: "Tarea", tipo: "pendiente", texto: p.descripcion, sub: nombreProyecto(p.proyectoId), dd, irA: () => setView("pendientes"), pendienteId: p.id });
@@ -3449,12 +3454,26 @@ function Dashboard({ data, setView, onAddSaldo, onVerProyecto, onEditPendiente, 
               {accionesHoy.map((a) => (
                 <li key={a.id} className="flex items-center gap-2">
                   {a.pendienteId ? (
-                    <button onClick={() => onEditPendiente(a.pendienteId, { estatus: "Completada" })} title="Marcar como hecho"
-                      className="w-5 h-5 rounded flex items-center justify-center shrink-0" style={{ border: "1px solid var(--border)" }}>
+                    <button
+                      onClick={() => {
+                        const yaTachada = tachadas.has(a.pendienteId);
+                        if (yaTachada) {
+                          setTachadas((prev) => { const n = new Set(prev); n.delete(a.pendienteId); return n; });
+                          onEditPendiente(a.pendienteId, { estatus: "Pendiente" });
+                        } else {
+                          setTachadas((prev) => new Set(prev).add(a.pendienteId));
+                          onEditPendiente(a.pendienteId, { estatus: "Completada" });
+                        }
+                      }}
+                      title={tachadas.has(a.pendienteId) ? "Deshacer" : "Marcar como hecho"}
+                      className="w-5 h-5 rounded flex items-center justify-center shrink-0"
+                      style={{ border: "1px solid var(--border)", background: tachadas.has(a.pendienteId) ? "var(--teal)" : "transparent" }}
+                    >
+                      {tachadas.has(a.pendienteId) && <Check size={13} color="#fff" />}
                     </button>
                   ) : <span className="w-5 shrink-0" />}
                   <button onClick={a.irA} className="flex-1 text-left flex items-center justify-between gap-2 min-w-0 py-0.5">
-                    <span className="text-sm truncate">{a.texto || a.origen}{a.sub ? <span className="gp-text-muted"> — {a.sub}</span> : ""}</span>
+                    <span className={`text-sm truncate ${tachadas.has(a.pendienteId) ? "line-through gp-text-muted" : ""}`}>{a.texto || a.origen}{a.sub ? <span className="gp-text-muted"> — {a.sub}</span> : ""}</span>
                     {badgeDia(a.dd)}
                   </button>
                 </li>
@@ -3590,7 +3609,7 @@ function Dashboard({ data, setView, onAddSaldo, onVerProyecto, onEditPendiente, 
 
       {sinGithub.length > 0 && (
         <div className="gp-panel p-4 mb-6">
-          <div className="flex items-center gap-2 mb-3"><Github size={14} className="gp-text-gold" /><h3 className="text-sm font-medium">Pendiente: subir proyectos a GitHub</h3></div>
+          <div className="flex items-center gap-2 mb-3"><Github size={14} className="gp-text-gold" /><h3 className="text-sm font-medium">Tarea: subir proyectos a GitHub</h3></div>
           <ul className="space-y-1.5 text-xs gp-text-muted">
             {sinGithub.map((p) => <li key={p.id}>· {p.nombre}</li>)}
           </ul>
@@ -3602,7 +3621,7 @@ function Dashboard({ data, setView, onAddSaldo, onVerProyecto, onEditPendiente, 
         <div className="gp-panel p-4">
           <h3 className="text-sm font-medium mb-3">Avance general</h3>
           <div className="mb-3">
-            <div className="flex justify-between text-xs mb-1"><span className="gp-text-muted">Pendientes completados</span><span className="gp-mono">{pendientesHechos}/{pendientesTotal} · {pctPendientes}%</span></div>
+            <div className="flex justify-between text-xs mb-1"><span className="gp-text-muted">Tareas completadas</span><span className="gp-mono">{pendientesHechos}/{pendientesTotal} · {pctPendientes}%</span></div>
             <div className="h-2 rounded" style={{ background: "var(--border)" }}><div className="h-2 rounded" style={{ width: `${pctPendientes}%`, background: "var(--teal)" }} /></div>
           </div>
           <div>
@@ -5624,7 +5643,7 @@ function Deudas({ data, onAddFinanzas, onEditFinanzas, onRemoveFinanzas, onCrear
         </Modal>
       )}
       {modal && modal.paso === "tarea" && (
-        <Modal title="Acción relacionada" onClose={() => setModal(null)}>
+        <Modal title="Tarea relacionada" onClose={() => setModal(null)}>
           <PromptTareaRelacionada
             origenTabla="finanzas" origenId={modal.origenId} proyectoId={modal.item.proyectoId}
             descripcionSugerida={`Pagar a ${modal.item.concepto}`}
@@ -5924,7 +5943,7 @@ function ActivosDigitales({ data, onAdd, onEdit, onRemove, onCrearTarea }) {
         </Modal>
       )}
       {modal && modal.paso === "tarea" && (
-        <Modal title="Acción relacionada" onClose={() => setModal(null)}>
+        <Modal title="Tarea relacionada" onClose={() => setModal(null)}>
           <PromptTareaRelacionada
             origenTabla="activos" origenId={modal.origenId} proyectoId={modal.item.proyectoId}
             descripcionSugerida={`Renovar ${modal.item.nombre}`}
@@ -6228,6 +6247,7 @@ function ContactoForm({ item, proyectos, onSave }) {
         <Field label="WhatsApp"><input className="gp-input" value={v.whatsapp} onChange={(e) => setV({ ...v, whatsapp: e.target.value })} /></Field>
         <Field label="Correo (opcional)"><input className="gp-input" value={v.correo} onChange={(e) => setV({ ...v, correo: e.target.value })} /></Field>
       </div>
+      <Field label="Dirección (opcional)"><textarea className="gp-input" rows={2} placeholder="Calle, número, colonia, ciudad…" value={v.direccion || ""} onChange={(e) => setV({ ...v, direccion: e.target.value })} /></Field>
       <Field label="Notas"><textarea className="gp-input" rows={2} value={v.notas} onChange={(e) => setV({ ...v, notas: e.target.value })} /></Field>
       {error && <p className="text-xs gp-text-red mb-2">{error}</p>}
 
@@ -6911,7 +6931,7 @@ function Documentos({ data, onAdd, onEdit, onRemove, onCrearTarea }) {
         </Modal>
       )}
       {modal && modal.paso === "tarea" && (
-        <Modal title="Acción relacionada" onClose={() => setModal(null)}>
+        <Modal title="Tarea relacionada" onClose={() => setModal(null)}>
           <PromptTareaRelacionada
             origenTabla="documentos" origenId={modal.origenId} proyectoId={modal.item.proyectoId}
             descripcionSugerida={`Dar seguimiento a ${modal.item.nombre}`}
@@ -8842,7 +8862,7 @@ function Citas({ data, onAdd, onEdit, onRemove, onCrearTarea }) {
         </Modal>
       )}
       {modal && modal.paso === "tarea" && (
-        <Modal title="Acción relacionada" onClose={() => setModal(null)}>
+        <Modal title="Tarea relacionada" onClose={() => setModal(null)}>
           <PromptTareaRelacionada
             origenTabla="citas" origenId={modal.origenId} proyectoId=""
             descripcionSugerida={`Preparar para: ${modal.item.titulo}`}
@@ -9035,8 +9055,8 @@ function NotaForm({ item, onSave }) {
   const [contenido, setContenido] = useState(item.contenido || "");
   return (
     <div>
-      <Field label="Título (opcional)"><input className="gp-input" value={titulo} onChange={(e) => setTitulo(e.target.value)} /></Field>
-      <Field label="Escribe lo que sea"><textarea className="gp-input" rows={8} value={contenido} onChange={(e) => setContenido(e.target.value)} autoFocus /></Field>
+      <Field label="Título (opcional)"><input autoFocus className="gp-input" value={titulo} onChange={(e) => setTitulo(e.target.value)} /></Field>
+      <Field label="Escribe lo que sea"><textarea className="gp-input" rows={8} value={contenido} onChange={(e) => setContenido(e.target.value)} /></Field>
       <button className="gp-btn w-full py-2 text-sm mt-1" onClick={() => onSave({ titulo: titulo.trim(), contenido })}>
         Guardar
       </button>
@@ -9524,17 +9544,21 @@ function QuickCapture({ data, onAdd, onCrearRecordatorio, irAVista }) {
 function ContactoRapidoForm({ onSave }) {
   const [nombre, setNombre] = useState("");
   const [fechaNacimiento, setFechaNacimiento] = useState("");
-  const [telefono, setTelefono] = useState("");
+  const [whatsapp, setWhatsapp] = useState("");
+  const [correo, setCorreo] = useState("");
   const [error, setError] = useState("");
   return (
     <div>
       <Field label="Nombre"><input className="gp-input" value={nombre} onChange={(e) => setNombre(e.target.value)} /></Field>
-      <Field label="Teléfono (opcional)"><input className="gp-input" value={telefono} onChange={(e) => setTelefono(e.target.value)} /></Field>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <Field label="WhatsApp (opcional)"><input className="gp-input" value={whatsapp} onChange={(e) => setWhatsapp(e.target.value)} /></Field>
+        <Field label="Correo (opcional)"><input className="gp-input" value={correo} onChange={(e) => setCorreo(e.target.value)} /></Field>
+      </div>
       <CumpleanosField value={fechaNacimiento} onChange={setFechaNacimiento} />
       {error && <p className="text-xs gp-text-red mb-2">{error}</p>}
       <button className="gp-btn w-full py-2 text-sm mt-1" onClick={() => {
         if (!nombre.trim()) { setError("Captura un nombre."); return; }
-        onSave({ nombre: nombre.trim(), telefono: telefono.trim(), correo: "", empresa: "", categoria: "General", notas: "", fechaNacimiento });
+        onSave({ nombre: nombre.trim(), whatsapp: whatsapp.trim(), correo: correo.trim(), tipo: "Otro", notas: "", fechaNacimiento });
       }}>
         Guardar (puedes agregar más datos después desde Contactos)
       </button>
