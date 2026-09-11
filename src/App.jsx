@@ -10456,7 +10456,6 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
       window.location.reload();
       return;
     }
-    if (!micMutedRef.current) alternarMicMuted();
     detenerTodo();
     abiertoRef.current = false;
     setAbierto(false);
