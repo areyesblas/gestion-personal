@@ -10352,6 +10352,51 @@ function VoiceMode({ contextoPantalla, onDatosCreados, irAVista }) {
 
   const cambiarEstado = (nuevo) => { estadoRef.current = nuevo; setEstado(nuevo); };
 
+  // Posición libre del botón flotante, igual que el botón ⚡ (QuickCapture): por default abajo
+  // a la izquierda, pero se puede arrastrar a donde acomode y se recuerda por dispositivo.
+  const [pos, setPos] = useState(() => {
+    try {
+      const guardada = localStorage.getItem("arkeyone_vm_pos");
+      return guardada ? JSON.parse(guardada) : null; // null = posición default
+    } catch { return null; }
+  });
+  const btnRef = useRef(null);
+  const arrastreRef = useRef({ activo: false, movido: false, startX: 0, startY: 0, offsetX: 0, offsetY: 0 });
+
+  const clampPos = (x, y) => {
+    const w = 52, h = 52, margen = 8;
+    const maxX = window.innerWidth - w - margen;
+    const maxY = window.innerHeight - h - margen;
+    return { x: Math.min(Math.max(x, margen), maxX), y: Math.min(Math.max(y, margen), maxY) };
+  };
+  const onBtnPointerDown = (e) => {
+    const rect = btnRef.current.getBoundingClientRect();
+    arrastreRef.current = {
+      activo: true, movido: false, startX: e.clientX, startY: e.clientY,
+      offsetX: e.clientX - rect.left, offsetY: e.clientY - rect.top,
+    };
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch {}
+  };
+  const onBtnPointerMove = (e) => {
+    const a = arrastreRef.current;
+    if (!a.activo) return;
+    if (!a.movido && (Math.abs(e.clientX - a.startX) > 6 || Math.abs(e.clientY - a.startY) > 6)) a.movido = true;
+    if (!a.movido) return;
+    setPos(clampPos(e.clientX - a.offsetX, e.clientY - a.offsetY));
+  };
+  const onBtnPointerUp = () => {
+    const a = arrastreRef.current;
+    if (a.movido) {
+      setPos((p) => {
+        if (p) { try { localStorage.setItem("arkeyone_vm_pos", JSON.stringify(p)); } catch {} }
+        return p;
+      });
+    } else {
+      abrir(); // fue un toque, no un arrastre: abre el Modo Conversación como siempre
+    }
+    arrastreRef.current.activo = false;
+  };
+
   const SpeechRecognitionCtor = typeof window !== "undefined" && (window.SpeechRecognition || window.webkitSpeechRecognition);
   const usaSTTNativo = !!SpeechRecognitionCtor;
   const soportaModoVoz = usaSTTNativo || (typeof navigator !== "undefined" && navigator.mediaDevices?.getUserMedia && typeof window !== "undefined" && window.MediaRecorder);
@@ -10674,12 +10719,18 @@ function VoiceMode({ contextoPantalla, onDatosCreados, irAVista }) {
     <>
       {!abierto && (
         <button
-          onClick={abrir}
-          className="fixed z-[65] rounded-full shadow-lg flex items-center justify-center"
-          style={{ bottom: 84, left: 16, width: 52, height: 52, background: "var(--gold)", color: "#0B2341" }}
+          ref={btnRef}
+          onPointerDown={onBtnPointerDown}
+          onPointerMove={onBtnPointerMove}
+          onPointerUp={onBtnPointerUp}
+          className="fixed z-[65] rounded-full shadow-lg flex items-center justify-center touch-none"
+          style={{
+            width: 52, height: 52, background: "var(--gold)", color: "#0B2341",
+            ...(pos ? { left: pos.x, top: pos.y } : { bottom: 84, left: 16 }),
+          }}
           title="Modo Conversación (voz)"
         >
-          <Mic size={22} />
+          <Bot size={24} />
         </button>
       )}
       {abierto && (
