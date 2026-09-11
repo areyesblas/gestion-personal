@@ -170,6 +170,13 @@ Deno.serve(async (_req) => {
       (porTerminar || []).forEach((r) => items.push({ tipo: "campanas", entidadId: r.id, fechaRelevante: r.fecha_fin,
         texto: `${r.nombre} (${r.plataforma}) — termina ${fmtFecha(r.fecha_fin)}` }));
     }
+    // 14. Actividades de campaña (qué publicar/hacer y cuándo, sección 9 y 10 del documento)
+    {
+      const { data } = await admin.from("campana_actividades").select("id, accion, canal, fecha, campana_id").eq("user_id", uid).is("deleted_at", null)
+        .in("estado", ["Pendiente", "En proceso"]).gte("fecha", hoy).lte("fecha", limite);
+      (data || []).forEach((r) => items.push({ tipo: "campana_actividades", entidadId: r.id, fechaRelevante: r.fecha,
+        texto: `${r.accion}${r.canal ? ` (${r.canal})` : ""} — ${fmtFecha(r.fecha)}` }));
+    }
 
     if (items.length === 0) continue;
 
@@ -185,6 +192,7 @@ Deno.serve(async (_req) => {
       pendientes: "✅ Pendientes por vencer", documentos: "📄 Documentos por vencer", activos: "🌐 Activos digitales por renovar",
       apartados: "🐷 Apartados con fecha próxima", proyectos: "📁 Proyectos por revisar", cumpleanos: "🎂 Cumpleaños próximos",
       regalos: "🎁 Regalos pendientes", eventos: "📅 Eventos próximos", facturas: "🧾 Facturas pendientes", campanas: "📣 Campañas",
+      campana_actividades: "📣 Actividades de campaña",
     };
     const grupos: Record<string, Item[]> = {};
     nuevos.forEach((it) => { (grupos[it.tipo] = grupos[it.tipo] || []).push(it); });
