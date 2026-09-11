@@ -10331,6 +10331,69 @@ function Asistente({ onDatosCreados }) {
 // El "barge-in" (interrumpir a la IA hablando) usa el mismo micrófono ya abierto en ambos
 // caminos — no hay un modo "siempre escuchando" en segundo plano, solo mientras este panel
 // está abierto, como pide el Documento Maestro.
+// Arkey: la mascota del Modo Conversación. Un robotcito de antenas y piernas cuyo cuerpo,
+// ojos, boca y antenas reaccionan al estado real de la conversación (escuchando, pensando,
+// hablando) en vez de ser un simple ícono estático.
+function ArkeyRobot({ estado, onClick }) {
+  const colorCuerpo = "#9A2E1F"; // mismo rojo quemado del botón flotante -- identidad consistente
+  const colorAntena =
+    estado === "escuchando" ? "#22c55e" :
+    estado === "hablando" ? "var(--gold)" :
+    estado === "procesando" ? "#f59e0b" :
+    "#6b7280";
+  const clickable = estado === "escuchando";
+
+  return (
+    <div onClick={clickable ? onClick : undefined} style={{ cursor: clickable ? "pointer" : "default" }}>
+      <style>{`
+        @keyframes arkey-bounce { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
+        @keyframes arkey-antena { 0%,100% { opacity: .55; r: 5; } 50% { opacity: 1; r: 6.5; } }
+        @keyframes arkey-talk { 0%,100% { transform: scaleY(1); } 50% { transform: scaleY(2.6); } }
+        @keyframes arkey-blink { 0%,92%,100% { transform: scaleY(1); } 96% { transform: scaleY(.15); } }
+        @keyframes arkey-pensar { 0%,100% { opacity: .25; } 50% { opacity: 1; } }
+        .arkey-grupo { animation: ${estado === "escuchando" ? "arkey-bounce 1.6s ease-in-out infinite" : "none"}; transform-origin: center; }
+        .arkey-antena-punta { animation: ${estado === "escuchando" || estado === "hablando" ? "arkey-antena 1s ease-in-out infinite" : "none"}; transform-origin: center; }
+        .arkey-ojo { animation: arkey-blink 4s ease-in-out infinite; transform-origin: center; }
+        .arkey-boca-hablando { animation: arkey-talk .35s ease-in-out infinite; transform-origin: center; }
+        .arkey-punto1 { animation: arkey-pensar 1s ease-in-out infinite; }
+        .arkey-punto2 { animation: arkey-pensar 1s ease-in-out .2s infinite; }
+        .arkey-punto3 { animation: arkey-pensar 1s ease-in-out .4s infinite; }
+      `}</style>
+      <svg width="90" height="112" viewBox="0 0 120 150" className="arkey-grupo">
+        {/* antenas */}
+        <line x1="38" y1="34" x2="24" y2="10" stroke={colorAntena} strokeWidth="3" strokeLinecap="round" />
+        <line x1="82" y1="34" x2="96" y2="10" stroke={colorAntena} strokeWidth="3" strokeLinecap="round" />
+        <circle className="arkey-antena-punta" cx="24" cy="10" r="6" fill={colorAntena} />
+        <circle className="arkey-antena-punta" cx="96" cy="10" r="6" fill={colorAntena} />
+        {/* cuerpo / cabeza */}
+        <rect x="18" y="30" width="84" height="72" rx="26" fill={colorCuerpo} />
+        {/* cara */}
+        <rect x="32" y="48" width="56" height="40" rx="14" fill="#0B2341" />
+        {/* ojos */}
+        <circle className="arkey-ojo" cx="48" cy="66" r={estado === "escuchando" ? 6.5 : 5.5} fill="var(--gold)" />
+        <circle className="arkey-ojo" cx="72" cy="66" r={estado === "escuchando" ? 6.5 : 5.5} fill="var(--gold)" />
+        {/* boca */}
+        {estado === "hablando" ? (
+          <rect className="arkey-boca-hablando" x="52" y="76" width="16" height="4" rx="2" fill="var(--gold)" />
+        ) : estado === "procesando" ? (
+          <>
+            <circle className="arkey-punto1" cx="52" cy="78" r="2.5" fill="var(--gold)" />
+            <circle className="arkey-punto2" cx="60" cy="78" r="2.5" fill="var(--gold)" />
+            <circle className="arkey-punto3" cx="68" cy="78" r="2.5" fill="var(--gold)" />
+          </>
+        ) : (
+          <rect x="52" y="77" width="16" height="2.5" rx="1.25" fill="var(--gold)" opacity=".7" />
+        )}
+        {/* piernas */}
+        <rect x="35" y="102" width="14" height="24" rx="6" fill={colorCuerpo} />
+        <rect x="71" y="102" width="14" height="24" rx="6" fill={colorCuerpo} />
+        <rect x="30" y="122" width="24" height="8" rx="4" fill="#0B2341" />
+        <rect x="66" y="122" width="24" height="8" rx="4" fill="#0B2341" />
+      </svg>
+    </div>
+  );
+}
+
 function VoiceMode({ contextoPantalla, onDatosCreados, irAVista }) {
   const [abierto, setAbierto] = useState(false);
   const [estado, setEstado] = useState("inactivo"); // inactivo | escuchando | procesando | hablando | permiso | error
@@ -10797,7 +10860,7 @@ function VoiceMode({ contextoPantalla, onDatosCreados, irAVista }) {
         <div className="fixed inset-0 z-[75] flex items-end sm:items-center justify-center p-4" style={{ background: "rgba(0,0,0,.55)" }} onClick={cerrar}>
           <div className="gp-panel w-full max-w-md p-4 flex flex-col" style={{ maxHeight: "80vh" }} onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-3">
-              <h2 className="text-lg font-semibold flex items-center gap-2"><Bot size={20} className="gp-text-gold" /> Modo Conversación</h2>
+              <h2 className="text-lg font-semibold flex items-center gap-2"><Bot size={20} className="gp-text-gold" /> Arkey</h2>
               <button onClick={cerrar} className="gp-btn-ghost p-2 rounded"><X size={18} /></button>
             </div>
 
@@ -10818,19 +10881,7 @@ function VoiceMode({ contextoPantalla, onDatosCreados, irAVista }) {
             </div>
 
             <div className="flex flex-col items-center gap-2 py-2">
-              <div
-                className="w-16 h-16 rounded-full flex items-center justify-center"
-                onClick={estado === "escuchando" ? () => { desbloquearVoz(); forzarFinTurno(); } : undefined}
-                style={{
-                  background: estado === "escuchando" ? "#ef4444" : estado === "hablando" ? "var(--gold)" : "rgba(255,255,255,.08)",
-                  cursor: estado === "escuchando" ? "pointer" : "default",
-                }}
-              >
-                {estado === "escuchando" && <Mic size={26} className="animate-pulse" color="#fff" />}
-                {estado === "procesando" && <Square size={20} className="animate-pulse" />}
-                {estado === "hablando" && <Volume2 size={26} color="#0B2341" />}
-                {(estado === "permiso" || estado === "error") && <Mic size={26} style={{ opacity: .4 }} />}
-              </div>
+              <ArkeyRobot estado={estado} onClick={() => { desbloquearVoz(); forzarFinTurno(); }} />
               <p className="text-xs gp-text-muted text-center">
                 {estado === "escuchando" && "Escuchando…"}
                 {estado === "procesando" && "Pensando…"}
