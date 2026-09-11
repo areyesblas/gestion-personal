@@ -10419,10 +10419,6 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
   }
 
   const cerrar = () => {
-    // Se pasa primero por el mismo camino que el botón de mutear (el "switch" de Arkey) antes de
-    // la limpieza completa -- a petición explícita: cortar por ahí primero, en vez de solo abortar
-    // de golpe, es lo que más rápido libera el micrófono en la práctica.
-    if (!micMutedRef.current) alternarMicMuted();
     detenerTodo();
     abiertoRef.current = false;
     setAbierto(false);
@@ -10790,28 +10786,16 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
   }, [sinCreditos]);
 
   // Reproducir un mensaje ya escrito en el historial o en la conversación actual, sin tocar el
-  // estado de "escuchando/procesando/hablando" del modo voz en vivo -- solo suena y ya. Importante:
-  // se pausa el micrófono antes de hablar y se retoma después si venía escuchando -- en iOS,
-  // bocina y micrófono comparten la misma sesión de audio del sistema, y reproducir sin pausar
-  // primero rompe tanto el audio de salida como la escucha posterior (bug reportado).
-  async function leerTextoMensaje(texto) {
+  // estado de "escuchando/procesando/hablando" del modo voz en vivo -- solo suena y ya.
+  function leerTextoMensaje(texto) {
     if (!texto || !("speechSynthesis" in window)) return;
-    const estabaEscuchando = estadoRef.current === "escuchando";
-    try { recognitionRef.current?.stop(); } catch {}
-    if (!usaSTTNativo) { try { await pausarMicIOS(); } catch {} }
     try {
       window.speechSynthesis.cancel();
-      await vocesListas();
+      const u = new SpeechSynthesisUtterance(texto);
       const voces = window.speechSynthesis.getVoices();
       const candidatasEs = voces.filter((v) => v.lang?.toLowerCase().startsWith("es"));
       const vozEs = candidatasEs.find((v) => v.lang?.toLowerCase() === "es-mx") || candidatasEs[0];
-      const u = new SpeechSynthesisUtterance(texto);
       if (vozEs) { u.voice = vozEs; u.lang = vozEs.lang; } else { u.lang = "es-MX"; }
-      u.onend = () => {
-        if (estabaEscuchando && abiertoRef.current && !micMutedRef.current) {
-          if (usaSTTNativo) iniciarEscuchaNativa(); else reanudarMicTrasHablarIOS();
-        }
-      };
       window.speechSynthesis.speak(u);
     } catch {}
   }
@@ -10908,12 +10892,9 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
               <h2 className="text-lg font-semibold flex items-center gap-2"><Bot size={20} className="gp-text-gold" /> Arkey</h2>
               <div className="flex items-center gap-1">
                 <button onClick={abrirHistorial} title="Conversaciones anteriores" className="gp-btn-ghost p-2 rounded"><Clock size={16} /></button>
-                <button onClick={cerrar} title="Cerrar (duerme el micrófono de Arkey)" className="gp-btn-ghost p-2 rounded"><X size={18} /></button>
+                <button onClick={cerrar} className="gp-btn-ghost p-2 rounded"><X size={18} /></button>
               </div>
             </div>
-            {!sinCreditos && (
-              <p className="text-[10px] gp-text-muted mb-1 text-right">Al cerrar, el micrófono de Arkey se apaga solo 💤</p>
-            )}
             {uso && <p className="text-[11px] gp-text-muted mb-2">{uso.usadas}/{uso.limite} consultas este mes</p>}
             {sinCreditos && (
               <p className="text-[11px] mb-2 px-2 py-1 rounded" style={{ background: "rgba(197,48,48,.12)", color: "#C0392B" }}>
@@ -10988,7 +10969,7 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
               <div className="flex items-center gap-3">
                 <button
                   onClick={alternarMicMuted}
-                  title={sinCreditos ? "Sin consultas disponibles este mes" : micMuted ? "Switch de Arkey: apagado (toca para escuchar)" : "Switch de Arkey: encendido (toca para dormirlo)"}
+                  title={sinCreditos ? "Sin consultas disponibles este mes" : micMuted ? "Activar micrófono" : "Mutear micrófono"}
                   className="gp-btn-ghost p-2 rounded"
                   disabled={sinCreditos}
                   style={sinCreditos ? { opacity: 0.4, cursor: "not-allowed" } : micMuted ? { color: "#C0392B" } : undefined}
