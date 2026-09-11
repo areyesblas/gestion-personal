@@ -897,13 +897,14 @@ function Modal({ title, onClose, children }) {
 // alta al vuelo (Grupo C — multi-contacto y tags en Citas, pensado para reusarse en otras
 // pantallas después). `opciones` y `seleccionados` son {id, label}. `onCrear` es opcional: si no
 // se pasa, no se ofrece crear (por ejemplo, si algún día se usa solo para elegir entre existentes).
-function ComboboxMultiBuscar({ seleccionados, opciones, onAgregar, onQuitar, onCrear, placeholder, crearLabel }) {
+function ComboboxMultiBuscar({ seleccionados, opciones, onAgregar, onQuitar, onCrear, placeholder, crearLabel, max }) {
   const [query, setQuery] = useState("");
   const [abierto, setAbierto] = useState(false);
   const idsSeleccionados = new Set(seleccionados.map((s) => s.id));
   const q = query.trim().toLowerCase();
   const filtradas = opciones.filter((o) => !idsSeleccionados.has(o.id) && o.label.toLowerCase().includes(q));
   const coincideExacto = opciones.some((o) => o.label.toLowerCase() === q);
+  const lleno = max && seleccionados.length >= max;
 
   return (
     <div className="mb-3">
@@ -917,6 +918,7 @@ function ComboboxMultiBuscar({ seleccionados, opciones, onAgregar, onQuitar, onC
           ))}
         </div>
       )}
+      {!lleno && (
       <div className="relative">
         <input
           className="gp-input"
@@ -957,6 +959,7 @@ function ComboboxMultiBuscar({ seleccionados, opciones, onAgregar, onQuitar, onC
           </div>
         )}
       </div>
+      )}
     </div>
   );
 }
@@ -1794,6 +1797,45 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
     setReauthError("");
   };
 
+  // Crea un contacto solo con el nombre, sin salir del formulario que lo pidió (mismo patrón que
+  // ya usan Citas y la captura rápida de Salud). tipos por default: el que se le pida (p.ej.
+  // "Colaborador" al asignarlo desde una tarea, "Otro" en los demás casos).
+  const crearContactoRapido = (nombre, tipos = ["Otro"]) => {
+    const nid = uid();
+    addItem("contactos", { id: nid, nombre, tipos });
+    return nid;
+  };
+
+  // Envía (o reenvía) el correo de invitación de una tarea a su colaborador asignado — Edge
+  // Function notificar-tarea-asignada, que además marca estado_aceptacion="pendiente" e
+  // invitacion_enviada_en si es el primer envío.
+  const enviarInvitacionTarea = async (tareaId) => {
+    try {
+      const { data: sesion } = await supabase.auth.getSession();
+      const resp = await fetch(`${supabase.supabaseUrl}/functions/v1/notificar-tarea-asignada`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${sesion.session.access_token}` },
+        body: JSON.stringify({ tareaId }),
+      });
+      if (!resp.ok) {
+        const j = await resp.json().catch(() => ({}));
+        alert(j.error || "No se pudo enviar el correo. Intenta de nuevo.");
+        return;
+      }
+      // Refresca la tarea para reflejar estado_aceptacion/invitacion_enviada_en actualizados.
+      const fresh = await fetchTable("pendientes", activeOwnerId);
+      setData((prev) => ({ ...prev, pendientes: fresh }));
+    } catch (err) {
+      console.error("Error al enviar la invitación:", err);
+      alert("No se pudo enviar el correo. Revisa tu conexión e intenta de nuevo.");
+    }
+  };
+
+  // El creador acepta la tarea en nombre del colaborador (no tiene forma de hacerlo él mismo).
+  const aceptarTareaEnNombre = (tareaId) => {
+    editItem("pendientes", tareaId, { estadoAceptacion: "aceptada", aceptadaPorCreador: true, respondidaEn: new Date().toISOString() });
+  };
+
   // Cerrar sesión "a prueba de fallos": antes solo llamábamos a signOut() sin esperar su
   // resultado ni manejar errores — si esa llamada fallaba en silencio (por ejemplo con mala
   // conexión), la app se quedaba con la sesión vieja y el botón parecía no hacer nada. Ahora
@@ -2537,10 +2579,16 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
               onIrAVista={irAVista}
               sensibleDesbloqueadoHasta={sensibleDesbloqueadoHasta}
               onDesbloquear={desbloquearSensibleAqui}
+              onCrearContacto={crearContactoRapido}
+              onEnviarInvitacion={enviarInvitacionTarea}
+              onAceptarEnNombre={aceptarTareaEnNombre}
             />
           )}
           {view === "pendientes" && (
             <Pendientes data={data} activeOwnerId={activeOwnerId} onAdd={(i) => addItem("pendientes", i)} onEdit={(id, p) => editItem("pendientes", id, p)} onRemove={(id, extraIds, mensaje) => askDelete("pendientes", id, { extraIds, mensaje })} onAddComentario={(i) => addItem("comentarios", i)} onRemoveComentario={(id) => askDelete("comentarios", id)}
+              onCrearContacto={crearContactoRapido}
+              onEnviarInvitacion={enviarInvitacionTarea}
+              onAceptarEnNombre={aceptarTareaEnNombre}
               onAsignar={async (pendienteId) => {
                 try {
                   const { data: sesion } = await supabase.auth.getSession();
@@ -2579,7 +2627,12 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
             <Documentos data={data} onAdd={(i) => addItem("documentos", i)} onEdit={(id, p) => editItem("documentos", id, p)} onRemove={(id) => askDelete("documentos", id)} onCrearTarea={(t) => addItem("pendientes", t)} />
           )}
           {view === "equipo" && (
-            <Equipo data={data} onAdd={(i) => addItem("equipo", i)} onEdit={(id, p) => editItem("equipo", id, p)} onRemove={(id) => askDelete("equipo", id)} />
+            <Equipo data={data}
+              onAddContacto={(i) => addItem("contactos", i)}
+              onEditContacto={(id, p) => editItem("contactos", id, p)}
+              onAddFinanzas={(i) => addItem("finanzas", i)}
+              onAddFactura={(i) => addItem("facturas", i)}
+            />
           )}
           {view === "contactos" && (
             <Contactos data={data} onAdd={(i) => addItem("contactos", i)} onEdit={(id, p) => editItem("contactos", id, p)} onRemove={(id) => askDelete("contactos", id)} onAddComentario={(i) => addItem("comentarios", i)} onRemoveComentario={(id) => askDelete("comentarios", id)} onVerRegalos={(c) => { setRegalosFiltroContacto(c.id); setView("regalos"); }} />
@@ -2627,7 +2680,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
             <Agenda data={data} misId={misId}
               onEditPendiente={(id, p) => editItem("pendientes", id, p)}
               onAddCita={(c) => addItem("citas", c)}
-              onCrearContacto={(nombre) => { const nid = uid(); addItem("contactos", { id: nid, nombre, tipo: "Otro" }); return nid; }}
+              onCrearContacto={(nombre) => { const nid = uid(); addItem("contactos", { id: nid, nombre, tipos: ["Otro"] }); return nid; }}
               onEditCita={async (id, p) => {
                 await editItem("citas", id, p);
                 // Etapa 6 (Agenda interactiva, secc. 23.6): "al mover una tarea deben actualizarse
@@ -2640,7 +2693,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
           )}
           {view === "citas" && (
             <Citas data={data} onAdd={(i) => addItem("citas", i)} onEdit={(id, p) => editItem("citas", id, p)} onRemove={(id) => askDelete("citas", id)} onCrearTarea={(t) => addItem("pendientes", t)}
-              onCrearContacto={(nombre) => { const nid = uid(); addItem("contactos", { id: nid, nombre, tipo: "Otro" }); return nid; }} />
+              onCrearContacto={(nombre) => { const nid = uid(); addItem("contactos", { id: nid, nombre, tipos: ["Otro"] }); return nid; }} />
           )}
           {view === "notas" && (
             <Notas data={data} onAdd={(i) => addItem("notas", i)} onEdit={(id, p) => editItem("notas", id, p)} onRemove={(id) => askDelete("notas", id)} />
@@ -3889,7 +3942,7 @@ function rentabilidadProyecto(data, proyectoId) {
   const egresos = movs.filter((f) => f.tipo === "Egreso").reduce((s, f) => s + (Number(f.monto) || 0), 0);
   const tareasProyecto = data.pendientes.filter((t) => t.proyectoId === proyectoId);
   const pagosColab = tareasProyecto
-    .filter((t) => t.responsableId && t.estatus === "Completada")
+    .filter((t) => t.colaboradorContactoId && t.estatus === "Completada")
     .reduce((s, t) => s + (Number(t.precio) || 0), 0);
   // Cuánto costaría en total hacer el proyecto si se pagara TODO lo pactado en el precio de cada
   // tarea (sin importar si ya está hecha o quién la haga) — un estimado, no un movimiento real.
@@ -3904,12 +3957,12 @@ function repartoCostosProyecto(data, proyectoId) {
   const tareas = data.pendientes.filter((t) => t.proyectoId === proyectoId && Number(t.precio) > 0);
   const grupos = {};
   for (const t of tareas) {
-    const key = t.responsableId || "_yo";
+    const key = t.colaboradorContactoId || "_yo";
     if (!grupos[key]) {
       grupos[key] = {
         key,
-        nombre: t.responsableId ? (data.equipo.find((e) => e.id === t.responsableId)?.nombre || "—") : "Tú",
-        esYo: !t.responsableId,
+        nombre: t.colaboradorContactoId ? (data.contactos.find((c) => c.id === t.colaboradorContactoId)?.nombre || "—") : "Tú",
+        esYo: !t.colaboradorContactoId,
         tareas: 0, total: 0, generado: 0, pendiente: 0,
       };
     }
@@ -4151,7 +4204,7 @@ function ProyectoForm({ item, onSave }) {
 /* ---------- Detalle de proyecto (Fase: navegación con breadcrumb) ---------- */
 // Pantalla completa de un solo proyecto: todos sus pendientes con subtareas anidadas,
 // porcentaje de avance (manual en tareas finales, calculado en tareas con hijos), y comentarios.
-function ProyectoDetalle({ data, proyectoId, onVolver, onAddTarea, onEditTarea, onRemoveTarea, onAddComentario, onRemoveComentario, onAddMeta, onEditMeta, onRemoveMeta, onIrAVista, sensibleDesbloqueadoHasta, onDesbloquear }) {
+function ProyectoDetalle({ data, proyectoId, onVolver, onAddTarea, onEditTarea, onRemoveTarea, onAddComentario, onRemoveComentario, onAddMeta, onEditMeta, onRemoveMeta, onIrAVista, sensibleDesbloqueadoHasta, onDesbloquear, onCrearContacto, onEnviarInvitacion, onAceptarEnNombre }) {
   const proyecto = data.proyectos.find((p) => p.id === proyectoId);
   const [modal, setModal] = useState(null);
   const [modalMeta, setModalMeta] = useState(null);
@@ -4179,7 +4232,7 @@ function ProyectoDetalle({ data, proyectoId, onVolver, onAddTarea, onEditTarea, 
     );
   }
 
-  const empty = { proyectoId, parentId: "", descripcion: "", fechaLimite: todayISO(), fechaRevision: "", prioridad: "Media", estatus: "Pendiente", responsableId: "", contactoId: "", precio: "", tiempoEstimado: "", tiempoReal: "", asignadoA: "", avance: "" };
+  const empty = { proyectoId, parentId: "", descripcion: "", fechaLimite: todayISO(), fechaRevision: "", prioridad: "Media", estatus: "Pendiente", colaboradorContactoId: null, contactoId: "", precio: "", fechaPagoAprox: "", tiempoEstimado: "", tiempoReal: "", asignadoA: "", avance: "" };
   const tareasProyecto = data.pendientes.filter((t) => t.proyectoId === proyectoId);
   const arbol = buildTareaTree(tareasProyecto);
   const filas = flattenTareas(arbol);
@@ -4187,7 +4240,7 @@ function ProyectoDetalle({ data, proyectoId, onVolver, onAddTarea, onEditTarea, 
   const r = rentabilidadProyecto(data, proyectoId);
   const metasProyecto = (data.metas || []).filter((m) => m.proyectoId === proyectoId);
   const nComentarios = (id) => (data.comentarios || []).filter((c) => c.entidadTipo === "pendientes" && c.entidadId === id).length;
-  const nombreResp = (id) => data.equipo.find((e) => e.id === id)?.nombre || "Tú";
+  const nombreResp = (id) => data.contactos.find((c) => c.id === id)?.nombre || "Tú";
   const nombreCliente = (id) => data.contactos.find((c) => c.id === id)?.nombre || "—";
   const paraEditar = (t) => { const { hijos, ...limpio } = t; return limpio; };
   const confirmarBorrado = (item) => {
@@ -4351,7 +4404,7 @@ function ProyectoDetalle({ data, proyectoId, onVolver, onAddTarea, onEditTarea, 
                         </span>
                       </td>
                       <td className="gp-text-muted">{p.contactoId ? nombreCliente(p.contactoId) : "—"}</td>
-                      <td className="gp-text-muted">{nombreResp(p.responsableId)}</td>
+                      <td className="gp-text-muted">{nombreResp(p.colaboradorContactoId)}</td>
                       <td className="gp-mono" style={{ color: vencido ? "var(--red)" : undefined }}>{p.fechaLimite}</td>
                       <td><Badge tone={p.prioridad === "Alta" ? "red" : p.prioridad === "Media" ? "gold" : "muted"}>{p.prioridad}</Badge></td>
                       <td>
@@ -4565,8 +4618,11 @@ function ProyectoDetalle({ data, proyectoId, onVolver, onAddTarea, onEditTarea, 
 
       {modal && (
         <Modal title={modal.item.id ? "Editar tarea" : modal.item.parentId ? "Nueva subtarea" : "Nueva tarea"} onClose={() => setModal(null)}>
-          <PendienteForm item={modal.item} proyectos={data.proyectos} equipo={data.equipo} contactos={data.contactos} pendientes={data.pendientes} colaboradores={[]} proyectoFijoId={proyectoId}
-            onSave={(v) => {
+          <PendienteForm item={modal.item} proyectos={data.proyectos} contactos={data.contactos} pendientes={data.pendientes} colaboradores={[]} proyectoFijoId={proyectoId}
+            onCrearContacto={(nombre) => onCrearContacto(nombre, ["Colaborador"])}
+            onEnviarInvitacion={onEnviarInvitacion}
+            onAceptarEnNombre={onAceptarEnNombre}
+            onSave={(v, enviarCorreo) => {
               if (modal.item.id) {
                 onEditTarea(modal.item.id, v);
                 if (v.proyectoId !== modal.item.proyectoId) {
@@ -4574,7 +4630,9 @@ function ProyectoDetalle({ data, proyectoId, onVolver, onAddTarea, onEditTarea, 
                   hijosIds.forEach((hid) => onEditTarea(hid, { proyectoId: v.proyectoId }));
                 }
               } else {
-                onAddTarea({ ...v, id: uid() });
+                const nuevoId = uid();
+                onAddTarea({ ...v, id: nuevoId });
+                if (enviarCorreo) onEnviarInvitacion(nuevoId);
               }
               setModal(null);
             }}
@@ -4786,7 +4844,7 @@ function MindMapPendientes({ proyecto, tareas, onNodoClick, onAgregar, onElimina
   );
 }
 
-function Pendientes({ data, activeOwnerId, onAdd, onEdit, onRemove, onAddComentario, onRemoveComentario, onAsignar }) {
+function Pendientes({ data, activeOwnerId, onAdd, onEdit, onRemove, onAddComentario, onRemoveComentario, onAsignar, onCrearContacto, onEnviarInvitacion, onAceptarEnNombre }) {
   const [modal, setModal] = useState(null);
   const [comentariosDe, setComentariosDe] = useState(null);
   const [orden, setOrden] = useState("default");
@@ -4794,7 +4852,7 @@ function Pendientes({ data, activeOwnerId, onAdd, onEdit, onRemove, onAddComenta
   const [proyectoMindMap, setProyectoMindMap] = useState("");
   const [filtroProyecto, setFiltroProyecto] = useState(""); // "" = todos los proyectos, en la vista de lista
   const [colaboradores, setColaboradores] = useState([]);
-  const empty = { proyectoId: "", parentId: "", descripcion: "", fechaLimite: todayISO(), fechaRevision: "", prioridad: "Media", estatus: "Pendiente", responsableId: "", contactoId: "", precio: "", tiempoEstimado: "", tiempoReal: "", asignadoA: "" };
+  const empty = { proyectoId: "", parentId: "", descripcion: "", fechaLimite: todayISO(), fechaRevision: "", prioridad: "Media", estatus: "Pendiente", colaboradorContactoId: null, contactoId: "", precio: "", fechaPagoAprox: "", tiempoEstimado: "", tiempoReal: "", asignadoA: "" };
 
   useEffect(() => {
     if (!activeOwnerId) return;
@@ -4835,7 +4893,7 @@ function Pendientes({ data, activeOwnerId, onAdd, onEdit, onRemove, onAddComenta
   const nComentarios = (id) => (data.comentarios || []).filter((c) => c.entidadTipo === "pendientes" && c.entidadId === id).length;
 
   const nombreProyecto = (id) => data.proyectos.find((p) => p.id === id)?.nombre || "—";
-  const nombreResp = (id) => data.equipo.find((e) => e.id === id)?.nombre || "Tú";
+  const nombreResp = (id) => data.contactos.find((c) => c.id === id)?.nombre || "Tú";
   const nombreCliente = (id) => data.contactos.find((c) => c.id === id)?.nombre || "—";
   // Los objetos armados por buildTareaTree traen un campo "hijos" que es solo para dibujar el árbol
   // en pantalla — hay que quitarlo antes de mandar el ítem a editar, porque no es una columna real.
@@ -4929,7 +4987,7 @@ function Pendientes({ data, activeOwnerId, onAdd, onEdit, onRemove, onAddComenta
                   </td>
                   <td className="gp-text-muted hidden md:table-cell">{nombreProyecto(p.proyectoId)}</td>
                   <td className="gp-text-muted hidden md:table-cell">{p.contactoId ? nombreCliente(p.contactoId) : "—"}</td>
-                  <td className="gp-text-muted hidden md:table-cell">{nombreResp(p.responsableId)}</td>
+                  <td className="gp-text-muted hidden md:table-cell">{nombreResp(p.colaboradorContactoId)}</td>
                   <td className="gp-mono hidden md:table-cell" style={{ color: vencido ? "var(--red)" : undefined }}>{p.fechaLimite}</td>
                   <td className="hidden md:table-cell"><Badge tone={p.prioridad === "Alta" ? "red" : p.prioridad === "Media" ? "gold" : "muted"}>{p.prioridad}</Badge></td>
                   <td onClick={(e) => e.stopPropagation()}>
@@ -4970,8 +5028,11 @@ function Pendientes({ data, activeOwnerId, onAdd, onEdit, onRemove, onAddComenta
 
       {modal && (
         <Modal title={modal.item.id ? "Editar tarea" : modal.item.parentId ? "Nueva subtarea" : "Nueva tarea"} onClose={() => setModal(null)}>
-          <PendienteForm item={modal.item} proyectos={data.proyectos} equipo={data.equipo} contactos={data.contactos} pendientes={data.pendientes} colaboradores={colaboradores}
-            onSave={(v) => {
+          <PendienteForm item={modal.item} proyectos={data.proyectos} contactos={data.contactos} pendientes={data.pendientes} colaboradores={colaboradores}
+            onCrearContacto={(nombre) => onCrearContacto(nombre, ["Colaborador"])}
+            onEnviarInvitacion={onEnviarInvitacion}
+            onAceptarEnNombre={onAceptarEnNombre}
+            onSave={(v, enviarCorreo) => {
               if (modal.item.id) {
                 onEdit(modal.item.id, v);
                 // Si cambió de proyecto (directo, o porque ahora es subtarea de otra tarea en otro proyecto),
@@ -4985,6 +5046,7 @@ function Pendientes({ data, activeOwnerId, onAdd, onEdit, onRemove, onAddComenta
                 const nuevoId = uid();
                 onAdd({ ...v, id: nuevoId });
                 if (v.asignadoA) onAsignar(nuevoId);
+                if (enviarCorreo) onEnviarInvitacion(nuevoId);
               }
               setModal(null);
             }}
@@ -4995,9 +5057,11 @@ function Pendientes({ data, activeOwnerId, onAdd, onEdit, onRemove, onAddComenta
   );
 }
 
-function PendienteForm({ item, proyectos, equipo, contactos, pendientes, colaboradores, onSave, proyectoFijoId }) {
-  const [v, setV] = useState(item);
+function PendienteForm({ item, proyectos, contactos, pendientes, colaboradores, onCrearContacto, onEnviarInvitacion, onAceptarEnNombre, onSave, proyectoFijoId }) {
+  const [v, setV] = useState({ ...item, colaboradorContactoId: item.colaboradorContactoId || null, fechaPagoAprox: item.fechaPagoAprox || "" });
   const [error, setError] = useState("");
+  const [enviarCorreo, setEnviarCorreo] = useState(!item.id);
+  const [enviando, setEnviando] = useState(false);
   const excluidos = item.id ? [item.id, ...descendientesDe(item.id, pendientes)] : [];
   // Si el proyecto está fijo (venimos desde el detalle de un proyecto), solo se puede elegir
   // como tarea principal a otra tarea de ESE mismo proyecto — no tiene sentido anidar entre proyectos distintos.
@@ -5014,6 +5078,7 @@ function PendienteForm({ item, proyectos, equipo, contactos, pendientes, colabor
 
   const proyectoHeredado = v.parentId ? proyectos.find((p) => p.id === v.proyectoId) : null;
   const proyectoFijo = proyectoFijoId ? proyectos.find((p) => p.id === proyectoFijoId) : null;
+  const colaboradorElegido = v.colaboradorContactoId ? contactos.find((c) => c.id === v.colaboradorContactoId) : null;
 
   return (
     <div>
@@ -5053,12 +5118,49 @@ function PendienteForm({ item, proyectos, equipo, contactos, pendientes, colabor
         <Field label="Prioridad"><select className="gp-input" value={v.prioridad} onChange={(e) => setV({ ...v, prioridad: e.target.value })}>{PRIORIDADES.map((c) => <option key={c}>{c}</option>)}</select></Field>
       </div>
       <Field label="Fecha de revisión (opcional)"><input type="date" className="gp-input" value={v.fechaRevision || ""} onChange={(e) => setV({ ...v, fechaRevision: e.target.value })} /></Field>
-      <Field label="Responsable">
-        <select className="gp-input" value={v.responsableId} onChange={(e) => setV({ ...v, responsableId: e.target.value })}>
-          <option value="">Tú</option>
-          {equipo.map((m) => <option key={m.id} value={m.id}>{m.nombre}</option>)}
-        </select>
+
+      <Field label="Colaborador (opcional — se le puede pagar y le llega correo para aceptar)">
+        <ComboboxMultiBuscar
+          max={1}
+          seleccionados={colaboradorElegido ? [{ id: colaboradorElegido.id, label: colaboradorElegido.nombre }] : []}
+          opciones={contactos.map((c) => ({ id: c.id, label: c.nombre }))}
+          onAgregar={(o) => setV({ ...v, colaboradorContactoId: o.id })}
+          onQuitar={() => setV({ ...v, colaboradorContactoId: null })}
+          onCrear={(nombre) => setV({ ...v, colaboradorContactoId: onCrearContacto(nombre) })}
+          placeholder="Buscar o agregar colaborador…"
+          crearLabel={(texto) => `Crear contacto "${texto}"`}
+        />
       </Field>
+
+      {colaboradorElegido && (
+        <div className="gp-panel-hi p-3 mb-3 text-xs" style={{ border: "1px solid var(--border)", borderRadius: 6 }}>
+          {!colaboradorElegido.correo ? (
+            <p className="gp-text-gold">Este contacto no tiene correo — agrégaselo desde Contactos para poder enviarle la invitación.</p>
+          ) : !item.id ? (
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" checked={enviarCorreo} onChange={(e) => setEnviarCorreo(e.target.checked)} />
+              Enviarle un correo a {colaboradorElegido.correo} en cuanto guarde, para que acepte o rechace esta tarea
+            </label>
+          ) : !v.estadoAceptacion ? (
+            <div className="flex items-center justify-between gap-2">
+              <span className="gp-text-muted">Aún no se le ha avisado.</span>
+              <button type="button" disabled={enviando} className="gp-btn-ghost px-2.5 py-1 rounded" onClick={async () => { setEnviando(true); await onEnviarInvitacion(item.id); setEnviando(false); }}>
+                {enviando ? "Enviando…" : "Enviar invitación por correo"}
+              </button>
+            </div>
+          ) : v.estadoAceptacion === "pendiente" ? (
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <Badge tone="gold">Esperando que {colaboradorElegido.nombre} confirme</Badge>
+              <button type="button" className="gp-btn-ghost px-2.5 py-1 rounded" onClick={() => onAceptarEnNombre(item.id)}>Aceptar en su nombre</button>
+            </div>
+          ) : v.estadoAceptacion === "aceptada" ? (
+            <Badge tone="teal">Aceptada{v.aceptadaPorCreador ? " (por ti, en su nombre)" : ""}</Badge>
+          ) : (
+            <Badge tone="red">Rechazada</Badge>
+          )}
+        </div>
+      )}
+
       {colaboradores && colaboradores.length > 0 && (
         <Field label="Asignar a colaborador ARKEYONE (opcional — le llega notificación push)">
           <select className="gp-input" value={v.asignadoA || ""} onChange={(e) => setV({ ...v, asignadoA: e.target.value })}>
@@ -5069,12 +5171,24 @@ function PendienteForm({ item, proyectos, equipo, contactos, pendientes, colabor
       )}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Field label="Precio pactado (si es delegado)"><MoneyInput className="gp-input" value={v.precio} onChange={(val) => setV({ ...v, precio: val })} /></Field>
-        <Field label="Tiempo estimado (horas)"><input type="number" className="gp-input" value={v.tiempoEstimado} onChange={(e) => setV({ ...v, tiempoEstimado: e.target.value })} /></Field>
+        <Field label="Fecha aprox. de pago (opcional)"><input type="date" className="gp-input" value={v.fechaPagoAprox} onChange={(e) => setV({ ...v, fechaPagoAprox: e.target.value })} /></Field>
       </div>
-      <Field label="Tiempo real (horas, cuando termine)"><input type="number" className="gp-input" value={v.tiempoReal} onChange={(e) => setV({ ...v, tiempoReal: e.target.value })} /></Field>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <Field label="Tiempo estimado (horas)"><input type="number" className="gp-input" value={v.tiempoEstimado} onChange={(e) => setV({ ...v, tiempoEstimado: e.target.value })} /></Field>
+        <Field label="Tiempo real (horas, cuando termine)"><input type="number" className="gp-input" value={v.tiempoReal} onChange={(e) => setV({ ...v, tiempoReal: e.target.value })} /></Field>
+      </div>
       {error && <p className="text-xs gp-text-red mb-2">{error}</p>}
 
-      <button className="gp-btn w-full py-2 text-sm mt-2" onClick={() => { if (!v.descripcion?.toString().trim()) { setError("La descripción del pendiente es obligatoria."); return; } setError(""); onSave(v); }}>Guardar</button>
+      <button
+        className="gp-btn w-full py-2 text-sm mt-2"
+        onClick={() => {
+          if (!v.descripcion?.toString().trim()) { setError("La descripción del pendiente es obligatoria."); return; }
+          setError("");
+          onSave(v, !item.id && colaboradorElegido && colaboradorElegido.correo ? enviarCorreo : false);
+        }}
+      >
+        Guardar
+      </button>
     </div>
   );
 }
@@ -5897,35 +6011,46 @@ function DeudaForm({ item, proyectos, saldoPendiente, onAbrirPago, onSave }) {
 }
 
 /* ---------- Equipo ---------- */
-function Equipo({ data, onAdd, onEdit, onRemove }) {
-  const [modal, setModal] = useState(null);
+// Colaboradores (Grupo C): ya no es su propia entidad — es una vista sobre Contactos filtrada por
+// tipos incluye "Colaborador" (Documento Maestro: Contactos es la entidad maestra de personas,
+// reutilizada transversalmente). La tabla `equipo` quedó desactivada; esta pantalla ahora muestra,
+// por cada colaborador, sus tareas asignadas, lo ganado (tareas aceptadas, aunque sigan en proceso),
+// lo ya pagado (egresos reales en Finanzas) y el saldo pendiente — sin duplicar el dinero real.
+function Equipo({ data, onAddContacto, onEditContacto, onAddFinanzas, onAddFactura }) {
+  const [modal, setModal] = useState(null); // {item} alta/edición contacto | {colaborador, paso:"pagar"}
   const [orden, setOrden] = useState("alfabetico");
   const [busqueda, setBusqueda] = useState("");
-  const empty = { nombre: "", whatsapp: "", correo: "", comentarios: "" };
-  const tareasDe = (id) => data.pendientes.filter((p) => p.responsableId === id);
+  const emptyContacto = { nombre: "", tipos: ["Colaborador"], whatsapp: "", correo: "", direccion: "", notas: "", contexto: "", proyectoId: "", parentesco: "", fechaNacimiento: "" };
+
+  const colaboradores = data.contactos.filter((c) => (c.tipos && c.tipos.length ? c.tipos : [c.tipo || "Otro"]).includes("Colaborador"));
+  const tareasDe = (id) => data.pendientes.filter((p) => p.colaboradorContactoId === id);
+  const ganadoDe = (id) => tareasDe(id).filter((p) => p.estadoAceptacion === "aceptada" || p.aceptadaPorCreador).reduce((s, p) => s + (Number(p.precio) || 0), 0);
+  const pagadoDe = (id) => data.finanzas.filter((f) => f.categoria === "Pago a colaborador" && f.contactoId === id && f.estatus !== "Cancelado").reduce((s, f) => s + (Number(f.monto) || 0), 0);
+  const nombreProyecto = (pid) => data.proyectos.find((p) => p.id === pid)?.nombre || "—";
+
   const camposOrden = {
     registro: { get: (m) => m.createdAt, tipo: "fecha" },
     alfabetico: { get: (m) => m.nombre, tipo: "texto" },
+    saldo: { get: (m) => ganadoDe(m.id) - pagadoDe(m.id), tipo: "numero" },
   };
   const opcionesOrden = [
     { key: "registro", label: "fecha de registro" },
     { key: "alfabetico", label: "alfabético" },
+    { key: "saldo", label: "saldo pendiente" },
   ];
-  // Buscador propio de esta lista (independiente del buscador global de ARKEYONE): filtra por
-  // contenido en cualquier parte del texto, no solo por inicio, e ignora acentos/mayúsculas.
   const qn = normalizarTexto(busqueda);
   const filtrados = !qn
-    ? data.equipo
-    : data.equipo.filter((m) => [m.nombre, m.whatsapp, m.correo, m.comentarios].some((v) => normalizarTexto(v).includes(qn)));
+    ? colaboradores
+    : colaboradores.filter((m) => [m.nombre, m.whatsapp, m.correo, m.notas].some((v) => normalizarTexto(v).includes(qn)));
   const listaEquipo = ordenarLista(filtrados, orden, camposOrden);
 
   return (
     <div>
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-1">
         <h2 className="gp-serif text-2xl">Colaboradores</h2>
-        <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm w-full sm:w-auto"><Plus size={14} /> Nuevo</button>
+        <button onClick={() => setModal({ item: emptyContacto })} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm w-full sm:w-auto"><Plus size={14} /> Nuevo</button>
       </div>
-      <p className="text-sm gp-text-muted mb-3">Colaboradores a los que delegas, con sus tareas y tu evaluación.</p>
+      <p className="text-sm gp-text-muted mb-3">Colaboradores a los que delegas tareas y les pagas por su trabajo. Un colaborador es un Contacto — puede ser también tu cliente o proveedor a la vez.</p>
       <div className="flex flex-wrap items-center gap-2 mb-4">
         <input className="gp-input text-sm flex-1 sm:max-w-xs" placeholder="Buscar en Colaboradores…" value={busqueda} onChange={(e) => setBusqueda(e.target.value)} />
         <OrdenSelector opciones={opcionesOrden} value={orden} onChange={setOrden} />
@@ -5934,57 +6059,115 @@ function Equipo({ data, onAdd, onEdit, onRemove }) {
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         {listaEquipo.map((m) => {
           const tareas = tareasDe(m.id);
-          const totalPagado = tareas.reduce((s, t) => s + Number(t.precio || 0), 0);
+          const ganado = ganadoDe(m.id);
+          const pagado = pagadoDe(m.id);
+          const saldo = Math.max(0, ganado - pagado);
           return (
             <div key={m.id} className="gp-panel p-4">
               <div className="flex items-start justify-between">
                 <div>
                   <p className="text-sm font-medium">{m.nombre}</p>
-                  <div className="flex gap-3 mt-1 text-xs gp-text-muted">
+                  <div className="flex gap-3 mt-1 text-xs gp-text-muted flex-wrap">
                     {m.whatsapp && <span className="flex items-center gap-1"><MessageCircle size={12} /> {m.whatsapp}</span>}
                     {m.correo && <span className="flex items-center gap-1"><Mail size={12} /> {m.correo}</span>}
                   </div>
                 </div>
-                <div className="flex gap-1"><IconBtn onClick={() => setModal({ item: m })}><Pencil size={13} /></IconBtn><IconBtn onClick={() => onRemove(m.id)}><Trash2 size={13} /></IconBtn></div>
+                <IconBtn onClick={() => setModal({ item: m })}><Pencil size={13} /></IconBtn>
               </div>
-              <p className="text-xs mt-2 gp-text-muted">{m.comentarios}</p>
-              <div className="mt-3 pt-3 border-t gp-border text-xs">
-                <span className="gp-text-muted">{tareas.length} tarea(s) asignadas · </span>
-                <span className="gp-mono gp-text-gold">{fmtMoney(totalPagado)} pactado</span>
+              {m.notas && <p className="text-xs mt-2 gp-text-muted">{m.notas}</p>}
+              <div className="mt-3 pt-3 border-t gp-border text-xs space-y-1">
+                <div className="flex justify-between"><span className="gp-text-muted">{tareas.length} tarea(s) asignadas</span><span className="gp-mono">{fmtMoney(ganado)} ganado</span></div>
+                <div className="flex justify-between"><span className="gp-text-muted">Pagado</span><span className="gp-mono gp-text-teal">{fmtMoney(pagado)}</span></div>
+                <div className="flex justify-between items-center">
+                  <span className="gp-text-muted">Saldo pendiente</span>
+                  <span className="gp-mono gp-text-gold font-medium">{fmtMoney(saldo)}</span>
+                </div>
               </div>
+              {saldo > 0 && (
+                <button onClick={() => setModal({ colaborador: m, paso: "pagar" })} className="gp-btn-ghost w-full mt-3 py-1.5 text-xs rounded">Registrar pago</button>
+              )}
             </div>
           );
         })}
         {listaEquipo.length === 0 && (
           <p className="text-sm gp-text-muted col-span-2">
-            {data.equipo.length === 0 ? "Aún no registras colaboradores." : "Ningún colaborador coincide con tu búsqueda."}
+            {colaboradores.length === 0 ? "Aún no tienes contactos marcados como Colaborador. Márcalos desde Contactos, o crea uno aquí." : "Ningún colaborador coincide con tu búsqueda."}
           </p>
         )}
       </div>
 
-      {modal && (
+      {modal && modal.item && (
         <Modal title={modal.item.id ? "Editar colaborador" : "Nuevo colaborador"} onClose={() => setModal(null)}>
-          <EquipoForm item={modal.item} onSave={(v) => { modal.item.id ? onEdit(modal.item.id, v) : onAdd(v); setModal(null); }} />
+          <ContactoForm
+            item={modal.item} proyectos={data.proyectos}
+            onSave={(v) => {
+              const vConTipo = { ...v, tipos: v.tipos.includes("Colaborador") ? v.tipos : [...v.tipos, "Colaborador"] };
+              if (modal.item.id) onEditContacto(modal.item.id, vConTipo); else onAddContacto(vConTipo);
+              setModal(null);
+            }}
+          />
+        </Modal>
+      )}
+      {modal && modal.paso === "pagar" && (
+        <Modal title={`Registrar pago — ${modal.colaborador.nombre}`} onClose={() => setModal(null)}>
+          <PagoColaboradorForm
+            saldoPendiente={ganadoDe(modal.colaborador.id) - pagadoDe(modal.colaborador.id)}
+            proyectos={data.proyectos}
+            onPagar={({ monto, fecha, proyectoId, solicitarFactura }) => {
+              const finanzasId = uid();
+              onAddFinanzas({
+                id: finanzasId, tipo: "Egreso", categoria: "Pago a colaborador", forma: "Transferencia", estatus: "Cobrado",
+                esRecurrente: false, fecha, proyectoId: proyectoId || "", contactoId: modal.colaborador.id,
+                concepto: `Pago a ${modal.colaborador.nombre}`, monto,
+              });
+              if (solicitarFactura) {
+                onAddFactura({
+                  id: uid(), tipo: "Recibida", proyectoId: proyectoId || "", contactoId: modal.colaborador.id,
+                  folio: "", fecha, concepto: `Pago a ${modal.colaborador.nombre}`, subtotal: monto, iva: 0, total: monto,
+                  estatus: "Pendiente", notas: "Factura solicitada al colaborador por este pago.", finanzasId,
+                });
+              }
+              setModal(null);
+            }}
+          />
         </Modal>
       )}
     </div>
   );
 }
 
-function EquipoForm({ item, onSave }) {
-  const [v, setV] = useState(item);
+function PagoColaboradorForm({ saldoPendiente, proyectos, onPagar }) {
+  const [monto, setMonto] = useState(saldoPendiente);
+  const [fecha, setFecha] = useState(todayISO());
+  const [proyectoId, setProyectoId] = useState("");
+  const [solicitarFactura, setSolicitarFactura] = useState(false);
   const [error, setError] = useState("");
   return (
     <div>
-      <Field label="Nombre"><input className="gp-input" value={v.nombre} onChange={(e) => setV({ ...v, nombre: e.target.value })} /></Field>
+      <p className="text-xs gp-text-muted mb-3">Saldo pendiente actual: <span className="gp-mono">{fmtMoney(saldoPendiente)}</span></p>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <Field label="WhatsApp"><input className="gp-input" value={v.whatsapp} onChange={(e) => setV({ ...v, whatsapp: e.target.value })} /></Field>
-        <Field label="Correo (opcional)"><input className="gp-input" value={v.correo} onChange={(e) => setV({ ...v, correo: e.target.value })} /></Field>
+        <Field label="Monto a pagar"><MoneyInput className="gp-input" value={monto} onChange={setMonto} /></Field>
+        <Field label="Fecha del pago"><input type="date" className="gp-input" value={fecha} onChange={(e) => setFecha(e.target.value)} /></Field>
       </div>
-      <Field label="Comentarios sobre esta persona"><textarea className="gp-input" rows={3} value={v.comentarios} onChange={(e) => setV({ ...v, comentarios: e.target.value })} /></Field>
+      <Field label="Proyecto relacionado (opcional)">
+        <select className="gp-input" value={proyectoId} onChange={(e) => setProyectoId(e.target.value)}>
+          <option value="">— sin proyecto —</option>
+          {proyectos.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+        </select>
+      </Field>
+      <label className="flex items-center gap-2 mb-3 text-sm cursor-pointer">
+        <input type="checkbox" checked={solicitarFactura} onChange={(e) => setSolicitarFactura(e.target.checked)} />
+        Solicitar factura al colaborador por este pago
+      </label>
+      <p className="text-xs gp-text-muted mb-3">Este pago se registra como un Egreso real en Finanzas (categoría "Pago a colaborador"), ligado a este contacto.</p>
       {error && <p className="text-xs gp-text-red mb-2">{error}</p>}
-
-      <button className="gp-btn w-full py-2 text-sm mt-2" onClick={() => { if (!v.nombre?.toString().trim()) { setError("El nombre es obligatorio."); return; } setError(""); onSave(v); }}>Guardar</button>
+      <button className="gp-btn w-full py-2 text-sm mt-1" onClick={() => {
+        const montoNum = Number(monto);
+        if (!montoNum || montoNum <= 0) { setError("Captura un monto válido."); return; }
+        onPagar({ monto: montoNum, fecha, proyectoId, solicitarFactura });
+      }}>
+        Registrar pago
+      </button>
     </div>
   );
 }
@@ -6331,7 +6514,7 @@ function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
   const [filtroTipo, setFiltroTipo] = useState("Todos");
   const [orden, setOrden] = useState("default");
   const [busqueda, setBusqueda] = useState("");
-  const empty = { nombre: "", tipo: "Cliente", parentesco: "", fechaNacimiento: "", contexto: "", proyectoId: "", whatsapp: "", correo: "", notas: "" };
+  const empty = { nombre: "", tipos: ["Cliente"], parentesco: "", fechaNacimiento: "", contexto: "", proyectoId: "", whatsapp: "", correo: "", direccion: "", notas: "" };
   const nombreProyecto = (id) => data.proyectos.find((p) => p.id === id)?.nombre || "—";
   const toneTipo = { Cliente: "teal", Proveedor: "gold", Colaborador: "red", Otro: "" };
   const camposOrden = {
@@ -6342,11 +6525,12 @@ function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
     { key: "alfabetico", label: "alfabético" },
     { key: "registro", label: "fecha de registro" },
   ];
-  const filtrados = filtroTipo === "Todos" ? data.contactos : data.contactos.filter((c) => (c.tipo || "Otro") === filtroTipo);
+  const tiposDe = (c) => (c.tipos && c.tipos.length ? c.tipos : [c.tipo || "Otro"]);
+  const filtrados = filtroTipo === "Todos" ? data.contactos : data.contactos.filter((c) => tiposDe(c).includes(filtroTipo));
   const buscados = filtrarPorBusqueda(filtrados, busqueda, [(c) => c.nombre, (c) => c.contexto, (c) => c.whatsapp, (c) => c.correo, (c) => c.parentesco, (c) => c.notas]);
   const visibles = ordenarLista(buscados, orden, camposOrden);
   const columnasExport = [
-    { label: "Nombre", get: (c) => c.nombre }, { label: "Tipo", get: (c) => c.tipo },
+    { label: "Nombre", get: (c) => c.nombre }, { label: "Tipo", get: (c) => tiposDe(c).join(", ") },
     { label: "Parentesco", get: (c) => c.parentesco }, { label: "WhatsApp", get: (c) => c.whatsapp },
     { label: "Correo", get: (c) => c.correo }, { label: "Proyecto", get: (c) => nombreProyecto(c.proyectoId) },
     { label: "Notas", get: (c) => c.notas },
@@ -6358,7 +6542,7 @@ function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
         <h2 className="gp-serif text-2xl">Contactos</h2>
         <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm w-full sm:w-auto"><Plus size={14} /> Nuevo</button>
       </div>
-      <p className="text-sm gp-text-muted mb-4">Clientes, proveedores, colaboradores y gente que conoces en eventos — para que no se pierdan.</p>
+      <p className="text-sm gp-text-muted mb-4">Clientes, proveedores, colaboradores y gente que conoces en eventos — para que no se pierdan. Un contacto puede ser varias cosas a la vez.</p>
 
       <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
         <div className="flex flex-wrap gap-1">
@@ -6377,9 +6561,9 @@ function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
           <div key={c.id} className="gp-panel p-4">
             <div className="flex items-start justify-between">
               <div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <p className="text-sm font-medium">{c.nombre}</p>
-                  <Badge tone={toneTipo[c.tipo || "Otro"]}>{c.tipo || "Otro"}</Badge>
+                  {tiposDe(c).map((t) => <Badge key={t} tone={toneTipo[t] || ""}>{t}</Badge>)}
                   {c.parentesco && <Badge tone="muted">{c.parentesco}</Badge>}
                   {(() => {
                     const dc = diasParaCumple(c.fechaNacimiento);
@@ -6388,7 +6572,7 @@ function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
                   })()}
                 </div>
                 <p className="text-xs gp-text-muted mt-0.5">{c.contexto} {c.proyectoId ? `· ${nombreProyecto(c.proyectoId)}` : ""}</p>
-                <div className="flex gap-3 mt-1 text-xs gp-text-muted">
+                <div className="flex gap-3 mt-1 text-xs gp-text-muted flex-wrap">
                   {c.whatsapp && <span className="flex items-center gap-1"><MessageCircle size={12} /> {c.whatsapp}</span>}
                   {c.correo && <span className="flex items-center gap-1"><Mail size={12} /> {c.correo}</span>}
                 </div>
@@ -6421,19 +6605,26 @@ function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
 }
 
 function ContactoForm({ item, proyectos, onSave }) {
-  const [v, setV] = useState(item);
+  const [v, setV] = useState({ ...item, tipos: item.tipos && item.tipos.length ? item.tipos : (item.tipo ? [item.tipo] : ["Cliente"]) });
   const [error, setError] = useState("");
   const [otroParentesco, setOtroParentesco] = useState(() => !!item.parentesco && !PARENTESCOS.includes(item.parentesco));
+  const toggleTipo = (t) => setV((prev) => ({ ...prev, tipos: prev.tipos.includes(t) ? prev.tipos.filter((x) => x !== t) : [...prev.tipos, t] }));
   return (
     <div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <Field label="Nombre"><input className="gp-input" value={v.nombre} onChange={(e) => setV({ ...v, nombre: e.target.value })} /></Field>
-        <Field label="Tipo">
-          <select className="gp-input" value={v.tipo || "Otro"} onChange={(e) => setV({ ...v, tipo: e.target.value })}>
-            <option>Cliente</option><option>Proveedor</option><option>Colaborador</option><option>Otro</option>
-          </select>
-        </Field>
-      </div>
+      <Field label="Nombre"><input className="gp-input" value={v.nombre} onChange={(e) => setV({ ...v, nombre: e.target.value })} /></Field>
+      <Field label="Tipo (puede ser varios a la vez)">
+        <div className="flex flex-wrap gap-1.5">
+          {["Cliente", "Proveedor", "Colaborador", "Otro"].map((t) => (
+            <button
+              key={t} type="button" onClick={() => toggleTipo(t)}
+              className="text-xs px-2.5 py-1 rounded-full border"
+              style={v.tipos.includes(t) ? { background: "var(--gold)", color: "#161822", borderColor: "var(--gold)" } : { borderColor: "var(--border)" }}
+            >
+              {t}
+            </button>
+          ))}
+        </div>
+      </Field>
       <Field label="Parentesco (opcional)">
         <select
           className="gp-input"
@@ -6467,7 +6658,7 @@ function ContactoForm({ item, proyectos, onSave }) {
       <Field label="Notas"><textarea className="gp-input" rows={2} value={v.notas} onChange={(e) => setV({ ...v, notas: e.target.value })} /></Field>
       {error && <p className="text-xs gp-text-red mb-2">{error}</p>}
 
-      <button className="gp-btn w-full py-2 text-sm mt-2" onClick={() => { if (!v.nombre?.toString().trim()) { setError("El nombre del contacto es obligatorio."); return; } setError(""); onSave(v); }}>Guardar</button>
+      <button className="gp-btn w-full py-2 text-sm mt-2" onClick={() => { if (!v.nombre?.toString().trim()) { setError("El nombre del contacto es obligatorio."); return; } if (v.tipos.length === 0) { setError("Elige al menos un tipo."); return; } setError(""); onSave(v); }}>Guardar</button>
     </div>
   );
 }
@@ -9779,7 +9970,7 @@ function QuickCapture({ data, onAdd, onCrearRecordatorio, irAVista }) {
       {tipo === "cita" && (
         <Modal title="Nueva cita" onClose={cerrar}>
           <CitaForm item={{ titulo: "", fechaHora: localInputsAFechaHora(todayISO(), "09:00"), lugar: "", contactoIds: [], tags: [], notas: "" }} contactos={data.contactos}
-            tagsExistentes={tagsUnicos(data.citas)} onCrearContacto={(nombre) => { const nid = uid(); onAdd("contactos", { id: nid, nombre, tipo: "Otro" }); return nid; }}
+            tagsExistentes={tagsUnicos(data.citas)} onCrearContacto={(nombre) => { const nid = uid(); onAdd("contactos", { id: nid, nombre, tipos: ["Otro"] }); return nid; }}
             onSave={(v) => { onAdd("citas", { ...v, id: uid() }); cerrar(); irAVista("citas"); }} />
         </Modal>
       )}
@@ -9806,13 +9997,13 @@ function QuickCapture({ data, onAdd, onCrearRecordatorio, irAVista }) {
       )}
       {tipo === "glucosa" && (
         <Modal title="Registrar glucosa" onClose={cerrar}>
-          <GlucosaRapidaForm contactos={data.contactos} onCrearContacto={(nombre) => { const nid = uid(); onAdd("contactos", { id: nid, nombre, tipo: "Otro" }); return nid; }}
+          <GlucosaRapidaForm contactos={data.contactos} onCrearContacto={(nombre) => { const nid = uid(); onAdd("contactos", { id: nid, nombre, tipos: ["Otro"] }); return nid; }}
             onSave={(v) => { onAdd("salud", { ...v, id: uid() }); cerrar(); irAVista("salud"); }} />
         </Modal>
       )}
       {tipo === "presion" && (
         <Modal title="Registrar presión arterial" onClose={cerrar}>
-          <PresionRapidaForm contactos={data.contactos} onCrearContacto={(nombre) => { const nid = uid(); onAdd("contactos", { id: nid, nombre, tipo: "Otro" }); return nid; }}
+          <PresionRapidaForm contactos={data.contactos} onCrearContacto={(nombre) => { const nid = uid(); onAdd("contactos", { id: nid, nombre, tipos: ["Otro"] }); return nid; }}
             onSave={(v) => { onAdd("salud", { ...v, id: uid() }); cerrar(); irAVista("salud"); }} />
         </Modal>
       )}
@@ -10019,7 +10210,7 @@ function TareaRapidaForm({ onSave }) {
       {error && <p className="text-xs gp-text-red mb-2">{error}</p>}
       <button className="gp-btn w-full py-2 text-sm mt-1" onClick={() => {
         if (!descripcion.trim()) { setError("Captura una descripción."); return; }
-        onSave({ descripcion: descripcion.trim(), fechaLimite, estatus: "Pendiente", prioridad: "Media", proyectoId: "", responsableId: "", contactoId: "" });
+        onSave({ descripcion: descripcion.trim(), fechaLimite, estatus: "Pendiente", prioridad: "Media", proyectoId: "", contactoId: "" });
       }}>
         Guardar (puedes agregar proyecto, prioridad, etc. después desde Tareas)
       </button>
