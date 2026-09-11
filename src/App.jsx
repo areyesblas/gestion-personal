@@ -10557,7 +10557,7 @@ function VoiceMode({ contextoPantalla, onDatosCreados, irAVista }) {
       const ahora = Date.now();
       // Umbral más alto mientras la IA habla: evita que su propia voz saliendo de la bocina
       // (si el usuario no trae audífonos) dispare una interrupción falsa.
-      const UMBRAL = estadoRef.current === "hablando" ? 0.05 : 0.02;
+      const UMBRAL = estadoRef.current === "hablando" ? 0.05 : 0.012;
 
       if (estadoRef.current === "hablando") {
         if (rms > UMBRAL) {
@@ -10709,6 +10709,18 @@ function VoiceMode({ contextoPantalla, onDatosCreados, irAVista }) {
     else volverAEscucharIOS();
   }
 
+  // Respaldo manual: si la deteccion automatica de silencio no funciona bien en el microfono
+  // de este dispositivo (cada telefono es distinto), tocar el circulo mientras esta "escuchando"
+  // corta el turno ahi mismo y lo manda, en vez de quedarse grabando para siempre.
+  function forzarFinTurno() {
+    if (estadoRef.current !== "escuchando") return;
+    if (usaSTTNativo) {
+      try { recognitionRef.current?.stop(); } catch {} // dispara el ultimo resultado final pendiente y sigue el flujo normal
+    } else {
+      finalizarSegmentoYEnviar();
+    }
+  }
+
   async function hablar(texto) {
     if (!texto || !("speechSynthesis" in window)) { volverAEscuchar(); return; }
     if (!usaSTTNativo) await pausarMicIOS(); // suelta el mic en iOS para que el audio salga por la bocina, y espera a que cierre de verdad
@@ -10774,16 +10786,21 @@ function VoiceMode({ contextoPantalla, onDatosCreados, irAVista }) {
             </div>
 
             <div className="flex flex-col items-center gap-2 py-2">
-              <div className="w-16 h-16 rounded-full flex items-center justify-center" style={{
-                background: estado === "escuchando" ? "#ef4444" : estado === "hablando" ? "var(--gold)" : "rgba(255,255,255,.08)",
-              }}>
+              <div
+                className="w-16 h-16 rounded-full flex items-center justify-center"
+                onClick={estado === "escuchando" ? forzarFinTurno : undefined}
+                style={{
+                  background: estado === "escuchando" ? "#ef4444" : estado === "hablando" ? "var(--gold)" : "rgba(255,255,255,.08)",
+                  cursor: estado === "escuchando" ? "pointer" : "default",
+                }}
+              >
                 {estado === "escuchando" && <Mic size={26} className="animate-pulse" color="#fff" />}
                 {estado === "procesando" && <Square size={20} className="animate-pulse" />}
                 {estado === "hablando" && <Volume2 size={26} color="#0B2341" />}
                 {(estado === "permiso" || estado === "error") && <Mic size={26} style={{ opacity: .4 }} />}
               </div>
               <p className="text-xs gp-text-muted text-center">
-                {estado === "escuchando" && "Escuchando…"}
+                {estado === "escuchando" && "Escuchando… (toca el círculo cuando termines de hablar)"}
                 {estado === "procesando" && "Pensando…"}
                 {estado === "hablando" && "Hablando…"}
                 {estado === "permiso" && (errorMsg || "Necesito permiso de micrófono.")}
