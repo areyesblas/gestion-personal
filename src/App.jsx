@@ -10588,6 +10588,30 @@ function VoiceMode({ contextoPantalla, onDatosCreados, irAVista }) {
     iniciarSegmentoGrabacion();
   }
 
+  // En iOS, mientras el microfono sigue abierto (lo necesitamos para el barge-in), Safari a
+  // veces enruta la salida de audio al auricular en vez de la bocina -- se oye casi nada salvo
+  // que el telefono este pegado al oido. Por eso, justo antes de que ARKEYONE hable, soltamos
+  // el microfono por completo (para forzar la ruta normal de audio) y lo volvemos a abrir al
+  // terminar. Efecto secundario aceptado: en iOS no hay barge-in mientras la IA esta hablando
+  // (en Chrome/Android si sigue habiendo, porque ese camino no depende de audio del dispositivo).
+  function pausarMicIOS() {
+    try { mediaRecorderRef.current?.stop(); } catch {}
+    mediaRecorderRef.current = null;
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    rafRef.current = null;
+    try { streamRef.current?.getTracks().forEach((t) => t.stop()); } catch {}
+    streamRef.current = null;
+    try { audioCtxRef.current?.close(); } catch {}
+    audioCtxRef.current = null;
+    analyserRef.current = null;
+  }
+
+  async function reanudarMicTrasHablarIOS() {
+    if (!abiertoRef.current) return;
+    cambiarEstado("escuchando");
+    await iniciarEscuchaIOS(); // ya se concedio el permiso antes, no vuelve a preguntar
+  }
+
   // ---------- Compartido: mandar el turno a asistente-ia y leer la respuesta ----------
   async function enviarTurno(texto) {
     cambiarEstado("procesando");
@@ -10619,6 +10643,8 @@ function VoiceMode({ contextoPantalla, onDatosCreados, irAVista }) {
     }
   }
 
+  // Usado cuando el microfono NUNCA se cerro (errores durante "procesando", con el stream de
+  // iOS todavia vivo) -- solo reinicia la grabacion, no vuelve a pedir permiso ni abre stream nuevo.
   function volverAEscuchar() {
     if (!abiertoRef.current) return;
     cambiarEstado("escuchando");
@@ -10628,18 +10654,20 @@ function VoiceMode({ contextoPantalla, onDatosCreados, irAVista }) {
 
   function hablar(texto) {
     if (!texto || !("speechSynthesis" in window)) { volverAEscuchar(); return; }
+    if (!usaSTTNativo) pausarMicIOS(); // suelta el mic en iOS para que el audio salga por la bocina
     cambiarEstado("hablando");
     try {
       window.speechSynthesis.cancel();
       const u = new SpeechSynthesisUtterance(texto);
       u.lang = "es-MX";
-      u.onend = () => volverAEscuchar();
-      u.onerror = () => volverAEscuchar();
+      const alTerminar = () => { if (usaSTTNativo) volverAEscuchar(); else reanudarMicTrasHablarIOS(); };
+      u.onend = alTerminar;
+      u.onerror = alTerminar;
       window.speechSynthesis.speak(u);
       // En el camino nativo, seguimos "escuchando" con el mismo reconocedor mientras la IA
       // habla, únicamente para detectar una interrupción (barge-in) -- ver r.onresult arriba.
       if (usaSTTNativo) iniciarEscuchaNativa();
-    } catch { volverAEscuchar(); }
+    } catch { if (usaSTTNativo) volverAEscuchar(); else reanudarMicTrasHablarIOS(); }
   }
 
   return (
@@ -10690,7 +10718,7 @@ function VoiceMode({ contextoPantalla, onDatosCreados, irAVista }) {
               <p className="text-xs gp-text-muted text-center">
                 {estado === "escuchando" && "Escuchando…"}
                 {estado === "procesando" && "Pensando…"}
-                {estado === "hablando" && "Hablando… (puedes interrumpirme)"}
+                {estado === "hablando" && (usaSTTNativo ? "Hablando… (puedes interrumpirme)" : "Hablando…")}
                 {estado === "permiso" && (errorMsg || "Necesito permiso de micrófono.")}
                 {estado === "error" && (errorMsg || "Algo salió mal.")}
               </p>
