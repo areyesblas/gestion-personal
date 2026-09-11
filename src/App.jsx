@@ -10344,7 +10344,8 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
       const r = recognitionRef.current;
       if (r) {
         r.onresult = null; r.onerror = null; r.onend = null; r.onstart = null; r.onspeechend = null; r.onaudioend = null;
-        r.abort(); // abort() corta ya, sin esperar un resultado final como sí hace stop()
+        try { r.stop(); } catch {} // stop() "educado" primero: WebKit a veces solo libera la sesión de audio del sistema si se le deja cerrar por su cuenta en vez de cortarse en seco
+        r.abort(); // abort() corta ya, por si stop() no bastara (no esperamos su resultado final)
       }
     } catch {}
     recognitionRef.current = null;
@@ -10377,11 +10378,16 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
     // punto/indicador de micrófono se queda encendido aunque ya no estemos escuchando (esto es
     // justo lo que reportaste: se apaga el sonido pero no el micrófono). Forzamos la liberación
     // pidiendo y cerrando al instante un stream de audio "vacío": eso obliga a iOS a soltar
-    // la sesión de grabación de verdad.
+    // la sesión de grabación de verdad. Un solo intento inmediato a veces choca con el cierre
+    // interno de WebKit (que no es síncrono), así que se reintenta una vez más tras una pausa.
     if (esIOS && usaSTTNativo && navigator.mediaDevices?.getUserMedia) {
-      navigator.mediaDevices.getUserMedia({ audio: true })
-        .then((s) => s.getTracks().forEach((t) => t.stop()))
-        .catch(() => {});
+      const liberarForzado = () => {
+        navigator.mediaDevices.getUserMedia({ audio: true })
+          .then((s) => s.getTracks().forEach((t) => t.stop()))
+          .catch(() => {});
+      };
+      liberarForzado();
+      setTimeout(liberarForzado, 400);
     }
   }
 
