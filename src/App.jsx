@@ -2716,6 +2716,11 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
       </div>
 
       <QuickCapture data={data} onAdd={addItem} onCrearRecordatorio={onCrearRecordatorio} irAVista={irAVista} />
+      <VoiceMode
+        contextoPantalla={view === "proyecto-detalle" && proyectoDetalleId ? { modulo: "proyectos", entidad_id: proyectoDetalleId } : (view && view !== "dashboard" ? { modulo: view } : null)}
+        onDatosCreados={recargarModulos}
+        irAVista={irAVista}
+      />
       {busquedaAbierta && <BusquedaGlobal data={data} onNavigate={buscarNavegarA} onClose={() => setBusquedaAbierta(false)} />}
 
       {confirmDelete && (
@@ -10029,6 +10034,15 @@ const ETIQUETA_ACCION_ASISTENTE = {
   registrar_avance_proyecto: "Registró un avance",
   crear_movimiento: "Registró un movimiento",
   crear_cita: "Agendó una cita",
+  actualizar_pendiente: "Actualizó una tarea",
+  eliminar_pendiente: "Eliminó una tarea",
+  actualizar_movimiento: "Actualizó un movimiento",
+  eliminar_movimiento: "Eliminó un movimiento",
+  actualizar_proyecto: "Actualizó un proyecto",
+  crear_contacto: "Creó un contacto",
+  crear_atencion: "Registró una atención",
+  actualizar_cita: "Reprogramó una cita",
+  cancelar_cita: "Canceló una cita",
 };
 // A qué módulo de `data` (el estado local ya cargado en el navegador) pertenece cada
 // herramienta de escritura del Asistente. Como el Asistente guarda directo en Supabase desde
@@ -10042,7 +10056,21 @@ const MODULO_POR_HERRAMIENTA_ASISTENTE = {
   registrar_avance_proyecto: "comentarios",
   crear_movimiento: "finanzas",
   crear_cita: "citas",
+  actualizar_pendiente: "pendientes",
+  eliminar_pendiente: "pendientes",
+  actualizar_movimiento: "finanzas",
+  eliminar_movimiento: "finanzas",
+  actualizar_proyecto: "proyectos",
+  crear_contacto: "contactos",
+  crear_atencion: "regalos",
+  actualizar_cita: "citas",
+  cancelar_cita: "citas",
 };
+// Herramientas cuyo resultado puede traer requiere_confirmacion:true — si el backend lo marca
+// asi, NO se cuenta como "acción realizada" real todavía (nada se guardó), aunque la llamada
+// haya ocurrido. Se usa para no mostrar una palomita de "hecho" cuando en realidad se está
+// esperando el sí del usuario.
+const ACCION_FUE_CONFIRMACION_PENDIENTE = (accion) => accion?.resultado?.requiere_confirmacion === true;
 
 function Asistente({ onDatosCreados }) {
   const [mensajes, setMensajes] = useState([]); // [{rol: "usuario"|"asistente", texto, acciones}]
@@ -10169,7 +10197,7 @@ function Asistente({ onDatosCreados }) {
       // del cliente para que se vea de inmediato en Agenda/Pendientes/etc., sin recargar.
       const modulosTocados = [...new Set(
         (json.acciones || [])
-          .filter((a) => !a.resultado?.error && MODULO_POR_HERRAMIENTA_ASISTENTE[a.herramienta])
+          .filter((a) => !a.resultado?.error && !ACCION_FUE_CONFIRMACION_PENDIENTE(a) && MODULO_POR_HERRAMIENTA_ASISTENTE[a.herramienta])
           .map((a) => MODULO_POR_HERRAMIENTA_ASISTENTE[a.herramienta])
       )];
       if (modulosTocados.length > 0) onDatosCreados?.(modulosTocados);
@@ -10248,7 +10276,7 @@ function Asistente({ onDatosCreados }) {
               </div>
               {m.acciones?.length > 0 && (
                 <div className="mt-2 pt-2 flex flex-col gap-1" style={{ borderTop: "1px solid rgba(0,0,0,.15)" }}>
-                  {m.acciones.map((a, j) => (
+                  {m.acciones.filter((a) => !ACCION_FUE_CONFIRMACION_PENDIENTE(a)).map((a, j) => (
                     <span key={j} className="text-xs flex items-center gap-1 opacity-80">
                       <Check size={12} /> {ETIQUETA_ACCION_ASISTENTE[a.herramienta] || a.herramienta}
                       {a.resultado?.error ? ` — no se pudo (${a.resultado.error})` : ""}
@@ -10288,6 +10316,394 @@ function Asistente({ onDatosCreados }) {
         </button>
       </div>
     </div>
+  );
+}
+
+// Modo Conversación: capa flotante global de voz sobre el mismo Asistente/asistente-ia de
+// siempre (no crea un chatbot aparte). Detecta la plataforma y usa dos caminos:
+//  - Chrome/Edge/Android: SpeechRecognition nativo del navegador, en modo continuo con
+//    reinicio automático — gratis y sin ida y vuelta de red extra.
+//  - Safari iOS (no soporta SpeechRecognition, ni en PWA instalada): graba con MediaRecorder
+//    y detecta el fin de cada turno con un VAD sencillo por energía (Web Audio API), luego
+//    transcribe con la función transcribir-voz (Whisper). Requiere que se haya configurado
+//    OPENAI_API_KEY como secret de Supabase; si no, el error se muestra y se ofrece el chat
+//    de texto como respaldo.
+// El "barge-in" (interrumpir a la IA hablando) usa el mismo micrófono ya abierto en ambos
+// caminos — no hay un modo "siempre escuchando" en segundo plano, solo mientras este panel
+// está abierto, como pide el Documento Maestro.
+function VoiceMode({ contextoPantalla, onDatosCreados, irAVista }) {
+  const [abierto, setAbierto] = useState(false);
+  const [estado, setEstado] = useState("inactivo"); // inactivo | escuchando | procesando | hablando | permiso | error
+  const [errorMsg, setErrorMsg] = useState("");
+  const [transcripciones, setTranscripciones] = useState([]); // [{rol, texto}]
+
+  const estadoRef = useRef("inactivo");
+  const abiertoRef = useRef(false);
+  const recognitionRef = useRef(null);
+  const streamRef = useRef(null);
+  const audioCtxRef = useRef(null);
+  const analyserRef = useRef(null);
+  const rafRef = useRef(null);
+  const mediaRecorderRef = useRef(null);
+  const chunksRef = useRef([]);
+  const empezoHablarRef = useRef(null);
+  const silencioDesdeRef = useRef(null);
+  const bargeInDesdeRef = useRef(null);
+
+  const cambiarEstado = (nuevo) => { estadoRef.current = nuevo; setEstado(nuevo); };
+
+  const SpeechRecognitionCtor = typeof window !== "undefined" && (window.SpeechRecognition || window.webkitSpeechRecognition);
+  const usaSTTNativo = !!SpeechRecognitionCtor;
+  const soportaModoVoz = usaSTTNativo || (typeof navigator !== "undefined" && navigator.mediaDevices?.getUserMedia && typeof window !== "undefined" && window.MediaRecorder);
+
+  useEffect(() => () => detenerTodo(), []); // limpia todo si el componente se desmonta
+
+  function detenerTodo() {
+    try { recognitionRef.current?.stop(); } catch {}
+    try { recognitionRef.current?.abort?.(); } catch {}
+    recognitionRef.current = null;
+    try { mediaRecorderRef.current?.stop(); } catch {}
+    mediaRecorderRef.current = null;
+    try { streamRef.current?.getTracks().forEach((t) => t.stop()); } catch {}
+    streamRef.current = null;
+    try { audioCtxRef.current?.close(); } catch {}
+    audioCtxRef.current = null;
+    analyserRef.current = null;
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    rafRef.current = null;
+    try { window.speechSynthesis?.cancel(); } catch {}
+    empezoHablarRef.current = null;
+    silencioDesdeRef.current = null;
+    bargeInDesdeRef.current = null;
+  }
+
+  const abrir = async () => {
+    setTranscripciones([]);
+    setErrorMsg("");
+    abiertoRef.current = true;
+    setAbierto(true);
+    if (!soportaModoVoz) {
+      cambiarEstado("error");
+      setErrorMsg("Tu navegador no soporta el Modo Conversación por voz.");
+      return;
+    }
+    cambiarEstado("escuchando");
+    if (usaSTTNativo) iniciarEscuchaNativa();
+    else await iniciarEscuchaIOS();
+  };
+
+  const cerrar = () => {
+    detenerTodo();
+    abiertoRef.current = false;
+    setAbierto(false);
+    cambiarEstado("inactivo");
+  };
+
+  // ---------- Camino Chrome/Android: SpeechRecognition nativo ----------
+  function iniciarEscuchaNativa() {
+    const r = new SpeechRecognitionCtor();
+    r.lang = "es-MX";
+    r.continuous = true;
+    r.interimResults = true;
+    let finalBuffer = "";
+    let timerSilencio = null;
+
+    r.onresult = (e) => {
+      // Si la IA está hablando y detectamos cualquier voz, es una interrupción (barge-in):
+      // corta la lectura y pasa a escuchar de verdad lo que está diciendo el usuario.
+      if (estadoRef.current === "hablando") {
+        try { window.speechSynthesis.cancel(); } catch {}
+        cambiarEstado("escuchando");
+        return;
+      }
+      if (estadoRef.current !== "escuchando") return;
+      let final = "";
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        if (e.results[i].isFinal) final += e.results[i][0].transcript;
+      }
+      if (final.trim()) {
+        finalBuffer += (finalBuffer ? " " : "") + final.trim();
+        if (timerSilencio) clearTimeout(timerSilencio);
+        // Pequeña pausa antes de mandar, para no cortar al usuario si sigue hablando.
+        timerSilencio = setTimeout(() => {
+          const texto = finalBuffer.trim();
+          finalBuffer = "";
+          if (texto) {
+            try { r.stop(); } catch {}
+            enviarTurno(texto);
+          }
+        }, 700);
+      }
+    };
+    r.onerror = (e) => {
+      if (e.error === "no-speech" || e.error === "aborted") return;
+      if (e.error === "not-allowed" || e.error === "service-not-allowed") {
+        cambiarEstado("permiso");
+        setErrorMsg("ARKEYONE necesita permiso de micrófono para el Modo Conversación.");
+      }
+    };
+    r.onend = () => {
+      // Si seguimos abiertos y en modo escucha, se reinicia solo (el navegador a veces corta
+      // el reconocimiento tras una pausa aunque continuous=true).
+      if (abiertoRef.current && estadoRef.current === "escuchando") {
+        try { r.start(); } catch {}
+      }
+    };
+    recognitionRef.current = r;
+    try { r.start(); } catch { cambiarEstado("error"); setErrorMsg("No se pudo iniciar el micrófono."); }
+  }
+
+  // ---------- Camino iOS Safari: MediaRecorder + VAD por energía ----------
+  function mimeTypeSoportado() {
+    const candidatos = ["audio/mp4", "audio/webm;codecs=opus", "audio/webm"];
+    for (const c of candidatos) {
+      if (window.MediaRecorder?.isTypeSupported?.(c)) return c;
+    }
+    return "";
+  }
+
+  async function iniciarEscuchaIOS() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      const ctx = new AudioCtx();
+      audioCtxRef.current = ctx;
+      const source = ctx.createMediaStreamSource(stream);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 2048;
+      source.connect(analyser);
+      analyserRef.current = analyser;
+      iniciarSegmentoGrabacion();
+      loopVAD();
+    } catch {
+      cambiarEstado("permiso");
+      setErrorMsg("ARKEYONE necesita permiso de micrófono para el Modo Conversación.");
+    }
+  }
+
+  function iniciarSegmentoGrabacion() {
+    if (!streamRef.current) return;
+    const mime = mimeTypeSoportado();
+    try {
+      const mr = new MediaRecorder(streamRef.current, mime ? { mimeType: mime } : undefined);
+      chunksRef.current = [];
+      mr.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
+      mr.start();
+      mediaRecorderRef.current = mr;
+    } catch {
+      cambiarEstado("error");
+      setErrorMsg("No se pudo grabar audio en este navegador.");
+    }
+  }
+
+  function loopVAD() {
+    const tick = () => {
+      const analyser = analyserRef.current;
+      if (!analyser) return; // se detuvo el modo conversación
+      const buffer = new Uint8Array(analyser.fftSize);
+      analyser.getByteTimeDomainData(buffer);
+      let suma = 0;
+      for (let i = 0; i < buffer.length; i++) {
+        const v = (buffer[i] - 128) / 128;
+        suma += v * v;
+      }
+      const rms = Math.sqrt(suma / buffer.length);
+      const ahora = Date.now();
+      // Umbral más alto mientras la IA habla: evita que su propia voz saliendo de la bocina
+      // (si el usuario no trae audífonos) dispare una interrupción falsa.
+      const UMBRAL = estadoRef.current === "hablando" ? 0.05 : 0.02;
+
+      if (estadoRef.current === "hablando") {
+        if (rms > UMBRAL) {
+          if (!bargeInDesdeRef.current) bargeInDesdeRef.current = ahora;
+          else if (ahora - bargeInDesdeRef.current > 250) {
+            bargeInDesdeRef.current = null;
+            try { window.speechSynthesis.cancel(); } catch {}
+            cambiarEstado("escuchando");
+            iniciarSegmentoGrabacion();
+          }
+        } else {
+          bargeInDesdeRef.current = null;
+        }
+      } else if (estadoRef.current === "escuchando") {
+        if (rms > UMBRAL) {
+          if (!empezoHablarRef.current) empezoHablarRef.current = ahora;
+          silencioDesdeRef.current = null;
+        } else if (empezoHablarRef.current) {
+          if (!silencioDesdeRef.current) silencioDesdeRef.current = ahora;
+          else if (ahora - silencioDesdeRef.current > 900) {
+            empezoHablarRef.current = null;
+            silencioDesdeRef.current = null;
+            finalizarSegmentoYEnviar();
+          }
+        }
+      }
+      rafRef.current = requestAnimationFrame(tick);
+    };
+    rafRef.current = requestAnimationFrame(tick);
+  }
+
+  function finalizarSegmentoYEnviar() {
+    const mr = mediaRecorderRef.current;
+    if (!mr || mr.state === "inactive") return;
+    cambiarEstado("procesando");
+    mr.onstop = async () => {
+      const blob = new Blob(chunksRef.current, { type: mr.mimeType || "audio/webm" });
+      chunksRef.current = [];
+      if (blob.size < 2000) { volverAEscucharIOS(); return; } // muy corto, probablemente ruido
+      await transcribirYEnviar(blob);
+    };
+    mr.stop();
+  }
+
+  async function transcribirYEnviar(blob) {
+    try {
+      const { data: sesion } = await supabase.auth.getSession();
+      const form = new FormData();
+      form.append("audio", blob, blob.type.includes("mp4") ? "audio.mp4" : "audio.webm");
+      const resp = await fetch(`${supabase.supabaseUrl}/functions/v1/transcribir-voz`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${sesion.session.access_token}` },
+        body: form,
+      });
+      const json = await resp.json().catch(() => ({}));
+      if (!resp.ok || json.error) {
+        setErrorMsg(json.error || "No se pudo transcribir tu audio.");
+        volverAEscucharIOS();
+        return;
+      }
+      const texto = (json.texto || "").trim();
+      if (!texto) { volverAEscucharIOS(); return; }
+      await enviarTurno(texto);
+    } catch {
+      setErrorMsg("No se pudo transcribir. Revisa tu conexión.");
+      volverAEscucharIOS();
+    }
+  }
+
+  function volverAEscucharIOS() {
+    if (!abiertoRef.current) return;
+    cambiarEstado("escuchando");
+    iniciarSegmentoGrabacion();
+  }
+
+  // ---------- Compartido: mandar el turno a asistente-ia y leer la respuesta ----------
+  async function enviarTurno(texto) {
+    cambiarEstado("procesando");
+    setTranscripciones((prev) => [...prev, { rol: "usuario", texto }]);
+    try {
+      const { data: sesion } = await supabase.auth.getSession();
+      const resp = await fetch(`${supabase.supabaseUrl}/functions/v1/asistente-ia`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${sesion.session.access_token}` },
+        body: JSON.stringify({ mensaje: texto, modo: "voz", contexto_pantalla: contextoPantalla || null }),
+      });
+      const json = await resp.json().catch(() => ({}));
+      if (!resp.ok || json.error) {
+        setTranscripciones((prev) => [...prev, { rol: "asistente", texto: json.error || "No pude responder, intenta de nuevo." }]);
+        volverAEscuchar();
+        return;
+      }
+      setTranscripciones((prev) => [...prev, { rol: "asistente", texto: json.respuesta }]);
+      const modulosTocados = [...new Set(
+        (json.acciones || [])
+          .filter((a) => !a.resultado?.error && !ACCION_FUE_CONFIRMACION_PENDIENTE(a) && MODULO_POR_HERRAMIENTA_ASISTENTE[a.herramienta])
+          .map((a) => MODULO_POR_HERRAMIENTA_ASISTENTE[a.herramienta])
+      )];
+      if (modulosTocados.length > 0) onDatosCreados?.(modulosTocados);
+      hablar(json.respuesta);
+    } catch {
+      setTranscripciones((prev) => [...prev, { rol: "asistente", texto: "No pude conectarme. Revisa tu conexión." }]);
+      volverAEscuchar();
+    }
+  }
+
+  function volverAEscuchar() {
+    if (!abiertoRef.current) return;
+    cambiarEstado("escuchando");
+    if (usaSTTNativo) iniciarEscuchaNativa();
+    else volverAEscucharIOS();
+  }
+
+  function hablar(texto) {
+    if (!texto || !("speechSynthesis" in window)) { volverAEscuchar(); return; }
+    cambiarEstado("hablando");
+    try {
+      window.speechSynthesis.cancel();
+      const u = new SpeechSynthesisUtterance(texto);
+      u.lang = "es-MX";
+      u.onend = () => volverAEscuchar();
+      u.onerror = () => volverAEscuchar();
+      window.speechSynthesis.speak(u);
+      // En el camino nativo, seguimos "escuchando" con el mismo reconocedor mientras la IA
+      // habla, únicamente para detectar una interrupción (barge-in) -- ver r.onresult arriba.
+      if (usaSTTNativo) iniciarEscuchaNativa();
+    } catch { volverAEscuchar(); }
+  }
+
+  return (
+    <>
+      {!abierto && (
+        <button
+          onClick={abrir}
+          className="fixed z-[65] rounded-full shadow-lg flex items-center justify-center"
+          style={{ bottom: 84, left: 16, width: 52, height: 52, background: "var(--gold)", color: "#0B2341" }}
+          title="Modo Conversación (voz)"
+        >
+          <Mic size={22} />
+        </button>
+      )}
+      {abierto && (
+        <div className="fixed inset-0 z-[75] flex items-end sm:items-center justify-center p-4" style={{ background: "rgba(0,0,0,.55)" }} onClick={cerrar}>
+          <div className="gp-panel w-full max-w-md p-4 flex flex-col" style={{ maxHeight: "80vh" }} onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-lg font-semibold flex items-center gap-2"><Bot size={20} className="gp-text-gold" /> Modo Conversación</h2>
+              <button onClick={cerrar} className="gp-btn-ghost p-2 rounded"><X size={18} /></button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto mb-3" style={{ minHeight: 80 }}>
+              {transcripciones.length === 0 && (
+                <p className="text-sm gp-text-muted text-center py-6">
+                  {estado === "permiso" || estado === "error" ? (errorMsg || "Algo salió mal.") : "Habla cuando quieras — te escucho."}
+                </p>
+              )}
+              {transcripciones.map((t, i) => (
+                <div key={i} className={`mb-2 flex ${t.rol === "usuario" ? "justify-end" : "justify-start"}`}>
+                  <div className="max-w-[85%] rounded-lg px-3 py-2 text-sm" style={{
+                    background: t.rol === "usuario" ? "var(--gold)" : "var(--panel-2, rgba(255,255,255,.06))",
+                    color: t.rol === "usuario" ? "#0B2341" : "inherit",
+                  }}>{t.texto}</div>
+                </div>
+              ))}
+            </div>
+
+            <div className="flex flex-col items-center gap-2 py-2">
+              <div className="w-16 h-16 rounded-full flex items-center justify-center" style={{
+                background: estado === "escuchando" ? "#ef4444" : estado === "hablando" ? "var(--gold)" : "rgba(255,255,255,.08)",
+              }}>
+                {estado === "escuchando" && <Mic size={26} className="animate-pulse" color="#fff" />}
+                {estado === "procesando" && <Square size={20} className="animate-pulse" />}
+                {estado === "hablando" && <Volume2 size={26} color="#0B2341" />}
+                {(estado === "permiso" || estado === "error") && <Mic size={26} style={{ opacity: .4 }} />}
+              </div>
+              <p className="text-xs gp-text-muted text-center">
+                {estado === "escuchando" && "Escuchando…"}
+                {estado === "procesando" && "Pensando…"}
+                {estado === "hablando" && "Hablando… (puedes interrumpirme)"}
+                {estado === "permiso" && (errorMsg || "Necesito permiso de micrófono.")}
+                {estado === "error" && (errorMsg || "Algo salió mal.")}
+              </p>
+              {(estado === "permiso" || estado === "error") && (
+                <button onClick={() => { cerrar(); irAVista("asistente"); }} className="gp-btn px-3 py-1.5 text-xs mt-1">
+                  Usar el chat de texto
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 
