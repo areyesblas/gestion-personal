@@ -10639,14 +10639,14 @@ function VoiceMode({ contextoPantalla, onDatosCreados, irAVista }) {
   // el microfono por completo (para forzar la ruta normal de audio) y lo volvemos a abrir al
   // terminar. Efecto secundario aceptado: en iOS no hay barge-in mientras la IA esta hablando
   // (en Chrome/Android si sigue habiendo, porque ese camino no depende de audio del dispositivo).
-  function pausarMicIOS() {
+  async function pausarMicIOS() {
     try { mediaRecorderRef.current?.stop(); } catch {}
     mediaRecorderRef.current = null;
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
     rafRef.current = null;
     try { streamRef.current?.getTracks().forEach((t) => t.stop()); } catch {}
     streamRef.current = null;
-    try { audioCtxRef.current?.close(); } catch {}
+    try { await audioCtxRef.current?.close(); } catch {} // esperamos de verdad a que cierre, si no iOS puede tardar en soltar la sesion de audio de grabacion
     audioCtxRef.current = null;
     analyserRef.current = null;
   }
@@ -10655,6 +10655,18 @@ function VoiceMode({ contextoPantalla, onDatosCreados, irAVista }) {
     if (!abiertoRef.current) return;
     cambiarEstado("escuchando");
     await iniciarEscuchaIOS(); // ya se concedio el permiso antes, no vuelve a preguntar
+  }
+
+  // Espera a que el navegador tenga la lista de voces cargada -- en Safari/iOS a veces esta
+  // vacia justo al inicio de la sesion y speak() no dice nada ni da error si la llamas antes.
+  function vocesListas() {
+    return new Promise((resolve) => {
+      if (!("speechSynthesis" in window)) { resolve(); return; }
+      if (window.speechSynthesis.getVoices().length > 0) { resolve(); return; }
+      const manejador = () => { window.speechSynthesis.removeEventListener("voiceschanged", manejador); resolve(); };
+      window.speechSynthesis.addEventListener("voiceschanged", manejador);
+      setTimeout(() => { window.speechSynthesis.removeEventListener("voiceschanged", manejador); resolve(); }, 1000);
+    });
   }
 
   // ---------- Compartido: mandar el turno a asistente-ia y leer la respuesta ----------
@@ -10681,7 +10693,7 @@ function VoiceMode({ contextoPantalla, onDatosCreados, irAVista }) {
           .map((a) => MODULO_POR_HERRAMIENTA_ASISTENTE[a.herramienta])
       )];
       if (modulosTocados.length > 0) onDatosCreados?.(modulosTocados);
-      hablar(json.respuesta);
+      await hablar(json.respuesta);
     } catch {
       setTranscripciones((prev) => [...prev, { rol: "asistente", texto: "No pude conectarme. Revisa tu conexión." }]);
       volverAEscuchar();
@@ -10697,12 +10709,16 @@ function VoiceMode({ contextoPantalla, onDatosCreados, irAVista }) {
     else volverAEscucharIOS();
   }
 
-  function hablar(texto) {
+  async function hablar(texto) {
     if (!texto || !("speechSynthesis" in window)) { volverAEscuchar(); return; }
-    if (!usaSTTNativo) pausarMicIOS(); // suelta el mic en iOS para que el audio salga por la bocina
+    if (!usaSTTNativo) await pausarMicIOS(); // suelta el mic en iOS para que el audio salga por la bocina, y espera a que cierre de verdad
     cambiarEstado("hablando");
     try {
       window.speechSynthesis.cancel();
+      await vocesListas();
+      // Pequeña pausa: en Safari, hablar justo después de cancelar o de cerrar el AudioContext
+      // del micrófono a veces se queda mudo sin avisar. Este respiro lo evita.
+      await new Promise((resolve) => setTimeout(resolve, 150));
       const u = new SpeechSynthesisUtterance(texto);
       u.lang = "es-MX";
       const alTerminar = () => { if (usaSTTNativo) volverAEscuchar(); else reanudarMicTrasHablarIOS(); };
@@ -10769,7 +10785,7 @@ function VoiceMode({ contextoPantalla, onDatosCreados, irAVista }) {
               <p className="text-xs gp-text-muted text-center">
                 {estado === "escuchando" && "Escuchando…"}
                 {estado === "procesando" && "Pensando…"}
-                {estado === "hablando" && (usaSTTNativo ? "Hablando… (puedes interrumpirme)" : "Hablando…")}
+                {estado === "hablando" && "Hablando…"}
                 {estado === "permiso" && (errorMsg || "Necesito permiso de micrófono.")}
                 {estado === "error" && (errorMsg || "Algo salió mal.")}
               </p>
