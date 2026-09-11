@@ -106,6 +106,10 @@ Deno.serve(async (req) => {
     if (!tarea.estado_aceptacion) update.estado_aceptacion = "pendiente";
     await admin.from("pendientes").update(update).eq("id", tareaId);
 
+    // Si el correo del colaborador coincide con una cuenta ARKEYONE real, lo liga a la tarea
+    // (asignado_a) para que le aparezca en "Mi trabajo" y pueda aceptar/rechazar ahí mismo.
+    await admin.rpc("vincular_colaborador_a_tarea", { p_tarea_id: tareaId });
+
     return new Response(JSON.stringify({ ok: true }), { headers: headersJson });
   } catch (err) {
     return new Response(JSON.stringify({ error: String(err) }), { status: 500, headers: headersJson });

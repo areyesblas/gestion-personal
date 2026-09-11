@@ -22,7 +22,7 @@ const CATEGORIA_POR_TIPO: Record<string, string> = {
   pago_recurrente: "Finanzas", pendiente: "Recordatorios", documento: "Legal",
   activo_digital: "Activos digitales", apartado: "Finanzas", revision_proyecto: "Proyectos",
   cumpleanos: "Recordatorios", regalo: "Recordatorios", evento: "Agenda", factura: "Finanzas",
-  campana: "Proyectos", asignacion: "Colaboradores",
+  campana: "Proyectos", asignacion: "Colaboradores", colaboradores: "Colaboradores",
 };
 
 type Prefs = { tiposDesactivados: string[]; silencioActivo: boolean; silencioInicioMin: number; silencioFinMin: number };
@@ -319,5 +319,36 @@ Deno.serve(async (_req) => {
     }
   }
 
-  return new Response(JSON.stringify({ ok: true, hoy, horaMin, ...resultado }), { headers: { "Content-Type": "application/json" } });
+  // Colaboradores (Grupo C, correo a colaboradores): si a un colaborador se le invitó a una
+  // tarea y no respondió en 2 días, se marca como rechazada automáticamente y se avisa al
+  // creador — igual que si hubiera rechazado a propósito, pero sin que nadie tenga que revisarlo.
+  const limiteRespuesta = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
+  const { data: sinRespuesta } = await admin.from("pendientes")
+    .select("id, descripcion, proyecto_id, user_id, colaborador_contacto_id")
+    .eq("estado_aceptacion", "pendiente").is("deleted_at", null).lt("invitacion_enviada_en", limiteRespuesta);
+
+  let autoRechazadas = 0;
+  for (const t of sinRespuesta || []) {
+    await admin.from("pendientes").update({ estado_aceptacion: "rechazada", respondida_en: new Date().toISOString() }).eq("id", t.id);
+    autoRechazadas++;
+    if (!t.user_id) continue;
+    let nombreColaborador = "Tu colaborador";
+    if (t.colaborador_contacto_id) {
+      const { data: c } = await admin.from("contactos").select("nombre").eq("id", t.colaborador_contacto_id).maybeSingle();
+      if (c?.nombre) nombreColaborador = c.nombre;
+    }
+    let sufProyecto = "";
+    if (t.proyecto_id) {
+      const { data: p } = await admin.from("proyectos").select("nombre").eq("id", t.proyecto_id).maybeSingle();
+      if (p?.nombre) sufProyecto = ` del proyecto ${p.nombre}`;
+    }
+    const titulo = "Tarea no aceptada";
+    const mensaje = `${nombreColaborador} no respondió en 2 días a la tarea "${t.descripcion}"${sufProyecto} — se marcó como no aceptada.`;
+    await admin.from("notifications").insert({ user_id: t.user_id, tipo: "colaboradores", severidad: "info", titulo, mensaje, recurso_tabla: "pendientes", recurso_id: t.id });
+    if (await debeEnviarPush(t.user_id, "colaboradores", horaMin)) {
+      await enviarPushAUsuario(t.user_id, { titulo, mensaje, url: "/?modulo=pendientes", tag: "colaboradores", recursoTabla: "pendientes", recursoId: t.id });
+    }
+  }
+
+  return new Response(JSON.stringify({ ok: true, hoy, horaMin, ...resultado, autoRechazadas }), { headers: { "Content-Type": "application/json" } });
 });
