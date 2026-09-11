@@ -6,7 +6,7 @@ import {
   Users, Activity, Plus, X, Trash2, Pencil, Github, ChevronDown,
   ChevronRight, Bell, Lightbulb, Rocket, MessageCircle, Mail, Globe,
   Target, Contact, BarChart3, FileText, Flame, HeartPulse, Check, Menu, PieChart as PieChartIcon,
-  PiggyBank, Camera, Film, Upload, MapPin, Clock, Mic, MicOff, Gift, Receipt, Megaphone, ChevronUp, Gem, Download, Sun, Moon, Shield, LogOut, ChevronLeft, Lock, Pill, CalendarClock, Zap, StickyNote, Search, Sparkles, Send, Bot, Square, Settings, CalendarRange, Palette, Eye, EyeOff, Sliders,
+  PiggyBank, Camera, Film, Upload, MapPin, Clock, Mic, MicOff, Gift, Receipt, Megaphone, ChevronUp, Gem, Download, Sun, Moon, Shield, LogOut, ChevronLeft, Lock, Pill, CalendarClock, Zap, StickyNote, Search, Sparkles, Send, Bot, Square, Settings, CalendarRange, Palette, Eye, EyeOff, Sliders, Volume2,
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
@@ -10083,8 +10083,10 @@ function ArkeyRobot({ estado, onClick }) {
     estado === "escuchando" ? "#22c55e" :
     estado === "hablando" ? "var(--gold)" :
     estado === "procesando" ? "#f59e0b" :
+    estado === "dormido" ? "#4b5563" :
     "#6b7280";
   const clickable = estado === "escuchando";
+  const dormido = estado === "dormido";
 
   return (
     <div onClick={clickable ? onClick : undefined} style={{ cursor: clickable ? "pointer" : "default" }}>
@@ -10112,11 +10114,22 @@ function ArkeyRobot({ estado, onClick }) {
         <rect x="18" y="30" width="84" height="72" rx="26" fill={colorCuerpo} />
         {/* cara */}
         <rect x="32" y="48" width="56" height="40" rx="14" fill="#0B2341" />
-        {/* ojos */}
-        <circle className="arkey-ojo" cx="48" cy="66" r={estado === "escuchando" ? 6.5 : 5.5} fill="var(--gold)" />
-        <circle className="arkey-ojo" cx="72" cy="66" r={estado === "escuchando" ? 6.5 : 5.5} fill="var(--gold)" />
+        {/* ojos: dormido = arquitos cerrados en vez de círculos, sin parpadeo */}
+        {dormido ? (
+          <>
+            <path d="M42 66 Q48 70 54 66" stroke="#6b7280" strokeWidth="2.5" strokeLinecap="round" fill="none" />
+            <path d="M66 66 Q72 70 78 66" stroke="#6b7280" strokeWidth="2.5" strokeLinecap="round" fill="none" />
+          </>
+        ) : (
+          <>
+            <circle className="arkey-ojo" cx="48" cy="66" r={estado === "escuchando" ? 6.5 : 5.5} fill="var(--gold)" />
+            <circle className="arkey-ojo" cx="72" cy="66" r={estado === "escuchando" ? 6.5 : 5.5} fill="var(--gold)" />
+          </>
+        )}
         {/* boca */}
-        {estado === "hablando" ? (
+        {dormido ? (
+          <text x="60" y="82" textAnchor="middle" fontSize="10" fill="#6b7280">zzZ</text>
+        ) : estado === "hablando" ? (
           <rect className="arkey-boca-hablando" x="52" y="76" width="16" height="4" rx="2" fill="var(--gold)" />
         ) : estado === "procesando" ? (
           <>
@@ -10151,6 +10164,7 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
 
   const estadoRef = useRef("inactivo");
   const abiertoRef = useRef(false);
+  const scrollRef = useRef(null); // contenedor de mensajes: se usa para auto-scroll al fondo
   const recognitionRef = useRef(null);
   const streamRef = useRef(null);
   const audioCtxRef = useRef(null);
@@ -10414,6 +10428,7 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
   // ---------- Camino Chrome/Android: SpeechRecognition nativo ----------
   function iniciarEscuchaNativa() {
     if (micMutedRef.current) return; // el micrófono está muteado a propósito: no arrancamos hasta que se reactive
+    if (sinCreditosRef.current) return; // sin consultas disponibles este mes: Arkey se queda dormido, no escucha
     const r = new SpeechRecognitionCtor();
     r.lang = "es-MX";
     r.continuous = true;
@@ -10477,6 +10492,7 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
   }
 
   async function iniciarEscuchaIOS() {
+    if (sinCreditosRef.current) return; // sin consultas disponibles este mes: Arkey se queda dormido, no escucha
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
@@ -10665,6 +10681,7 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
           .map((a) => MODULO_POR_HERRAMIENTA_ASISTENTE[a.herramienta])
       )];
       if (modulosTocados.length > 0) onDatosCreados?.(modulosTocados);
+      podarHistorialSiExcede(); // no se espera: corre en segundo plano, no debe retrasar la respuesta hablada
       await hablar(json.respuesta);
     } catch {
       setTranscripciones((prev) => [...prev, { rol: "asistente", texto: "No pude conectarme. Revisa tu conexión." }]);
@@ -10743,6 +10760,69 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
   }
 
 
+  // Auto-scroll: cada vez que se agrega un mensaje (propio o de Arkey), baja el panel al fondo
+  // para que el usuario nunca tenga que arrastrar el dedo mientras la conversación avanza.
+  useEffect(() => {
+    if (!scrollRef.current) return;
+    scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+  }, [transcripciones, mensajesDia]);
+
+  // Se agotaron las consultas del mes: Arkey "se duerme" -- el micrófono se bloquea por completo
+  // y no vuelve a arrancar solo, hasta que exista un botón de créditos extra (fase futura).
+  const sinCreditos = !!uso && uso.limite != null && uso.usadas >= uso.limite;
+  const sinCreditosRef = useRef(false); // se lee desde funciones con closures viejas (ej. iniciarEscuchaNativa) que no ven el re-render todavía
+  useEffect(() => { sinCreditosRef.current = sinCreditos; }, [sinCreditos]);
+  useEffect(() => {
+    if (!sinCreditos) return;
+    try { recognitionRef.current?.stop(); } catch {}
+    try { window.speechSynthesis?.cancel(); } catch {}
+    cambiarEstado("dormido");
+  }, [sinCreditos]);
+
+  // Reproducir un mensaje ya escrito en el historial o en la conversación actual, sin tocar el
+  // estado de "escuchando/procesando/hablando" del modo voz en vivo -- solo suena y ya.
+  function leerTextoMensaje(texto) {
+    if (!texto || !("speechSynthesis" in window)) return;
+    try {
+      window.speechSynthesis.cancel();
+      const u = new SpeechSynthesisUtterance(texto);
+      const voces = window.speechSynthesis.getVoices();
+      const candidatasEs = voces.filter((v) => v.lang?.toLowerCase().startsWith("es"));
+      const vozEs = candidatasEs.find((v) => v.lang?.toLowerCase() === "es-mx") || candidatasEs[0];
+      if (vozEs) { u.voice = vozEs; u.lang = vozEs.lang; } else { u.lang = "es-MX"; }
+      window.speechSynthesis.speak(u);
+    } catch {}
+  }
+
+  // Poda automática: conserva solo los últimos 100 mensajes por usuario en asistente_mensajes
+  // para no dejar crecer el historial sin límite (rendimiento del panel y de la consulta).
+  async function podarHistorialSiExcede() {
+    try {
+      const { data: sesion } = await supabase.auth.getSession();
+      const uid = sesion?.session?.user?.id;
+      if (!uid) return;
+      const { data } = await supabase.from("asistente_mensajes").select("id, created_at")
+        .eq("user_id", uid).order("created_at", { ascending: false }).range(100, 100 + 200);
+      if (data && data.length > 0) {
+        const idsAPodar = data.map((m) => m.id);
+        await supabase.from("asistente_mensajes").delete().in("id", idsAPodar);
+      }
+    } catch {}
+  }
+
+  // Eliminar un día completo del historial de conversaciones, a petición del usuario.
+  async function eliminarDiaHistorial(fecha) {
+    try {
+      const { data: sesion } = await supabase.auth.getSession();
+      const uid = sesion?.session?.user?.id;
+      if (!uid) return;
+      await supabase.from("asistente_mensajes").delete()
+        .eq("user_id", uid).gte("created_at", `${fecha}T00:00:00`).lt("created_at", `${fecha}T23:59:59.999`);
+      setDiasHistorial((prev) => (prev || []).filter((d) => d.fecha !== fecha));
+      if (diaSeleccionado === fecha) { setDiaSeleccionado(null); setMensajesDia([]); }
+    } catch {}
+  }
+
   async function hablar(texto) {
     if (!texto || !("speechSynthesis" in window)) { volverAEscuchar(); return; }
     setErrorMsg("");
@@ -10801,7 +10881,7 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
       )}
       {abierto && (
         <div className="fixed inset-0 z-[75] flex items-end sm:items-center justify-center p-4" style={{ background: "rgba(0,0,0,.55)" }} onClick={cerrar}>
-          <div className="gp-panel w-full max-w-md p-4 flex flex-col" style={{ maxHeight: "85vh" }} onClick={(e) => e.stopPropagation()}>
+          <div className="gp-panel w-full max-w-lg sm:max-w-xl p-4 flex flex-col" style={{ maxHeight: "90vh", minHeight: "70vh" }} onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-1">
               <h2 className="text-lg font-semibold flex items-center gap-2"><Bot size={20} className="gp-text-gold" /> Arkey</h2>
               <div className="flex items-center gap-1">
@@ -10810,6 +10890,11 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
               </div>
             </div>
             {uso && <p className="text-[11px] gp-text-muted mb-2">{uso.usadas}/{uso.limite} consultas este mes</p>}
+            {sinCreditos && (
+              <p className="text-[11px] mb-2 px-2 py-1 rounded" style={{ background: "rgba(197,48,48,.12)", color: "#C0392B" }}>
+                Arkey se quedó sin consultas este mes y se fue a dormir 💤. El micrófono está bloqueado hasta el próximo mes (o hasta que agreguemos la opción de consultas extra).
+              </p>
+            )}
 
             {historialAbierto ? (
               <div className="flex-1 overflow-y-auto mb-3" style={{ minHeight: 200 }}>
@@ -10826,26 +10911,49 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
                   </>
                 ) : (
                   <>
-                    <button onClick={() => setDiaSeleccionado(null)} className="text-xs gp-text-muted mb-2">← Ver otros días</button>
+                    <div className="flex items-center justify-between mb-2">
+                      <button onClick={() => setDiaSeleccionado(null)} className="text-xs gp-text-muted">← Ver otros días</button>
+                      <button onClick={() => eliminarDiaHistorial(diaSeleccionado)} className="text-xs" style={{ color: "#C0392B" }}>Eliminar este día</button>
+                    </div>
                     {mensajesDia.map((m, i) => (
                       <div key={i} className={`mb-2 flex ${m.rol === "usuario" ? "justify-end" : "justify-start"}`}>
-                        <div className="max-w-[85%] rounded-lg px-3 py-2 text-sm" style={{
+                        <div className="relative max-w-[85%] rounded-lg px-3 py-2 pr-7 text-sm" style={{
                           background: m.rol === "usuario" ? "var(--gold)" : "var(--panel-2, rgba(255,255,255,.06))",
                           color: m.rol === "usuario" ? "#0B2341" : "inherit",
-                        }}>{m.contenido}</div>
+                        }}>
+                          {m.contenido}
+                          <button
+                            onClick={() => leerTextoMensaje(m.contenido)}
+                            title="Escuchar de nuevo"
+                            className="absolute bottom-1 right-1 opacity-60 hover:opacity-100"
+                            style={{ background: "none", border: "none", padding: 2 }}
+                          >
+                            <Volume2 size={12} />
+                          </button>
+                        </div>
                       </div>
                     ))}
                   </>
                 )}
               </div>
             ) : (
-              <div className="flex-1 overflow-y-auto mb-3" style={{ minHeight: 80 }}>
+              <div ref={scrollRef} className="flex-1 overflow-y-auto mb-3" style={{ minHeight: 80 }}>
                 {transcripciones.map((t, i) => (
                   <div key={i} className={`mb-2 flex ${t.rol === "usuario" ? "justify-end" : "justify-start"}`}>
-                    <div className="max-w-[85%] rounded-lg px-3 py-2 text-sm" style={{
+                    <div className="relative max-w-[85%] rounded-lg px-3 py-2 pr-7 text-sm" style={{
                       background: t.rol === "usuario" ? "var(--gold)" : "var(--panel-2, rgba(255,255,255,.06))",
                       color: t.rol === "usuario" ? "#0B2341" : "inherit",
-                    }}>{t.texto}</div>
+                    }}>
+                      {t.texto}
+                      <button
+                        onClick={() => leerTextoMensaje(t.texto)}
+                        title="Escuchar de nuevo"
+                        className="absolute bottom-1 right-1 opacity-60 hover:opacity-100"
+                        style={{ background: "none", border: "none", padding: 2 }}
+                      >
+                        <Volume2 size={12} />
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -10855,30 +10963,32 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
               <div className="flex items-center gap-3">
                 <button
                   onClick={alternarMicMuted}
-                  title={micMuted ? "Activar micrófono" : "Mutear micrófono"}
+                  title={sinCreditos ? "Sin consultas disponibles este mes" : micMuted ? "Activar micrófono" : "Mutear micrófono"}
                   className="gp-btn-ghost p-2 rounded"
-                  style={micMuted ? { color: "#C0392B" } : undefined}
+                  disabled={sinCreditos}
+                  style={sinCreditos ? { opacity: 0.4, cursor: "not-allowed" } : micMuted ? { color: "#C0392B" } : undefined}
                 >
-                  {micMuted ? <MicOff size={18} /> : <Mic size={18} />}
+                  {micMuted || sinCreditos ? <MicOff size={18} /> : <Mic size={18} />}
                 </button>
-                <ArkeyRobot estado={estado} onClick={() => { desbloquearVoz(); forzarFinTurno(); }} />
+                <ArkeyRobot estado={estado} onClick={sinCreditos ? undefined : () => { desbloquearVoz(); forzarFinTurno(); }} />
               </div>
               <div className="w-24 h-1.5 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,.12)" }} title="Nivel captado por el micrófono">
                 <div
                   className="h-full rounded-full"
                   style={{
                     width: `${Math.round(nivelMic * 100)}%`,
-                    background: micMuted ? "#C0392B" : "var(--gold)",
+                    background: micMuted || sinCreditos ? "#C0392B" : "var(--gold)",
                     transition: "width 80ms linear",
                   }}
                 />
               </div>
               <p className="text-xs gp-text-muted text-center">
-                {estado === "escuchando" && "Escuchando…"}
-                {estado === "procesando" && "Pensando…"}
-                {estado === "hablando" && "Hablando… (puedes interrumpirme)"}
-                {estado === "permiso" && (errorMsg || "Necesito permiso de micrófono.")}
-                {estado === "error" && (errorMsg || "Algo salió mal.")}
+                {sinCreditos && "Arkey está dormido 💤"}
+                {!sinCreditos && estado === "escuchando" && "Escuchando…"}
+                {!sinCreditos && estado === "procesando" && "Pensando…"}
+                {!sinCreditos && estado === "hablando" && "Hablando… (puedes interrumpirme)"}
+                {!sinCreditos && estado === "permiso" && (errorMsg || "Necesito permiso de micrófono.")}
+                {!sinCreditos && estado === "error" && (errorMsg || "Algo salió mal.")}
               </p>
               <div className="flex items-center gap-2 w-full mt-1">
                 <input
@@ -10886,10 +10996,11 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
                   value={textoManual}
                   onChange={(e) => setTextoManual(e.target.value)}
                   onKeyDown={(e) => { if (e.key === "Enter") enviarTextoManual(); }}
-                  placeholder="O escríbele a Arkey…"
+                  placeholder={sinCreditos ? "Sin consultas disponibles este mes" : "O escríbele a Arkey…"}
                   className="gp-input flex-1 text-sm"
+                  disabled={sinCreditos}
                 />
-                <button onClick={enviarTextoManual} className="gp-btn-ghost p-2 rounded" disabled={!textoManual.trim()}>
+                <button onClick={enviarTextoManual} className="gp-btn-ghost p-2 rounded" disabled={!textoManual.trim() || sinCreditos}>
                   <Send size={16} />
                 </button>
               </div>
