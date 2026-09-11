@@ -10381,7 +10381,12 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
       return;
     }
     iniciarMedidorVisual();
-    if (usaSTTNativo) iniciarMedidorNivelNativo(); // en el camino iOS de respaldo, el medidor se conecta solo al abrir su propio stream (ver iniciarEscuchaIOS)
+    // IMPORTANTE: se espera (await) a que termine de pedir permiso de micrófono para el medidor
+    // ANTES de arrancar el reconocimiento nativo. Si se piden casi al mismo tiempo (como estaba
+    // antes, sin await), iOS muestra el diálogo de permiso DOS veces -- una por cada camino que
+    // pide el micrófono por su cuenta. Pidiéndolo una sola vez y esperando la respuesta, el
+    // reconocimiento que arranca después ya encuentra el permiso concedido y no vuelve a preguntar.
+    if (usaSTTNativo) await iniciarMedidorNivelNativo(); // en el camino iOS de respaldo, el medidor se conecta solo al abrir su propio stream (ver iniciarEscuchaIOS)
     await hablar(SALUDO_INICIAL); // el saludo no gasta cuota (no llama a asistente-ia); al terminar de decirlo, pasa solo a escuchar
   };
 
