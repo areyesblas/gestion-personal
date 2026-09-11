@@ -10452,6 +10452,7 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
     // se guarda la pantalla actual (contextoPantalla) y se restaura justo después de recargar.
     if (esIOS) {
       try { localStorage.setItem("arkeyone_reload_vista", JSON.stringify(contextoPantalla || null)); } catch {}
+      try { sessionStorage.setItem("arkeyone_skip_splash", "1"); } catch {} // ya viene de la app abierta, no hace falta ver la animación de bienvenida otra vez
       window.location.reload();
       return;
     }
