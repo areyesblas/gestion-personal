@@ -250,6 +250,135 @@ const TOOLS = [
     },
   },
   {
+    name: "crear_medicion_salud",
+    description: "Registra una medicion de salud (peso, glucosa, presion arterial, colesterol, trigliceridos) para el usuario o para una persona vinculada. Usa buscar_datos con modulo=contactos primero si la medicion es de un tercero. No requiere confirmacion.",
+    input_schema: {
+      type: "object",
+      properties: {
+        peso: { type: "number" },
+        glucosa: { type: "number" },
+        sistolica: { type: "number" },
+        diastolica: { type: "number" },
+        colesterol: { type: "number" },
+        trigliceridos: { type: "number" },
+        notas: { type: "string" },
+        fecha: { type: "string", description: "YYYY-MM-DD, si no se da se usa hoy." },
+        contacto_id: { type: "string", description: "Opcional, solo si es una persona vinculada (no el propio usuario)." },
+      },
+    },
+  },
+  {
+    name: "crear_medicamento",
+    description: "Registra un medicamento con su dosis, horarios y dias de toma, para el usuario o para una persona vinculada. Usa buscar_datos con modulo=contactos primero si es un tercero. No requiere confirmacion.",
+    input_schema: {
+      type: "object",
+      properties: {
+        nombre: { type: "string" },
+        dosis: { type: "string" },
+        contacto_id: { type: "string", description: "Opcional. Si no se da, el medicamento es para el propio usuario." },
+        horarios: { type: "array", items: { type: "string" }, description: "Horas de toma en formato HH:MM, ej. ['08:00', '20:00']." },
+        dias_semana: { type: "array", items: { type: "number" }, description: "Dias de la semana en que se toma, 0=domingo a 6=sabado. Si no se da, se asume todos los dias." },
+        fecha_inicio: { type: "string", description: "YYYY-MM-DD, si no se da se usa hoy." },
+        fecha_fin: { type: "string", description: "YYYY-MM-DD, opcional para tratamientos indefinidos." },
+        instrucciones: { type: "string" },
+        motivo: { type: "string" },
+        medico: { type: "string" },
+        via_administracion: { type: "string" },
+        observaciones: { type: "string" },
+      },
+      required: ["nombre"],
+    },
+  },
+  {
+    name: "crear_habito",
+    description: "Crea un nuevo habito con su frecuencia. No requiere confirmacion.",
+    input_schema: {
+      type: "object",
+      properties: {
+        nombre: { type: "string" },
+        frecuencia_tipo: { type: "string", enum: ["diario", "dias_semana", "veces_semana"], description: "Por defecto 'diario' (todos los dias)." },
+        frecuencia_dias_semana: { type: "array", items: { type: "number" }, description: "Solo si frecuencia_tipo='dias_semana': dias 0=domingo a 6=sabado." },
+        frecuencia_veces_semana: { type: "number", description: "Solo si frecuencia_tipo='veces_semana'." },
+      },
+      required: ["nombre"],
+    },
+  },
+  {
+    name: "marcar_habito_cumplido",
+    description: "Marca (o desmarca) un habito como cumplido en una fecha, por defecto hoy. Usa buscar_datos con modulo=habitos primero para obtener el id exacto. No requiere confirmacion.",
+    input_schema: {
+      type: "object",
+      properties: {
+        id: { type: "string" },
+        cumplido: { type: "boolean", description: "true para marcar cumplido (default), false para desmarcar." },
+        fecha: { type: "string", description: "YYYY-MM-DD, si no se da se usa hoy." },
+      },
+      required: ["id"],
+    },
+  },
+  {
+    name: "crear_evento",
+    description: "Crea un evento/show (expediente operativo: fecha, lugar, contacto, comentarios). Los montos (costo, ingreso, ganancia) NO se capturan aqui -- van en Finanzas y se relacionan por separado. Usa buscar_datos con modulo=contactos primero si aplica. No requiere confirmacion.",
+    input_schema: {
+      type: "object",
+      properties: {
+        nombre: { type: "string" },
+        fecha: { type: "string", description: "YYYY-MM-DD" },
+        lugar: { type: "string" },
+        horario: { type: "string" },
+        contacto_id: { type: "string" },
+        proyecto_id: { type: "string" },
+        comentarios: { type: "string" },
+      },
+      required: ["nombre"],
+    },
+  },
+  {
+    name: "crear_patrimonio",
+    description: "Registra un bien patrimonial (nombre, categoria, fecha y valor de adquisicion). El valor actual se calcula despues con valuaciones, no se captura aqui. No requiere confirmacion.",
+    input_schema: {
+      type: "object",
+      properties: {
+        nombre: { type: "string" },
+        categoria: { type: "string" },
+        fecha_adquisicion: { type: "string", description: "YYYY-MM-DD" },
+        valor_adquisicion: { type: "number" },
+        notas: { type: "string" },
+      },
+      required: ["nombre"],
+    },
+  },
+  {
+    name: "crear_apartado",
+    description: "Crea un apartado (meta de ahorro): nombre, monto objetivo, fecha objetivo. El monto ya ahorrado se calcula despues con transferencias, no se captura aqui. No requiere confirmacion.",
+    input_schema: {
+      type: "object",
+      properties: {
+        nombre: { type: "string" },
+        monto_objetivo: { type: "number" },
+        fecha_objetivo: { type: "string", description: "YYYY-MM-DD" },
+        proyecto_id: { type: "string" },
+        notas: { type: "string" },
+      },
+      required: ["nombre"],
+    },
+  },
+  {
+    name: "crear_meta",
+    description: "Crea una meta (objetivo a lograr), opcionalmente ligada a un proyecto. Usa buscar_datos con modulo=proyectos primero si aplica. No requiere confirmacion.",
+    input_schema: {
+      type: "object",
+      properties: {
+        descripcion: { type: "string" },
+        proyecto_id: { type: "string" },
+        fecha_objetivo: { type: "string", description: "YYYY-MM-DD" },
+        fecha_revision: { type: "string", description: "YYYY-MM-DD" },
+        prioridad: { type: "string", enum: ["Baja", "Media", "Alta"] },
+      },
+      required: ["descripcion"],
+    },
+  },
+  {
     name: "actualizar_cita",
     description: "Reprograma o modifica una cita existente (titulo, fecha_hora, lugar). Usa buscar_datos primero para el id. No requiere confirmacion.",
     input_schema: {
@@ -477,6 +606,90 @@ async function ejecutarHerramienta(nombre: string, input: any, userId: string) {
         fecha: input.fecha || fechaHoraActualMexico().iso, proyecto_id: input.proyecto_id || null,
       };
       const { error } = await admin.from("actividades").insert(row);
+      return error ? { error: error.message } : { ok: true, id: row.id };
+    }
+    case "crear_medicion_salud": {
+      const row: any = {
+        id: uid(), user_id: userId, fecha: input.fecha || fechaHoraActualMexico().iso,
+        hora: fechaHoraActualMexico().hora, origen: "rapido",
+        peso: input.peso ?? null, glucosa: input.glucosa ?? null,
+        sistolica: input.sistolica ?? null, diastolica: input.diastolica ?? null,
+        colesterol: input.colesterol ?? null, trigliceridos: input.trigliceridos ?? null,
+        notas: input.notas || null, contacto_id: input.contacto_id || null,
+      };
+      const { error } = await admin.from("salud").insert(row);
+      return error ? { error: error.message } : { ok: true, id: row.id };
+    }
+    case "crear_medicamento": {
+      const row: any = { id: uid(), user_id: userId, nombre: input.nombre };
+      if (input.dosis !== undefined) row.dosis = input.dosis;
+      if (input.contacto_id !== undefined) row.contacto_id = input.contacto_id;
+      if (input.horarios !== undefined) row.horarios = input.horarios;
+      if (input.dias_semana !== undefined) row.dias_semana = input.dias_semana;
+      if (input.fecha_inicio !== undefined) row.fecha_inicio = input.fecha_inicio;
+      if (input.fecha_fin !== undefined) row.fecha_fin = input.fecha_fin;
+      if (input.instrucciones !== undefined) row.instrucciones = input.instrucciones;
+      if (input.motivo !== undefined) row.motivo = input.motivo;
+      if (input.medico !== undefined) row.medico = input.medico;
+      if (input.via_administracion !== undefined) row.via_administracion = input.via_administracion;
+      if (input.observaciones !== undefined) row.observaciones = input.observaciones;
+      const { error } = await admin.from("medicamentos").insert(row);
+      return error ? { error: error.message } : { ok: true, id: row.id };
+    }
+    case "crear_habito": {
+      const row: any = { id: uid(), user_id: userId, nombre: input.nombre, fechas: [], frecuencia_tipo: input.frecuencia_tipo || "diario" };
+      if (input.frecuencia_dias_semana !== undefined) row.frecuencia_dias_semana = input.frecuencia_dias_semana;
+      if (input.frecuencia_veces_semana !== undefined) row.frecuencia_veces_semana = input.frecuencia_veces_semana;
+      const { error } = await admin.from("habitos").insert(row);
+      return error ? { error: error.message } : { ok: true, id: row.id };
+    }
+    case "marcar_habito_cumplido": {
+      const { data: habito } = await admin.from("habitos").select("id, fechas").eq("id", input.id).eq("user_id", userId).maybeSingle();
+      if (!habito) return { error: "No se encontro ese habito (o no te pertenece). Usa buscar_datos primero." };
+      const fecha = input.fecha || fechaHoraActualMexico().iso;
+      const actuales: string[] = habito.fechas || [];
+      const marcarCumplido = input.cumplido !== false;
+      const nuevas = marcarCumplido
+        ? (actuales.includes(fecha) ? actuales : [...actuales, fecha])
+        : actuales.filter((f) => f !== fecha);
+      const { error } = await admin.from("habitos").update({ fechas: nuevas }).eq("id", input.id).eq("user_id", userId);
+      return error ? { error: error.message } : { ok: true };
+    }
+    case "crear_evento": {
+      const row = {
+        id: uid(), user_id: userId, nombre: input.nombre, fecha: input.fecha || null,
+        lugar: input.lugar || null, horario: input.horario || null,
+        contacto_id: input.contacto_id || null, proyecto_id: input.proyecto_id || null,
+        comentarios: input.comentarios || null,
+      };
+      const { error } = await admin.from("eventos").insert(row);
+      return error ? { error: error.message } : { ok: true, id: row.id };
+    }
+    case "crear_patrimonio": {
+      const row = {
+        id: uid(), user_id: userId, nombre: input.nombre, categoria: input.categoria || "Otro",
+        fecha_adquisicion: input.fecha_adquisicion || null, valor_adquisicion: input.valor_adquisicion ?? 0,
+        notas: input.notas || null,
+      };
+      const { error } = await admin.from("patrimonio").insert(row);
+      return error ? { error: error.message } : { ok: true, id: row.id };
+    }
+    case "crear_apartado": {
+      const row = {
+        id: uid(), user_id: userId, nombre: input.nombre, monto_objetivo: input.monto_objetivo ?? null,
+        fecha_objetivo: input.fecha_objetivo || null, proyecto_id: input.proyecto_id || null,
+        notas: input.notas || null,
+      };
+      const { error } = await admin.from("apartados").insert(row);
+      return error ? { error: error.message } : { ok: true, id: row.id };
+    }
+    case "crear_meta": {
+      const row = {
+        id: uid(), user_id: userId, descripcion: input.descripcion, proyecto_id: input.proyecto_id || null,
+        fecha_objetivo: input.fecha_objetivo || null, fecha_revision: input.fecha_revision || null,
+        prioridad: input.prioridad || "Media", estatus: "No iniciada",
+      };
+      const { error } = await admin.from("metas").insert(row);
       return error ? { error: error.message } : { ok: true, id: row.id };
     }
     case "actualizar_cita": {
