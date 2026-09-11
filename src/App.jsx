@@ -10337,6 +10337,7 @@ function VoiceMode({ contextoPantalla, onDatosCreados, irAVista }) {
   const [errorMsg, setErrorMsg] = useState("");
   const [transcripciones, setTranscripciones] = useState([]); // [{rol, texto}]
   const [nivelAudio, setNivelAudio] = useState(0); // diagnostico visible: nivel de energia que capta el mic (0-1), solo camino iOS
+  const [vocesInfo, setVocesInfo] = useState(""); // diagnostico visible: cuantas voces de sintesis detecto el navegador
   const ultimoReporteNivelRef = useRef(0);
 
   const estadoRef = useRef("inactivo");
@@ -10734,19 +10735,27 @@ function VoiceMode({ contextoPantalla, onDatosCreados, irAVista }) {
 
   async function hablar(texto) {
     if (!texto || !("speechSynthesis" in window)) { volverAEscuchar(); return; }
+    setErrorMsg("");
     if (!usaSTTNativo) await pausarMicIOS(); // suelta el mic en iOS para que el audio salga por la bocina, y espera a que cierre de verdad
     cambiarEstado("hablando");
     try {
       window.speechSynthesis.cancel();
       await vocesListas();
+      const voces = window.speechSynthesis.getVoices();
+      setVocesInfo(`${voces.length} voces · ${voces.slice(0, 4).map((v) => v.lang).join(", ") || "ninguna"}`);
       // Pequeña pausa: en Safari, hablar justo después de cancelar o de cerrar el AudioContext
       // del micrófono a veces se queda mudo sin avisar. Este respiro lo evita.
       await new Promise((resolve) => setTimeout(resolve, 150));
       const u = new SpeechSynthesisUtterance(texto);
-      u.lang = "es-MX";
+      // Buscar una voz en español instalada de verdad en vez de solo fijar 'lang': en Safari, si
+      // no existe una voz que haga match exacto con el lang pedido, a veces se queda muda sin dar
+      // ningún error (a diferencia de Chrome, que sí improvisa con la voz más cercana).
+      const vozEs = voces.find((v) => v.lang?.toLowerCase() === "es-mx")
+        || voces.find((v) => v.lang?.toLowerCase().startsWith("es"));
+      if (vozEs) { u.voice = vozEs; u.lang = vozEs.lang; } else { u.lang = "es-MX"; }
       const alTerminar = () => { if (usaSTTNativo) volverAEscuchar(); else reanudarMicTrasHablarIOS(); };
       u.onend = alTerminar;
-      u.onerror = alTerminar;
+      u.onerror = (e) => { setErrorMsg(`TTS: ${e.error || "error desconocido"}`); alTerminar(); };
       window.speechSynthesis.speak(u);
       // En el camino nativo (Chrome/Android/Mac), seguimos "escuchando" con el mismo reconocedor
       // mientras la IA habla, únicamente para detectar una interrupción (barge-in) -- ver
@@ -10777,7 +10786,7 @@ function VoiceMode({ contextoPantalla, onDatosCreados, irAVista }) {
         <div className="fixed inset-0 z-[75] flex items-end sm:items-center justify-center p-4" style={{ background: "rgba(0,0,0,.55)" }} onClick={cerrar}>
           <div className="gp-panel w-full max-w-md p-4 flex flex-col" style={{ maxHeight: "80vh" }} onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-3">
-              <h2 className="text-lg font-semibold flex items-center gap-2"><Bot size={20} className="gp-text-gold" /> Modo Conversación <span className="text-[10px] gp-text-muted font-normal">v20260911f · {usaSTTNativo ? "camino: nativo" : "camino: iOS/grabación"}{esIOS ? " · iOS" : ""}</span></h2>
+              <h2 className="text-lg font-semibold flex items-center gap-2"><Bot size={20} className="gp-text-gold" /> Modo Conversación <span className="text-[10px] gp-text-muted font-normal">v20260911g · {usaSTTNativo ? "camino: nativo" : "camino: iOS/grabación"}{esIOS ? " · iOS" : ""}</span></h2>
               <button onClick={cerrar} className="gp-btn-ghost p-2 rounded"><X size={18} /></button>
             </div>
 
@@ -10818,6 +10827,10 @@ function VoiceMode({ contextoPantalla, onDatosCreados, irAVista }) {
                 {estado === "permiso" && (errorMsg || "Necesito permiso de micrófono.")}
                 {estado === "error" && (errorMsg || "Algo salió mal.")}
               </p>
+              {vocesInfo && <p className="text-[10px] gp-text-muted text-center">{vocesInfo}</p>}
+              {errorMsg && estado !== "permiso" && estado !== "error" && (
+                <p className="text-[10px] text-center" style={{ color: "#ef4444" }}>{errorMsg}</p>
+              )}
               {estado === "escuchando" && !usaSTTNativo && (
                 <div className="w-full max-w-[200px] flex items-center gap-2">
                   <div className="flex-1 h-2 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,.12)" }}>
