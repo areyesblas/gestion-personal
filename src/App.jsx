@@ -1422,6 +1422,25 @@ function AvisoInstalarPWA() {
   );
 }
 
+// Al cerrar el asistente Arkey en iOS se recarga la página completa, para forzar a iOS a soltar
+// el micrófono de verdad (ver VoiceMode.cerrar -- bug de WebKit que no se resuelve solo con JS).
+// Esta función lee la pantalla que se guardó justo antes de esa recarga, para no hacer sentir al
+// usuario que "perdió su lugar". Es de un solo uso: se borra de localStorage al leerla.
+// Por seguridad, las pantallas sensibles (Finanzas, Salud, etc.) NO se restauran automáticamente
+// -- tras una recarga, vuelven a pedir la contraseña de reautenticación como cualquier otra vez
+// que expira la sesión corta, así que se manda a "dashboard" en esos casos.
+const VISTAS_SENSIBLES_NO_RESTAURAR = ["finanzas", "facturas", "reportes", "estimaciones", "deudas", "apartados", "patrimonio", "activos", "documentos", "salud", "medicamentos", "actividades"];
+function leerVistaGuardadaTrasReload() {
+  try {
+    const cruda = localStorage.getItem("arkeyone_reload_vista");
+    if (!cruda) return null;
+    localStorage.removeItem("arkeyone_reload_vista");
+    const ctx = JSON.parse(cruda);
+    if (!ctx?.modulo || VISTAS_SENSIBLES_NO_RESTAURAR.includes(ctx.modulo)) return null;
+    return ctx;
+  } catch { return null; }
+}
+
 export default function App() {
   const [session, setSession] = useState(undefined); // undefined = cargando, null = sin sesión
   const [recuperando, setRecuperando] = useState(false);
@@ -1646,9 +1665,16 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
   const miEmail = session.user.email;
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [view, setView] = useState("dashboard");
+  const [vistaRestauradaTrasReload] = useState(() => leerVistaGuardadaTrasReload());
+  const [view, setView] = useState(() => {
+    if (!vistaRestauradaTrasReload) return "dashboard";
+    // contextoPantalla usa {modulo:"proyectos", entidad_id} tanto para la lista como para el
+    // detalle de un proyecto -- solo es "proyecto-detalle" si venía con un entidad_id puesto.
+    if (vistaRestauradaTrasReload.modulo === "proyectos" && vistaRestauradaTrasReload.entidad_id) return "proyecto-detalle";
+    return vistaRestauradaTrasReload.modulo || "dashboard";
+  });
   const [regalosFiltroContacto, setRegalosFiltroContacto] = useState("");
-  const [proyectoDetalleId, setProyectoDetalleId] = useState(null);
+  const [proyectoDetalleId, setProyectoDetalleId] = useState(() => vistaRestauradaTrasReload?.entidad_id || null);
   const irADetalleProyecto = (proyectoId) => { setProyectoDetalleId(proyectoId); irAVista("proyecto-detalle"); };
   const [busquedaAbierta, setBusquedaAbierta] = useState(false);
   const buscarNavegarA = (key, item) => {
@@ -10419,6 +10445,17 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
   }
 
   const cerrar = () => {
+    // En iOS, el micrófono a veces se queda con la sesión de grabación abierta a nivel de
+    // sistema pase lo que pase en JS (bug de WebKit) -- ya se intentó todo lo razonable desde
+    // el código. La única forma de garantizar que se suelte de verdad es recargar la página,
+    // que mata el proceso que la tiene abierta. Para que no se sienta como perder el lugar,
+    // se guarda la pantalla actual (contextoPantalla) y se restaura justo después de recargar.
+    if (esIOS) {
+      try { localStorage.setItem("arkeyone_reload_vista", JSON.stringify(contextoPantalla || null)); } catch {}
+      window.location.reload();
+      return;
+    }
+    if (!micMutedRef.current) alternarMicMuted();
     detenerTodo();
     abiertoRef.current = false;
     setAbierto(false);
