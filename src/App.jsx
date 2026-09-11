@@ -6,7 +6,7 @@ import {
   Users, Activity, Plus, X, Trash2, Pencil, Github, ChevronDown,
   ChevronRight, Bell, Lightbulb, Rocket, MessageCircle, Mail, Globe,
   Target, Contact, BarChart3, FileText, Flame, HeartPulse, Check, Menu, PieChart as PieChartIcon,
-  PiggyBank, Camera, Film, Upload, MapPin, Clock, Mic, MicOff, Gift, Receipt, Megaphone, ChevronUp, Gem, Download, Sun, Moon, Shield, LogOut, ChevronLeft, Lock, Pill, CalendarClock, Zap, StickyNote, Search, Sparkles, Send, Bot, Volume2, VolumeX, Square, Settings, CalendarRange, Palette, Eye, EyeOff, Sliders,
+  PiggyBank, Camera, Film, Upload, MapPin, Clock, Mic, MicOff, Gift, Receipt, Megaphone, ChevronUp, Gem, Download, Sun, Moon, Shield, LogOut, ChevronLeft, Lock, Pill, CalendarClock, Zap, StickyNote, Search, Sparkles, Send, Bot, Square, Settings, CalendarRange, Palette, Eye, EyeOff, Sliders,
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
@@ -10142,7 +10142,6 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
   const [estado, setEstado] = useState("inactivo"); // inactivo | escuchando | procesando | hablando | permiso | error
   const [errorMsg, setErrorMsg] = useState("");
   const [transcripciones, setTranscripciones] = useState([]); // [{rol, texto}]
-  const [silenciado, setSilenciado] = useState(false);
   const [uso, setUso] = useState(null); // {usadas, limite}
   const [textoManual, setTextoManual] = useState("");
   const [historialAbierto, setHistorialAbierto] = useState(false);
@@ -10152,7 +10151,6 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
 
   const estadoRef = useRef("inactivo");
   const abiertoRef = useRef(false);
-  const silenciadoRef = useRef(false);
   const recognitionRef = useRef(null);
   const streamRef = useRef(null);
   const audioCtxRef = useRef(null);
@@ -10176,7 +10174,6 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
   const medidorIntervalRef = useRef(null);
 
   const cambiarEstado = (nuevo) => { estadoRef.current = nuevo; setEstado(nuevo); };
-  const cambiarSilenciado = (nuevo) => { silenciadoRef.current = nuevo; setSilenciado(nuevo); };
   const cambiarMicMuted = (nuevo) => { micMutedRef.current = nuevo; setMicMuted(nuevo); };
 
   function leerNivelDeAnalyser(analyser) {
@@ -10743,7 +10740,6 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
 
   async function hablar(texto) {
     if (!texto || !("speechSynthesis" in window)) { volverAEscuchar(); return; }
-    if (silenciadoRef.current) { volverAEscuchar(); return; } // silenciado: no reproduce audio, solo vuelve a escuchar
     setErrorMsg("");
     if (!usaSTTNativo) await pausarMicIOS(); // suelta el mic en iOS para que el audio salga por la bocina, y espera a que cierre de verdad
     cambiarEstado("hablando");
@@ -10861,13 +10857,6 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
                   {micMuted ? <MicOff size={18} /> : <Mic size={18} />}
                 </button>
                 <ArkeyRobot estado={estado} onClick={() => { desbloquearVoz(); forzarFinTurno(); }} />
-                <button
-                  onClick={() => { const nuevo = !silenciado; cambiarSilenciado(nuevo); if (nuevo) { try { window.speechSynthesis.cancel(); } catch {} } }}
-                  title={silenciado ? "Activar voz" : "Silenciar voz"}
-                  className="gp-btn-ghost p-2 rounded"
-                >
-                  {silenciado ? <VolumeX size={18} /> : <Volume2 size={18} />}
-                </button>
               </div>
               <div className="w-24 h-1.5 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,.12)" }} title="Nivel captado por el micrófono">
                 <div
