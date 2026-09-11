@@ -10244,8 +10244,16 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
   useEffect(() => () => detenerTodo(), []); // limpia todo si el componente se desmonta
 
   function detenerTodo() {
-    try { recognitionRef.current?.stop(); } catch {}
-    try { recognitionRef.current?.abort?.(); } catch {}
+    // Desconectamos los handlers ANTES de abortar: si no, el propio r.onend puede disparar
+    // un r.start() de auto-reinicio (ver iniciarEscuchaNativa) por una condición de carrera
+    // entre el evento asíncrono del navegador y el cierre del panel.
+    try {
+      const r = recognitionRef.current;
+      if (r) {
+        r.onresult = null; r.onerror = null; r.onend = null; r.onstart = null; r.onspeechend = null; r.onaudioend = null;
+        r.abort(); // abort() corta ya, sin esperar un resultado final como sí hace stop()
+      }
+    } catch {}
     recognitionRef.current = null;
     try { mediaRecorderRef.current?.stop(); } catch {}
     mediaRecorderRef.current = null;
@@ -10260,6 +10268,18 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
     empezoHablarRef.current = null;
     silencioDesdeRef.current = null;
     bargeInDesdeRef.current = null;
+
+    // Bug conocido de WebKit en iOS: con reconocimiento nativo continuo, abort() detiene el
+    // reconocimiento pero a veces no libera de inmediato la sesión de audio del sistema, y el
+    // punto/indicador de micrófono se queda encendido aunque ya no estemos escuchando (esto es
+    // justo lo que reportaste: se apaga el sonido pero no el micrófono). Forzamos la liberación
+    // pidiendo y cerrando al instante un stream de audio "vacío": eso obliga a iOS a soltar
+    // la sesión de grabación de verdad.
+    if (esIOS && usaSTTNativo && navigator.mediaDevices?.getUserMedia) {
+      navigator.mediaDevices.getUserMedia({ audio: true })
+        .then((s) => s.getTracks().forEach((t) => t.stop()))
+        .catch(() => {});
+    }
   }
 
   const abrir = async () => {
