@@ -126,6 +126,113 @@ const TOOLS = [
       required: ["titulo", "fecha_hora"],
     },
   },
+  {
+    name: "actualizar_pendiente",
+    description: "Actualiza una tarea/pendiente existente: descripcion, fecha_limite, prioridad o estatus (incluye completar y cancelar). Usa buscar_datos primero para obtener el id exacto. Accion reversible, no requiere confirmacion.",
+    input_schema: {
+      type: "object",
+      properties: {
+        id: { type: "string" },
+        descripcion: { type: "string" },
+        fecha_limite: { type: "string", description: "YYYY-MM-DD" },
+        prioridad: { type: "string", enum: ["Baja", "Media", "Alta"] },
+        estatus: { type: "string", enum: ["Borrador", "No iniciada", "Pendiente", "En proceso", "En espera", "Completada", "Cancelada"] },
+      },
+      required: ["id"],
+    },
+  },
+  {
+    name: "eliminar_pendiente",
+    description: "Elimina una tarea/pendiente (borrado logico, recuperable desde Papelera). ACCION QUE REQUIERE CONFIRMACION DEL USUARIO: llamala primero SIN 'confirmado' (o con confirmado=false) -- el sistema no borrara nada y te devolvera un mensaje de confirmacion que debes decirle al usuario tal cual, en texto, SIN llamar la herramienta de nuevo en ese mismo turno. Solo cuando el usuario responda que si en su siguiente mensaje, vuelve a llamar esta herramienta con confirmado=true.",
+    input_schema: {
+      type: "object",
+      properties: { id: { type: "string" }, confirmado: { type: "boolean" } },
+      required: ["id"],
+    },
+  },
+  {
+    name: "actualizar_movimiento",
+    description: "Actualiza un movimiento de Finanzas (concepto, monto, fecha, categoria o estatus). Cambiar el monto o poner estatus=Cancelado es sensible y REQUIERE CONFIRMACION: llamala primero sin 'confirmado' -- el sistema no aplicara el cambio y te devolvera un mensaje para confirmar con el usuario en texto; solo despues de su 'si' vuelve a llamarla con confirmado=true. Cambios que NO tocan monto ni cancelan (ej. corregir el concepto o la fecha) se aplican directo sin pedir confirmado.",
+    input_schema: {
+      type: "object",
+      properties: {
+        id: { type: "string" }, concepto: { type: "string" }, monto: { type: "number" },
+        fecha: { type: "string" }, categoria: { type: "string" }, estatus: { type: "string" },
+        confirmado: { type: "boolean" },
+      },
+      required: ["id"],
+    },
+  },
+  {
+    name: "eliminar_movimiento",
+    description: "Elimina un movimiento de Finanzas (borrado logico). ACCION DE IMPACTO ECONOMICO QUE REQUIERE CONFIRMACION: misma mecanica que eliminar_pendiente -- primero sin confirmado=true, repite el mensaje de confirmacion al usuario en texto, y solo tras su 'si' la vuelves a llamar con confirmado=true.",
+    input_schema: {
+      type: "object",
+      properties: { id: { type: "string" }, confirmado: { type: "boolean" } },
+      required: ["id"],
+    },
+  },
+  {
+    name: "actualizar_proyecto",
+    description: "Actualiza un proyecto existente: nombre, estatus, categoria, prioridad o descripcion. Usa buscar_datos primero para el id. No requiere confirmacion.",
+    input_schema: {
+      type: "object",
+      properties: {
+        id: { type: "string" }, nombre: { type: "string" }, estatus: { type: "string" },
+        categoria: { type: "string" }, prioridad: { type: "string" }, descripcion: { type: "string" },
+      },
+      required: ["id"],
+    },
+  },
+  {
+    name: "crear_contacto",
+    description: "Crea un nuevo contacto. No requiere confirmacion.",
+    input_schema: {
+      type: "object",
+      properties: {
+        nombre: { type: "string" },
+        whatsapp: { type: "string" },
+        correo: { type: "string" },
+        tipos: { type: "array", items: { type: "string" }, description: "Ej. ['Cliente'], ['Colaborador'], ['Familiar']. Si no se especifica se deja ['Otro']." },
+        notas: { type: "string" },
+      },
+      required: ["nombre"],
+    },
+  },
+  {
+    name: "crear_atencion",
+    description: "Registra una atencion (regalo, felicitacion, condolencia, agradecimiento) ligada a un contacto. Usa buscar_datos con modulo=contactos primero para obtener el contacto_id correcto.",
+    input_schema: {
+      type: "object",
+      properties: {
+        contacto_id: { type: "string" },
+        tipo: { type: "string", enum: ["Regalo", "Felicitacion", "Condolencia", "Agradecimiento", "Otro"] },
+        ocasion: { type: "string" },
+        descripcion: { type: "string" },
+        fecha: { type: "string", description: "YYYY-MM-DD" },
+        costo: { type: "number" },
+      },
+      required: ["contacto_id", "descripcion"],
+    },
+  },
+  {
+    name: "actualizar_cita",
+    description: "Reprograma o modifica una cita existente (titulo, fecha_hora, lugar). Usa buscar_datos primero para el id. No requiere confirmacion.",
+    input_schema: {
+      type: "object",
+      properties: { id: { type: "string" }, titulo: { type: "string" }, fecha_hora: { type: "string" }, lugar: { type: "string" } },
+      required: ["id"],
+    },
+  },
+  {
+    name: "cancelar_cita",
+    description: "Cancela (elimina) una cita. ACCION QUE REQUIERE CONFIRMACION: misma mecanica que eliminar_pendiente -- primero sin confirmado=true, repite el mensaje de confirmacion al usuario en texto, y solo tras su 'si' la vuelves a llamar con confirmado=true.",
+    input_schema: {
+      type: "object",
+      properties: { id: { type: "string" }, confirmado: { type: "boolean" } },
+      required: ["id"],
+    },
+  },
 ];
 
 const SELECT_POR_MODULO: Record<string, string> = {
@@ -134,7 +241,7 @@ const SELECT_POR_MODULO: Record<string, string> = {
   notas: "id, titulo, contenido",
   finanzas: "id, concepto, tipo, monto, fecha, estatus, categoria",
   citas: "id, titulo, fecha_hora, lugar",
-  contactos: "id, nombre, telefono, correo",
+  contactos: "id, nombre, whatsapp, correo, tipos",
   salud: "id, fecha, hora, peso, glucosa, sistolica, diastolica, colesterol, trigliceridos, notas",
   medicamentos: "id, nombre, dosis, activo, horarios, fecha_inicio, fecha_fin",
   habitos: "id, nombre, frecuencia_tipo",
@@ -257,6 +364,98 @@ async function ejecutarHerramienta(nombre: string, input: any, userId: string) {
       const { error } = await admin.from("citas").insert(row);
       return error ? { error: error.message } : { ok: true, id: row.id };
     }
+    case "actualizar_pendiente": {
+      const { data: existente } = await admin.from("pendientes").select("id, descripcion").eq("id", input.id).eq("user_id", userId).maybeSingle();
+      if (!existente) return { error: "No se encontro esa tarea (o no te pertenece). Usa buscar_datos primero." };
+      const cambios: any = {};
+      for (const campo of ["descripcion", "fecha_limite", "prioridad", "estatus"]) {
+        if (input[campo] !== undefined) cambios[campo] = input[campo];
+      }
+      const { error } = await admin.from("pendientes").update(cambios).eq("id", input.id).eq("user_id", userId);
+      return error ? { error: error.message } : { ok: true };
+    }
+    case "eliminar_pendiente": {
+      const { data: existente } = await admin.from("pendientes").select("id, descripcion").eq("id", input.id).eq("user_id", userId).is("deleted_at", null).maybeSingle();
+      if (!existente) return { error: "No se encontro esa tarea (o no te pertenece, o ya estaba eliminada)." };
+      if (input.confirmado !== true) {
+        return { requiere_confirmacion: true, mensaje_para_usuario: `¿Confirmas eliminar la tarea "${existente.descripcion}"?` };
+      }
+      const { error } = await admin.from("pendientes").update({ deleted_at: new Date().toISOString() }).eq("id", input.id).eq("user_id", userId);
+      return error ? { error: error.message } : { ok: true };
+    }
+    case "actualizar_movimiento": {
+      const { data: existente } = await admin.from("finanzas").select("id, concepto, monto, tipo").eq("id", input.id).eq("user_id", userId).maybeSingle();
+      if (!existente) return { error: "No se encontro ese movimiento (o no te pertenece). Usa buscar_datos primero." };
+      const tocaMonto = input.monto !== undefined && Number(input.monto) !== Number(existente.monto);
+      const tocaCancelacion = input.estatus === "Cancelado";
+      if ((tocaMonto || tocaCancelacion) && input.confirmado !== true) {
+        const detalle = tocaMonto ? `cambiar el monto de "${existente.concepto}" de $${existente.monto} a $${input.monto}` : `cancelar el movimiento "${existente.concepto}" de $${existente.monto}`;
+        return { requiere_confirmacion: true, mensaje_para_usuario: `¿Confirmas ${detalle}?` };
+      }
+      const cambios: any = {};
+      for (const campo of ["concepto", "monto", "fecha", "categoria", "estatus"]) {
+        if (input[campo] !== undefined) cambios[campo] = input[campo];
+      }
+      const { error } = await admin.from("finanzas").update(cambios).eq("id", input.id).eq("user_id", userId);
+      return error ? { error: error.message } : { ok: true };
+    }
+    case "eliminar_movimiento": {
+      const { data: existente } = await admin.from("finanzas").select("id, concepto, monto").eq("id", input.id).eq("user_id", userId).is("deleted_at", null).maybeSingle();
+      if (!existente) return { error: "No se encontro ese movimiento (o no te pertenece, o ya estaba eliminado)." };
+      if (input.confirmado !== true) {
+        return { requiere_confirmacion: true, mensaje_para_usuario: `¿Confirmas eliminar el movimiento "${existente.concepto}" de $${existente.monto}?` };
+      }
+      const { error } = await admin.from("finanzas").update({ deleted_at: new Date().toISOString() }).eq("id", input.id).eq("user_id", userId);
+      return error ? { error: error.message } : { ok: true };
+    }
+    case "actualizar_proyecto": {
+      const { data: existente } = await admin.from("proyectos").select("id").eq("id", input.id).eq("user_id", userId).maybeSingle();
+      if (!existente) return { error: "No se encontro ese proyecto (o no te pertenece). Usa buscar_datos primero." };
+      const cambios: any = {};
+      for (const campo of ["nombre", "estatus", "categoria", "prioridad", "descripcion"]) {
+        if (input[campo] !== undefined) cambios[campo] = input[campo];
+      }
+      const { error } = await admin.from("proyectos").update(cambios).eq("id", input.id).eq("user_id", userId);
+      return error ? { error: error.message } : { ok: true };
+    }
+    case "crear_contacto": {
+      const row = {
+        id: uid(), user_id: userId, nombre: input.nombre, whatsapp: input.whatsapp || null,
+        correo: input.correo || null, tipos: input.tipos?.length ? input.tipos : ["Otro"], notas: input.notas || null,
+      };
+      const { error } = await admin.from("contactos").insert(row);
+      return error ? { error: error.message } : { ok: true, id: row.id };
+    }
+    case "crear_atencion": {
+      const { data: contacto } = await admin.from("contactos").select("id").eq("id", input.contacto_id).eq("user_id", userId).maybeSingle();
+      if (!contacto) return { error: "No se encontro ese contacto (o no te pertenece). Usa buscar_datos con modulo=contactos primero." };
+      const row = {
+        id: uid(), user_id: userId, contacto_id: input.contacto_id, tipo: input.tipo || "Regalo",
+        ocasion: input.ocasion || "Otro", descripcion: input.descripcion,
+        fecha: input.fecha || new Date().toISOString().slice(0, 10), costo: input.costo ?? null,
+      };
+      const { error } = await admin.from("regalos").insert(row);
+      return error ? { error: error.message } : { ok: true, id: row.id };
+    }
+    case "actualizar_cita": {
+      const { data: existente } = await admin.from("citas").select("id").eq("id", input.id).eq("user_id", userId).maybeSingle();
+      if (!existente) return { error: "No se encontro esa cita (o no te pertenece). Usa buscar_datos primero." };
+      const cambios: any = {};
+      for (const campo of ["titulo", "fecha_hora", "lugar"]) {
+        if (input[campo] !== undefined) cambios[campo] = input[campo];
+      }
+      const { error } = await admin.from("citas").update(cambios).eq("id", input.id).eq("user_id", userId);
+      return error ? { error: error.message } : { ok: true };
+    }
+    case "cancelar_cita": {
+      const { data: existente } = await admin.from("citas").select("id, titulo, fecha_hora").eq("id", input.id).eq("user_id", userId).is("deleted_at", null).maybeSingle();
+      if (!existente) return { error: "No se encontro esa cita (o no te pertenece, o ya estaba cancelada)." };
+      if (input.confirmado !== true) {
+        return { requiere_confirmacion: true, mensaje_para_usuario: `¿Confirmas cancelar la cita "${existente.titulo}"?` };
+      }
+      const { error } = await admin.from("citas").update({ deleted_at: new Date().toISOString() }).eq("id", input.id).eq("user_id", userId);
+      return error ? { error: error.message } : { ok: true };
+    }
     default:
       return { error: "Herramienta desconocida." };
   }
@@ -272,9 +471,13 @@ SI PUEDES CONSULTAR los datos reales del usuario -- no es cierto que solo puedas
 
 Cuando el usuario pida un consejo, un resumen general, o haga una pregunta abierta ("como voy", "dame un consejo", "que deberia priorizar hoy", "como esta mi situacion"), usa obtener_panorama para traer numeros reales (tareas vencidas, balance del mes, deudas, habitos de hoy, ultima medicion de salud, vencimientos proximos) y da un consejo concreto basado en esos datos -- no generalidades ni frases motivacionales vacias. Se honesto: si algo se ve mal (deudas altas, tareas vencidas acumuladas, muchos dias sin registrar habitos), dilo con tacto pero sin suavizarlo de mas.
 
-Si el usuario pide algo ambiguo (por ejemplo, no queda claro a cual proyecto se refiere porque hay varias coincidencias, o no encuentras ninguna), pregunta antes de actuar en vez de adivinar. Si la accion es clara, ejecutala directo sin pedir confirmacion de mas -- el usuario ya te la pidio.
+Si el usuario pide algo ambiguo (por ejemplo, no queda claro a cual proyecto se refiere porque hay varias coincidencias, o no encuentras ninguna), pregunta antes de actuar en vez de adivinar. Para el resto de las acciones -- crear, actualizar montos que no cambian el monto ni cancelan nada, agendar, etc. -- ejecutalas directo sin pedir confirmacion de mas, el usuario ya te lo pidio.
 
-Responde de forma conversacional y con la extension que amerite la pregunta: un par de lineas para algo simple, mas espacio si estas dando un consejo o un resumen con varios puntos. No repitas mecanicamente toda la informacion cruda de las herramientas -- interpretala y comunicala como lo haria una persona.`;
+CONFIRMACION PARA ACCIONES SENSIBLES: eliminar_pendiente, eliminar_movimiento, cancelar_cita, y actualizar_movimiento cuando cambia el monto o cancela, tienen un candado real en el servidor: si las llamas sin confirmado=true, NO se ejecutan y te regresan { requiere_confirmacion: true, mensaje_para_usuario: "..." }. Cuando eso pase, responde en ese mismo turno SOLO con ese mensaje de confirmacion en texto (puedes ajustar el tono pero conserva la pregunta) y NO vuelvas a llamar la herramienta todavia. Espera el siguiente mensaje del usuario: si dice que si / confirma / adelante, entonces llama la misma herramienta otra vez con los mismos datos mas confirmado=true. Si dice que no o cambia de opinion, no la llames y confirma que no se hizo nada.
+
+CONTEXTO DE PANTALLA: si el mensaje del usuario viene acompañado de contexto de pantalla (modulo y entidad en la que esta parado dentro de ARKEYONE), usalo para resolver referencias como "este proyecto", "esta tarea", "cuanto llevamos aqui" sin pedirle que lo repita -- pero si el usuario nombra explicitamente otra cosa, prioriza lo que dice sobre el contexto de pantalla.
+
+Responde de forma conversacional y con la extension que amerite la pregunta: un par de lineas para algo simple, mas espacio si estas dando un consejo o un resumen con varios puntos. No repitas mecanicamente toda la informacion cruda de las herramientas -- interpretala y comunicala como lo haria una persona. Si estas en modo voz (te lo indica el contexto), manten las respuestas un poco mas breves y naturales para escuchar -- evita listas largas con viñetas, mejor dilo como lo dirias hablando.`;
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
@@ -290,10 +493,11 @@ Deno.serve(async (req) => {
     }
     const userId = userData.user.id;
 
-    const { mensaje } = await req.json();
+    const { mensaje, contexto_pantalla, modo } = await req.json();
     if (!mensaje || typeof mensaje !== "string" || !mensaje.trim()) {
       return new Response(JSON.stringify({ error: "Falta el mensaje." }), { status: 400, headers: headersJson });
     }
+    const modoConversacion = modo === "voz" ? "voz" : "texto";
 
     const mes = new Date().toISOString().slice(0, 7);
     let { data: uso } = await admin.from("asistente_uso").select("id, consultas_usadas, limite_mes").eq("user_id", userId).eq("mes", mes).maybeSingle();
@@ -315,7 +519,18 @@ Deno.serve(async (req) => {
       .eq("user_id", userId).order("created_at", { ascending: false }).limit(MENSAJES_HISTORIAL);
     const historial = (historialRows || []).reverse();
 
-    await admin.from("asistente_mensajes").insert({ id: uid(), user_id: userId, rol: "usuario", contenido: mensaje });
+    await admin.from("asistente_mensajes").insert({
+      id: uid(), user_id: userId, rol: "usuario", contenido: mensaje,
+      contexto_pantalla: contexto_pantalla || null, modo: modoConversacion,
+    });
+
+    let systemPrompt = SYSTEM_PROMPT;
+    if (contexto_pantalla && typeof contexto_pantalla === "object") {
+      systemPrompt += `\n\nCONTEXTO DE PANTALLA ACTUAL DEL USUARIO: ${JSON.stringify(contexto_pantalla)}`;
+    }
+    if (modoConversacion === "voz") {
+      systemPrompt += `\n\nEsta conversacion es por VOZ (Modo Conversacion): el usuario te esta hablando y tu respuesta se leera en voz alta. Se breve y natural, como platicando, sin listas con viñetas ni formato de texto.`;
+    }
 
     const mensajes: any[] = [
       ...historial.map((h: any) => ({ role: h.rol === "usuario" ? "user" : "assistant", content: h.contenido })),
@@ -333,7 +548,7 @@ Deno.serve(async (req) => {
           "x-api-key": ANTHROPIC_API_KEY,
           "anthropic-version": "2023-06-01",
         },
-        body: JSON.stringify({ model: MODELO, max_tokens: 1536, system: SYSTEM_PROMPT, tools: TOOLS, messages: mensajes }),
+        body: JSON.stringify({ model: MODELO, max_tokens: 1536, system: systemPrompt, tools: TOOLS, messages: mensajes }),
       });
 
       if (!resp.ok) {
@@ -367,7 +582,7 @@ Deno.serve(async (req) => {
     }
 
     await admin.from("asistente_uso").update({ consultas_usadas: uso.consultas_usadas + 1 }).eq("id", uso.id);
-    await admin.from("asistente_mensajes").insert({ id: uid(), user_id: userId, rol: "asistente", contenido: respuestaFinal, acciones: accionesRealizadas });
+    await admin.from("asistente_mensajes").insert({ id: uid(), user_id: userId, rol: "asistente", contenido: respuestaFinal, acciones: accionesRealizadas, modo: modoConversacion });
 
     return new Response(JSON.stringify({
       respuesta: respuestaFinal,
