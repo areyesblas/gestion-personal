@@ -10768,7 +10768,10 @@ function VoiceMode({ contextoPantalla, onDatosCreados, irAVista }) {
       // En el camino nativo (Chrome/Android/Mac), seguimos "escuchando" con el mismo reconocedor
       // mientras la IA habla, únicamente para detectar una interrupción (barge-in) -- ver
       // r.onresult arriba. En iOS lo evitamos: reactivar el mic mientras se habla silencia el audio.
-      if (usaSTTNativo && !esIOS) iniciarEscuchaNativa();
+      // Antes evitábamos esto en iOS pensando que reactivar el mic mientras habla causaba el
+      // silencio -- resultó que la causa real era el desbloqueo de voz (ver desbloquearVoz).
+      // Ahora lo probamos también en iOS: si el audio se sigue escuchando bien, se queda así.
+      if (usaSTTNativo) iniciarEscuchaNativa();
     } catch { if (usaSTTNativo) volverAEscuchar(); else reanudarMicTrasHablarIOS(); }
   }
 
@@ -10829,9 +10832,9 @@ function VoiceMode({ contextoPantalla, onDatosCreados, irAVista }) {
                 {(estado === "permiso" || estado === "error") && <Mic size={26} style={{ opacity: .4 }} />}
               </div>
               <p className="text-xs gp-text-muted text-center">
-                {estado === "escuchando" && "Escuchando… (toca el círculo cuando termines de hablar)"}
+                {estado === "escuchando" && "Escuchando…"}
                 {estado === "procesando" && "Pensando…"}
-                {estado === "hablando" && "Hablando…"}
+                {estado === "hablando" && "Hablando… (puedes interrumpirme)"}
                 {estado === "permiso" && (errorMsg || "Necesito permiso de micrófono.")}
                 {estado === "error" && (errorMsg || "Algo salió mal.")}
               </p>
