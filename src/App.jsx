@@ -2398,9 +2398,6 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
             <button onClick={() => setBusquedaAbierta(true)} className="p-2 gp-btn-ghost rounded" aria-label="Buscar">
               <Search size={18} />
             </button>
-            <button onClick={() => irAVista("asistente")} className="p-2 gp-btn-ghost rounded" aria-label="Asistente">
-              <Bot size={18} />
-            </button>
           </div>
         </div>
 
@@ -2437,13 +2434,6 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
               className={`gp-input flex items-center justify-center px-3 py-2 ${sidebarColapsado ? "md:px-0" : ""}`}
             >
               <Search size={16} />
-            </button>
-            <button
-              onClick={() => irAVista("asistente")}
-              title="Asistente"
-              className={`gp-input flex items-center justify-center px-3 py-2 ${sidebarColapsado ? "md:px-0" : ""}`}
-            >
-              <Bot size={16} />
             </button>
           </div>
 
@@ -2689,7 +2679,6 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
               onEdit={async (id, p) => { await editItem("activos", id, p); const actual = data.activos.find((a) => a.id === id); await sincronizarFinanzasDeActivo({ ...actual, ...p, id }); }}
               onRemove={(id) => askDelete("activos", id)} onCrearTarea={(t) => addItem("pendientes", t)} />
           )}
-          {view === "asistente" && <Asistente onDatosCreados={recargarModulos} />}
           {view === "agenda" && (
             <Agenda data={data} misId={misId}
               onEditPendiente={(id, p) => editItem("pendientes", id, p)}
@@ -2719,7 +2708,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
       <VoiceMode
         contextoPantalla={view === "proyecto-detalle" && proyectoDetalleId ? { modulo: "proyectos", entidad_id: proyectoDetalleId } : (view && view !== "dashboard" ? { modulo: view } : null)}
         onDatosCreados={recargarModulos}
-        irAVista={irAVista}
+        nombreUsuario={miEmail}
       />
       {busquedaAbierta && <BusquedaGlobal data={data} onNavigate={buscarNavegarA} onClose={() => setBusquedaAbierta(false)} />}
 
@@ -10072,252 +10061,6 @@ const MODULO_POR_HERRAMIENTA_ASISTENTE = {
 // esperando el sí del usuario.
 const ACCION_FUE_CONFIRMACION_PENDIENTE = (accion) => accion?.resultado?.requiere_confirmacion === true;
 
-function Asistente({ onDatosCreados }) {
-  const [mensajes, setMensajes] = useState([]); // [{rol: "usuario"|"asistente", texto, acciones}]
-  const [texto, setTexto] = useState("");
-  const [enviando, setEnviando] = useState(false);
-  const [uso, setUso] = useState(null); // {consultas_usadas, limite_mes}
-  const [error, setError] = useState("");
-  const [escuchando, setEscuchando] = useState(false);
-  const [lecturaAuto, setLecturaAuto] = useState(() => {
-    try { return localStorage.getItem("arkeyone_asistente_voz") === "1"; } catch { return false; }
-  });
-  const [hablando, setHablando] = useState(false);
-  const [cargandoHistorial, setCargandoHistorial] = useState(true);
-  const [confirmarBorrado, setConfirmarBorrado] = useState(false);
-  const finRef = useRef(null);
-  const reconocimientoRef = useRef(null);
-
-  // Carga el historial ya guardado (asistente_mensajes) al entrar a la pantalla — antes se
-  // guardaba en la base pero nunca se volvía a mostrar, así que cada vez se veía vacío.
-  useEffect(() => {
-    (async () => {
-      const { data: sesion } = await supabase.auth.getSession();
-      const userId = sesion?.session?.user?.id;
-      if (!userId) { setCargandoHistorial(false); return; }
-      const { data, error } = await supabase.from("asistente_mensajes")
-        .select("rol, contenido, acciones, created_at")
-        .eq("user_id", userId).order("created_at", { ascending: true }).limit(200);
-      if (!error && data) {
-        setMensajes(data.map((m) => ({ rol: m.rol, texto: m.contenido, acciones: m.acciones || [] })));
-      }
-      setCargandoHistorial(false);
-    })();
-  }, []);
-
-  const borrarConversacion = async () => {
-    const { data: sesion } = await supabase.auth.getSession();
-    const userId = sesion?.session?.user?.id;
-    if (userId) await supabase.from("asistente_mensajes").delete().eq("user_id", userId);
-    setMensajes([]);
-    setConfirmarBorrado(false);
-  };
-
-  useEffect(() => { finRef.current?.scrollIntoView({ behavior: "smooth" }); }, [mensajes, enviando]);
-  // Se detiene la voz si sales de la pantalla del Asistente a media lectura.
-  useEffect(() => () => { try { window.speechSynthesis?.cancel(); } catch {} }, []);
-
-  // Lectura en voz alta de las respuestas: usa la síntesis de voz del navegador (speechSynthesis),
-  // que a diferencia del dictado SÍ funciona en Safari de iPhone, además de escritorio y Android.
-  const VozDisponible = typeof window !== "undefined" && "speechSynthesis" in window;
-  const hablar = (texto) => {
-    if (!VozDisponible || !texto) return;
-    try {
-      window.speechSynthesis.cancel(); // corta cualquier lectura anterior antes de empezar una nueva
-      const u = new SpeechSynthesisUtterance(texto);
-      u.lang = "es-MX";
-      u.onstart = () => setHablando(true);
-      u.onend = () => setHablando(false);
-      u.onerror = () => setHablando(false);
-      window.speechSynthesis.speak(u);
-    } catch { setHablando(false); }
-  };
-  const detenerVoz = () => { try { window.speechSynthesis?.cancel(); } catch {} setHablando(false); };
-  const alternarLecturaAuto = () => {
-    setLecturaAuto((v) => {
-      const nuevo = !v;
-      try { localStorage.setItem("arkeyone_asistente_voz", nuevo ? "1" : "0"); } catch {}
-      if (!nuevo) detenerVoz();
-      return nuevo;
-    });
-  };
-
-  // Dictado por voz: usa el reconocimiento de voz del navegador (Web Speech API). Chrome/Edge
-  // de escritorio y Android lo soportan bien; Safari de iOS NO lo soporta todavía (ni en la app
-  // instalada ni en el navegador) — por eso el botón solo aparece si el navegador lo tiene. En
-  // iPhone, el micrófono del teclado del sistema (junto a la barra espaciadora) sigue funcionando
-  // igual para dictar en este mismo campo de texto.
-  const ReconocimientoVoz = typeof window !== "undefined" && (window.SpeechRecognition || window.webkitSpeechRecognition);
-
-  const alternarDictado = () => {
-    if (!ReconocimientoVoz) return;
-    if (escuchando) {
-      reconocimientoRef.current?.stop();
-      return;
-    }
-    const r = new ReconocimientoVoz();
-    r.lang = "es-MX";
-    r.interimResults = false;
-    r.continuous = false;
-    r.onresult = (e) => {
-      const dicho = Array.from(e.results).map((res) => res[0].transcript).join(" ");
-      setTexto((prev) => (prev ? prev.trim() + " " : "") + dicho.trim());
-    };
-    r.onerror = () => setEscuchando(false);
-    r.onend = () => setEscuchando(false);
-    reconocimientoRef.current = r;
-    setEscuchando(true);
-    r.start();
-  };
-
-  const enviar = async () => {
-    const contenido = texto.trim();
-    if (!contenido || enviando) return;
-    setTexto("");
-    setError("");
-    setMensajes((prev) => [...prev, { rol: "usuario", texto: contenido }]);
-    setEnviando(true);
-    try {
-      const { data: sesion } = await supabase.auth.getSession();
-      const resp = await fetch(`${supabase.supabaseUrl}/functions/v1/asistente-ia`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${sesion.session.access_token}` },
-        body: JSON.stringify({ mensaje: contenido }),
-      });
-      const json = await resp.json().catch(() => ({}));
-      if (!resp.ok || json.error) {
-        setError(json.error || "No se pudo contactar al asistente. Intenta de nuevo.");
-        setMensajes((prev) => prev.slice(0, -1)); // quita el mensaje del usuario si ni siquiera se proceso
-        return;
-      }
-      setMensajes((prev) => [...prev, { rol: "asistente", texto: json.respuesta, acciones: json.acciones || [] }]);
-      if (lecturaAuto) hablar(json.respuesta);
-      if (json.consultas_usadas != null) setUso({ consultas_usadas: json.consultas_usadas, limite_mes: json.limite_mes });
-      // Si el Asistente creó o modificó algo (sin error), refrescamos esos módulos del lado
-      // del cliente para que se vea de inmediato en Agenda/Pendientes/etc., sin recargar.
-      const modulosTocados = [...new Set(
-        (json.acciones || [])
-          .filter((a) => !a.resultado?.error && !ACCION_FUE_CONFIRMACION_PENDIENTE(a) && MODULO_POR_HERRAMIENTA_ASISTENTE[a.herramienta])
-          .map((a) => MODULO_POR_HERRAMIENTA_ASISTENTE[a.herramienta])
-      )];
-      if (modulosTocados.length > 0) onDatosCreados?.(modulosTocados);
-    } catch (err) {
-      console.error("Error al hablar con el asistente:", err);
-      setError("No se pudo contactar al asistente. Revisa tu conexión.");
-      setMensajes((prev) => prev.slice(0, -1));
-    } finally {
-      setEnviando(false);
-    }
-  };
-
-  return (
-    <div className="flex flex-col" style={{ height: "calc(100vh - 160px)" }}>
-      <div className="flex items-center justify-between mb-3">
-        <h1 className="text-2xl font-bold flex items-center gap-2"><Sparkles size={22} className="gp-text-gold" /> Asistente</h1>
-        <div className="flex items-center gap-3">
-          {uso && (
-            <span className="text-xs gp-text-muted">{uso.limite_mes - uso.consultas_usadas} de {uso.limite_mes} consultas restantes este mes</span>
-          )}
-          {VozDisponible && (
-            <button
-              onClick={alternarLecturaAuto}
-              title={lecturaAuto ? "Dejar de leer las respuestas en voz alta" : "Leer las respuestas en voz alta"}
-              className="gp-btn-ghost p-2 rounded"
-              style={lecturaAuto ? { color: "var(--gold)" } : undefined}
-            >
-              {lecturaAuto ? <Volume2 size={18} /> : <VolumeX size={18} />}
-            </button>
-          )}
-          {mensajes.length > 0 && (
-            <button onClick={() => setConfirmarBorrado(true)} title="Borrar conversación" className="gp-btn-ghost p-2 rounded">
-              <Trash2 size={18} />
-            </button>
-          )}
-        </div>
-      </div>
-
-      {confirmarBorrado && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,.6)" }} onClick={() => setConfirmarBorrado(false)}>
-          <div className="gp-panel p-4 max-w-sm w-full" onClick={(e) => e.stopPropagation()}>
-            <p className="text-sm mb-4">¿Borrar toda la conversación con el Asistente? No se puede deshacer.</p>
-            <div className="flex gap-2 justify-end">
-              <button className="gp-btn-ghost px-3 py-2 text-sm rounded" onClick={() => setConfirmarBorrado(false)}>Cancelar</button>
-              <button className="gp-btn px-3 py-2 text-sm" style={{ background: "#ef4444", color: "#fff" }} onClick={borrarConversacion}>Borrar</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      <div className="flex-1 overflow-y-auto gp-panel gp-hueso p-4 mb-3" style={{ minHeight: 0 }}>
-        {cargandoHistorial && <p className="text-sm gp-text-muted">Cargando conversación…</p>}
-        {!cargandoHistorial && mensajes.length === 0 && (
-          <p className="text-sm gp-text-muted">
-            Pregúntame lo que quieras sobre tus datos en ARKEYONE, o pídeme que guarde algo por ti — por ejemplo
-            "guárdame una nota de que hoy quedamos en...", "crea una idea de...", o "agrégale un avance de 10% a ARKEYDATA".
-          </p>
-        )}
-        {mensajes.map((m, i) => (
-          <div key={i} className={`mb-3 flex ${m.rol === "usuario" ? "justify-end" : "justify-start"}`}>
-            <div className="max-w-[85%] rounded-lg px-3 py-2 text-sm" style={{
-              background: m.rol === "usuario" ? "var(--gold)" : "var(--panel-2, rgba(255,255,255,.06))",
-              color: m.rol === "usuario" ? "#0B2341" : "inherit",
-            }}>
-              <div className="flex items-start gap-2">
-                <p className="flex-1" style={{ whiteSpace: "pre-wrap" }}>{m.texto}</p>
-                {m.rol === "asistente" && VozDisponible && (
-                  <button
-                    onClick={() => (hablando ? detenerVoz() : hablar(m.texto))}
-                    title={hablando ? "Detener" : "Escuchar"}
-                    className="shrink-0 opacity-60 hover:opacity-100"
-                  >
-                    {hablando ? <Square size={13} /> : <Volume2 size={13} />}
-                  </button>
-                )}
-              </div>
-              {m.acciones?.length > 0 && (
-                <div className="mt-2 pt-2 flex flex-col gap-1" style={{ borderTop: "1px solid rgba(0,0,0,.15)" }}>
-                  {m.acciones.filter((a) => !ACCION_FUE_CONFIRMACION_PENDIENTE(a)).map((a, j) => (
-                    <span key={j} className="text-xs flex items-center gap-1 opacity-80">
-                      <Check size={12} /> {ETIQUETA_ACCION_ASISTENTE[a.herramienta] || a.herramienta}
-                      {a.resultado?.error ? ` — no se pudo (${a.resultado.error})` : ""}
-                    </span>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        ))}
-        {enviando && <p className="text-xs gp-text-muted">Pensando…</p>}
-        {error && <p className="text-xs gp-text-red">{error}</p>}
-        <div ref={finRef} />
-      </div>
-
-      <div className="flex gap-2">
-        {ReconocimientoVoz && (
-          <button
-            className="gp-btn-ghost px-3 rounded"
-            onClick={alternarDictado}
-            title={escuchando ? "Detener dictado" : "Dictar por voz"}
-            style={escuchando ? { color: "#ef4444" } : undefined}
-          >
-            <Mic size={18} className={escuchando ? "animate-pulse" : ""} />
-          </button>
-        )}
-        <input
-          className="gp-input flex-1"
-          placeholder={escuchando ? "Escuchando…" : "Escribe tu mensaje…"}
-          value={texto}
-          onChange={(e) => setTexto(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); enviar(); } }}
-          disabled={enviando}
-        />
-        <button className="gp-btn px-4" onClick={enviar} disabled={enviando || !texto.trim()}>
-          <Send size={16} />
-        </button>
-      </div>
-    </div>
-  );
-}
 
 // Modo Conversación: capa flotante global de voz sobre el mismo Asistente/asistente-ia de
 // siempre (no crea un chatbot aparte). Detecta la plataforma y usa dos caminos:
@@ -10359,7 +10102,7 @@ function ArkeyRobot({ estado, onClick }) {
         .arkey-punto2 { animation: arkey-pensar 1s ease-in-out .2s infinite; }
         .arkey-punto3 { animation: arkey-pensar 1s ease-in-out .4s infinite; }
       `}</style>
-      <svg width="90" height="112" viewBox="0 0 120 150" className="arkey-grupo">
+      <svg width="118" height="147" viewBox="0 0 120 150" className="arkey-grupo">
         {/* antenas */}
         <line x1="38" y1="34" x2="24" y2="10" stroke={colorAntena} strokeWidth="3" strokeLinecap="round" />
         <line x1="82" y1="34" x2="96" y2="10" stroke={colorAntena} strokeWidth="3" strokeLinecap="round" />
@@ -10394,15 +10137,22 @@ function ArkeyRobot({ estado, onClick }) {
   );
 }
 
-function VoiceMode({ contextoPantalla, onDatosCreados, irAVista }) {
+function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
   const [abierto, setAbierto] = useState(false);
   const [estado, setEstado] = useState("inactivo"); // inactivo | escuchando | procesando | hablando | permiso | error
   const [errorMsg, setErrorMsg] = useState("");
   const [transcripciones, setTranscripciones] = useState([]); // [{rol, texto}]
-
+  const [silenciado, setSilenciado] = useState(false);
+  const [uso, setUso] = useState(null); // {usadas, limite}
+  const [textoManual, setTextoManual] = useState("");
+  const [historialAbierto, setHistorialAbierto] = useState(false);
+  const [diasHistorial, setDiasHistorial] = useState(null); // null = no cargado; [] = cargado y vacio
+  const [diaSeleccionado, setDiaSeleccionado] = useState(null);
+  const [mensajesDia, setMensajesDia] = useState([]);
 
   const estadoRef = useRef("inactivo");
   const abiertoRef = useRef(false);
+  const silenciadoRef = useRef(false);
   const recognitionRef = useRef(null);
   const streamRef = useRef(null);
   const audioCtxRef = useRef(null);
@@ -10415,6 +10165,12 @@ function VoiceMode({ contextoPantalla, onDatosCreados, irAVista }) {
   const bargeInDesdeRef = useRef(null);
 
   const cambiarEstado = (nuevo) => { estadoRef.current = nuevo; setEstado(nuevo); };
+  const cambiarSilenciado = (nuevo) => { silenciadoRef.current = nuevo; setSilenciado(nuevo); };
+
+  // Primer nombre a partir del correo, para un saludo mas cercano cuando abre el panel.
+  const primerNombre = (nombreUsuario || "").split("@")[0]?.split(/[._-]/)[0];
+  const nombreCapitalizado = primerNombre ? primerNombre.charAt(0).toUpperCase() + primerNombre.slice(1) : "";
+  const SALUDO_INICIAL = nombreCapitalizado ? `¡Hola ${nombreCapitalizado}! ¿En qué puedo apoyarte?` : "¡Hola! ¿En qué puedo apoyarte?";
 
   // En iOS, Safari a veces solo deja que speechSynthesis suene si la primerísima vez que se usa
   // en la sesión ocurre en el mismo instante de un toque real del usuario (sincrónico, sin ningún
@@ -10507,25 +10263,38 @@ function VoiceMode({ contextoPantalla, onDatosCreados, irAVista }) {
   }
 
   const abrir = async () => {
-    setTranscripciones([]);
+    setTranscripciones([{ rol: "asistente", texto: SALUDO_INICIAL }]);
     setErrorMsg("");
     abiertoRef.current = true;
     setAbierto(true);
+    cargarUso();
     if (!soportaModoVoz) {
       cambiarEstado("error");
       setErrorMsg("Tu navegador no soporta el Modo Conversación por voz.");
       return;
     }
-    cambiarEstado("escuchando");
-    if (usaSTTNativo) iniciarEscuchaNativa();
-    else await iniciarEscuchaIOS();
+    await hablar(SALUDO_INICIAL); // el saludo no gasta cuota (no llama a asistente-ia); al terminar de decirlo, pasa solo a escuchar
   };
+
+  async function cargarUso() {
+    try {
+      const { data: sesion } = await supabase.auth.getSession();
+      const uid = sesion?.session?.user?.id;
+      if (!uid) return;
+      const mes = new Date().toISOString().slice(0, 7);
+      const { data } = await supabase.from("asistente_uso").select("consultas_usadas, limite_mes").eq("user_id", uid).eq("mes", mes).maybeSingle();
+      if (data) setUso({ usadas: data.consultas_usadas, limite: data.limite_mes });
+      else setUso({ usadas: 0, limite: 100 });
+    } catch {}
+  }
 
   const cerrar = () => {
     detenerTodo();
     abiertoRef.current = false;
     setAbierto(false);
     cambiarEstado("inactivo");
+    setHistorialAbierto(false);
+    setDiaSeleccionado(null);
   };
 
   // ---------- Camino Chrome/Android: SpeechRecognition nativo ----------
@@ -10771,6 +10540,7 @@ function VoiceMode({ contextoPantalla, onDatosCreados, irAVista }) {
         return;
       }
       setTranscripciones((prev) => [...prev, { rol: "asistente", texto: json.respuesta }]);
+      if (json.consultas_usadas !== undefined) setUso({ usadas: json.consultas_usadas, limite: json.limite_mes });
       const modulosTocados = [...new Set(
         (json.acciones || [])
           .filter((a) => !a.resultado?.error && !ACCION_FUE_CONFIRMACION_PENDIENTE(a) && MODULO_POR_HERRAMIENTA_ASISTENTE[a.herramienta])
@@ -10805,8 +10575,59 @@ function VoiceMode({ contextoPantalla, onDatosCreados, irAVista }) {
     }
   }
 
+  // Respaldo: escribir en vez de hablar -- corta cualquier escucha/lectura en curso y manda el
+  // texto directo por el mismo flujo de siempre. Sirve si la voz falla, si no se puede hablar en
+  // ese momento, o simplemente si el usuario prefiere teclear.
+  const enviarTextoManual = () => {
+    const t = textoManual.trim();
+    if (!t) return;
+    try { recognitionRef.current?.stop(); } catch {}
+    try { window.speechSynthesis.cancel(); } catch {}
+    setTextoManual("");
+    enviarTurno(t);
+  };
+
+  // Historial por día: se guarda completo en asistente_mensajes (nunca se borra solo), pero aquí
+  // solo se consulta bajo demanda -- se agrupa por fecha para no mandar meses enteros de una vez.
+  async function abrirHistorial() {
+    setHistorialAbierto(true);
+    setDiaSeleccionado(null);
+    if (diasHistorial !== null) return; // ya se cargó antes en esta sesión del panel
+    try {
+      const { data: sesion } = await supabase.auth.getSession();
+      const uid = sesion?.session?.user?.id;
+      if (!uid) return;
+      const { data } = await supabase.from("asistente_mensajes").select("created_at")
+        .eq("user_id", uid).order("created_at", { ascending: false }).limit(500);
+      const porDia = {};
+      for (const m of data || []) {
+        const dia = m.created_at.slice(0, 10);
+        porDia[dia] = (porDia[dia] || 0) + 1;
+      }
+      setDiasHistorial(Object.entries(porDia).map(([fecha, cantidad]) => ({ fecha, cantidad })));
+    } catch {
+      setDiasHistorial([]);
+    }
+  }
+
+  async function verDia(fecha) {
+    setDiaSeleccionado(fecha);
+    setMensajesDia([]);
+    try {
+      const { data: sesion } = await supabase.auth.getSession();
+      const uid = sesion?.session?.user?.id;
+      if (!uid) return;
+      const { data } = await supabase.from("asistente_mensajes").select("rol, contenido, created_at")
+        .eq("user_id", uid).gte("created_at", `${fecha}T00:00:00`).lt("created_at", `${fecha}T23:59:59.999`)
+        .order("created_at", { ascending: true });
+      setMensajesDia(data || []);
+    } catch {}
+  }
+
+
   async function hablar(texto) {
     if (!texto || !("speechSynthesis" in window)) { volverAEscuchar(); return; }
+    if (silenciadoRef.current) { volverAEscuchar(); return; } // silenciado: no reproduce audio, solo vuelve a escuchar
     setErrorMsg("");
     if (!usaSTTNativo) await pausarMicIOS(); // suelta el mic en iOS para que el audio salga por la bocina, y espera a que cierre de verdad
     cambiarEstado("hablando");
@@ -10863,30 +10684,67 @@ function VoiceMode({ contextoPantalla, onDatosCreados, irAVista }) {
       )}
       {abierto && (
         <div className="fixed inset-0 z-[75] flex items-end sm:items-center justify-center p-4" style={{ background: "rgba(0,0,0,.55)" }} onClick={cerrar}>
-          <div className="gp-panel w-full max-w-md p-4 flex flex-col" style={{ maxHeight: "80vh" }} onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between mb-3">
+          <div className="gp-panel w-full max-w-md p-4 flex flex-col" style={{ maxHeight: "85vh" }} onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-1">
               <h2 className="text-lg font-semibold flex items-center gap-2"><Bot size={20} className="gp-text-gold" /> Arkey</h2>
-              <button onClick={cerrar} className="gp-btn-ghost p-2 rounded"><X size={18} /></button>
+              <div className="flex items-center gap-1">
+                <button onClick={abrirHistorial} title="Conversaciones anteriores" className="gp-btn-ghost p-2 rounded"><Clock size={16} /></button>
+                <button onClick={cerrar} className="gp-btn-ghost p-2 rounded"><X size={18} /></button>
+              </div>
             </div>
+            {uso && <p className="text-[11px] gp-text-muted mb-2">{uso.usadas}/{uso.limite} consultas este mes</p>}
 
-            <div className="flex-1 overflow-y-auto mb-3" style={{ minHeight: 80 }}>
-              {transcripciones.length === 0 && (
-                <p className="text-sm gp-text-muted text-center py-6">
-                  {estado === "permiso" || estado === "error" ? (errorMsg || "Algo salió mal.") : "Habla cuando quieras — te escucho."}
-                </p>
-              )}
-              {transcripciones.map((t, i) => (
-                <div key={i} className={`mb-2 flex ${t.rol === "usuario" ? "justify-end" : "justify-start"}`}>
-                  <div className="max-w-[85%] rounded-lg px-3 py-2 text-sm" style={{
-                    background: t.rol === "usuario" ? "var(--gold)" : "var(--panel-2, rgba(255,255,255,.06))",
-                    color: t.rol === "usuario" ? "#0B2341" : "inherit",
-                  }}>{t.texto}</div>
-                </div>
-              ))}
-            </div>
+            {historialAbierto ? (
+              <div className="flex-1 overflow-y-auto mb-3" style={{ minHeight: 200 }}>
+                {!diaSeleccionado ? (
+                  <>
+                    <button onClick={() => setHistorialAbierto(false)} className="text-xs gp-text-muted mb-2">← Volver a la conversación</button>
+                    {diasHistorial === null && <p className="text-sm gp-text-muted text-center py-6">Cargando…</p>}
+                    {diasHistorial?.length === 0 && <p className="text-sm gp-text-muted text-center py-6">Todavía no hay conversaciones guardadas.</p>}
+                    {diasHistorial?.map((d) => (
+                      <button key={d.fecha} onClick={() => verDia(d.fecha)} className="w-full text-left px-3 py-2 rounded gp-btn-ghost mb-1 flex justify-between text-sm">
+                        <span>{d.fecha}</span><span className="gp-text-muted">{d.cantidad} mensajes</span>
+                      </button>
+                    ))}
+                  </>
+                ) : (
+                  <>
+                    <button onClick={() => setDiaSeleccionado(null)} className="text-xs gp-text-muted mb-2">← Ver otros días</button>
+                    {mensajesDia.map((m, i) => (
+                      <div key={i} className={`mb-2 flex ${m.rol === "usuario" ? "justify-end" : "justify-start"}`}>
+                        <div className="max-w-[85%] rounded-lg px-3 py-2 text-sm" style={{
+                          background: m.rol === "usuario" ? "var(--gold)" : "var(--panel-2, rgba(255,255,255,.06))",
+                          color: m.rol === "usuario" ? "#0B2341" : "inherit",
+                        }}>{m.contenido}</div>
+                      </div>
+                    ))}
+                  </>
+                )}
+              </div>
+            ) : (
+              <div className="flex-1 overflow-y-auto mb-3" style={{ minHeight: 80 }}>
+                {transcripciones.map((t, i) => (
+                  <div key={i} className={`mb-2 flex ${t.rol === "usuario" ? "justify-end" : "justify-start"}`}>
+                    <div className="max-w-[85%] rounded-lg px-3 py-2 text-sm" style={{
+                      background: t.rol === "usuario" ? "var(--gold)" : "var(--panel-2, rgba(255,255,255,.06))",
+                      color: t.rol === "usuario" ? "#0B2341" : "inherit",
+                    }}>{t.texto}</div>
+                  </div>
+                ))}
+              </div>
+            )}
 
             <div className="flex flex-col items-center gap-2 py-2">
-              <ArkeyRobot estado={estado} onClick={() => { desbloquearVoz(); forzarFinTurno(); }} />
+              <div className="flex items-center gap-3">
+                <ArkeyRobot estado={estado} onClick={() => { desbloquearVoz(); forzarFinTurno(); }} />
+                <button
+                  onClick={() => { const nuevo = !silenciado; cambiarSilenciado(nuevo); if (nuevo) { try { window.speechSynthesis.cancel(); } catch {} } }}
+                  title={silenciado ? "Activar voz" : "Silenciar voz"}
+                  className="gp-btn-ghost p-2 rounded"
+                >
+                  {silenciado ? <VolumeX size={18} /> : <Volume2 size={18} />}
+                </button>
+              </div>
               <p className="text-xs gp-text-muted text-center">
                 {estado === "escuchando" && "Escuchando…"}
                 {estado === "procesando" && "Pensando…"}
@@ -10894,11 +10752,19 @@ function VoiceMode({ contextoPantalla, onDatosCreados, irAVista }) {
                 {estado === "permiso" && (errorMsg || "Necesito permiso de micrófono.")}
                 {estado === "error" && (errorMsg || "Algo salió mal.")}
               </p>
-              {(estado === "permiso" || estado === "error") && (
-                <button onClick={() => { cerrar(); irAVista("asistente"); }} className="gp-btn px-3 py-1.5 text-xs mt-1">
-                  Usar el chat de texto
+              <div className="flex items-center gap-2 w-full mt-1">
+                <input
+                  type="text"
+                  value={textoManual}
+                  onChange={(e) => setTextoManual(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") enviarTextoManual(); }}
+                  placeholder="O escríbele a Arkey…"
+                  className="gp-input flex-1 text-sm"
+                />
+                <button onClick={enviarTextoManual} className="gp-btn-ghost p-2 rounded" disabled={!textoManual.trim()}>
+                  <Send size={16} />
                 </button>
-              )}
+              </div>
             </div>
           </div>
         </div>
