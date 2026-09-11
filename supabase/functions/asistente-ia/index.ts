@@ -236,6 +236,20 @@ const TOOLS = [
     },
   },
   {
+    name: "crear_actividad",
+    description: "Crea una entrada en el Diario personal del usuario (modulo 'actividades'): contar el dia, registrar que paso, que se hizo, o guardar un recuerdo. No confundir con tareas/pendientes. No requiere confirmacion.",
+    input_schema: {
+      type: "object",
+      properties: {
+        nombre: { type: "string", description: "Titulo breve de la entrada del diario." },
+        notas: { type: "string", description: "El texto libre de la entrada: que paso, que se hizo, como se sintio." },
+        fecha: { type: "string", description: "YYYY-MM-DD, si no se da se usa hoy." },
+        proyecto_id: { type: "string", description: "Opcional, solo si la entrada esta ligada a un proyecto existente (usa buscar_datos primero)." },
+      },
+      required: ["nombre"],
+    },
+  },
+  {
     name: "actualizar_cita",
     description: "Reprograma o modifica una cita existente (titulo, fecha_hora, lugar). Usa buscar_datos primero para el id. No requiere confirmacion.",
     input_schema: {
@@ -455,6 +469,14 @@ async function ejecutarHerramienta(nombre: string, input: any, userId: string) {
         fecha: input.fecha || fechaHoraActualMexico().iso, costo: input.costo ?? null,
       };
       const { error } = await admin.from("regalos").insert(row);
+      return error ? { error: error.message } : { ok: true, id: row.id };
+    }
+    case "crear_actividad": {
+      const row = {
+        id: uid(), user_id: userId, nombre: input.nombre, notas: input.notas || null,
+        fecha: input.fecha || fechaHoraActualMexico().iso, proyecto_id: input.proyecto_id || null,
+      };
+      const { error } = await admin.from("actividades").insert(row);
       return error ? { error: error.message } : { ok: true, id: row.id };
     }
     case "actualizar_cita": {
