@@ -10771,7 +10771,7 @@ function VoiceMode({ contextoPantalla, onDatosCreados, irAVista }) {
         <div className="fixed inset-0 z-[75] flex items-end sm:items-center justify-center p-4" style={{ background: "rgba(0,0,0,.55)" }} onClick={cerrar}>
           <div className="gp-panel w-full max-w-md p-4 flex flex-col" style={{ maxHeight: "80vh" }} onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-3">
-              <h2 className="text-lg font-semibold flex items-center gap-2"><Bot size={20} className="gp-text-gold" /> Modo Conversación <span className="text-[10px] gp-text-muted font-normal">v20260911d</span></h2>
+              <h2 className="text-lg font-semibold flex items-center gap-2"><Bot size={20} className="gp-text-gold" /> Modo Conversación <span className="text-[10px] gp-text-muted font-normal">v20260911e · {usaSTTNativo ? "camino: nativo" : "camino: iOS/grabación"}</span></h2>
               <button onClick={cerrar} className="gp-btn-ghost p-2 rounded"><X size={18} /></button>
             </div>
 
