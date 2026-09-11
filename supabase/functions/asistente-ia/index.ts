@@ -31,6 +31,26 @@ const headersJson = { "Content-Type": "application/json", ...corsHeaders };
 
 const uid = () => crypto.randomUUID();
 
+// La IA no sabe que dia es "hoy" por si sola -- si no se le dice explicitamente, puede inventar
+// cualquier fecha al resolver referencias relativas ("manana", "el proximo lunes"). Esto calcula
+// la fecha/hora real en horario de Mexico (no UTC, para evitar que cerca de medianoche calcule
+// el dia equivocado) y se inyecta en el system prompt de cada mensaje, sin depender de que el
+// modelo decida llamar obtener_panorama primero.
+function fechaHoraActualMexico() {
+  const ahora = new Date();
+  const partesISO = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Mexico_City", year: "numeric", month: "2-digit", day: "2-digit",
+  }).formatToParts(ahora);
+  const iso = `${partesISO.find((p) => p.type === "year")!.value}-${partesISO.find((p) => p.type === "month")!.value}-${partesISO.find((p) => p.type === "day")!.value}`;
+  const legible = new Intl.DateTimeFormat("es-MX", {
+    timeZone: "America/Mexico_City", weekday: "long", year: "numeric", month: "long", day: "numeric",
+  }).format(ahora);
+  const hora = new Intl.DateTimeFormat("es-MX", {
+    timeZone: "America/Mexico_City", hour: "2-digit", minute: "2-digit", hour12: false,
+  }).format(ahora);
+  return { iso, legible, hora };
+}
+
 const MODULOS_DISPONIBLES = [
   "proyectos", "pendientes", "notas", "finanzas", "citas", "contactos",
   "salud", "medicamentos", "habitos", "actividades", "documentos", "patrimonio",
@@ -279,7 +299,7 @@ async function ejecutarHerramienta(nombre: string, input: any, userId: string) {
       return { resultados: data };
     }
     case "obtener_panorama": {
-      const hoy = new Date().toISOString().slice(0, 10);
+      const hoy = fechaHoraActualMexico().iso;
       const en7dias = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
       const inicioMes = hoy.slice(0, 7) + "-01";
 
@@ -354,7 +374,7 @@ async function ejecutarHerramienta(nombre: string, input: any, userId: string) {
     case "crear_movimiento": {
       const row = {
         id: uid(), user_id: userId, tipo: input.tipo, concepto: input.concepto, monto: input.monto,
-        fecha: input.fecha || new Date().toISOString().slice(0, 10), estatus: "Cobrado",
+        fecha: input.fecha || fechaHoraActualMexico().iso, estatus: "Cobrado",
       };
       const { error } = await admin.from("finanzas").insert(row);
       return error ? { error: error.message } : { ok: true, id: row.id };
@@ -432,7 +452,7 @@ async function ejecutarHerramienta(nombre: string, input: any, userId: string) {
       const row = {
         id: uid(), user_id: userId, contacto_id: input.contacto_id, tipo: input.tipo || "Regalo",
         ocasion: input.ocasion || "Otro", descripcion: input.descripcion,
-        fecha: input.fecha || new Date().toISOString().slice(0, 10), costo: input.costo ?? null,
+        fecha: input.fecha || fechaHoraActualMexico().iso, costo: input.costo ?? null,
       };
       const { error } = await admin.from("regalos").insert(row);
       return error ? { error: error.message } : { ok: true, id: row.id };
@@ -525,6 +545,8 @@ Deno.serve(async (req) => {
     });
 
     let systemPrompt = SYSTEM_PROMPT;
+    const { iso: hoyISO, legible: hoyLegible, hora: horaActual } = fechaHoraActualMexico();
+    systemPrompt += `\n\nFECHA Y HORA ACTUAL: hoy es ${hoyLegible} (${hoyISO}), son las ${horaActual} hora de Mexico (CDMX). Usa esto SIEMPRE para resolver fechas relativas como "hoy", "manana", "el proximo lunes", "en dos semanas", etc. al crear o buscar citas, tareas, movimientos u otros registros con fecha -- nunca inventes ni asumas una fecha distinta a esta.`;
     if (contexto_pantalla && typeof contexto_pantalla === "object") {
       systemPrompt += `\n\nCONTEXTO DE PANTALLA ACTUAL DEL USUARIO: ${JSON.stringify(contexto_pantalla)}`;
     }
