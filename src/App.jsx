@@ -1355,7 +1355,15 @@ function IndicadorConexion() {
   const [mostrarRecuperado, setMostrarRecuperado] = useState(false);
 
   useEffect(() => {
-    const alConectar = () => { setEnLinea(true); setMostrarRecuperado(true); setTimeout(() => setMostrarRecuperado(false), 3000); };
+    // Al recuperar conexión, avisamos aquí (banner) y además avisamos al resto de la app
+    // con un evento global: AppLoggedIn lo escucha para volver a traer los datos reales de
+    // Supabase. Sin esto el banner decía "ya está actualizada" sin que fuera cierto.
+    const alConectar = () => {
+      setEnLinea(true);
+      setMostrarRecuperado(true);
+      setTimeout(() => setMostrarRecuperado(false), 3000);
+      window.dispatchEvent(new Event("arkeyone-reconectado"));
+    };
     const alDesconectar = () => setEnLinea(false);
     window.addEventListener("online", alConectar);
     window.addEventListener("offline", alDesconectar);
@@ -2202,6 +2210,17 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
       setPullDist(0);
     }
   };
+
+  // El banner de "Conexión recuperada" (IndicadorConexion, fuera de este componente) manda
+  // este evento global al recuperar internet. Antes el banner lo prometía pero nadie volvía
+  // a pedir datos reales — aquí sí se cumple: se vuelve a traer todo de Supabase igual que
+  // con "pull to refresh". No corre si ya hay un refresco en curso.
+  useEffect(() => {
+    const alReconectar = () => { if (!refrescando) refrescarTodo(); };
+    window.addEventListener("arkeyone-reconectado", alReconectar);
+    return () => window.removeEventListener("arkeyone-reconectado", alReconectar);
+  }, [activeOwnerId, refrescando]);
+
   const onTouchStartContenido = (e) => {
     if ((contenidoRef.current?.scrollTop || 0) > 0 || refrescando) { pullRef.current.activo = false; return; }
     pullRef.current = { activo: true, startY: e.touches[0].clientY };
