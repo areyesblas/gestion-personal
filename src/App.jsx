@@ -10820,9 +10820,14 @@ function VoiceMode({ contextoPantalla, onDatosCreados, irAVista }) {
       const u = new SpeechSynthesisUtterance(texto);
       // Buscar una voz en español instalada de verdad en vez de solo fijar 'lang': en Safari, si
       // no existe una voz que haga match exacto con el lang pedido, a veces se queda muda sin dar
-      // ningún error (a diferencia de Chrome, que sí improvisa con la voz más cercana).
-      const vozEs = voces.find((v) => v.lang?.toLowerCase() === "es-mx")
-        || voces.find((v) => v.lang?.toLowerCase().startsWith("es"));
+      // ningún error (a diferencia de Chrome, que sí improvisa con la voz más cercana). Entre las
+      // opciones en español, se prefiere una de mejor calidad (Enhanced/Premium/Neural) si el
+      // dispositivo tiene alguna instalada -- suenan más naturales que la voz básica del sistema.
+      const candidatasEs = voces.filter((v) => v.lang?.toLowerCase().startsWith("es"));
+      const vozEs = candidatasEs.find((v) => v.lang?.toLowerCase() === "es-mx" && /enhanced|premium|neural/i.test(v.name || ""))
+        || candidatasEs.find((v) => v.lang?.toLowerCase() === "es-mx")
+        || candidatasEs.find((v) => /enhanced|premium|neural/i.test(v.name || ""))
+        || candidatasEs[0];
       if (vozEs) { u.voice = vozEs; u.lang = vozEs.lang; } else { u.lang = "es-MX"; }
       const alTerminar = () => { if (usaSTTNativo) volverAEscuchar(); else reanudarMicTrasHablarIOS(); };
       u.onend = alTerminar;
