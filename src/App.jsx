@@ -6,7 +6,7 @@ import {
   Users, Activity, Plus, X, Trash2, Pencil, Github, ChevronDown,
   ChevronRight, Bell, Lightbulb, Rocket, MessageCircle, Mail, Globe,
   Target, Contact, BarChart3, FileText, Flame, HeartPulse, Check, Menu, PieChart as PieChartIcon,
-  PiggyBank, Camera, Film, Upload, MapPin, Clock, Mic, Gift, Receipt, Megaphone, ChevronUp, Gem, Download, Sun, Moon, Shield, LogOut, ChevronLeft, Lock, Pill, CalendarClock, Zap, StickyNote, Search, Sparkles, Send, Bot, Volume2, VolumeX, Square, Settings, CalendarRange, Palette, Eye, EyeOff, Sliders,
+  PiggyBank, Camera, Film, Upload, MapPin, Clock, Mic, MicOff, Gift, Receipt, Megaphone, ChevronUp, Gem, Download, Sun, Moon, Shield, LogOut, ChevronLeft, Lock, Pill, CalendarClock, Zap, StickyNote, Search, Sparkles, Send, Bot, Volume2, VolumeX, Square, Settings, CalendarRange, Palette, Eye, EyeOff, Sliders,
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
@@ -10164,8 +10164,89 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
   const silencioDesdeRef = useRef(null);
   const bargeInDesdeRef = useRef(null);
 
+  // Mute real del micrófono (distinto de "silenciado", que apaga la voz de la IA): corta lo que
+  // el micrófono manda a transcribir, y se ve reflejado en el medidor de nivel bajando a cero.
+  const [micMuted, setMicMuted] = useState(false);
+  const micMutedRef = useRef(false);
+  const [nivelMic, setNivelMic] = useState(0); // 0..1, para la barra visual del nivel captado por el micrófono
+  const nivelAnalyserRef = useRef(null); // apunta al analyser activo (el de VAD en iOS de respaldo, o el paralelo en el camino nativo)
+  const medidorStreamRef = useRef(null); // stream propio solo para medir nivel en el camino nativo (Chrome/Android/iOS Safari 26), que no expone el audio crudo
+  const medidorCtxRef = useRef(null);
+  const medidorAnalyserRef = useRef(null);
+  const medidorIntervalRef = useRef(null);
+
   const cambiarEstado = (nuevo) => { estadoRef.current = nuevo; setEstado(nuevo); };
   const cambiarSilenciado = (nuevo) => { silenciadoRef.current = nuevo; setSilenciado(nuevo); };
+  const cambiarMicMuted = (nuevo) => { micMutedRef.current = nuevo; setMicMuted(nuevo); };
+
+  function leerNivelDeAnalyser(analyser) {
+    if (!analyser) return 0;
+    const buffer = new Uint8Array(analyser.fftSize);
+    analyser.getByteTimeDomainData(buffer);
+    let suma = 0;
+    for (let i = 0; i < buffer.length; i++) {
+      const v = (buffer[i] - 128) / 128;
+      suma += v * v;
+    }
+    return Math.sqrt(suma / buffer.length);
+  }
+
+  function iniciarMedidorVisual() {
+    if (medidorIntervalRef.current) return;
+    medidorIntervalRef.current = setInterval(() => {
+      const rms = leerNivelDeAnalyser(nivelAnalyserRef.current);
+      setNivelMic(Math.min(1, rms / 0.2));
+    }, 80);
+  }
+
+  function detenerMedidorVisual() {
+    if (medidorIntervalRef.current) clearInterval(medidorIntervalRef.current);
+    medidorIntervalRef.current = null;
+    setNivelMic(0);
+  }
+
+  // Camino nativo (Chrome/Android/iOS Safari 26): SpeechRecognition no expone el audio crudo del
+  // micrófono, así que para poder mostrar el nivel (y mutear de verdad lo que se manda a
+  // transcribir) abrimos un stream propio en paralelo, solo para medir y para el track.enabled.
+  async function iniciarMedidorNivelNativo() {
+    if (medidorStreamRef.current || !navigator.mediaDevices?.getUserMedia) return;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      medidorStreamRef.current = stream;
+      stream.getAudioTracks().forEach((t) => { t.enabled = !micMutedRef.current; });
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      const ctx = new AudioCtx();
+      medidorCtxRef.current = ctx;
+      const source = ctx.createMediaStreamSource(stream);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 1024;
+      source.connect(analyser);
+      medidorAnalyserRef.current = analyser;
+      nivelAnalyserRef.current = analyser;
+    } catch {} // si falla, el reconocimiento sigue funcionando normal, solo no hay medidor visual
+  }
+
+  // Botón de mutear micrófono: distinto del botón de silenciar voz. Aquí el objetivo es que deje
+  // de transmitirse lo que el micrófono capta -- ni se transcribe ni dispara barge-in -- y que el
+  // medidor baje a cero de verdad, hasta que el usuario lo reactive.
+  const alternarMicMuted = () => {
+    const nuevo = !micMuted;
+    cambiarMicMuted(nuevo);
+    if (usaSTTNativo) {
+      if (nuevo) {
+        try { recognitionRef.current?.stop(); } catch {} // corta ya lo que esté escuchando (turno normal o barge-in)
+      } else if (abiertoRef.current && (estadoRef.current === "escuchando" || estadoRef.current === "hablando")) {
+        iniciarEscuchaNativa();
+      }
+      try { medidorStreamRef.current?.getAudioTracks().forEach((t) => { t.enabled = !nuevo; }); } catch {}
+    } else {
+      // Camino iOS de respaldo (MediaRecorder + VAD): mutear el track real ya basta -- seguirá
+      // "grabando" pero solo silencio, así que el VAD nunca dispara un envío mientras esté muteado.
+      try { streamRef.current?.getAudioTracks().forEach((t) => { t.enabled = !nuevo; }); } catch {}
+      empezoHablarRef.current = null;
+      silencioDesdeRef.current = null;
+    }
+  };
 
   // Primer nombre a partir del correo, para un saludo mas cercano cuando abre el panel.
   const primerNombre = (nombreUsuario || "").split("@")[0]?.split(/[._-]/)[0];
@@ -10269,6 +10350,15 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
     silencioDesdeRef.current = null;
     bargeInDesdeRef.current = null;
 
+    detenerMedidorVisual();
+    nivelAnalyserRef.current = null;
+    try { medidorStreamRef.current?.getTracks().forEach((t) => t.stop()); } catch {}
+    medidorStreamRef.current = null;
+    try { medidorCtxRef.current?.close(); } catch {}
+    medidorCtxRef.current = null;
+    medidorAnalyserRef.current = null;
+    cambiarMicMuted(false); // que la próxima vez que se abra, arranque siempre sin mutear
+
     // Bug conocido de WebKit en iOS: con reconocimiento nativo continuo, abort() detiene el
     // reconocimiento pero a veces no libera de inmediato la sesión de audio del sistema, y el
     // punto/indicador de micrófono se queda encendido aunque ya no estemos escuchando (esto es
@@ -10293,6 +10383,8 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
       setErrorMsg("Tu navegador no soporta el Modo Conversación por voz.");
       return;
     }
+    iniciarMedidorVisual();
+    if (usaSTTNativo) iniciarMedidorNivelNativo(); // en el camino iOS de respaldo, el medidor se conecta solo al abrir su propio stream (ver iniciarEscuchaIOS)
     await hablar(SALUDO_INICIAL); // el saludo no gasta cuota (no llama a asistente-ia); al terminar de decirlo, pasa solo a escuchar
   };
 
@@ -10319,6 +10411,7 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
 
   // ---------- Camino Chrome/Android: SpeechRecognition nativo ----------
   function iniciarEscuchaNativa() {
+    if (micMutedRef.current) return; // el micrófono está muteado a propósito: no arrancamos hasta que se reactive
     const r = new SpeechRecognitionCtor();
     r.lang = "es-MX";
     r.continuous = true;
@@ -10362,8 +10455,9 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
     };
     r.onend = () => {
       // Si seguimos abiertos y en modo escucha, se reinicia solo (el navegador a veces corta
-      // el reconocimiento tras una pausa aunque continuous=true).
-      if (abiertoRef.current && estadoRef.current === "escuchando") {
+      // el reconocimiento tras una pausa aunque continuous=true). Si el usuario muteó el mic a
+      // propósito (ver alternarMicMuted), no se reinicia hasta que él mismo lo reactive.
+      if (abiertoRef.current && estadoRef.current === "escuchando" && !micMutedRef.current) {
         try { r.start(); } catch {}
       }
     };
@@ -10384,6 +10478,7 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
+      stream.getAudioTracks().forEach((t) => { t.enabled = !micMutedRef.current; });
       const AudioCtx = window.AudioContext || window.webkitAudioContext;
       const ctx = new AudioCtx();
       audioCtxRef.current = ctx;
@@ -10392,6 +10487,7 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
       analyser.fftSize = 2048;
       source.connect(analyser);
       analyserRef.current = analyser;
+      nivelAnalyserRef.current = analyser; // mismo analyser sirve para el VAD y para el medidor visual
       iniciarSegmentoGrabacion();
       loopVAD();
     } catch {
@@ -10756,6 +10852,14 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
 
             <div className="flex flex-col items-center gap-2 py-2">
               <div className="flex items-center gap-3">
+                <button
+                  onClick={alternarMicMuted}
+                  title={micMuted ? "Activar micrófono" : "Mutear micrófono"}
+                  className="gp-btn-ghost p-2 rounded"
+                  style={micMuted ? { color: "#C0392B" } : undefined}
+                >
+                  {micMuted ? <MicOff size={18} /> : <Mic size={18} />}
+                </button>
                 <ArkeyRobot estado={estado} onClick={() => { desbloquearVoz(); forzarFinTurno(); }} />
                 <button
                   onClick={() => { const nuevo = !silenciado; cambiarSilenciado(nuevo); if (nuevo) { try { window.speechSynthesis.cancel(); } catch {} } }}
@@ -10764,6 +10868,16 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
                 >
                   {silenciado ? <VolumeX size={18} /> : <Volume2 size={18} />}
                 </button>
+              </div>
+              <div className="w-24 h-1.5 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,.12)" }} title="Nivel captado por el micrófono">
+                <div
+                  className="h-full rounded-full"
+                  style={{
+                    width: `${Math.round(nivelMic * 100)}%`,
+                    background: micMuted ? "#C0392B" : "var(--gold)",
+                    transition: "width 80ms linear",
+                  }}
+                />
               </div>
               <p className="text-xs gp-text-muted text-center">
                 {estado === "escuchando" && "Escuchando…"}
