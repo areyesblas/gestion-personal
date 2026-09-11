@@ -1919,13 +1919,14 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
   const [activeOwnerId, setActiveOwnerId] = useState(misId);
   const [activeOwnerEmail, setActiveOwnerEmail] = useState(miEmail);
   const [modulosPermitidos, setModulosPermitidos] = useState(null); // null = soy el dueño, acceso total
+  const [dependientesCuidado, setDependientesCuidado] = useState([]); // ids de Contactos de los que soy Cuidador (sin módulo completo de Salud)
   const [misColaboraciones, setMisColaboraciones] = useState([]);
 
   useEffect(() => {
     (async () => {
       await supabase.rpc("vincular_invitaciones");
-      const { data: colabs } = await supabase.from("colaboradores").select("*").eq("colaborador_user_id", misId).eq("estatus", "Activo");
-      setMisColaboraciones((colabs || []).map((c) => ({ propietarioId: c.propietario_id, propietarioEmail: c.propietario_email, modulos: c.modulos })));
+      const { data: colabs } = await supabase.from("colaboradores").select("*, colaborador_dependientes(contacto_id)").eq("colaborador_user_id", misId).eq("estatus", "Activo");
+      setMisColaboraciones((colabs || []).map((c) => ({ propietarioId: c.propietario_id, propietarioEmail: c.propietario_email, modulos: c.modulos, dependientes: (c.colaborador_dependientes || []).map((d) => d.contacto_id) })));
 
       const { data: pref } = await supabase.from("preferencias").select("tema, alertas_correo_activas, color_personalizado, notif_tipos_desactivados, notif_silencio_activo, notif_silencio_inicio, notif_silencio_fin").eq("user_id", misId).maybeSingle();
       const temaGuardado = pref?.tema === "claro" || pref?.tema === "oscuro" ? "actual" : pref?.tema;
@@ -2132,14 +2133,16 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
     setExportPaso("listo");
   };
 
-  const cambiarCuenta = async (ownerId, ownerEmail, modulos) => {
+  const cambiarCuenta = async (ownerId, ownerEmail, modulos, dependientes) => {
     setLoading(true);
     setActiveOwnerId(ownerId);
     setActiveOwnerEmail(ownerEmail);
     setModulosPermitidos(modulos); // null = tu propia cuenta
+    setDependientesCuidado(dependientes || []);
     const result = await loadAllTables(ownerId);
     setData(result);
-    setView(modulos ? Object.keys(VIEW_TO_MODULO).find((v) => modulos.includes(VIEW_TO_MODULO[v])) || "dashboard" : "dashboard");
+    const tieneSoloCuidado = modulos && !modulos.includes("salud") && (dependientes || []).length > 0;
+    setView(modulos ? (Object.keys(VIEW_TO_MODULO).find((v) => modulos.includes(VIEW_TO_MODULO[v])) || (tieneSoloCuidado ? "salud" : "dashboard")) : "dashboard");
     setLoading(false);
   };
 
@@ -2353,10 +2356,15 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
   const ADMIN_UID = "eca7e776-6c96-44eb-b4e0-b03c85fa5bb8";
   const esAdmin = misId === ADMIN_UID && activeOwnerId === misId;
 
+  // Un Cuidador ve Salud/Medicamentos aunque no tenga el módulo completo, si le
+  // asignaron al menos una persona a su cargo (dependientesCuidado).
+  const esCuidadorSinModuloCompleto = dependientesCuidado.length > 0;
   const navGroupsFiltrados = modulosPermitidos === null
     ? navGroups
     : navGroups
-        .map((g) => ({ ...g, items: g.items.filter((it) => it.id === "mi-trabajo" || (VIEW_TO_MODULO[it.id] && modulosPermitidos.includes(VIEW_TO_MODULO[it.id]))) }))
+        .map((g) => ({ ...g, items: g.items.filter((it) => it.id === "mi-trabajo"
+          || (VIEW_TO_MODULO[it.id] && modulosPermitidos.includes(VIEW_TO_MODULO[it.id]))
+          || (esCuidadorSinModuloCompleto && (it.id === "salud" || it.id === "medicamentos"))) }))
         .filter((g) => g.items.length > 0);
 
   return (
@@ -2444,7 +2452,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
                   if (e.target.value === misId) cambiarCuenta(misId, miEmail, null);
                   else {
                     const c = misColaboraciones.find((x) => x.propietarioId === e.target.value);
-                    cambiarCuenta(c.propietarioId, c.propietarioEmail, c.modulos);
+                    cambiarCuenta(c.propietarioId, c.propietarioEmail, c.modulos, c.dependientes);
                   }
                 }}
               >
@@ -2534,7 +2542,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
           )}
           {view === "dashboard" && <Dashboard data={data} setView={irAVista} onAddSaldo={(i) => addItem("saldoInicial", i)} onVerProyecto={irADetalleProyecto} onEditPendiente={(id, p) => editItem("pendientes", id, p)} sensibleDesbloqueadoHasta={sensibleDesbloqueadoHasta} onDesbloquear={desbloquearSensibleAqui} />}
           {view === "papelera" && <Papelera onRestore={restoreItem} onPermanentDelete={permanentDelete} ownerId={activeOwnerId} />}
-          {view === "colaboradores" && <Colaboradores misId={misId} miEmail={miEmail} />}
+          {view === "colaboradores" && <Colaboradores misId={misId} miEmail={miEmail} contactos={data.contactos} />}
           {view === "admin" && <AdminUsuarios adminUid={ADMIN_UID} adminEmail={miEmail} />}
           {view === "configuracion" && (
             <Configuracion
@@ -2663,11 +2671,11 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
             <Habitos data={data} onAdd={(i) => addItem("habitos", i)} onEdit={(id, p) => editItem("habitos", id, p)} onRemove={(id) => askDelete("habitos", id)} />
           )}
           {view === "salud" && (
-            <Salud data={data} onAdd={(i) => addItem("salud", i)} onEdit={(id, p) => editItem("salud", id, p)} onRemove={(id) => askDelete("salud", id)} onUpdatePerfil={updatePerfilSalud} />
+            <Salud data={data} onAdd={(i) => addItem("salud", i)} onEdit={(id, p) => editItem("salud", id, p)} onRemove={(id) => askDelete("salud", id)} onUpdatePerfil={updatePerfilSalud} soloCuidado={esCuidadorSinModuloCompleto} />
           )}
           {view === "mi-trabajo" && <MiTrabajo misId={misId} />}
           {view === "medicamentos" && (
-            <Medicamentos data={data} onAdd={(i) => addItem("medicamentos", i)} onEdit={(id, p) => editItem("medicamentos", id, p)} onRemove={(id) => askDelete("medicamentos", id)} />
+            <Medicamentos data={data} onAdd={(i) => addItem("medicamentos", i)} onEdit={(id, p) => editItem("medicamentos", id, p)} onRemove={(id) => askDelete("medicamentos", id)} soloCuidado={esCuidadorSinModuloCompleto} />
           )}
           {view === "activos" && (
             <ActivosDigitales data={data}
@@ -3196,21 +3204,35 @@ function AdminUsuarios({ adminUid, adminEmail }) {
   );
 }
 
-function Colaboradores({ misId, miEmail }) {
+function Colaboradores({ misId, miEmail, contactos }) {
   const [lista, setLista] = useState(null);
   const [modal, setModal] = useState(false);
   const [busy, setBusy] = useState(null);
   const [revocarConfirm, setRevocarConfirm] = useState(null);
   const [eliminarConfirm, setEliminarConfirm] = useState(null);
   const [avisoCorreo, setAvisoCorreo] = useState(null); // { id, ok, mensaje }
+  const [cuidadoModal, setCuidadoModal] = useState(null); // colaborador para el que se gestionan dependientes
 
   const cargar = async () => {
     setLista(null);
-    const { data, error } = await supabase.from("colaboradores").select("*").eq("propietario_id", misId).order("created_at", { ascending: false });
+    const { data, error } = await supabase.from("colaboradores").select("*, colaborador_dependientes(id, contacto_id)").eq("propietario_id", misId).order("created_at", { ascending: false });
     if (error) { console.error("Error al cargar colaboradores:", error); setLista([]); return; }
     setLista(data);
   };
   useEffect(() => { cargar(); }, []);
+
+  const nombreContacto = (id) => (contactos || []).find((c) => c.id === id)?.nombre || "—";
+
+  const agregarDependiente = async (colaboradorId, contactoId) => {
+    const { error } = await supabase.from("colaborador_dependientes").insert({ colaborador_id: colaboradorId, propietario_id: misId, contacto_id: contactoId });
+    if (error) { alert("No se pudo agregar: " + error.message); return; }
+    cargar();
+  };
+  const quitarDependiente = async (dependienteId) => {
+    const { error } = await supabase.from("colaborador_dependientes").delete().eq("id", dependienteId);
+    if (error) { alert("No se pudo quitar: " + error.message); return; }
+    cargar();
+  };
 
   // Llama a la Edge Function que manda el correo de invitación por Resend.
   // Blindado con try/catch: si falla la red o el fetch se cae (ej. CORS, sin conexión),
@@ -3325,6 +3347,9 @@ function Colaboradores({ misId, miEmail }) {
                       const key = Object.keys(ETIQUETA_TABLA).find((k) => tableName(k) === m);
                       return <Badge key={m} tone="muted">{key ? ETIQUETA_TABLA[key] : m}</Badge>;
                     })}
+                    {(c.colaborador_dependientes || []).map((d) => (
+                      <Badge key={d.id} tone="teal">Cuidador de {nombreContacto(d.contacto_id)}</Badge>
+                    ))}
                   </div>
                 </div>
                 <div className="flex gap-1 shrink-0">
@@ -3342,6 +3367,9 @@ function Colaboradores({ misId, miEmail }) {
                 </div>
               </div>
               {c.estatus === "Pendiente" && <p className="text-xs gp-text-muted mt-2">Ya le mandamos un correo de invitación. Se activa solo en cuanto esa persona cree su cuenta o inicie sesión con ese correo.</p>}
+              {c.estatus !== "Revocado" && (
+                <button onClick={() => setCuidadoModal(c)} className="text-xs gp-text-gold mt-2">Gestionar personas a cargo (Cuidador)</button>
+              )}
             </div>
           ))}
         </div>
@@ -3376,6 +3404,34 @@ function Colaboradores({ misId, miEmail }) {
       {modal && (
         <Modal title="Invitar colaborador" onClose={() => setModal(false)}>
           <InvitarForm busy={busy === "nuevo"} onSave={invitar} />
+        </Modal>
+      )}
+
+      {cuidadoModal && (
+        <Modal title={`Personas a cargo de ${cuidadoModal.colaborador_nombre || cuidadoModal.colaborador_email}`} onClose={() => setCuidadoModal(null)}>
+          <p className="text-xs gp-text-muted mb-3">
+            Marca los contactos que esta persona puede acompañar como Cuidador: va a poder ver y registrar Salud y Medicamentos solo de quienes marques aquí, sin acceso al resto de tu cuenta — aunque no le hayas dado el módulo completo de Salud.
+          </p>
+          {(contactos || []).length === 0 ? (
+            <p className="text-sm gp-text-muted">No tienes contactos todavía. Crea uno primero desde Contactos.</p>
+          ) : (
+            <div className="flex flex-col gap-1 max-h-72 overflow-y-auto gp-scroll">
+              {(contactos || []).map((ct) => {
+                const dep = (lista.find((c) => c.id === cuidadoModal.id)?.colaborador_dependientes || []).find((d) => d.contacto_id === ct.id);
+                return (
+                  <label key={ct.id} className="flex items-center gap-2 text-sm py-1.5">
+                    <input
+                      type="checkbox"
+                      checked={!!dep}
+                      onChange={() => (dep ? quitarDependiente(dep.id) : agregarDependiente(cuidadoModal.id, ct.id))}
+                    />
+                    {ct.nombre}
+                  </label>
+                );
+              })}
+            </div>
+          )}
+          <button onClick={() => setCuidadoModal(null)} className="gp-btn w-full py-2 text-sm mt-4">Listo</button>
         </Modal>
       )}
     </div>
@@ -7676,9 +7732,9 @@ function HabitoDetalle({ habito: h, hoy, onToggleDia, onSave }) {
 /* ---------- Medicamentos ---------- */
 const DIAS_SEMANA_LABELS = ["D", "L", "M", "M", "J", "V", "S"]; // 0=domingo … 6=sábado
 
-function MedicamentoForm({ inicial, contactos, onSave, onCancel }) {
+function MedicamentoForm({ inicial, contactos, soloCuidado, onSave, onCancel }) {
   const [form, setForm] = useState(inicial || {
-    nombre: "", dosis: "", contactoId: null, horarios: ["08:00"], diasSemana: [0, 1, 2, 3, 4, 5, 6],
+    nombre: "", dosis: "", contactoId: soloCuidado ? (contactos || [])[0]?.id || null : null, horarios: ["08:00"], diasSemana: [0, 1, 2, 3, 4, 5, 6],
     fechaInicio: todayISO(), fechaFin: "", instrucciones: "", activo: true,
     motivo: "", medico: "", viaAdministracion: "", observaciones: "",
   });
@@ -7695,7 +7751,7 @@ function MedicamentoForm({ inicial, contactos, onSave, onCancel }) {
       <Field label="Dosis"><input className="gp-input" placeholder="ej. 1 tableta, 5ml" value={form.dosis} onChange={(e) => set("dosis", e.target.value)} /></Field>
       <Field label="¿Para quién es?">
         <select className="gp-input" value={form.contactoId || ""} onChange={(e) => set("contactoId", e.target.value || null)}>
-          <option value="">Yo</option>
+          {!soloCuidado && <option value="">Yo</option>}
           {(contactos || []).map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
         </select>
       </Field>
@@ -7753,7 +7809,7 @@ function MedicamentoForm({ inicial, contactos, onSave, onCancel }) {
   );
 }
 
-function Medicamentos({ data, onAdd, onEdit, onRemove }) {
+function Medicamentos({ data, onAdd, onEdit, onRemove, soloCuidado }) {
   const [modal, setModal] = useState(null); // null | "nuevo" | medicamento a editar
 
   const lista = [...(data.medicamentos || [])].sort((a, b) => (a.activo === b.activo ? 0 : a.activo ? -1 : 1));
@@ -7766,6 +7822,7 @@ function Medicamentos({ data, onAdd, onEdit, onRemove }) {
         <button onClick={() => setModal("nuevo")} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm w-full sm:w-auto"><Plus size={14} /> Agregar</button>
       </div>
       <p className="text-sm gp-text-muted mb-6">Configura horarios y ARKEYONE te avisa por notificación push, con botones de "Tomado" y "Posponer".</p>
+      {soloCuidado && <p className="text-xs gp-text-muted mb-4">Estás viendo Medicamentos como cuidador — solo ves a las personas que te asignaron.</p>}
 
       <div className="space-y-2">
         {lista.map((m) => (
@@ -7810,6 +7867,7 @@ function Medicamentos({ data, onAdd, onEdit, onRemove }) {
           <MedicamentoForm
             inicial={modal === "nuevo" ? null : modal}
             contactos={data.contactos}
+            soloCuidado={soloCuidado}
             onCancel={() => setModal(null)}
             onSave={(vals) => { modal === "nuevo" ? onAdd(vals) : onEdit(modal.id, vals); setModal(null); }}
           />
@@ -7820,23 +7878,27 @@ function Medicamentos({ data, onAdd, onEdit, onRemove }) {
 }
 
 /* ---------- Salud ---------- */
-function Salud({ data, onAdd, onEdit, onRemove, onUpdatePerfil }) {
+function Salud({ data, onAdd, onEdit, onRemove, onUpdatePerfil, soloCuidado }) {
   const [modal, setModal] = useState(null);
   const [tab, setTab] = useState("historial"); // "historial" | "tendencias"
-  const [personaId, setPersonaId] = useState(null); // null = "Yo"; si no, id de un Contacto
-  const [agregandoPersona, setAgregandoPersona] = useState(false);
-  const [orden, setOrden] = useState("default");
-  const [ordenDir, setOrdenDir] = useState("asc");
-  const toggleOrden = (key) => { if (orden === key) setOrdenDir((d) => (d === "asc" ? "desc" : "asc")); else { setOrden(key); setOrdenDir("asc"); } };
-
   // Personas con seguimiento de Salud: "Yo" + cualquier Contacto que ya tenga al menos un
   // registro de Salud o un medicamento — nunca una ficha duplicada, siempre viene de Contactos.
   const idsConSeguimiento = [...new Set([
     ...data.salud.map((s) => s.contactoId).filter(Boolean),
     ...(data.medicamentos || []).map((m) => m.contactoId).filter(Boolean),
   ])];
+  // Un Cuidador (sin módulo completo de Salud) no tiene datos propios que mostrar en "Yo",
+  // así que arranca directo en la primera persona a su cargo.
+  const [personaId, setPersonaId] = useState(soloCuidado ? (idsConSeguimiento[0] || null) : null);
+  const [agregandoPersona, setAgregandoPersona] = useState(false);
+  const [orden, setOrden] = useState("default");
+  const [ordenDir, setOrdenDir] = useState("asc");
+  const toggleOrden = (key) => { if (orden === key) setOrdenDir((d) => (d === "asc" ? "desc" : "asc")); else { setOrden(key); setOrdenDir("asc"); } };
+
   const nombreContacto = (id) => data.contactos.find((c) => c.id === id)?.nombre || "—";
-  const personas = [{ id: null, nombre: "Yo" }, ...idsConSeguimiento.map((id) => ({ id, nombre: nombreContacto(id) }))];
+  const personas = soloCuidado
+    ? idsConSeguimiento.map((id) => ({ id, nombre: nombreContacto(id) }))
+    : [{ id: null, nombre: "Yo" }, ...idsConSeguimiento.map((id) => ({ id, nombre: nombreContacto(id) }))];
   const contactosDisponiblesParaAgregar = data.contactos.filter((c) => !idsConSeguimiento.includes(c.id));
 
   const saludPersona = data.salud.filter((s) => (s.contactoId || null) === personaId);
@@ -7871,8 +7933,13 @@ function Salud({ data, onAdd, onEdit, onRemove, onUpdatePerfil }) {
         {personas.map((p) => (
           <button key={p.id || "yo"} onClick={() => setPersonaId(p.id)} className={`text-xs px-3 py-1.5 rounded-full border ${personaId === p.id ? "gp-btn" : "gp-text-muted"}`}>{p.nombre}</button>
         ))}
-        <button onClick={() => setAgregandoPersona(true)} className="text-xs px-3 py-1.5 rounded-full border gp-text-muted flex items-center gap-1"><Plus size={12} /> Otra persona</button>
+        {!soloCuidado && (
+          <button onClick={() => setAgregandoPersona(true)} className="text-xs px-3 py-1.5 rounded-full border gp-text-muted flex items-center gap-1"><Plus size={12} /> Otra persona</button>
+        )}
       </div>
+      {soloCuidado && (
+        <p className="text-xs gp-text-muted mb-4">Estás viendo Salud como cuidador — solo ves a las personas que te asignaron, no el resto de esta cuenta.</p>
+      )}
       {agregandoPersona && (
         <Modal title="Seguimiento de Salud para otra persona" onClose={() => setAgregandoPersona(false)}>
           <p className="text-xs gp-text-muted mb-3">Selecciona un contacto ya existente — no se crea una ficha nueva, se reutiliza su expediente de Contactos.</p>
