@@ -10355,6 +10355,20 @@ function VoiceMode({ contextoPantalla, onDatosCreados, irAVista }) {
 
   const cambiarEstado = (nuevo) => { estadoRef.current = nuevo; setEstado(nuevo); };
 
+  // En iOS, Safari a veces solo deja que speechSynthesis suene si la primerísima vez que se usa
+  // en la sesión ocurre en el mismo instante de un toque real del usuario (sincrónico, sin ningún
+  // await de por medio). Nuestra respuesta llega segundos después por la red, así que ese permiso
+  // ya se perdió para cuando intentamos hablar. Por eso "desbloqueamos" la voz aquí, directo
+  // dentro de cada toque genuino (abrir el panel, cortar el turno), con una utterance silenciosa.
+  const desbloquearVoz = () => {
+    try {
+      if (!("speechSynthesis" in window)) return;
+      const u = new SpeechSynthesisUtterance(" ");
+      u.volume = 0;
+      window.speechSynthesis.speak(u);
+    } catch {}
+  };
+
   // Posición libre del botón flotante, igual que el botón ⚡ (QuickCapture): por default abajo
   // a la izquierda, pero se puede arrastrar a donde acomode y se recuerda por dispositivo.
   const [pos, setPos] = useState(() => {
@@ -10395,6 +10409,7 @@ function VoiceMode({ contextoPantalla, onDatosCreados, irAVista }) {
         return p;
       });
     } else {
+      desbloquearVoz(); // toque real del usuario: aprovecharlo para desbloquear la voz en iOS
       abrir(); // fue un toque, no un arrastre: abre el Modo Conversación como siempre
     }
     arrastreRef.current.activo = false;
@@ -10786,7 +10801,7 @@ function VoiceMode({ contextoPantalla, onDatosCreados, irAVista }) {
         <div className="fixed inset-0 z-[75] flex items-end sm:items-center justify-center p-4" style={{ background: "rgba(0,0,0,.55)" }} onClick={cerrar}>
           <div className="gp-panel w-full max-w-md p-4 flex flex-col" style={{ maxHeight: "80vh" }} onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-3">
-              <h2 className="text-lg font-semibold flex items-center gap-2"><Bot size={20} className="gp-text-gold" /> Modo Conversación <span className="text-[10px] gp-text-muted font-normal">v20260911g · {usaSTTNativo ? "camino: nativo" : "camino: iOS/grabación"}{esIOS ? " · iOS" : ""}</span></h2>
+              <h2 className="text-lg font-semibold flex items-center gap-2"><Bot size={20} className="gp-text-gold" /> Modo Conversación <span className="text-[10px] gp-text-muted font-normal">v20260911h · {usaSTTNativo ? "camino: nativo" : "camino: iOS/grabación"}{esIOS ? " · iOS" : ""}</span></h2>
               <button onClick={cerrar} className="gp-btn-ghost p-2 rounded"><X size={18} /></button>
             </div>
 
@@ -10809,7 +10824,7 @@ function VoiceMode({ contextoPantalla, onDatosCreados, irAVista }) {
             <div className="flex flex-col items-center gap-2 py-2">
               <div
                 className="w-16 h-16 rounded-full flex items-center justify-center"
-                onClick={estado === "escuchando" ? forzarFinTurno : undefined}
+                onClick={estado === "escuchando" ? () => { desbloquearVoz(); forzarFinTurno(); } : undefined}
                 style={{
                   background: estado === "escuchando" ? "#ef4444" : estado === "hablando" ? "var(--gold)" : "rgba(255,255,255,.08)",
                   cursor: estado === "escuchando" ? "pointer" : "default",
