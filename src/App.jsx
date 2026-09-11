@@ -10165,6 +10165,7 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
   const estadoRef = useRef("inactivo");
   const abiertoRef = useRef(false);
   const scrollRef = useRef(null); // contenedor de mensajes: se usa para auto-scroll al fondo
+  const timerSilencioRef = useRef(null); // temporizador de 700ms que decide cuándo mandar lo que se dijo (ver iniciarEscuchaNativa); debe poder cancelarse desde detenerTodo()
   const recognitionRef = useRef(null);
   const streamRef = useRef(null);
   const audioCtxRef = useRef(null);
@@ -10357,6 +10358,7 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
     rafRef.current = null;
     try { window.speechSynthesis?.cancel(); } catch {}
+    if (timerSilencioRef.current) { clearTimeout(timerSilencioRef.current); timerSilencioRef.current = null; } // corta el envío pendiente de lo último que se dijo, si lo había -- si no, se manda solo y reactiva el mic aunque el panel ya esté cerrado
     empezoHablarRef.current = null;
     silencioDesdeRef.current = null;
     bargeInDesdeRef.current = null;
@@ -10434,7 +10436,6 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
     r.continuous = true;
     r.interimResults = true;
     let finalBuffer = "";
-    let timerSilencio = null;
 
     r.onresult = (e) => {
       // Si la IA está hablando y detectamos cualquier voz, es una interrupción (barge-in):
@@ -10451,9 +10452,13 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
       }
       if (final.trim()) {
         finalBuffer += (finalBuffer ? " " : "") + final.trim();
-        if (timerSilencio) clearTimeout(timerSilencio);
-        // Pequeña pausa antes de mandar, para no cortar al usuario si sigue hablando.
-        timerSilencio = setTimeout(() => {
+        if (timerSilencioRef.current) clearTimeout(timerSilencioRef.current);
+        // Pequeña pausa antes de mandar, para no cortar al usuario si sigue hablando. Se guarda
+        // en un ref (no en una variable local) para que detenerTodo() -- llamado al cerrar el
+        // panel -- pueda cancelarlo; si no, este envío se dispara igual aunque el panel ya esté
+        // cerrado, y al terminar de responder reactiva el micrófono solo (bug reportado).
+        timerSilencioRef.current = setTimeout(() => {
+          timerSilencioRef.current = null;
           const texto = finalBuffer.trim();
           finalBuffer = "";
           if (texto) {
@@ -10658,6 +10663,7 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
 
   // ---------- Compartido: mandar el turno a asistente-ia y leer la respuesta ----------
   async function enviarTurno(texto) {
+    if (!abiertoRef.current) return; // el panel ya se cerró -- no seguir ni gastar cuota ni reactivar el mic
     cambiarEstado("procesando");
     setTranscripciones((prev) => [...prev, { rol: "usuario", texto }]);
     try {
