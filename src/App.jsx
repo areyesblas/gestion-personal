@@ -703,6 +703,44 @@ function mensajeErrorGuardado(error) {
     ? "No se pudo guardar. Revisa tu conexión a internet."
     : "No se pudo guardar. Hubo un problema con los datos — si se repite, cuéntame qué campos llenaste.";
 }
+// --- Cola de pendientes offline ---------------------------------------------
+// Sin internet la app queda de solo lectura: en vez de intentar escribir en Supabase
+// (fallaría), cada intento de guardar/editar/borrar se guarda aquí, en el propio
+// navegador, marcado como "pendiente de subir", hasta que vuelva la conexión y el
+// usuario decida qué hacer (ver AvisoPendientesOffline).
+const CLAVE_PENDIENTES_OFFLINE = "arkeyone_pendientes_offline";
+function leerPendientesOffline() {
+  try { return JSON.parse(localStorage.getItem(CLAVE_PENDIENTES_OFFLINE) || "[]"); }
+  catch { return []; }
+}
+function guardarPendientesOffline(lista) {
+  try { localStorage.setItem(CLAVE_PENDIENTES_OFFLINE, JSON.stringify(lista)); } catch {}
+}
+function agregarPendienteOffline({ ownerId, operacion, key, targetIds, payload, descripcion }) {
+  const lista = leerPendientesOffline();
+  lista.push({ id: uid(), ownerId, operacion, key, targetIds: targetIds || null, payload: payload || null, descripcion, creadoEn: new Date().toISOString() });
+  guardarPendientesOffline(lista);
+}
+function quitarPendientesOffline(ids) {
+  guardarPendientesOffline(leerPendientesOffline().filter((p) => !ids.includes(p.id)));
+}
+
+// TTS simple y sin estado, para avisos puntuales fuera del panel del Asistente (que trae su
+// propia máquina de estados de escucha/habla). Solo habla; no toca el micrófono.
+function hablarSimple(texto, onFin) {
+  try {
+    if (!("speechSynthesis" in window)) { onFin?.(); return; }
+    window.speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(texto);
+    const voces = window.speechSynthesis.getVoices();
+    const candidatasEs = voces.filter((v) => v.lang?.toLowerCase().startsWith("es"));
+    const vozEs = candidatasEs.find((v) => v.lang?.toLowerCase() === "es-mx") || candidatasEs[0];
+    if (vozEs) { u.voice = vozEs; u.lang = vozEs.lang; } else { u.lang = "es-MX"; }
+    if (onFin) u.onend = onFin;
+    window.speechSynthesis.speak(u);
+  } catch { onFin?.(); }
+}
+
 const fromRow = (key, row) => (key === "salud" ? rowToSalud(row) : rowToJs(row));
 
 async function fetchTable(key, ownerId) {
@@ -1381,6 +1419,95 @@ function IndicadorConexion() {
     >
       {enLinea ? "Conexión recuperada — la información ya está actualizada." : "Sin conexión a internet. Lo que ves puede no estar actualizado; reconéctate para seguir trabajando."}
     </div>
+  );
+}
+
+// Al reconectar con pendientes offline en la cola: intenta preguntar por voz usando el
+// Asistente de IA real (gasta cuota de asistente_uso); si no hay cuota, el navegador no
+// soporta voz, o algo falla en el camino, cae a un modal de texto con las mismas 3 opciones.
+// Solo hace UNA consulta al Asistente (para interpretar la respuesta hablada) — no negocia
+// por turnos, para no gastar cuota de más.
+function AvisoPendientesOffline({ pendientes, onActualizar, onGuardarComoNotas, onEliminar, onCerrar }) {
+  const [fase, setFase] = useState("iniciando"); // iniciando | escuchando | procesando | modal
+
+  useEffect(() => {
+    let cancelado = false;
+    (async () => {
+      let hayCuota = false;
+      try {
+        const { data: sesion } = await supabase.auth.getSession();
+        const uid = sesion?.session?.user?.id;
+        const mes = new Date().toISOString().slice(0, 7);
+        const { data: uso } = await supabase.from("asistente_uso").select("consultas_usadas, limite_mes").eq("user_id", uid).eq("mes", mes).maybeSingle();
+        const usadas = uso?.consultas_usadas ?? 0;
+        const limite = uso?.limite_mes ?? 100;
+        hayCuota = usadas < limite;
+      } catch { hayCuota = false; }
+
+      const RecClass = window.SpeechRecognition || window.webkitSpeechRecognition;
+      const soportaVoz = "speechSynthesis" in window && !!RecClass;
+
+      if (cancelado) return;
+      if (!hayCuota || !soportaVoz) { setFase("modal"); return; }
+
+      const n = pendientes.length;
+      const pregunta = `Tienes ${n} ${n === 1 ? "cambio pendiente" : "cambios pendientes"} de cuando estabas sin conexión. ¿Quieres que los actualice, que los deje guardados como notas ya en línea, o que los elimine?`;
+      hablarSimple(pregunta, () => { if (!cancelado) escuchar(RecClass); });
+    })();
+    return () => { cancelado = true; try { window.speechSynthesis?.cancel(); } catch {} };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function escuchar(RecClass) {
+    setFase("escuchando");
+    try {
+      const r = new RecClass();
+      r.lang = "es-MX";
+      r.interimResults = false;
+      r.maxAlternatives = 1;
+      let seResolvio = false;
+      r.onresult = (e) => { seResolvio = true; interpretar(e.results[0][0].transcript); };
+      r.onerror = () => { if (!seResolvio) setFase("modal"); };
+      r.onend = () => { if (!seResolvio) setFase((f) => (f === "escuchando" ? "modal" : f)); };
+      r.start();
+    } catch { setFase("modal"); }
+  }
+
+  async function interpretar(texto) {
+    setFase("procesando");
+    try {
+      const { data: sesion } = await supabase.auth.getSession();
+      const resp = await fetch(`${supabase.supabaseUrl}/functions/v1/asistente-ia`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${sesion.session.access_token}` },
+        body: JSON.stringify({
+          mensaje: `El usuario acaba de responder esto sobre qué hacer con sus cambios pendientes guardados offline: "${texto}". Responde ÚNICAMENTE con una de estas tres palabras en mayúsculas, sin nada más alrededor: ACTUALIZAR, NOTAS o ELIMINAR.`,
+          modo: "voz",
+        }),
+      });
+      const json = await resp.json().catch(() => ({}));
+      const r = (json.respuesta || "").toUpperCase();
+      if (r.includes("ACTUALIZAR")) { hablarSimple("Listo, actualizando tus pendientes."); onActualizar(); }
+      else if (r.includes("NOTAS")) { hablarSimple("Listo, los dejo guardados como notas."); onGuardarComoNotas(); }
+      else if (r.includes("ELIMINAR")) { hablarSimple("Listo, los elimino."); onEliminar(); }
+      else setFase("modal");
+    } catch { setFase("modal"); }
+  }
+
+  if (fase !== "modal") return null; // mientras habla/escucha no bloquea la pantalla con nada visual
+
+  const n = pendientes.length;
+  return (
+    <Modal title="Tienes cambios pendientes" onClose={onCerrar}>
+      <p className="text-sm gp-text-muted mb-3">
+        Hiciste {n} {n === 1 ? "cambio" : "cambios"} sin conexión, guardados en Notas. ¿Qué quieres hacer?
+      </p>
+      <div className="flex flex-col gap-2">
+        <button className="gp-btn py-2 text-sm" onClick={onActualizar}>Actualizarlos ahora</button>
+        <button className="gp-btn py-2 text-sm" onClick={onGuardarComoNotas}>Dejarlos como notas (en línea)</button>
+        <button className="gp-btn py-2 text-sm" style={{ background: "#8a2f2f" }} onClick={onEliminar}>Eliminarlos</button>
+      </div>
+    </Modal>
   );
 }
 
@@ -2215,11 +2342,51 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
   // este evento global al recuperar internet. Antes el banner lo prometía pero nadie volvía
   // a pedir datos reales — aquí sí se cumple: se vuelve a traer todo de Supabase igual que
   // con "pull to refresh". No corre si ya hay un refresco en curso.
+  //
+  // Además, si hay pendientes de cuando estuvo offline (ver addItem/editItem/removeItem),
+  // se dispara el aviso (voz o modal, ver AvisoPendientesOffline) para que el usuario decida
+  // qué hacer con ellos antes de seguir.
+  const [pendientesParaAvisar, setPendientesParaAvisar] = useState(null);
   useEffect(() => {
-    const alReconectar = () => { if (!refrescando) refrescarTodo(); };
+    const alReconectar = () => {
+      if (!refrescando) refrescarTodo();
+      const propios = leerPendientesOffline().filter((p) => p.ownerId === activeOwnerId);
+      if (propios.length > 0) setPendientesParaAvisar(propios);
+    };
     window.addEventListener("arkeyone-reconectado", alReconectar);
     return () => window.removeEventListener("arkeyone-reconectado", alReconectar);
   }, [activeOwnerId, refrescando]);
+
+  // Las 3 salidas que puede elegir el usuario para sus pendientes offline (por voz o en el modal).
+  const resolverPendientesActualizar = async () => {
+    const lista = pendientesParaAvisar || [];
+    for (const p of lista) {
+      try {
+        if (p.operacion === "add") await supabase.from(tableName(p.key)).insert(toRow(p.key, p.payload));
+        else if (p.operacion === "edit") await supabase.from(tableName(p.key)).update(toRow(p.key, p.payload)).eq("id", p.targetIds[0]);
+        else if (p.operacion === "delete") await supabase.from(tableName(p.key)).update({ deleted_at: new Date().toISOString() }).in("id", p.targetIds);
+      } catch (err) { console.error("Error al sincronizar pendiente offline:", p, err); }
+    }
+    quitarPendientesOffline(lista.map((p) => p.id));
+    setPendientesParaAvisar(null);
+    refrescarTodo();
+  };
+  const resolverPendientesComoNotas = async () => {
+    const lista = pendientesParaAvisar || [];
+    for (const p of lista) {
+      try {
+        await supabase.from("notas").insert(toRow("notas", { id: uid(), userId: activeOwnerId, titulo: `Pendiente offline — ${p.key}`, contenido: p.descripcion }));
+      } catch (err) { console.error("Error al guardar pendiente offline como nota:", p, err); }
+    }
+    quitarPendientesOffline(lista.map((p) => p.id));
+    setPendientesParaAvisar(null);
+    refrescarTodo();
+  };
+  const resolverPendientesEliminar = () => {
+    const lista = pendientesParaAvisar || [];
+    quitarPendientesOffline(lista.map((p) => p.id));
+    setPendientesParaAvisar(null);
+  };
 
   const onTouchStartContenido = (e) => {
     if ((contenidoRef.current?.scrollTop || 0) > 0 || refrescando) { pullRef.current.activo = false; return; }
@@ -2243,17 +2410,37 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
 
   const addItem = async (key, item) => {
     const newItem = { ...item, id: item.id || uid(), userId: activeOwnerId };
+    if (!navigator.onLine) {
+      agregarPendienteOffline({ ownerId: activeOwnerId, operacion: "add", key, payload: newItem, descripcion: `Nuevo en ${key}: ${labelFor(key, newItem)}` });
+      setData((prev) => ({ ...prev })); // fuerza a que Notas vuelva a leer la cola local y se refresque en pantalla
+      alert("Sin conexión: se guardó como pendiente en Notas. Se subirá cuando vuelva internet.");
+      return;
+    }
     const { error } = await supabase.from(tableName(key)).insert(toRow(key, newItem));
     if (error) { console.error(`Error al guardar en ${tableName(key)}:`, error); alert(mensajeErrorGuardado(error)); return; }
     setData((prev) => ({ ...prev, [key]: [...prev[key], newItem] }));
   };
   const editItem = async (key, id, patch) => {
+    if (!navigator.onLine) {
+      const actual = (data[key] || []).find((i) => i.id === id);
+      agregarPendienteOffline({ ownerId: activeOwnerId, operacion: "edit", key, targetIds: [id], payload: patch, descripcion: `Editar en ${key}: ${labelFor(key, { ...actual, ...patch })}` });
+      setData((prev) => ({ ...prev }));
+      alert("Sin conexión: se guardó como pendiente en Notas. Se subirá cuando vuelva internet.");
+      return;
+    }
     const { error } = await supabase.from(tableName(key)).update(toRow(key, patch)).eq("id", id);
     if (error) { console.error(`Error al actualizar ${tableName(key)}:`, error); alert(mensajeErrorGuardado(error)); return; }
     setData((prev) => ({ ...prev, [key]: prev[key].map((i) => (i.id === id ? { ...i, ...patch } : i)) }));
   };
   const removeItem = async (key, id, extraIds = []) => {
     const idsTodos = [id, ...extraIds];
+    if (!navigator.onLine) {
+      const actual = (data[key] || []).find((i) => i.id === id);
+      agregarPendienteOffline({ ownerId: activeOwnerId, operacion: "delete", key, targetIds: idsTodos, descripcion: `Borrar en ${key}: ${labelFor(key, actual || {})}` });
+      setData((prev) => ({ ...prev }));
+      alert("Sin conexión: se guardó como pendiente en Notas. Se aplicará cuando vuelva internet.");
+      return;
+    }
     const { error } = await supabase.from(tableName(key)).update({ deleted_at: new Date().toISOString() }).in("id", idsTodos);
     if (error) { console.error(`Error al borrar en ${tableName(key)}:`, error); alert(mensajeErrorGuardado(error)); return; }
     setData((prev) => ({ ...prev, [key]: prev[key].filter((i) => !idsTodos.includes(i.id)) }));
@@ -2562,6 +2749,16 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
           </div>
         </div>
 
+        {pendientesParaAvisar && (
+          <AvisoPendientesOffline
+            pendientes={pendientesParaAvisar}
+            onActualizar={resolverPendientesActualizar}
+            onGuardarComoNotas={resolverPendientesComoNotas}
+            onEliminar={resolverPendientesEliminar}
+            onCerrar={() => setPendientesParaAvisar(null)}
+          />
+        )}
+
         {/* contenido */}
         <div
           ref={contenidoRef}
@@ -2744,7 +2941,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
               onCrearContacto={(nombre) => { const nid = uid(); addItem("contactos", { id: nid, nombre, tipos: ["Otro"] }); return nid; }} />
           )}
           {view === "notas" && (
-            <Notas data={data} onAdd={(i) => addItem("notas", i)} onEdit={(id, p) => editItem("notas", id, p)} onRemove={(id) => askDelete("notas", id)} />
+            <Notas data={data} ownerId={activeOwnerId} onAdd={(i) => addItem("notas", i)} onEdit={(id, p) => editItem("notas", id, p)} onRemove={(id) => askDelete("notas", id)} />
           )}
         </div>
       </div>
@@ -9992,12 +10189,21 @@ function BusquedaGlobal({ data, onNavigate, onClose }) {
 }
 
 
-function Notas({ data, onAdd, onEdit, onRemove }) {
+function Notas({ data, ownerId, onAdd, onEdit, onRemove }) {
   const [modal, setModal] = useState(null);
   const [busqueda, setBusqueda] = useState("");
+  const [tick, setTick] = useState(0); // se incrementa para forzar releer la cola local tras quitar un pendiente
   const empty = { titulo: "", contenido: "" };
 
-  const filtradas = filtrarPorBusqueda(data.notas, busqueda, [(n) => n.titulo, (n) => n.contenido])
+  // Pendientes guardados sin conexión (ver addItem/editItem/removeItem): viven solo en este
+  // navegador hasta que el usuario decida qué hacer con ellos al reconectar. Se muestran aquí
+  // como notas de solo lectura, marcadas claramente, para que se vean aunque no haya internet.
+  const pendientesOffline = leerPendientesOffline()
+    .filter((p) => p.ownerId === ownerId)
+    .map((p) => ({ id: `pendiente-${p.id}`, pendienteOfflineId: p.id, titulo: "⏳ Pendiente por subir", contenido: p.descripcion, createdAt: p.creadoEn, updatedAt: p.creadoEn }));
+
+  const notasCombinadas = [...pendientesOffline, ...data.notas];
+  const filtradas = filtrarPorBusqueda(notasCombinadas, busqueda, [(n) => n.titulo, (n) => n.contenido])
     .slice()
     .sort((a, b) => (b.updatedAt || b.createdAt || "").localeCompare(a.updatedAt || a.createdAt || ""));
 
@@ -10023,13 +10229,19 @@ function Notas({ data, onAdd, onEdit, onRemove }) {
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
         {filtradas.map((n) => (
-          <div key={n.id} onClick={() => setModal({ item: n })} className="gp-panel p-4 cursor-pointer flex flex-col" style={{ minHeight: 120 }}>
+          <div key={n.id} onClick={() => { if (!n.pendienteOfflineId) setModal({ item: n }); }}
+            className={`gp-panel p-4 flex flex-col ${n.pendienteOfflineId ? "" : "cursor-pointer"}`}
+            style={{ minHeight: 120, ...(n.pendienteOfflineId ? { borderStyle: "dashed", opacity: 0.9 } : {}) }}>
             <div className="flex items-start justify-between gap-2 mb-1">
               <span className="text-sm font-medium truncate">{n.titulo || "Sin título"}</span>
-              <IconBtn onClick={(e) => { e.stopPropagation(); onRemove(n.id); }}><Trash2 size={13} /></IconBtn>
+              <IconBtn onClick={(e) => {
+                e.stopPropagation();
+                if (n.pendienteOfflineId) { quitarPendientesOffline([n.pendienteOfflineId]); setTick((t) => t + 1); }
+                else onRemove(n.id);
+              }}><Trash2 size={13} /></IconBtn>
             </div>
             <p className="text-xs gp-text-muted flex-1" style={{ display: "-webkit-box", WebkitLineClamp: 5, WebkitBoxOrient: "vertical", overflow: "hidden", whiteSpace: "pre-wrap" }}>{n.contenido}</p>
-            <p className="text-xs gp-text-muted mt-2" style={{ opacity: 0.7 }}>{fmtFechaCorta(n.updatedAt || n.createdAt)}</p>
+            <p className="text-xs gp-text-muted mt-2" style={{ opacity: 0.7 }}>{n.pendienteOfflineId ? "Sin subir — solo en este dispositivo" : fmtFechaCorta(n.updatedAt || n.createdAt)}</p>
           </div>
         ))}
       </div>
