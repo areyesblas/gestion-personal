@@ -10336,6 +10336,8 @@ function VoiceMode({ contextoPantalla, onDatosCreados, irAVista }) {
   const [estado, setEstado] = useState("inactivo"); // inactivo | escuchando | procesando | hablando | permiso | error
   const [errorMsg, setErrorMsg] = useState("");
   const [transcripciones, setTranscripciones] = useState([]); // [{rol, texto}]
+  const [nivelAudio, setNivelAudio] = useState(0); // diagnostico visible: nivel de energia que capta el mic (0-1), solo camino iOS
+  const ultimoReporteNivelRef = useRef(0);
 
   const estadoRef = useRef("inactivo");
   const abiertoRef = useRef(false);
@@ -10555,6 +10557,10 @@ function VoiceMode({ contextoPantalla, onDatosCreados, irAVista }) {
       }
       const rms = Math.sqrt(suma / buffer.length);
       const ahora = Date.now();
+      if (ahora - ultimoReporteNivelRef.current > 120) { // no saturar de renders, cada ~120ms basta para verlo en vivo
+        ultimoReporteNivelRef.current = ahora;
+        setNivelAudio(rms);
+      }
       // Umbral más alto mientras la IA habla: evita que su propia voz saliendo de la bocina
       // (si el usuario no trae audífonos) dispare una interrupción falsa.
       const UMBRAL = estadoRef.current === "hablando" ? 0.05 : 0.012;
@@ -10765,7 +10771,7 @@ function VoiceMode({ contextoPantalla, onDatosCreados, irAVista }) {
         <div className="fixed inset-0 z-[75] flex items-end sm:items-center justify-center p-4" style={{ background: "rgba(0,0,0,.55)" }} onClick={cerrar}>
           <div className="gp-panel w-full max-w-md p-4 flex flex-col" style={{ maxHeight: "80vh" }} onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-3">
-              <h2 className="text-lg font-semibold flex items-center gap-2"><Bot size={20} className="gp-text-gold" /> Modo Conversación</h2>
+              <h2 className="text-lg font-semibold flex items-center gap-2"><Bot size={20} className="gp-text-gold" /> Modo Conversación <span className="text-[10px] gp-text-muted font-normal">v20260911d</span></h2>
               <button onClick={cerrar} className="gp-btn-ghost p-2 rounded"><X size={18} /></button>
             </div>
 
@@ -10806,6 +10812,18 @@ function VoiceMode({ contextoPantalla, onDatosCreados, irAVista }) {
                 {estado === "permiso" && (errorMsg || "Necesito permiso de micrófono.")}
                 {estado === "error" && (errorMsg || "Algo salió mal.")}
               </p>
+              {estado === "escuchando" && !usaSTTNativo && (
+                <div className="w-full max-w-[200px] flex items-center gap-2">
+                  <div className="flex-1 h-2 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,.12)" }}>
+                    <div className="h-full rounded-full" style={{
+                      width: `${Math.min(100, Math.round((nivelAudio / 0.05) * 100))}%`,
+                      background: nivelAudio > 0.012 ? "#22c55e" : "#6b7280",
+                      transition: "width .1s linear",
+                    }} />
+                  </div>
+                  <span className="text-[10px] gp-text-muted" style={{ minWidth: 38 }}>{nivelAudio.toFixed(3)}</span>
+                </div>
+              )}
               {(estado === "permiso" || estado === "error") && (
                 <button onClick={() => { cerrar(); irAVista("asistente"); }} className="gp-btn px-3 py-1.5 text-xs mt-1">
                   Usar el chat de texto
