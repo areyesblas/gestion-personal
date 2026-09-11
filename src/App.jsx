@@ -10401,6 +10401,11 @@ function VoiceMode({ contextoPantalla, onDatosCreados, irAVista }) {
 
   const SpeechRecognitionCtor = typeof window !== "undefined" && (window.SpeechRecognition || window.webkitSpeechRecognition);
   const usaSTTNativo = !!SpeechRecognitionCtor;
+  // Este Safari (iOS 26) ya trae reconocimiento de voz nativo real, pero sigue teniendo el
+  // mismo conflicto de audio que el camino de grabación manual: si el micrófono se reactiva
+  // mientras ARKEYONE habla (para detectar una interrupción), el audio de salida se queda mudo.
+  // Por eso, en iOS nunca reactivamos el micrófono durante "hablando", sea cual sea el camino.
+  const esIOS = typeof navigator !== "undefined" && /iPad|iPhone|iPod/.test(navigator.userAgent || "");
   const soportaModoVoz = usaSTTNativo || (typeof navigator !== "undefined" && navigator.mediaDevices?.getUserMedia && typeof window !== "undefined" && window.MediaRecorder);
 
   useEffect(() => () => detenerTodo(), []); // limpia todo si el componente se desmonta
@@ -10743,9 +10748,10 @@ function VoiceMode({ contextoPantalla, onDatosCreados, irAVista }) {
       u.onend = alTerminar;
       u.onerror = alTerminar;
       window.speechSynthesis.speak(u);
-      // En el camino nativo, seguimos "escuchando" con el mismo reconocedor mientras la IA
-      // habla, únicamente para detectar una interrupción (barge-in) -- ver r.onresult arriba.
-      if (usaSTTNativo) iniciarEscuchaNativa();
+      // En el camino nativo (Chrome/Android/Mac), seguimos "escuchando" con el mismo reconocedor
+      // mientras la IA habla, únicamente para detectar una interrupción (barge-in) -- ver
+      // r.onresult arriba. En iOS lo evitamos: reactivar el mic mientras se habla silencia el audio.
+      if (usaSTTNativo && !esIOS) iniciarEscuchaNativa();
     } catch { if (usaSTTNativo) volverAEscuchar(); else reanudarMicTrasHablarIOS(); }
   }
 
@@ -10771,7 +10777,7 @@ function VoiceMode({ contextoPantalla, onDatosCreados, irAVista }) {
         <div className="fixed inset-0 z-[75] flex items-end sm:items-center justify-center p-4" style={{ background: "rgba(0,0,0,.55)" }} onClick={cerrar}>
           <div className="gp-panel w-full max-w-md p-4 flex flex-col" style={{ maxHeight: "80vh" }} onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-3">
-              <h2 className="text-lg font-semibold flex items-center gap-2"><Bot size={20} className="gp-text-gold" /> Modo Conversación <span className="text-[10px] gp-text-muted font-normal">v20260911e · {usaSTTNativo ? "camino: nativo" : "camino: iOS/grabación"}</span></h2>
+              <h2 className="text-lg font-semibold flex items-center gap-2"><Bot size={20} className="gp-text-gold" /> Modo Conversación <span className="text-[10px] gp-text-muted font-normal">v20260911f · {usaSTTNativo ? "camino: nativo" : "camino: iOS/grabación"}{esIOS ? " · iOS" : ""}</span></h2>
               <button onClick={cerrar} className="gp-btn-ghost p-2 rounded"><X size={18} /></button>
             </div>
 
