@@ -2249,18 +2249,18 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
   };
   const editItem = async (key, id, patch) => {
     const { error } = await supabase.from(tableName(key)).update(toRow(key, patch)).eq("id", id);
-    if (error) { console.error(`Error al actualizar ${tableName(key)}:`, error); alert("No se pudo guardar el cambio."); return; }
+    if (error) { console.error(`Error al actualizar ${tableName(key)}:`, error); alert(mensajeErrorGuardado(error)); return; }
     setData((prev) => ({ ...prev, [key]: prev[key].map((i) => (i.id === id ? { ...i, ...patch } : i)) }));
   };
   const removeItem = async (key, id, extraIds = []) => {
     const idsTodos = [id, ...extraIds];
     const { error } = await supabase.from(tableName(key)).update({ deleted_at: new Date().toISOString() }).in("id", idsTodos);
-    if (error) { console.error(`Error al borrar en ${tableName(key)}:`, error); alert("No se pudo borrar."); return; }
+    if (error) { console.error(`Error al borrar en ${tableName(key)}:`, error); alert(mensajeErrorGuardado(error)); return; }
     setData((prev) => ({ ...prev, [key]: prev[key].filter((i) => !idsTodos.includes(i.id)) }));
   };
   const restoreItem = async (key, id) => {
     const { error } = await supabase.from(tableName(key)).update({ deleted_at: null }).eq("id", id);
-    if (error) { console.error(`Error al restaurar en ${tableName(key)}:`, error); alert("No se pudo restaurar."); return false; }
+    if (error) { console.error(`Error al restaurar en ${tableName(key)}:`, error); alert(mensajeErrorGuardado(error)); return false; }
     const fresh = await fetchTable(key, activeOwnerId);
     setData((prev) => ({ ...prev, [key]: fresh }));
     return true;
