@@ -10548,7 +10548,7 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
   const arrastreRef = useRef({ activo: false, movido: false, startX: 0, startY: 0, offsetX: 0, offsetY: 0 });
 
   const clampPos = (x, y) => {
-    const w = 52, h = 52, margen = 8;
+    const w = 66, h = 66, margen = 8;
     const maxX = window.innerWidth - w - margen;
     const maxY = window.innerHeight - h - margen;
     return { x: Math.min(Math.max(x, margen), maxX), y: Math.min(Math.max(y, margen), maxY) };
@@ -11143,14 +11143,15 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
           onPointerDown={onBtnPointerDown}
           onPointerMove={onBtnPointerMove}
           onPointerUp={onBtnPointerUp}
-          className="fixed z-[65] rounded-full shadow-lg flex items-center justify-center touch-none animate-[pulse_2.8s_ease-in-out_infinite]"
+          className="fixed z-[65] rounded-full flex items-center justify-center touch-none animate-[pulse_1.4s_ease-in-out_infinite]"
           style={{
-            width: 52, height: 52, background: "#9A2E1F", color: "#FFF3EC",
+            width: 66, height: 66, background: "#9A2E1F", color: "#FFF3EC",
+            boxShadow: "0 4px 14px rgba(154,46,31,.55), 0 0 0 4px rgba(154,46,31,.18)",
             ...(pos ? { left: pos.x, top: pos.y } : { bottom: 84, left: 16 }),
           }}
           title="Modo Conversación (voz)"
         >
-          <Bot size={24} />
+          <Bot size={30} />
         </button>
       )}
       {abierto && (
