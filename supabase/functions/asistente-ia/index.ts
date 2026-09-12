@@ -31,6 +31,38 @@ const headersJson = { "Content-Type": "application/json", ...corsHeaders };
 
 const uid = () => crypto.randomUUID();
 
+// Normaliza texto para comparar sin importar acentos, mayusculas o espacios de sobra --
+// "Café con Ana" y "cafe con ana" deben detectarse como el mismo texto.
+function normalizarTexto(s: string | null | undefined) {
+  return (s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+}
+
+// Revision generica anti-duplicados: antes de crear una entidad por nombre/descripcion
+// (tareas, notas, proyectos, contactos, habitos, etc.), busca entre los registros no
+// eliminados del usuario en esa tabla si ya existe algo muy parecido (coincidencia exacta
+// normalizada, o uno contiene al otro). Si encuentra algo, devuelve ese registro para que
+// quien llama decida si pregunta al usuario antes de insertar. No aplica a registros que
+// se esperan repetidos por naturaleza (movimientos de finanzas, mediciones de salud, citas).
+async function buscarPosibleDuplicado(tabla: string, campo: string, valor: string | undefined | null, userId: string, filtroExtra?: Record<string, any>) {
+  const norm = normalizarTexto(valor);
+  if (norm.length < 3) return null; // texto muy corto no es confiable para comparar
+  let query = admin.from(tabla).select(`id, ${campo}`).eq("user_id", userId).is("deleted_at", null).limit(50);
+  if (filtroExtra) {
+    for (const [k, v] of Object.entries(filtroExtra)) {
+      if (v !== undefined && v !== null) query = query.eq(k, v);
+    }
+  }
+  const { data } = await query;
+  if (!data) return null;
+  for (const row of data as any[]) {
+    const rowNorm = normalizarTexto(row[campo]);
+    if (rowNorm && (rowNorm === norm || rowNorm.includes(norm) || norm.includes(rowNorm))) {
+      return row;
+    }
+  }
+  return null;
+}
+
 // La IA no sabe que dia es "hoy" por si sola -- si no se le dice explicitamente, puede inventar
 // cualquier fecha al resolver referencias relativas ("manana", "el proximo lunes"). Esto calcula
 // la fecha/hora real en horario de Mexico (no UTC, para evitar que cerca de medianoche calcule
@@ -60,12 +92,12 @@ const MODULOS_DISPONIBLES = [
 const TOOLS = [
   {
     name: "buscar_datos",
-    description: `Busca o LISTA informacion real y actual del usuario en cualquier modulo de ARKEYONE (${MODULOS_DISPONIBLES.join(", ")}). Usala en tres casos: (1) ANTES de crear o actualizar algo ligado a un registro existente, para obtener el id correcto -- nunca inventes un id; (2) cuando el usuario pregunte por el estado de algo que ya existe o crees haber creado (por ejemplo "por que no veo mi cita", "que tengo pendiente", "ya se guardo eso", "cuanto llevo ahorrado", "que hice ayer en mi diario") -- en ese caso SIEMPRE usa esta herramienta para revisar los datos reales antes de responder, en vez de decir que no puedes consultarlo; (3) cuando necesites contexto de un modulo especifico para dar un consejo puntual (ej. revisar habitos antes de sugerir uno nuevo). Si dejas 'texto' vacio, devuelve los registros mas recientes de ese modulo (para listar todo). "actividades" es el Diario personal (no confundir con tareas, que es "pendientes").`,
+    description: `Busca o LISTA informacion real y actual del usuario en cualquier modulo de ARKEYONE (${MODULOS_DISPONIBLES.join(", ")}). Usala en tres casos: (1) ANTES de crear o actualizar algo ligado a un registro existente, para obtener el id correcto -- nunca inventes un id; (2) cuando el usuario pregunte por el estado de algo que ya existe o crees haber creado (por ejemplo "por que no veo mi cita", "que tengo pendiente", "ya se guardo eso", "cuanto llevo ahorrado", "que hice ayer en mi diario") -- en ese caso SIEMPRE usa esta herramienta para revisar los datos reales antes de responder, en vez de decir que no puedes consultarlo; (3) cuando necesites contexto de un modulo especifico para dar un consejo puntual (ej. revisar habitos antes de sugerir uno nuevo). La busqueda de 'texto' ignora acentos/mayusculas y encuentra coincidencias aunque las palabras esten en otro orden (ej. 'reyes angel' encuentra 'Angel Reyes'). Si dejas 'texto' vacio, devuelve los registros mas recientes de ese modulo (para listar todo). "actividades" es el Diario personal (no confundir con tareas, que es "pendientes").`,
     input_schema: {
       type: "object",
       properties: {
         modulo: { type: "string", enum: MODULOS_DISPONIBLES },
-        texto: { type: "string", description: "Texto a buscar en el campo principal del modulo (busqueda parcial). Dejalo vacio para listar los registros mas recientes de ese modulo sin filtrar." },
+        texto: { type: "string", description: "Texto a buscar en el campo principal del modulo (busqueda parcial, sin acentos, por palabras sueltas en cualquier orden). Dejalo vacio para listar los registros mas recientes de ese modulo sin filtrar." },
       },
       required: ["modulo"],
     },
@@ -77,31 +109,32 @@ const TOOLS = [
   },
   {
     name: "crear_nota",
-    description: "Crea una nota libre en el modulo Notas.",
+    description: "Crea una nota libre en el modulo Notas. Si ya existe una nota muy parecida (mismo titulo/contenido), NO la crea: devuelve posible_duplicado=true. Solo si el usuario confirma que la quiere crear de todas formas, vuelve a llamarla con confirmado=true.",
     input_schema: {
       type: "object",
-      properties: { titulo: { type: "string" }, contenido: { type: "string" } },
+      properties: { titulo: { type: "string" }, contenido: { type: "string" }, confirmado: { type: "boolean" } },
       required: ["contenido"],
     },
   },
   {
     name: "crear_idea_proyecto",
-    description: "Crea un nuevo proyecto con estatus 'Idea' en Proyectos e ideas.",
+    description: "Crea un nuevo proyecto con estatus 'Idea' en Proyectos e ideas. Si ya existe un proyecto con nombre muy parecido, NO lo crea: devuelve posible_duplicado=true. Solo si el usuario confirma, vuelve a llamarla con confirmado=true.",
     input_schema: {
       type: "object",
-      properties: { nombre: { type: "string" }, descripcion: { type: "string" } },
+      properties: { nombre: { type: "string" }, descripcion: { type: "string" }, confirmado: { type: "boolean" } },
       required: ["nombre"],
     },
   },
   {
     name: "crear_pendiente",
-    description: "Crea una tarea/pendiente, opcionalmente ligada a un proyecto (usa buscar_datos primero para obtener el proyecto_id exacto).",
+    description: "Crea una tarea/pendiente, opcionalmente ligada a un proyecto (usa buscar_datos primero para obtener el proyecto_id exacto). Si ya existe una tarea con descripcion muy parecida, NO la crea: devuelve posible_duplicado=true. Solo si el usuario confirma, vuelve a llamarla con confirmado=true.",
     input_schema: {
       type: "object",
       properties: {
         descripcion: { type: "string" },
         proyecto_id: { type: "string" },
         fecha_limite: { type: "string", description: "Formato YYYY-MM-DD" },
+        confirmado: { type: "boolean" },
       },
       required: ["descripcion"],
     },
@@ -206,7 +239,7 @@ const TOOLS = [
   },
   {
     name: "crear_contacto",
-    description: "Crea un nuevo contacto. No requiere confirmacion.",
+    description: "Crea un nuevo contacto. Si ya existe un contacto con nombre muy parecido, NO lo crea: devuelve posible_duplicado=true. Solo si el usuario confirma, vuelve a llamarla con confirmado=true.",
     input_schema: {
       type: "object",
       properties: {
@@ -215,6 +248,7 @@ const TOOLS = [
         correo: { type: "string" },
         tipos: { type: "array", items: { type: "string" }, description: "Ej. ['Cliente'], ['Colaborador'], ['Familiar']. Si no se especifica se deja ['Otro']." },
         notas: { type: "string" },
+        confirmado: { type: "boolean" },
       },
       required: ["nombre"],
     },
@@ -269,7 +303,7 @@ const TOOLS = [
   },
   {
     name: "crear_medicamento",
-    description: "Registra un medicamento con su dosis, horarios y dias de toma, para el usuario o para una persona vinculada. Usa buscar_datos con modulo=contactos primero si es un tercero. No requiere confirmacion.",
+    description: "Registra un medicamento con su dosis, horarios y dias de toma, para el usuario o para una persona vinculada. Usa buscar_datos con modulo=contactos primero si es un tercero. Si esa persona ya tiene un medicamento con nombre muy parecido, NO lo crea: devuelve posible_duplicado=true. Solo si el usuario confirma, vuelve a llamarla con confirmado=true.",
     input_schema: {
       type: "object",
       properties: {
@@ -285,13 +319,14 @@ const TOOLS = [
         medico: { type: "string" },
         via_administracion: { type: "string" },
         observaciones: { type: "string" },
+        confirmado: { type: "boolean" },
       },
       required: ["nombre"],
     },
   },
   {
     name: "crear_habito",
-    description: "Crea un nuevo habito con su frecuencia. No requiere confirmacion.",
+    description: "Crea un nuevo habito con su frecuencia. Si ya existe un habito con nombre muy parecido, NO lo crea: devuelve posible_duplicado=true. Solo si el usuario confirma, vuelve a llamarla con confirmado=true.",
     input_schema: {
       type: "object",
       properties: {
@@ -299,6 +334,7 @@ const TOOLS = [
         frecuencia_tipo: { type: "string", enum: ["diario", "dias_semana", "veces_semana"], description: "Por defecto 'diario' (todos los dias)." },
         frecuencia_dias_semana: { type: "array", items: { type: "number" }, description: "Solo si frecuencia_tipo='dias_semana': dias 0=domingo a 6=sabado." },
         frecuencia_veces_semana: { type: "number", description: "Solo si frecuencia_tipo='veces_semana'." },
+        confirmado: { type: "boolean" },
       },
       required: ["nombre"],
     },
@@ -318,7 +354,7 @@ const TOOLS = [
   },
   {
     name: "crear_evento",
-    description: "Crea un evento/show (expediente operativo: fecha, lugar, contacto, comentarios). Los montos (costo, ingreso, ganancia) NO se capturan aqui -- van en Finanzas y se relacionan por separado. Usa buscar_datos con modulo=contactos primero si aplica. No requiere confirmacion.",
+    description: "Crea un evento/show (expediente operativo: fecha, lugar, contacto, comentarios). Los montos (costo, ingreso, ganancia) NO se capturan aqui -- van en Finanzas y se relacionan por separado. Usa buscar_datos con modulo=contactos primero si aplica. Si ya existe un evento con nombre muy parecido, NO lo crea: devuelve posible_duplicado=true. Solo si el usuario confirma, vuelve a llamarla con confirmado=true.",
     input_schema: {
       type: "object",
       properties: {
@@ -329,13 +365,14 @@ const TOOLS = [
         contacto_id: { type: "string" },
         proyecto_id: { type: "string" },
         comentarios: { type: "string" },
+        confirmado: { type: "boolean" },
       },
       required: ["nombre"],
     },
   },
   {
     name: "crear_patrimonio",
-    description: "Registra un bien patrimonial (nombre, categoria, fecha y valor de adquisicion). El valor actual se calcula despues con valuaciones, no se captura aqui. No requiere confirmacion.",
+    description: "Registra un bien patrimonial (nombre, categoria, fecha y valor de adquisicion). El valor actual se calcula despues con valuaciones, no se captura aqui. Si ya existe un bien con nombre muy parecido, NO lo crea: devuelve posible_duplicado=true. Solo si el usuario confirma, vuelve a llamarla con confirmado=true.",
     input_schema: {
       type: "object",
       properties: {
@@ -344,13 +381,14 @@ const TOOLS = [
         fecha_adquisicion: { type: "string", description: "YYYY-MM-DD" },
         valor_adquisicion: { type: "number" },
         notas: { type: "string" },
+        confirmado: { type: "boolean" },
       },
       required: ["nombre"],
     },
   },
   {
     name: "crear_apartado",
-    description: "Crea un apartado (meta de ahorro): nombre, monto objetivo, fecha objetivo. El monto ya ahorrado se calcula despues con transferencias, no se captura aqui. No requiere confirmacion.",
+    description: "Crea un apartado (meta de ahorro): nombre, monto objetivo, fecha objetivo. El monto ya ahorrado se calcula despues con transferencias, no se captura aqui. Si ya existe un apartado con nombre muy parecido, NO lo crea: devuelve posible_duplicado=true. Solo si el usuario confirma, vuelve a llamarla con confirmado=true.",
     input_schema: {
       type: "object",
       properties: {
@@ -359,13 +397,14 @@ const TOOLS = [
         fecha_objetivo: { type: "string", description: "YYYY-MM-DD" },
         proyecto_id: { type: "string" },
         notas: { type: "string" },
+        confirmado: { type: "boolean" },
       },
       required: ["nombre"],
     },
   },
   {
     name: "crear_meta",
-    description: "Crea una meta (objetivo a lograr), opcionalmente ligada a un proyecto. Usa buscar_datos con modulo=proyectos primero si aplica. No requiere confirmacion.",
+    description: "Crea una meta (objetivo a lograr), opcionalmente ligada a un proyecto. Usa buscar_datos con modulo=proyectos primero si aplica. Si ya existe una meta con descripcion muy parecida, NO la crea: devuelve posible_duplicado=true. Solo si el usuario confirma, vuelve a llamarla con confirmado=true.",
     input_schema: {
       type: "object",
       properties: {
@@ -374,6 +413,7 @@ const TOOLS = [
         fecha_objetivo: { type: "string", description: "YYYY-MM-DD" },
         fecha_revision: { type: "string", description: "YYYY-MM-DD" },
         prioridad: { type: "string", enum: ["Baja", "Media", "Alta"] },
+        confirmado: { type: "boolean" },
       },
       required: ["descripcion"],
     },
@@ -432,14 +472,22 @@ async function ejecutarHerramienta(nombre: string, input: any, userId: string) {
       const campo = CAMPO_BUSQUEDA[input.modulo];
       const cols = SELECT_POR_MODULO[input.modulo];
       if (!campo || !cols) return { error: "Modulo no valido." };
-      const texto = input.texto ?? "";
-      const { data, error } = await admin.from(input.modulo).select(cols)
-        .eq("user_id", userId).is("deleted_at", null)
-        .ilike(campo, `%${texto}%`)
-        .order("created_at", { ascending: false })
-        .limit(10);
+      const texto = (input.texto ?? "").trim();
+      // Busqueda inteligente (RPC arkeyone_buscar_modulo): ignora acentos/mayusculas y hace match
+      // si TODAS las palabras dichas aparecen en cualquier orden (antes usaba ilike '%texto%' tal
+      // cual, que fallaba si faltaba un acento o si las palabras venian en otro orden). Con texto
+      // vacio, la funcion SQL no filtra nada (equivalente a listar sin filtro).
+      const { data, error } = await admin.rpc("arkeyone_buscar_modulo", {
+        p_tabla: input.modulo, p_columna: campo, p_user_id: userId, p_texto: texto, p_limite: 10,
+      });
       if (error) return { error: error.message };
-      return { resultados: data };
+      // La RPC regresa la fila completa (jsonb); se recorta aqui a las mismas columnas que antes
+      // exponia SELECT_POR_MODULO, para no filtrar de mas al modelo.
+      const columnasPermitidas = cols.split(",").map((c: string) => c.trim());
+      const resultados = (data || []).map((fila: any) =>
+        Object.fromEntries(columnasPermitidas.map((c: string) => [c, fila[c]]))
+      );
+      return { resultados };
     }
     case "obtener_panorama": {
       const hoy = fechaHoraActualMexico().iso;
@@ -485,11 +533,20 @@ async function ejecutarHerramienta(nombre: string, input: any, userId: string) {
       };
     }
     case "crear_nota": {
+      const campoComparar = input.titulo ? "titulo" : "contenido";
+      if (input.confirmado !== true) {
+        const dup = await buscarPosibleDuplicado("notas", campoComparar, input[campoComparar], userId);
+        if (dup) return { posible_duplicado: true, existente: dup, mensaje_para_usuario: `Ya tienes una nota parecida: "${dup[campoComparar]}". ¿La creo de todas formas o prefieres usar esa?` };
+      }
       const row = { id: uid(), user_id: userId, titulo: input.titulo || null, contenido: input.contenido };
       const { error } = await admin.from("notas").insert(row);
       return error ? { error: error.message } : { ok: true, id: row.id };
     }
     case "crear_idea_proyecto": {
+      if (input.confirmado !== true) {
+        const dup = await buscarPosibleDuplicado("proyectos", "nombre", input.nombre, userId);
+        if (dup) return { posible_duplicado: true, existente: dup, mensaje_para_usuario: `Ya tienes un proyecto llamado "${dup.nombre}". ¿Creo uno nuevo de todas formas o te refieres a ese?` };
+      }
       const row = {
         id: uid(), user_id: userId, nombre: input.nombre, categoria: "Software", estatus: "Idea",
         modo: "Finito", monetizacion: "Dinero", prioridad: "Media", descripcion: input.descripcion || null,
@@ -499,6 +556,10 @@ async function ejecutarHerramienta(nombre: string, input: any, userId: string) {
       return error ? { error: error.message } : { ok: true, id: row.id };
     }
     case "crear_pendiente": {
+      if (input.confirmado !== true) {
+        const dup = await buscarPosibleDuplicado("pendientes", "descripcion", input.descripcion, userId);
+        if (dup) return { posible_duplicado: true, existente: dup, mensaje_para_usuario: `Ya tienes una tarea parecida: "${dup.descripcion}". ¿La creo de todas formas o te refieres a esa?` };
+      }
       const row = {
         id: uid(), user_id: userId, descripcion: input.descripcion, proyecto_id: input.proyecto_id || null,
         fecha_limite: input.fecha_limite || null, estatus: "Pendiente", prioridad: "Media",
@@ -582,6 +643,10 @@ async function ejecutarHerramienta(nombre: string, input: any, userId: string) {
       return error ? { error: error.message } : { ok: true };
     }
     case "crear_contacto": {
+      if (input.confirmado !== true) {
+        const dup = await buscarPosibleDuplicado("contactos", "nombre", input.nombre, userId);
+        if (dup) return { posible_duplicado: true, existente: dup, mensaje_para_usuario: `Ya tienes un contacto llamado "${dup.nombre}". ¿Creo uno nuevo de todas formas o te refieres a ese?` };
+      }
       const row = {
         id: uid(), user_id: userId, nombre: input.nombre, whatsapp: input.whatsapp || null,
         correo: input.correo || null, tipos: input.tipos?.length ? input.tipos : ["Otro"], notas: input.notas || null,
@@ -621,6 +686,10 @@ async function ejecutarHerramienta(nombre: string, input: any, userId: string) {
       return error ? { error: error.message } : { ok: true, id: row.id };
     }
     case "crear_medicamento": {
+      if (input.confirmado !== true) {
+        const dup = await buscarPosibleDuplicado("medicamentos", "nombre", input.nombre, userId, { contacto_id: input.contacto_id ?? null });
+        if (dup) return { posible_duplicado: true, existente: dup, mensaje_para_usuario: `Ya existe un medicamento parecido registrado: "${dup.nombre}". ¿Lo creo de todas formas o te refieres a ese?` };
+      }
       const row: any = { id: uid(), user_id: userId, nombre: input.nombre };
       if (input.dosis !== undefined) row.dosis = input.dosis;
       if (input.contacto_id !== undefined) row.contacto_id = input.contacto_id;
@@ -637,6 +706,10 @@ async function ejecutarHerramienta(nombre: string, input: any, userId: string) {
       return error ? { error: error.message } : { ok: true, id: row.id };
     }
     case "crear_habito": {
+      if (input.confirmado !== true) {
+        const dup = await buscarPosibleDuplicado("habitos", "nombre", input.nombre, userId);
+        if (dup) return { posible_duplicado: true, existente: dup, mensaje_para_usuario: `Ya tienes un habito parecido: "${dup.nombre}". ¿Creo uno nuevo de todas formas o te refieres a ese?` };
+      }
       const row: any = { id: uid(), user_id: userId, nombre: input.nombre, fechas: [], frecuencia_tipo: input.frecuencia_tipo || "diario" };
       if (input.frecuencia_dias_semana !== undefined) row.frecuencia_dias_semana = input.frecuencia_dias_semana;
       if (input.frecuencia_veces_semana !== undefined) row.frecuencia_veces_semana = input.frecuencia_veces_semana;
@@ -656,6 +729,10 @@ async function ejecutarHerramienta(nombre: string, input: any, userId: string) {
       return error ? { error: error.message } : { ok: true };
     }
     case "crear_evento": {
+      if (input.confirmado !== true) {
+        const dup = await buscarPosibleDuplicado("eventos", "nombre", input.nombre, userId);
+        if (dup) return { posible_duplicado: true, existente: dup, mensaje_para_usuario: `Ya tienes un evento parecido: "${dup.nombre}". ¿Creo uno nuevo de todas formas o te refieres a ese?` };
+      }
       const row = {
         id: uid(), user_id: userId, nombre: input.nombre, fecha: input.fecha || null,
         lugar: input.lugar || null, horario: input.horario || null,
@@ -666,6 +743,10 @@ async function ejecutarHerramienta(nombre: string, input: any, userId: string) {
       return error ? { error: error.message } : { ok: true, id: row.id };
     }
     case "crear_patrimonio": {
+      if (input.confirmado !== true) {
+        const dup = await buscarPosibleDuplicado("patrimonio", "nombre", input.nombre, userId);
+        if (dup) return { posible_duplicado: true, existente: dup, mensaje_para_usuario: `Ya tienes un bien registrado parecido: "${dup.nombre}". ¿Lo creo de todas formas o te refieres a ese?` };
+      }
       const row = {
         id: uid(), user_id: userId, nombre: input.nombre, categoria: input.categoria || "Otro",
         fecha_adquisicion: input.fecha_adquisicion || null, valor_adquisicion: input.valor_adquisicion ?? 0,
@@ -675,6 +756,10 @@ async function ejecutarHerramienta(nombre: string, input: any, userId: string) {
       return error ? { error: error.message } : { ok: true, id: row.id };
     }
     case "crear_apartado": {
+      if (input.confirmado !== true) {
+        const dup = await buscarPosibleDuplicado("apartados", "nombre", input.nombre, userId);
+        if (dup) return { posible_duplicado: true, existente: dup, mensaje_para_usuario: `Ya tienes un apartado parecido: "${dup.nombre}". ¿Creo uno nuevo de todas formas o te refieres a ese?` };
+      }
       const row = {
         id: uid(), user_id: userId, nombre: input.nombre, monto_objetivo: input.monto_objetivo ?? null,
         fecha_objetivo: input.fecha_objetivo || null, proyecto_id: input.proyecto_id || null,
@@ -684,6 +769,10 @@ async function ejecutarHerramienta(nombre: string, input: any, userId: string) {
       return error ? { error: error.message } : { ok: true, id: row.id };
     }
     case "crear_meta": {
+      if (input.confirmado !== true) {
+        const dup = await buscarPosibleDuplicado("metas", "descripcion", input.descripcion, userId);
+        if (dup) return { posible_duplicado: true, existente: dup, mensaje_para_usuario: `Ya tienes una meta parecida: "${dup.descripcion}". ¿Creo una nueva de todas formas o te refieres a esa?` };
+      }
       const row = {
         id: uid(), user_id: userId, descripcion: input.descripcion, proyecto_id: input.proyecto_id || null,
         fecha_objetivo: input.fecha_objetivo || null, fecha_revision: input.fecha_revision || null,
@@ -726,9 +815,13 @@ Puedes leer CUALQUIER modulo real del usuario con buscar_datos (proyectos, tarea
 
 SI PUEDES CONSULTAR los datos reales del usuario -- no es cierto que solo puedas crear cosas. Cuando el usuario pregunte por el estado de algo ("por que no veo mi cita", "ya se guardo eso", "que tengo pendiente", "como va mi diario", "cuanto he gastado"), SIEMPRE usa buscar_datos primero para revisar la informacion real antes de responder. Nunca respondas "no tengo herramientas para consultar eso" sin haber intentado buscar_datos primero -- casi siempre si puedes.
 
+La busqueda de buscar_datos ('texto') ignora acentos y mayusculas, y hace match aunque las palabras esten en otro orden al de como fueron guardadas (ej. buscar 'reyes angel' encuentra 'Angel Reyes'). No necesitas pedirle al usuario que repita el nombre exacto con acentos.
+
 Cuando el usuario pida un consejo, un resumen general, o haga una pregunta abierta ("como voy", "dame un consejo", "que deberia priorizar hoy", "como esta mi situacion"), usa obtener_panorama para traer numeros reales (tareas vencidas, balance del mes, deudas, habitos de hoy, ultima medicion de salud, vencimientos proximos) y da un consejo concreto basado en esos datos -- no generalidades ni frases motivacionales vacias. Se honesto: si algo se ve mal (deudas altas, tareas vencidas acumuladas, muchos dias sin registrar habitos), dilo con tacto pero sin suavizarlo de mas.
 
 Si el usuario pide algo ambiguo (por ejemplo, no queda claro a cual proyecto se refiere porque hay varias coincidencias, o no encuentras ninguna), pregunta antes de actuar en vez de adivinar. Para el resto de las acciones -- crear, actualizar montos que no cambian el monto ni cancelan nada, agendar, etc. -- ejecutalas directo sin pedir confirmacion de mas, el usuario ya te lo pidio.
+
+PREVENCION DE DUPLICADOS: crear_nota, crear_idea_proyecto, crear_pendiente, crear_contacto, crear_habito, crear_patrimonio, crear_apartado, crear_meta, crear_evento y crear_medicamento revisan primero si ya existe algo muy parecido antes de crear. Si la herramienta te devuelve { posible_duplicado: true, existente: {...}, mensaje_para_usuario: "..." }, NO la vuelvas a llamar en ese mismo turno: responde solo con ese mensaje de confirmacion (puedes ajustar el tono) y espera la respuesta del usuario en su siguiente mensaje. Si el usuario confirma que quiere crear uno nuevo de todas formas, llama la misma herramienta otra vez con los mismos datos mas confirmado=true. Si dice que se refiere al que ya existe, usa ese registro (buscar_datos si necesitas mas detalle) en vez de crear uno nuevo. Esto NO aplica a registrar movimientos de finanzas, mediciones de salud o citas -- ahi repetir es normal y esperado, no se revisa duplicado.
 
 CONFIRMACION PARA ACCIONES SENSIBLES: eliminar_pendiente, eliminar_movimiento, cancelar_cita, y actualizar_movimiento cuando cambia el monto o cancela, tienen un candado real en el servidor: si las llamas sin confirmado=true, NO se ejecutan y te regresan { requiere_confirmacion: true, mensaje_para_usuario: "..." }. Cuando eso pase, responde en ese mismo turno SOLO con ese mensaje de confirmacion en texto (puedes ajustar el tono pero conserva la pregunta) y NO vuelvas a llamar la herramienta todavia. Espera el siguiente mensaje del usuario: si dice que si / confirma / adelante, entonces llama la misma herramienta otra vez con los mismos datos mas confirmado=true. Si dice que no o cambia de opinion, no la llames y confirma que no se hizo nada.
 
@@ -757,6 +850,11 @@ Deno.serve(async (req) => {
     const modoConversacion = modo === "voz" ? "voz" : "texto";
 
     const mes = new Date().toISOString().slice(0, 7);
+
+    // Antes esto corria en serie (cuota -> insertar mensaje del usuario -> historial), sumando
+    // 3 viajes de red seguidos antes de siquiera llamar a Claude. La cuota si debe ir primero
+    // (si ya no hay, ni vale la pena seguir), pero guardar el mensaje del usuario y leer el
+    // historial no dependen uno del otro -- se lanzan juntos para recortar esa latencia.
     let { data: uso } = await admin.from("asistente_uso").select("id, consultas_usadas, limite_mes").eq("user_id", userId).eq("mes", mes).maybeSingle();
     if (!uso) {
       const nuevo = { id: uid(), user_id: userId, mes, consultas_usadas: 0, limite_mes: 100 };
@@ -770,16 +868,15 @@ Deno.serve(async (req) => {
       }), { headers: headersJson });
     }
 
-    // Memoria de conversacion: recarga los ultimos mensajes de esta cuenta como contexto,
-    // para que el asistente se sienta como un chat continuo y no como turnos sueltos.
-    const { data: historialRows } = await admin.from("asistente_mensajes").select("rol, contenido")
-      .eq("user_id", userId).order("created_at", { ascending: false }).limit(MENSAJES_HISTORIAL);
-    const historial = (historialRows || []).reverse();
-
-    await admin.from("asistente_mensajes").insert({
-      id: uid(), user_id: userId, rol: "usuario", contenido: mensaje,
-      contexto_pantalla: contexto_pantalla || null, modo: modoConversacion,
-    });
+    const [historialResp] = await Promise.all([
+      admin.from("asistente_mensajes").select("rol, contenido")
+        .eq("user_id", userId).order("created_at", { ascending: false }).limit(MENSAJES_HISTORIAL),
+      admin.from("asistente_mensajes").insert({
+        id: uid(), user_id: userId, rol: "usuario", contenido: mensaje,
+        contexto_pantalla: contexto_pantalla || null, modo: modoConversacion,
+      }),
+    ]);
+    const historial = (historialResp.data || []).reverse();
 
     let systemPrompt = SYSTEM_PROMPT;
     const { iso: hoyISO, legible: hoyLegible, hora: horaActual } = fechaHoraActualMexico();
