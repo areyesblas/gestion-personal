@@ -5509,12 +5509,7 @@ function Pendientes({ data, activeOwnerId, onAdd, onEdit, onRemove, onAddComenta
               const tieneHijos = p.hijos && p.hijos.length > 0;
               const avance = tieneHijos ? Math.round(calcAvanceTarea(p)) : null;
               return (
-                <tr
-                  key={p.id}
-                  onClick={() => setModal({ item: paraEditar(p) })}
-                  className="cursor-pointer"
-                  style={p.estatus === "Completada" ? { background: "var(--teal-tint)", color: "var(--teal-text)", "--muted": "#3F8562" } : undefined}
-                >
+                <tr key={p.id}>
                   <td style={{ maxWidth: 220 }}>
                     <span style={{ paddingLeft: nivel * 18 }} className="flex items-start gap-1">
                       {nivel > 0 && <span className="gp-text-muted shrink-0">└</span>}
@@ -5535,17 +5530,27 @@ function Pendientes({ data, activeOwnerId, onAdd, onEdit, onRemove, onAddComenta
                         <span className="gp-mono" style={{ fontSize: 10 }}>{avance}%</span>
                       </div>
                     ) : (
-                      <select className="gp-input" style={{ padding: "2px 6px" }} value={p.estatus} onChange={(e) => onEdit(p.id, { estatus: e.target.value })}>
-                        {ESTATUS_TAREA.map((s) => <option key={s}>{s}</option>)}
-                      </select>
+                      <>
+                        <input
+                          type="checkbox"
+                          className="md:hidden"
+                          style={{ width: 20, height: 20, accentColor: "var(--teal)" }}
+                          checked={p.estatus === "Completada"}
+                          onChange={(e) => onEdit(p.id, { estatus: e.target.checked ? "Completada" : "Pendiente" })}
+                        />
+                        <select className="gp-input hidden md:inline-block" style={{ padding: "2px 6px" }} value={p.estatus} onChange={(e) => onEdit(p.id, { estatus: e.target.value })}>
+                          {ESTATUS_TAREA.map((s) => <option key={s}>{s}</option>)}
+                        </select>
+                      </>
                     )}
                   </td>
                   <td className="gp-mono hidden md:table-cell">{p.precio ? fmtMoney(p.precio) : "—"}</td>
                   <td className="gp-mono gp-text-muted hidden md:table-cell">{p.tiempoEstimado ? `${p.tiempoEstimado}h` : "—"}{p.tiempoReal ? ` / ${p.tiempoReal}h` : ""}</td>
                   <td onClick={(e) => e.stopPropagation()}><div className="flex gap-1">
+                    <IconBtn onClick={() => setModal({ item: paraEditar(p) })}><Eye size={13} /></IconBtn>
                     <IconBtn onClick={() => setModal({ item: { ...empty, proyectoId: p.proyectoId, parentId: p.id } })}><Plus size={13} /></IconBtn>
                     <IconBtn onClick={() => setComentariosDe(p)}><MessageCircle size={13} />{nc > 0 && <span className="gp-mono" style={{ fontSize: 9, marginLeft: 2 }}>{nc}</span>}</IconBtn>
-                    <IconBtn onClick={() => setModal({ item: paraEditar(p) })}><Pencil size={13} /></IconBtn><IconBtn onClick={() => confirmarBorrado(p)}><Trash2 size={13} /></IconBtn>
+                    <IconBtn onClick={() => confirmarBorrado(p)}><Trash2 size={13} /></IconBtn>
                   </div></td>
                 </tr>
               );
