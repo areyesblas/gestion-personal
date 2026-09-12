@@ -2091,7 +2091,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
       const { data: colabs } = await supabase.from("colaboradores").select("*, colaborador_dependientes(contacto_id)").eq("colaborador_user_id", misId).eq("estatus", "Activo");
       setMisColaboraciones((colabs || []).map((c) => ({ propietarioId: c.propietario_id, propietarioEmail: c.propietario_email, modulos: c.modulos, dependientes: (c.colaborador_dependientes || []).map((d) => d.contacto_id) })));
 
-      const { data: pref } = await supabase.from("preferencias").select("tema, alertas_correo_activas, color_personalizado, notif_tipos_desactivados, notif_silencio_activo, notif_silencio_inicio, notif_silencio_fin").eq("user_id", misId).maybeSingle();
+      const { data: pref } = await supabase.from("preferencias").select("tema, alertas_correo_activas, color_personalizado, notif_tipos_desactivados, notif_silencio_activo, notif_silencio_inicio, notif_silencio_fin, notif_anticipacion_citas_min").eq("user_id", misId).maybeSingle();
       const temaGuardado = pref?.tema === "claro" || pref?.tema === "oscuro" ? "actual" : pref?.tema;
       if (temaGuardado && temaGuardado !== tema) setTema(temaGuardado);
       if (pref?.color_personalizado) setColorPersonalizado(pref.color_personalizado);
@@ -2100,6 +2100,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
       if (pref?.notif_silencio_activo) setNotifSilencioActivo(true);
       if (pref?.notif_silencio_inicio) setNotifSilencioInicio(pref.notif_silencio_inicio.slice(0, 5));
       if (pref?.notif_silencio_fin) setNotifSilencioFin(pref.notif_silencio_fin.slice(0, 5));
+      if (pref?.notif_anticipacion_citas_min != null) setNotifAnticipacionCitasMin(pref.notif_anticipacion_citas_min);
 
       let result = await loadAllTables(misId);
       result = await migrateFromOldBlobIfNeeded(result, misId);
@@ -2140,11 +2141,16 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
   const [notifSilencioActivo, setNotifSilencioActivo] = useState(false);
   const [notifSilencioInicio, setNotifSilencioInicio] = useState("22:00");
   const [notifSilencioFin, setNotifSilencioFin] = useState("07:00");
-  const guardarPreferenciasNotif = async ({ tipos, silencioActivo, silencioInicio, silencioFin }) => {
+  // Minutos de anticipación con los que se avisa una cita (push/notificación); el motor de
+  // recordatorios (Edge Function motor-recordatorios) lee este mismo valor por usuario. Default 30.
+  const [notifAnticipacionCitasMin, setNotifAnticipacionCitasMin] = useState(30);
+  const guardarPreferenciasNotif = async ({ tipos, silencioActivo, silencioInicio, silencioFin, anticipacionCitasMin }) => {
     setNotifTiposDesactivados(tipos); setNotifSilencioActivo(silencioActivo); setNotifSilencioInicio(silencioInicio); setNotifSilencioFin(silencioFin);
+    setNotifAnticipacionCitasMin(anticipacionCitasMin);
     await supabase.from("preferencias").upsert({
       user_id: misId, notif_tipos_desactivados: tipos, notif_silencio_activo: silencioActivo,
       notif_silencio_inicio: silencioInicio, notif_silencio_fin: silencioFin,
+      notif_anticipacion_citas_min: anticipacionCitasMin,
     }, { onConflict: "user_id" });
   };
 
@@ -3255,6 +3261,7 @@ function Configuracion({
             silencioActivo={notifSilencioActivo}
             silencioInicio={notifSilencioInicio}
             silencioFin={notifSilencioFin}
+            anticipacionCitasMin={notifAnticipacionCitasMin}
             onSave={async (v) => { await guardarPreferenciasNotif(v); setPrefsAbierto(false); }}
           />
         </Modal>
@@ -3266,11 +3273,12 @@ function Configuracion({
 // Elegir qué categorías de notificación llegan (push y correo) y un horario de silencio en el
 // que no se envían — sin borrar los eventos, que siguen quedando disponibles en el Centro de
 // Notificaciones para revisar cuando el usuario quiera.
-function PreferenciasNotifForm({ tiposDesactivados, silencioActivo, silencioInicio, silencioFin, onSave }) {
+function PreferenciasNotifForm({ tiposDesactivados, silencioActivo, silencioInicio, silencioFin, anticipacionCitasMin, onSave }) {
   const [desactivados, setDesactivados] = useState(tiposDesactivados);
   const [silencio, setSilencio] = useState(silencioActivo);
   const [inicio, setInicio] = useState(silencioInicio);
   const [fin, setFin] = useState(silencioFin);
+  const [anticipacionCitas, setAnticipacionCitas] = useState(anticipacionCitasMin ?? 30);
   const toggle = (cat) => setDesactivados((prev) => (prev.includes(cat) ? prev.filter((c) => c !== cat) : [...prev, cat]));
 
   return (
@@ -3288,6 +3296,20 @@ function PreferenciasNotifForm({ tiposDesactivados, silencioActivo, silencioInic
         })}
       </div>
 
+      <div className="gp-panel p-2.5 mb-4">
+        <Field label="Avisar citas con cuánta anticipación">
+          <div className="flex items-center gap-2">
+            <input
+              type="number" min={5} max={120} step={5} className="gp-input w-24"
+              value={anticipacionCitas}
+              onChange={(e) => setAnticipacionCitas(e.target.value === "" ? "" : Number(e.target.value))}
+            />
+            <span className="text-sm gp-text-muted">minutos antes</span>
+          </div>
+        </Field>
+        <p className="text-xs gp-text-muted mt-1">Aplica a todas tus citas. Entre 5 y 120 minutos. Por defecto: 30.</p>
+      </div>
+
       <label className="gp-panel flex items-center justify-between p-2.5 text-sm cursor-pointer mb-2">
         <span>Horario de silencio</span>
         <input type="checkbox" checked={silencio} onChange={(e) => setSilencio(e.target.checked)} className="w-4 h-4" />
@@ -3300,7 +3322,13 @@ function PreferenciasNotifForm({ tiposDesactivados, silencioActivo, silencioInic
       )}
       <p className="text-xs gp-text-muted mb-3">{silencio ? "No se enviarán avisos entre esas horas; si el rango cruza medianoche, se aplica igual." : "El horario de silencio está desactivado — los avisos llegan a cualquier hora."}</p>
 
-      <button className="gp-btn w-full py-2 text-sm" onClick={() => onSave({ tipos: desactivados, silencioActivo: silencio, silencioInicio: inicio, silencioFin: fin })}>Guardar</button>
+      <button
+        className="gp-btn w-full py-2 text-sm"
+        onClick={() => {
+          const minutos = Math.min(120, Math.max(5, Number(anticipacionCitas) || 30));
+          onSave({ tipos: desactivados, silencioActivo: silencio, silencioInicio: inicio, silencioFin: fin, anticipacionCitasMin: minutos });
+        }}
+      >Guardar</button>
     </div>
   );
 }

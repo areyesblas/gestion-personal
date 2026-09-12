@@ -9,7 +9,6 @@ const VAPID_PRIVATE_KEY = Deno.env.get("VAPID_PRIVATE_KEY") ?? "";
 const VAPID_SUBJECT = Deno.env.get("VAPID_SUBJECT") ?? "mailto:soporte@arkeyone.com";
 const VENTANA_DIAS = 3;
 const TOLERANCIA_MIN = 5; // debe cuadrar con la frecuencia del cron
-const ANTICIPACION_CITA_MIN = 30; // avisar 30 minutos antes de la hora de la cita
 
 const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 if (VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY) webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
@@ -25,7 +24,7 @@ const CATEGORIA_POR_TIPO: Record<string, string> = {
   campana: "Proyectos", asignacion: "Colaboradores", colaboradores: "Colaboradores",
 };
 
-type Prefs = { tiposDesactivados: string[]; silencioActivo: boolean; silencioInicioMin: number; silencioFinMin: number };
+type Prefs = { tiposDesactivados: string[]; silencioActivo: boolean; silencioInicioMin: number; silencioFinMin: number; anticipacionCitasMin: number };
 const cachePrefs = new Map<string, Prefs>();
 function minutosDeHora(h: string | null): number {
   if (!h) return 0;
@@ -36,13 +35,16 @@ async function obtenerPrefs(userId: string): Promise<Prefs> {
   const cacheada = cachePrefs.get(userId);
   if (cacheada) return cacheada;
   const { data } = await admin.from("preferencias")
-    .select("notif_tipos_desactivados, notif_silencio_activo, notif_silencio_inicio, notif_silencio_fin")
+    .select("notif_tipos_desactivados, notif_silencio_activo, notif_silencio_inicio, notif_silencio_fin, notif_anticipacion_citas_min")
     .eq("user_id", userId).maybeSingle();
   const prefs: Prefs = {
     tiposDesactivados: data?.notif_tipos_desactivados || [],
     silencioActivo: !!data?.notif_silencio_activo,
     silencioInicioMin: minutosDeHora(data?.notif_silencio_inicio || "22:00"),
     silencioFinMin: minutosDeHora(data?.notif_silencio_fin || "07:00"),
+    // Minutos de anticipación con los que se avisa una cita, configurable por el usuario
+    // en Configuración > Notificaciones (default 30, ver columna preferencias.notif_anticipacion_citas_min).
+    anticipacionCitasMin: data?.notif_anticipacion_citas_min ?? 30,
   };
   cachePrefs.set(userId, prefs);
   return prefs;
@@ -179,18 +181,22 @@ Deno.serve(async (_req) => {
     }
   }
 
-  // Citas: avisar ANTICIPACION_CITA_MIN minutos antes de la hora exacta de la cita. Dispara cuando
-  // el "punto de aviso" (hora de la cita menos la anticipación) cae dentro de esta pasada del cron:
-  // eso equivale a que la hora de la cita misma caiga entre (ahora + anticipación) y
-  // (ahora + anticipación + tolerancia). fecha_hora es un instante absoluto, no hace falta zona horaria.
+  // Citas: avisar con la anticipación configurada por CADA usuario (preferencias.notif_anticipacion_citas_min,
+  // default 30 min) antes de la hora exacta de la cita. Se trae un horizonte amplio (150 min) para cubrir
+  // cualquier valor de anticipación razonable y luego se filtra por usuario: dispara cuando el "punto de
+  // aviso" (hora de la cita menos SU anticipación) cae dentro de esta pasada del cron. fecha_hora es un
+  // instante absoluto, no hace falta zona horaria.
   {
     const ahoraMs = Date.now();
-    const disparoDesde = new Date(ahoraMs + ANTICIPACION_CITA_MIN * 60000).toISOString();
-    const disparoHasta = new Date(ahoraMs + (ANTICIPACION_CITA_MIN + TOLERANCIA_MIN) * 60000).toISOString();
+    const horizonteMs = ahoraMs + 150 * 60000;
     const { data: citasProximas } = await admin.from("citas").select("*").is("deleted_at", null)
-      .gte("fecha_hora", disparoDesde).lt("fecha_hora", disparoHasta);
+      .gt("fecha_hora", new Date(ahoraMs).toISOString()).lte("fecha_hora", new Date(horizonteMs).toISOString());
 
     for (const cita of citasProximas || []) {
+      const prefsCita = await obtenerPrefs(cita.user_id);
+      const disparoMs = new Date(cita.fecha_hora).getTime() - prefsCita.anticipacionCitasMin * 60000;
+      if (disparoMs < ahoraMs || disparoMs >= ahoraMs + TOLERANCIA_MIN * 60000) continue;
+
       const { data: existente } = await admin.from("recordatorios").select("id").eq("user_id", cita.user_id)
         .eq("tipo", "cita").eq("tabla_origen", "citas").eq("registro_origen_id", cita.id).maybeSingle();
       if (existente) continue;
