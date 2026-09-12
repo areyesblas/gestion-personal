@@ -3202,6 +3202,7 @@ function Configuracion({
   notifTiposDesactivados, notifSilencioActivo, notifSilencioInicio, notifSilencioFin, notifAnticipacionCitasMin, guardarPreferenciasNotif,
 }) {
   const [prefsAbierto, setPrefsAbierto] = useState(false);
+  const [confirmarNotif, setConfirmarNotif] = useState(null); // { tipo: 'correo' | 'push', activar: bool }
   const cantidadActivas = CATEGORIAS_NOTIFICACION.length - notifTiposDesactivados.length;
   return (
     <div className="max-w-xl">
@@ -3215,18 +3216,19 @@ function Configuracion({
 
       <p className="text-xs gp-text-muted uppercase tracking-wide mb-2">Notificaciones</p>
       <div className="space-y-2 mb-5">
-        <FilaConfig icon={Bell} label="Alertas por correo" sublabel={alertasCorreoActivas ? "Activadas" : "Desactivadas"} onClick={() => cambiarAlertasCorreo(!alertasCorreoActivas)} chevron={false}
+        <FilaConfig icon={Bell} label="Alertas por correo" sublabel={alertasCorreoActivas ? "Activadas" : "Desactivadas"}
+          onClick={() => setConfirmarNotif({ tipo: "correo", activar: !alertasCorreoActivas })} chevron={false}
           extra={<span className="text-xs gp-text-gold shrink-0">{alertasCorreoActivas ? "Desactivar" : "Activar"}</span>} />
         {pushEstado !== "sin-soporte" && (
           <FilaConfig icon={Bell} label="Notificaciones push"
             sublabel={pushEstado === "activo" ? "Activadas en este dispositivo" : pushEstado === "denegado" ? "Bloqueadas — revisa los permisos del navegador" : pushEstado === "activando" ? "Activando…" : "Desactivadas en este dispositivo"}
-            onClick={() => (pushEstado === "activo" ? desactivarPush() : activarPush())}
+            onClick={() => { if (pushEstado !== "activando") setConfirmarNotif({ tipo: "push", activar: pushEstado !== "activo" }); }}
             chevron={false}
             extra={<span className="text-xs gp-text-gold shrink-0">{pushEstado === "activo" ? "Desactivar" : pushEstado === "activando" ? "" : "Activar"}</span>}
           />
         )}
         <FilaConfig icon={Sliders} label="Preferencias de notificación"
-          sublabel={`${cantidadActivas} de ${CATEGORIAS_NOTIFICACION.length} categorías activas${notifSilencioActivo ? ` · Silencio ${notifSilencioInicio}–${notifSilencioFin}` : ""}`}
+          sublabel={`${cantidadActivas} de ${CATEGORIAS_NOTIFICACION.length} categorías activas · Citas: ${notifAnticipacionCitasMin} min antes${notifSilencioActivo ? ` · Silencio ${notifSilencioInicio}–${notifSilencioFin}` : ""}`}
           onClick={() => setPrefsAbierto(true)} />
       </div>
 
@@ -3255,6 +3257,39 @@ function Configuracion({
         </>
       )}
 
+      {confirmarNotif && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,.6)" }} onClick={() => setConfirmarNotif(null)}>
+          <div className="gp-panel w-full max-w-sm p-5" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-2 mb-2">
+              <Bell size={16} className="gp-text-gold" />
+              <h3 className="gp-serif text-lg">
+                {confirmarNotif.tipo === "correo"
+                  ? (confirmarNotif.activar ? "¿Activar alertas por correo?" : "¿Desactivar alertas por correo?")
+                  : (confirmarNotif.activar ? "¿Activar notificaciones push?" : "¿Desactivar notificaciones push?")}
+              </h3>
+            </div>
+            <p className="text-sm gp-text-muted mb-5">
+              {confirmarNotif.tipo === "correo"
+                ? (confirmarNotif.activar ? "Recibirás un resumen diario por correo con tus pendientes y avisos." : "Dejarás de recibir el resumen diario por correo. Podrás reactivarlo cuando quieras.")
+                : (confirmarNotif.activar ? "Este dispositivo pedirá permiso y empezará a recibir avisos push." : "Este dispositivo dejará de recibir avisos push. Podrás reactivarlos cuando quieras.")}
+            </p>
+            <div className="flex gap-2">
+              <button onClick={() => setConfirmarNotif(null)} className="gp-btn-ghost flex-1 py-2 text-sm">Cancelar</button>
+              <button
+                onClick={() => {
+                  if (confirmarNotif.tipo === "correo") cambiarAlertasCorreo(confirmarNotif.activar);
+                  else (confirmarNotif.activar ? activarPush() : desactivarPush());
+                  setConfirmarNotif(null);
+                }}
+                className="gp-btn flex-1 py-2 text-sm"
+              >
+                {confirmarNotif.activar ? "Activar" : "Desactivar"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {prefsAbierto && (
         <Modal title="Preferencias de notificación" onClose={() => setPrefsAbierto(false)}>
           <PreferenciasNotifForm
@@ -3263,7 +3298,8 @@ function Configuracion({
             silencioInicio={notifSilencioInicio}
             silencioFin={notifSilencioFin}
             anticipacionCitasMin={notifAnticipacionCitasMin}
-            onSave={async (v) => { await guardarPreferenciasNotif(v); setPrefsAbierto(false); }}
+            onSave={async (v) => { await guardarPreferenciasNotif(v); }}
+            onSaved={() => setPrefsAbierto(false)}
           />
         </Modal>
       )}
@@ -3274,12 +3310,13 @@ function Configuracion({
 // Elegir qué categorías de notificación llegan (push y correo) y un horario de silencio en el
 // que no se envían — sin borrar los eventos, que siguen quedando disponibles en el Centro de
 // Notificaciones para revisar cuando el usuario quiera.
-function PreferenciasNotifForm({ tiposDesactivados, silencioActivo, silencioInicio, silencioFin, anticipacionCitasMin, onSave }) {
+function PreferenciasNotifForm({ tiposDesactivados, silencioActivo, silencioInicio, silencioFin, anticipacionCitasMin, onSave, onSaved }) {
   const [desactivados, setDesactivados] = useState(tiposDesactivados);
   const [silencio, setSilencio] = useState(silencioActivo);
   const [inicio, setInicio] = useState(silencioInicio);
   const [fin, setFin] = useState(silencioFin);
   const [anticipacionCitas, setAnticipacionCitas] = useState(anticipacionCitasMin ?? 30);
+  const [estadoGuardado, setEstadoGuardado] = useState("idle"); // idle | guardando | guardado
   const toggle = (cat) => setDesactivados((prev) => (prev.includes(cat) ? prev.filter((c) => c !== cat) : [...prev, cat]));
 
   return (
@@ -3324,12 +3361,19 @@ function PreferenciasNotifForm({ tiposDesactivados, silencioActivo, silencioInic
       <p className="text-xs gp-text-muted mb-3">{silencio ? "No se enviarán avisos entre esas horas; si el rango cruza medianoche, se aplica igual." : "El horario de silencio está desactivado — los avisos llegan a cualquier hora."}</p>
 
       <button
-        className="gp-btn w-full py-2 text-sm"
-        onClick={() => {
+        className="gp-btn w-full py-2 text-sm disabled:opacity-70"
+        disabled={estadoGuardado === "guardando"}
+        onClick={async () => {
           const minutos = Math.min(120, Math.max(5, Number(anticipacionCitas) || 30));
-          onSave({ tipos: desactivados, silencioActivo: silencio, silencioInicio: inicio, silencioFin: fin, anticipacionCitasMin: minutos });
+          setEstadoGuardado("guardando");
+          await onSave({ tipos: desactivados, silencioActivo: silencio, silencioInicio: inicio, silencioFin: fin, anticipacionCitasMin: minutos });
+          setAnticipacionCitas(minutos);
+          setEstadoGuardado("guardado");
+          setTimeout(() => onSaved?.(), 900);
         }}
-      >Guardar</button>
+      >
+        {estadoGuardado === "guardando" ? "Guardando…" : estadoGuardado === "guardado" ? "Guardado ✓" : "Guardar"}
+      </button>
     </div>
   );
 }
