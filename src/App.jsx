@@ -2807,6 +2807,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
               notifSilencioActivo={notifSilencioActivo}
               notifSilencioInicio={notifSilencioInicio}
               notifSilencioFin={notifSilencioFin}
+              notifAnticipacionCitasMin={notifAnticipacionCitasMin}
               guardarPreferenciasNotif={guardarPreferenciasNotif}
             />
           )}
@@ -3198,7 +3199,7 @@ function Configuracion({
   pushEstado, activarPush, desactivarPush,
   esPropia, irAColaboradores, irAPapelera,
   esAdmin, irAAdmin, miEmail,
-  notifTiposDesactivados, notifSilencioActivo, notifSilencioInicio, notifSilencioFin, guardarPreferenciasNotif,
+  notifTiposDesactivados, notifSilencioActivo, notifSilencioInicio, notifSilencioFin, notifAnticipacionCitasMin, guardarPreferenciasNotif,
 }) {
   const [prefsAbierto, setPrefsAbierto] = useState(false);
   const cantidadActivas = CATEGORIAS_NOTIFICACION.length - notifTiposDesactivados.length;
