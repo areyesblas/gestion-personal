@@ -11247,16 +11247,6 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
                 </button>
                 <ArkeyRobot estado={estado} onClick={sinCreditos ? undefined : () => { desbloquearVoz(); forzarFinTurno(); }} />
               </div>
-              <div className="w-24 h-1.5 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,.12)" }} title="Nivel captado por el micrófono">
-                <div
-                  className="h-full rounded-full"
-                  style={{
-                    width: `${Math.round(nivelMic * 100)}%`,
-                    background: micMuted || sinCreditos ? "#C0392B" : "var(--gold)",
-                    transition: "width 80ms linear",
-                  }}
-                />
-              </div>
               <p className="text-xs gp-text-muted text-center">
                 {sinCreditos && "Arkey está dormido 💤"}
                 {!sinCreditos && estado === "escuchando" && "Escuchando…"}
