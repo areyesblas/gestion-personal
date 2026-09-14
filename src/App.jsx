@@ -1596,32 +1596,34 @@ export default function App() {
   const [mfaEstado, setMfaEstado] = useState(null);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
-      setSession(data.session);
-      // Máximo absoluto de sesión: 8 horas desde que iniciaste sesión, aunque sigas activo.
-      if (data.session && !localStorage.getItem("arkeyone_login_at")) {
-        localStorage.setItem("arkeyone_login_at", String(Date.now()));
-      }
-    });
+    supabase.auth.getSession().then(({ data }) => setSession(data.session));
     const { data: listener } = supabase.auth.onAuthStateChange((event, newSession) => {
       if (event === "PASSWORD_RECOVERY") setRecuperando(true);
-      if (event === "SIGNED_IN") localStorage.setItem("arkeyone_login_at", String(Date.now()));
-      if (event === "SIGNED_OUT") localStorage.removeItem("arkeyone_login_at");
       setSession(newSession);
     });
     return () => listener.subscription.unsubscribe();
   }, []);
 
-  // Máximo absoluto de sesión: revisa cada minuto si ya pasaron 8 horas desde el login, y si es así, cierra sesión.
+  // Máximo absoluto de sesión: 8 horas desde el último login real, aunque sigas activo. Se usa
+  // session.user.last_sign_in_at (dato del propio servidor de Supabase) en vez de guardar la
+  // hora de login en localStorage: ese localStorage solo se llenaba en el evento SIGNED_IN, pero
+  // al reabrir la PWA con una sesión ya persistida Supabase dispara TOKEN_REFRESHED/INITIAL_SESSION
+  // (no SIGNED_IN), así que el valor guardado nunca se actualizaba — se quedaba pegado en la fecha
+  // del primer login de ese dispositivo. Pasadas las primeras 8h, CADA reapertura de la app caía
+  // ya "vencida" y este chequeo (cada minuto) la cerraba a los pocos segundos, como si el login
+  // recién hecho se cerrara solo. Revisa también al montar/cambiar de sesión, no solo cada minuto,
+  // para no dar la falsa impresión de "se cerró después de iniciar sesión" con el intervalo.
   useEffect(() => {
+    if (!session?.user?.last_sign_in_at) return;
     const SESION_MAX_MS = 8 * 60 * 60 * 1000;
+    const inicio = new Date(session.user.last_sign_in_at).getTime();
     const chequear = () => {
-      const inicio = Number(localStorage.getItem("arkeyone_login_at"));
-      if (inicio && Date.now() - inicio > SESION_MAX_MS) supabase.auth.signOut();
+      if (Date.now() - inicio > SESION_MAX_MS) supabase.auth.signOut();
     };
+    chequear();
     const id = setInterval(chequear, 60 * 1000);
     return () => clearInterval(id);
-  }, []);
+  }, [session?.user?.id, session?.user?.last_sign_in_at]);
 
   // Si el usuario tiene verificación en dos pasos activada, hay que pedirle el código antes de dejarlo pasar.
   useEffect(() => {
@@ -2016,7 +2018,6 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
       console.error("Error al cerrar sesión:", err);
     } finally {
       try {
-        localStorage.removeItem("arkeyone_login_at");
         sessionStorage.setItem("arkeyone_skip_splash", "1");
       } catch {}
       window.location.reload();
