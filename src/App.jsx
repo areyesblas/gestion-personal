@@ -10510,6 +10510,7 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
   const abiertoRef = useRef(false);
   const scrollRef = useRef(null); // contenedor de mensajes: se usa para auto-scroll al fondo
   const timerSilencioRef = useRef(null); // temporizador de 700ms que decide cuándo mandar lo que se dijo (ver iniciarEscuchaNativa); debe poder cancelarse desde detenerTodo()
+  const finalBufferRef = useRef(""); // texto final acumulado del turno actual (camino nativo); vive fuera del reconocedor porque cada reinicio (ver r.onend) crea uno nuevo, y debe sobrevivir a esos reinicios
   const recognitionRef = useRef(null);
   const streamRef = useRef(null);
   const audioCtxRef = useRef(null);
@@ -10677,6 +10678,7 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
     rafRef.current = null;
     try { window.speechSynthesis?.cancel(); } catch {}
     if (timerSilencioRef.current) { clearTimeout(timerSilencioRef.current); timerSilencioRef.current = null; } // corta el envío pendiente de lo último que se dijo, si lo había -- si no, se manda solo y reactiva el mic aunque el panel ya esté cerrado
+    finalBufferRef.current = ""; // no dejar texto de un turno a medias colgado para la próxima vez que se abra el panel
     empezoHablarRef.current = null;
     silencioDesdeRef.current = null;
     bargeInDesdeRef.current = null;
@@ -10769,14 +10771,10 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
     r.lang = "es-MX";
     r.continuous = true;
     r.interimResults = true;
-    let finalBuffer = "";
-    // e.resultIndex no es confiable en Android en modo continuo (a veces no avanza, o vuelve a
-    // apuntar a resultados que ya se habían procesado): llevamos nuestro propio marcador de hasta
-    // dónde ya se agregó a finalBuffer para no repetir texto ya finalizado (bug reportado: "Dime
-    // Dime Dime mis Dime mis deudas..."). Se reinicia en cada sesión nueva de reconocimiento
-    // (r.onstart), porque ahí sí vuelve a empezar desde el índice 0 de verdad.
+    // Marcador propio de hasta dónde ya se agregó a finalBufferRef, en vez de confiar a ciegas en
+    // e.resultIndex (no es confiable en Android en modo continuo). Como esta sesión es un objeto
+    // SpeechRecognition recién creado, e.results empieza vacío de verdad y arrancar en 0 es correcto.
     let indiceProcesado = 0;
-    r.onstart = () => { indiceProcesado = 0; };
 
     r.onresult = (e) => {
       if (estadoRef.current !== "escuchando") return;
@@ -10785,7 +10783,7 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
         if (e.results[i].isFinal) { final += (final ? " " : "") + e.results[i][0].transcript; indiceProcesado = i + 1; }
       }
       if (final.trim()) {
-        finalBuffer += (finalBuffer ? " " : "") + final.trim();
+        finalBufferRef.current += (finalBufferRef.current ? " " : "") + final.trim();
         if (timerSilencioRef.current) clearTimeout(timerSilencioRef.current);
         // Pequeña pausa antes de mandar, para no cortar al usuario si sigue hablando. Se guarda
         // en un ref (no en una variable local) para que detenerTodo() -- llamado al cerrar el
@@ -10793,8 +10791,8 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
         // cerrado, y al terminar de responder reactiva el micrófono solo (bug reportado).
         timerSilencioRef.current = setTimeout(() => {
           timerSilencioRef.current = null;
-          const texto = finalBuffer.trim();
-          finalBuffer = "";
+          const texto = finalBufferRef.current.trim();
+          finalBufferRef.current = "";
           if (texto) {
             try { r.stop(); } catch {}
             enviarTurno(texto);
@@ -10818,8 +10816,13 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
       // Si seguimos abiertos y en modo escucha, se reinicia solo (el navegador a veces corta
       // el reconocimiento tras una pausa aunque continuous=true). Si el usuario muteó el mic a
       // propósito (ver alternarMicMuted), no se reinicia hasta que él mismo lo reactive.
+      // IMPORTANTE: se reinicia con un objeto SpeechRecognition NUEVO (iniciarEscuchaNativa), no
+      // llamando r.start() sobre este mismo objeto -- en Android, reusar el mismo objeto a veces
+      // no reinicia de verdad su lista interna de resultados, y el siguiente onresult vuelve a
+      // traer resultados ya finalizados antes, duplicando el texto acumulado (bug reportado: el
+      // texto se repetía y crecía sin parar). Un objeto nuevo garantiza que sí empieza de cero.
       if (abiertoRef.current && estadoRef.current === "escuchando" && !micMutedRef.current) {
-        try { r.start(); } catch {}
+        iniciarEscuchaNativa();
       }
     };
     recognitionRef.current = r;
