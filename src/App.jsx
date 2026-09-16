@@ -10717,16 +10717,33 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
     }
   }
 
-  // Camino de grabación (iOS/Android): pide el permiso de micrófono ANTES del saludo, abriendo
-  // y soltando un stream de inmediato -- así el diálogo del sistema ("arkeyone.com solicita
-  // permiso para usar el micrófono") aparece primero, y el saludo hablado solo arranca una vez
-  // resuelto. Antes se pedía hasta después del saludo (al abrir el stream real de escucha en
-  // iniciarEscuchaIOS), así que el permiso aparecía a mitad/después de que Arkey ya había hablado.
-  async function pedirPermisoMicSiHaceFalta() {
+  // Camino de grabación (iOS/Android): abre el stream de micrófono + analyser de VAD si todavía
+  // no hay uno activo, y lo deja así -- a propósito NO se cierra entre turnos ni mientras Arkey
+  // habla (ver hablar()), para poder detectar por energía que el usuario empezó a hablar encima
+  // de él y cortarlo sin tener que tocar el robot (loopVAD, rama "hablando").
+  // Riesgo conocido y aceptado (decisión de Angel): en iOS, Safari a veces enruta la salida de
+  // audio al auricular en vez de la bocina mientras el micrófono sigue abierto, así que la voz
+  // de Arkey puede sonar muy bajito durante "hablando". Antes se evitaba esto cerrando el
+  // micrófono antes de cada respuesta hablada (ver pausarMicIOS en el historial) a costa de no
+  // tener interrupción por voz en iOS -- se decidió preferir la interrupción por voz.
+  // Llamarlo al abrir el panel (antes del saludo) también sirve para que el diálogo de permiso
+  // del sistema aparezca ANTES del saludo hablado, en vez de después.
+  async function asegurarMicAbierto() {
     if (usaSTTNativo) return true; // el camino nativo pide su propio permiso al arrancar SpeechRecognition (ver iniciarEscuchaNativa)
+    if (streamRef.current) return true; // ya está abierto de un turno anterior
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      stream.getTracks().forEach((t) => t.stop()); // solo queríamos resolver el permiso, no quedarnos grabando todavía
+      streamRef.current = stream;
+      stream.getAudioTracks().forEach((t) => { t.enabled = !micMutedRef.current; });
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      const ctx = new AudioCtx();
+      audioCtxRef.current = ctx;
+      const source = ctx.createMediaStreamSource(stream);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 2048;
+      source.connect(analyser);
+      analyserRef.current = analyser;
+      nivelAnalyserRef.current = analyser; // mismo analyser sirve para el VAD y para el medidor visual
       return true;
     } catch {
       cambiarEstado("permiso");
@@ -10752,8 +10769,9 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
     // Pedirlo dos veces por separado (un stream propio aquí + el interno de SpeechRecognition)
     // hacía que algunos Android se quedaran con dos sesiones de micrófono compitiendo entre sí
     // y el reconocimiento nunca llegaba a escuchar de verdad.
-    const permisoOk = await pedirPermisoMicSiHaceFalta();
+    const permisoOk = await asegurarMicAbierto();
     if (!permisoOk) return; // ya se mostró el error de permiso -- no tiene caso hablar el saludo si no vamos a poder escuchar la respuesta
+    if (!usaSTTNativo) loopVAD(); // arranca ya, para poder detectar una interrupción por voz desde el saludo mismo
     await hablar(SALUDO_INICIAL); // el saludo no gasta cuota (no llama a asistente-ia); al terminar de decirlo, pasa solo a escuchar
   };
 
@@ -10876,25 +10894,10 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
 
   async function iniciarEscuchaIOS() {
     if (sinCreditosRef.current) return; // sin consultas disponibles este mes: Arkey se queda dormido, no escucha
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      streamRef.current = stream;
-      stream.getAudioTracks().forEach((t) => { t.enabled = !micMutedRef.current; });
-      const AudioCtx = window.AudioContext || window.webkitAudioContext;
-      const ctx = new AudioCtx();
-      audioCtxRef.current = ctx;
-      const source = ctx.createMediaStreamSource(stream);
-      const analyser = ctx.createAnalyser();
-      analyser.fftSize = 2048;
-      source.connect(analyser);
-      analyserRef.current = analyser;
-      nivelAnalyserRef.current = analyser; // mismo analyser sirve para el VAD y para el medidor visual
-      iniciarSegmentoGrabacion();
-      loopVAD();
-    } catch {
-      cambiarEstado("permiso");
-      setErrorMsg("ARKEYONE necesita permiso de micrófono para el Modo Conversación.");
-    }
+    const ok = await asegurarMicAbierto(); // normalmente ya está abierto desde el turno anterior -- ver su comentario
+    if (!ok) return; // ya se mostró el error de permiso
+    iniciarSegmentoGrabacion();
+    if (!rafRef.current) loopVAD(); // por si el loop se hubiera detenido por alguna razón -- normalmente ya está corriendo desde abrir()
   }
 
   function iniciarSegmentoGrabacion() {
@@ -10935,8 +10938,11 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
           else if (ahora - bargeInDesdeRef.current > 250) {
             bargeInDesdeRef.current = null;
             try { window.speechSynthesis.cancel(); } catch {}
-            cambiarEstado("escuchando");
-            iniciarSegmentoGrabacion();
+            // Mismo mecanismo que tocar el robot (forzarFinTurno): usa el alTerminar de hablar()
+            // en vez de cambiar el estado a mano, para no pelearse con el respaldo por
+            // temporizador de hablar() (evita arrancar dos veces la escucha si cancel() también
+            // dispara el onerror de la utterance).
+            alTerminarHablaRef.current?.();
           }
         } else {
           bargeInDesdeRef.current = null;
@@ -11001,24 +11007,6 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
     if (!abiertoRef.current) return;
     cambiarEstado("escuchando");
     iniciarSegmentoGrabacion();
-  }
-
-  // En iOS, mientras el microfono sigue abierto (lo necesitamos para el barge-in), Safari a
-  // veces enruta la salida de audio al auricular en vez de la bocina -- se oye casi nada salvo
-  // que el telefono este pegado al oido. Por eso, justo antes de que ARKEYONE hable, soltamos
-  // el microfono por completo (para forzar la ruta normal de audio) y lo volvemos a abrir al
-  // terminar. Efecto secundario aceptado: en iOS no hay barge-in mientras la IA esta hablando
-  // (en Chrome/Android si sigue habiendo, porque ese camino no depende de audio del dispositivo).
-  async function pausarMicIOS() {
-    try { mediaRecorderRef.current?.stop(); } catch {}
-    mediaRecorderRef.current = null;
-    if (rafRef.current) cancelAnimationFrame(rafRef.current);
-    rafRef.current = null;
-    try { streamRef.current?.getTracks().forEach((t) => t.stop()); } catch {}
-    streamRef.current = null;
-    try { await audioCtxRef.current?.close(); } catch {} // esperamos de verdad a que cierre, si no iOS puede tardar en soltar la sesion de audio de grabacion
-    audioCtxRef.current = null;
-    analyserRef.current = null;
   }
 
   async function reanudarMicTrasHablarIOS() {
@@ -11225,7 +11213,15 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
   async function hablar(texto) {
     if (!texto || !("speechSynthesis" in window)) { volverAEscuchar(); return; }
     setErrorMsg("");
-    if (!usaSTTNativo) await pausarMicIOS(); // suelta el mic en iOS para que el audio salga por la bocina, y espera a que cierre de verdad
+    if (!usaSTTNativo) {
+      // El micrófono se queda abierto a propósito durante "hablando" (ver asegurarMicAbierto):
+      // solo se detiene la grabación del turno anterior si seguía activa por alguna razón (lo
+      // normal es que finalizarSegmentoYEnviar ya la haya parado antes de llegar aquí).
+      try { mediaRecorderRef.current?.stop(); } catch {}
+      mediaRecorderRef.current = null;
+      const ok = await asegurarMicAbierto();
+      if (!ok) { volverAEscuchar(); return; }
+    }
     cambiarEstado("hablando");
     try {
       window.speechSynthesis.cancel();
