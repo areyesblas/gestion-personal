@@ -1179,6 +1179,7 @@ function LoginScreen({ tema, toggleTema }) {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (loading) return; // evita doble envío (doble clic / Enter) que dispara rate limit del backend
     setError("");
     setAvisoRegistro("");
     setLoading(true);
@@ -1212,7 +1213,14 @@ function LoginScreen({ tema, toggleTema }) {
     }
     const { data, error } = await supabase.auth.signUp({ email, password });
     setLoading(false);
-    if (error) { setError(error.message === "User already registered" ? "Ese correo ya tiene una cuenta." : "No se pudo crear la cuenta."); return; }
+    if (error) {
+      if (error.status === 429 || error.code === "over_email_send_rate_limit" || error.code === "over_request_rate_limit") {
+        setError("Ya se envió un correo de confirmación hace unos segundos. Espera un momento antes de volver a intentar (revisa también spam).");
+      } else {
+        setError(error.message === "User already registered" ? "Ese correo ya tiene una cuenta." : "No se pudo crear la cuenta.");
+      }
+      return;
+    }
     if (data.session) return; // quedó logueado directo (confirmación de correo desactivada)
     if (data.user && data.user.identities && data.user.identities.length === 0) {
       // Supabase no manda error explícito para no revelar qué correos existen — esta es la señal real.
