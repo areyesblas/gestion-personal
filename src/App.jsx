@@ -10512,6 +10512,7 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
   const timerSilencioRef = useRef(null); // temporizador de 700ms que decide cuándo mandar lo que se dijo (ver iniciarEscuchaNativa); debe poder cancelarse desde detenerTodo()
   const finalBufferRef = useRef(""); // texto final acumulado del turno actual (camino nativo); vive fuera del reconocedor porque cada reinicio (ver r.onend) crea uno nuevo, y debe sobrevivir a esos reinicios
   const recognitionRef = useRef(null);
+  const alTerminarHablaRef = useRef(null); // función para forzar el fin del habla actual sin esperar el evento del navegador (ver forzarFinTurno: en Android, speechSynthesis.cancel() a veces no dispara ni onend ni onerror)
   const streamRef = useRef(null);
   const audioCtxRef = useRef(null);
   const analyserRef = useRef(null);
@@ -10677,6 +10678,7 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
     rafRef.current = null;
     try { window.speechSynthesis?.cancel(); } catch {}
+    alTerminarHablaRef.current = null; // no dejar una función de un habla ya cerrada colgada para la próxima vez que se abra el panel
     if (timerSilencioRef.current) { clearTimeout(timerSilencioRef.current); timerSilencioRef.current = null; } // corta el envío pendiente de lo último que se dijo, si lo había -- si no, se manda solo y reactiva el mic aunque el panel ya esté cerrado
     finalBufferRef.current = ""; // no dejar texto de un turno a medias colgado para la próxima vez que se abra el panel
     empezoHablarRef.current = null;
@@ -11053,7 +11055,11 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
   // habla (ver hablar()), así que esta es la única forma de cortarlo a medio turno.
   function forzarFinTurno() {
     if (estadoRef.current === "hablando") {
-      try { window.speechSynthesis.cancel(); } catch {} // dispara onend/onerror de la utterance -> alTerminar -> pasa a escuchar
+      try { window.speechSynthesis.cancel(); } catch {}
+      // No basta con esperar a que cancel() dispare onend/onerror de la utterance: en Android a
+      // veces no dispara ninguno de los dos (bug reportado: tocar el robot no interrumpía nada).
+      // Se fuerza el mismo cierre directamente, sin esperar al navegador.
+      alTerminarHablaRef.current?.();
       return;
     }
     if (estadoRef.current !== "escuchando") return;
@@ -11203,11 +11209,13 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
       if (vozEs) { u.voice = vozEs; u.lang = vozEs.lang; } else { u.lang = "es-MX"; }
       let yaTermino = false;
       const alTerminar = () => {
-        if (yaTermino) return; // evita doble ejecución si el evento real llega después del respaldo
+        if (yaTermino) return; // evita doble ejecución si el evento real llega después del respaldo (o de un toque manual, ver forzarFinTurno)
         yaTermino = true;
         clearTimeout(watchdog);
+        alTerminarHablaRef.current = null;
         if (usaSTTNativo) volverAEscuchar(); else reanudarMicTrasHablarIOS();
       };
+      alTerminarHablaRef.current = alTerminar; // permite a forzarFinTurno cortar YA, sin depender de que el navegador dispare onend/onerror
       u.onend = alTerminar;
       u.onerror = (e) => { setErrorMsg(`TTS: ${e.error || "error desconocido"}`); alTerminar(); };
       // Respaldo: en Chrome/Android hay un bug conocido donde speechSynthesis a veces nunca
