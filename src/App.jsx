@@ -11358,7 +11358,16 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
                 >
                   {micMuted || sinCreditos ? <MicOff size={18} /> : <Mic size={18} />}
                 </button>
-                <ArkeyRobot estado={estado} onClick={sinCreditos ? undefined : () => { desbloquearVoz(); forzarFinTurno(); }} />
+                <ArkeyRobot estado={estado} onClick={sinCreditos ? undefined : () => {
+                  // desbloquearVoz() solo hace falta la primerísima vez que se usa la voz en la
+                  // sesión (ver su propio comentario) -- si Arkey ya está "hablando", la voz ya
+                  // está desbloqueada de sobra. Llamar speak() de esa utterance silenciosa justo
+                  // antes de cancel() en este mismo toque podía interferir con que cancel() de
+                  // verdad silenciara el audio en curso en iOS (posible causa de que tocar para
+                  // interrumpir no cortara la voz ahí). Se salta en ese caso.
+                  if (estado !== "hablando") desbloquearVoz();
+                  forzarFinTurno();
+                }} />
               </div>
               <p className="text-xs gp-text-muted text-center">
                 {sinCreditos && "Arkey está dormido 💤"}
