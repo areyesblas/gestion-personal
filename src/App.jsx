@@ -10433,10 +10433,10 @@ function ArkeyRobot({ estado, onClick }) {
     estado === "procesando" ? "#f59e0b" :
     estado === "dormido" ? "#4b5563" :
     "#6b7280";
-  // "hablando" también es clickeable: es como se interrumpe a Arkey a media respuesta (ver
-  // forzarFinTurno). Antes solo "escuchando" activaba el onClick, así que tocarlo mientras
-  // hablaba no hacía nada -- ni siquiera llegaba a ejecutarse la lógica de interrupción.
-  const clickable = estado === "escuchando" || estado === "hablando";
+  // A propósito, "hablando" NO es clickeable: la interrupción a media respuesta es solo por voz
+  // (hablarle encima, ver loopVAD), no por toque -- decisión de Angel para que un toque accidental
+  // sobre el robot mientras Arkey habla no lo corte quien no quería interrumpirlo.
+  const clickable = estado === "escuchando";
   const dormido = estado === "dormido";
 
   return (
@@ -11076,20 +11076,7 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
   // mientras Arkey está "hablando" lo interrumpe -- el micrófono ya no escucha solo mientras
   // habla (ver hablar()), así que esta es la única forma de cortarlo a medio turno.
   function forzarFinTurno() {
-    if (estadoRef.current === "hablando") {
-      try { window.speechSynthesis.cancel(); } catch {}
-      // Respaldo: en algunos navegadores un solo cancel() no siempre silencia de inmediato el
-      // audio que ya se estaba reproduciendo (queda "hablando" un instante más aunque el estado
-      // de la app ya cambió). Un segundo cancel() casi inmediato, si todavía sigue "speaking",
-      // no hace daño y ayuda en esos casos.
-      setTimeout(() => { try { if (window.speechSynthesis.speaking) window.speechSynthesis.cancel(); } catch {} }, 50);
-      // No basta con esperar a que cancel() dispare onend/onerror de la utterance: a veces no
-      // dispara ninguno de los dos (bug reportado: tocar el robot no interrumpía nada). Se fuerza
-      // el mismo cierre directamente, sin esperar al navegador.
-      alTerminarHablaRef.current?.();
-      return;
-    }
-    if (estadoRef.current !== "escuchando") return;
+    if (estadoRef.current !== "escuchando") return; // interrumpir a Arkey hablando es solo por voz (loopVAD), no por toque -- ver ArkeyRobot
     if (usaSTTNativo) {
       try { recognitionRef.current?.stop(); } catch {} // dispara el ultimo resultado final pendiente y sigue el flujo normal
     } else {
@@ -11378,16 +11365,7 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
                 >
                   {micMuted || sinCreditos ? <MicOff size={18} /> : <Mic size={18} />}
                 </button>
-                <ArkeyRobot estado={estado} onClick={sinCreditos ? undefined : () => {
-                  // desbloquearVoz() solo hace falta la primerísima vez que se usa la voz en la
-                  // sesión (ver su propio comentario) -- si Arkey ya está "hablando", la voz ya
-                  // está desbloqueada de sobra. Llamar speak() de esa utterance silenciosa justo
-                  // antes de cancel() en este mismo toque podía interferir con que cancel() de
-                  // verdad silenciara el audio en curso en iOS (posible causa de que tocar para
-                  // interrumpir no cortara la voz ahí). Se salta en ese caso.
-                  if (estado !== "hablando") desbloquearVoz();
-                  forzarFinTurno();
-                }} />
+                <ArkeyRobot estado={estado} onClick={sinCreditos ? undefined : () => { desbloquearVoz(); forzarFinTurno(); }} />
               </div>
               <p className="text-xs gp-text-muted text-center">
                 {sinCreditos && "Arkey está dormido 💤"}
