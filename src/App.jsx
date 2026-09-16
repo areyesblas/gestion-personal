@@ -10772,13 +10772,6 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
     let finalBuffer = "";
 
     r.onresult = (e) => {
-      // Si la IA está hablando y detectamos cualquier voz, es una interrupción (barge-in):
-      // corta la lectura y pasa a escuchar de verdad lo que está diciendo el usuario.
-      if (estadoRef.current === "hablando") {
-        try { window.speechSynthesis.cancel(); } catch {}
-        cambiarEstado("escuchando");
-        return;
-      }
       if (estadoRef.current !== "escuchando") return;
       let final = "";
       for (let i = e.resultIndex; i < e.results.length; i++) {
@@ -11045,8 +11038,14 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
 
   // Respaldo manual: si la deteccion automatica de silencio no funciona bien en el microfono
   // de este dispositivo (cada telefono es distinto), tocar el circulo mientras esta "escuchando"
-  // corta el turno ahi mismo y lo manda, en vez de quedarse grabando para siempre.
+  // corta el turno ahi mismo y lo manda, en vez de quedarse grabando para siempre. Tocarlo
+  // mientras Arkey está "hablando" lo interrumpe -- el micrófono ya no escucha solo mientras
+  // habla (ver hablar()), así que esta es la única forma de cortarlo a medio turno.
   function forzarFinTurno() {
+    if (estadoRef.current === "hablando") {
+      try { window.speechSynthesis.cancel(); } catch {} // dispara onend/onerror de la utterance -> alTerminar -> pasa a escuchar
+      return;
+    }
     if (estadoRef.current !== "escuchando") return;
     if (usaSTTNativo) {
       try { recognitionRef.current?.stop(); } catch {} // dispara el ultimo resultado final pendiente y sigue el flujo normal
@@ -11207,13 +11206,12 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
       // fuerza el mismo cierre de todos modos.
       const watchdog = setTimeout(alTerminar, Math.max(4000, texto.length * 90));
       window.speechSynthesis.speak(u);
-      // En el camino nativo (Chrome/Android/Mac), seguimos "escuchando" con el mismo reconocedor
-      // mientras la IA habla, únicamente para detectar una interrupción (barge-in) -- ver
-      // r.onresult arriba. En iOS lo evitamos: reactivar el mic mientras se habla silencia el audio.
-      // Antes evitábamos esto en iOS pensando que reactivar el mic mientras habla causaba el
-      // silencio -- resultó que la causa real era el desbloqueo de voz (ver desbloquearVoz).
-      // Ahora lo probamos también en iOS: si el audio se sigue escuchando bien, se queda así.
-      if (usaSTTNativo) iniciarEscuchaNativa();
+      // Antes se dejaba el micrófono escuchando durante "hablando" para detectar una interrupción
+      // (barge-in). En Android, sin audífonos, el propio audio de Arkey saliendo por la bocina se
+      // vuelve a captar por el micrófono: la app se "auto-interrumpía", transcribía su propia voz
+      // como si fuera el usuario, respondía a eso, se auto-interrumpía otra vez, y así sin parar
+      // (el bug reportado de "escucha todo y se vuelve loco"). Por eso ahora el micrófono se queda
+      // apagado mientras Arkey habla, y solo arranca a escuchar de verdad cuando termina (alTerminar).
     } catch { if (usaSTTNativo) volverAEscuchar(); else reanudarMicTrasHablarIOS(); }
   }
 
