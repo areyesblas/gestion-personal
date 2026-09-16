@@ -10770,12 +10770,19 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
     r.continuous = true;
     r.interimResults = true;
     let finalBuffer = "";
+    // e.resultIndex no es confiable en Android en modo continuo (a veces no avanza, o vuelve a
+    // apuntar a resultados que ya se habían procesado): llevamos nuestro propio marcador de hasta
+    // dónde ya se agregó a finalBuffer para no repetir texto ya finalizado (bug reportado: "Dime
+    // Dime Dime mis Dime mis deudas..."). Se reinicia en cada sesión nueva de reconocimiento
+    // (r.onstart), porque ahí sí vuelve a empezar desde el índice 0 de verdad.
+    let indiceProcesado = 0;
+    r.onstart = () => { indiceProcesado = 0; };
 
     r.onresult = (e) => {
       if (estadoRef.current !== "escuchando") return;
       let final = "";
-      for (let i = e.resultIndex; i < e.results.length; i++) {
-        if (e.results[i].isFinal) final += e.results[i][0].transcript;
+      for (let i = Math.max(e.resultIndex, indiceProcesado); i < e.results.length; i++) {
+        if (e.results[i].isFinal) { final += (final ? " " : "") + e.results[i][0].transcript; indiceProcesado = i + 1; }
       }
       if (final.trim()) {
         finalBuffer += (finalBuffer ? " " : "") + final.trim();
