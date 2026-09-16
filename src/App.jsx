@@ -10786,6 +10786,16 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
   function iniciarEscuchaNativa() {
     if (micMutedRef.current) return; // el micrófono está muteado a propósito: no arrancamos hasta que se reactive
     if (sinCreditosRef.current) return; // sin consultas disponibles este mes: Arkey se queda dormido, no escucha
+    // Si ya había un reconocedor corriendo (ej. el que se deja escuchando durante "hablando" para
+    // detectar barge-in) hay que cerrarlo primero: el sistema de reconocimiento de voz de Android
+    // solo permite una sesión activa a la vez, y si se arranca una nueva sin cerrar la anterior,
+    // ninguna de las dos termina escuchando bien (y de paso suenan los tonos de inicio/fin de
+    // Android en conflicto uno con otro -- el "ruido" reportado en Android).
+    const anterior = recognitionRef.current;
+    if (anterior) {
+      try { anterior.onresult = null; anterior.onerror = null; anterior.onend = null; anterior.onstart = null; } catch {}
+      try { anterior.abort(); } catch {}
+    }
     const r = new SpeechRecognitionCtor();
     r.lang = "es-MX";
     r.continuous = true;
