@@ -10433,7 +10433,10 @@ function ArkeyRobot({ estado, onClick }) {
     estado === "procesando" ? "#f59e0b" :
     estado === "dormido" ? "#4b5563" :
     "#6b7280";
-  const clickable = estado === "escuchando";
+  // "hablando" también es clickeable: es como se interrumpe a Arkey a media respuesta (ver
+  // forzarFinTurno). Antes solo "escuchando" activaba el onClick, así que tocarlo mientras
+  // hablaba no hacía nada -- ni siquiera llegaba a ejecutarse la lógica de interrupción.
+  const clickable = estado === "escuchando" || estado === "hablando";
   const dormido = estado === "dormido";
 
   return (
