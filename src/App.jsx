@@ -10717,6 +10717,24 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
     }
   }
 
+  // Camino de grabación (iOS/Android): pide el permiso de micrófono ANTES del saludo, abriendo
+  // y soltando un stream de inmediato -- así el diálogo del sistema ("arkeyone.com solicita
+  // permiso para usar el micrófono") aparece primero, y el saludo hablado solo arranca una vez
+  // resuelto. Antes se pedía hasta después del saludo (al abrir el stream real de escucha en
+  // iniciarEscuchaIOS), así que el permiso aparecía a mitad/después de que Arkey ya había hablado.
+  async function pedirPermisoMicSiHaceFalta() {
+    if (usaSTTNativo) return true; // el camino nativo pide su propio permiso al arrancar SpeechRecognition (ver iniciarEscuchaNativa)
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream.getTracks().forEach((t) => t.stop()); // solo queríamos resolver el permiso, no quedarnos grabando todavía
+      return true;
+    } catch {
+      cambiarEstado("permiso");
+      setErrorMsg("ARKEYONE necesita permiso de micrófono para el Modo Conversación.");
+      return false;
+    }
+  }
+
   const abrir = async () => {
     setTranscripciones([{ rol: "asistente", texto: SALUDO_INICIAL }]);
     setErrorMsg("");
@@ -10733,8 +10751,9 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
     // pide su propio permiso al arrancar (ver iniciarEscuchaNativa, llamado dentro de hablar()).
     // Pedirlo dos veces por separado (un stream propio aquí + el interno de SpeechRecognition)
     // hacía que algunos Android se quedaran con dos sesiones de micrófono compitiendo entre sí
-    // y el reconocimiento nunca llegaba a escuchar de verdad. En el camino iOS de respaldo, el
-    // medidor se conecta solo al abrir su propio stream (ver iniciarEscuchaIOS).
+    // y el reconocimiento nunca llegaba a escuchar de verdad.
+    const permisoOk = await pedirPermisoMicSiHaceFalta();
+    if (!permisoOk) return; // ya se mostró el error de permiso -- no tiene caso hablar el saludo si no vamos a poder escuchar la respuesta
     await hablar(SALUDO_INICIAL); // el saludo no gasta cuota (no llama a asistente-ia); al terminar de decirlo, pasa solo a escuchar
   };
 
@@ -11071,9 +11090,14 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
   function forzarFinTurno() {
     if (estadoRef.current === "hablando") {
       try { window.speechSynthesis.cancel(); } catch {}
-      // No basta con esperar a que cancel() dispare onend/onerror de la utterance: en Android a
-      // veces no dispara ninguno de los dos (bug reportado: tocar el robot no interrumpía nada).
-      // Se fuerza el mismo cierre directamente, sin esperar al navegador.
+      // Respaldo: en algunos navegadores un solo cancel() no siempre silencia de inmediato el
+      // audio que ya se estaba reproduciendo (queda "hablando" un instante más aunque el estado
+      // de la app ya cambió). Un segundo cancel() casi inmediato, si todavía sigue "speaking",
+      // no hace daño y ayuda en esos casos.
+      setTimeout(() => { try { if (window.speechSynthesis.speaking) window.speechSynthesis.cancel(); } catch {} }, 50);
+      // No basta con esperar a que cancel() dispare onend/onerror de la utterance: a veces no
+      // dispara ninguno de los dos (bug reportado: tocar el robot no interrumpía nada). Se fuerza
+      // el mismo cierre directamente, sin esperar al navegador.
       alTerminarHablaRef.current?.();
       return;
     }
