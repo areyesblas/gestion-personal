@@ -10569,7 +10569,6 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
       } else if (abiertoRef.current && (estadoRef.current === "escuchando" || estadoRef.current === "hablando")) {
         motorAndroid.iniciarEscucha();
       }
-      motorAndroid.mutearMedidor(nuevo);
     } else {
       // Camino iOS de respaldo (MediaRecorder + VAD): mutear el track real ya basta -- seguirá
       // "grabando" pero solo silencio, así que el VAD nunca dispara un envío mientras esté muteado.
@@ -10700,12 +10699,12 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
       return;
     }
     iniciarMedidorVisual();
-    // IMPORTANTE: se espera (await) a que termine de pedir permiso de micrófono para el medidor
-    // ANTES de arrancar el reconocimiento nativo. Si se piden casi al mismo tiempo (como estaba
-    // antes, sin await), iOS muestra el diálogo de permiso DOS veces -- una por cada camino que
-    // pide el micrófono por su cuenta. Pidiéndolo una sola vez y esperando la respuesta, el
-    // reconocimiento que arranca después ya encuentra el permiso concedido y no vuelve a preguntar.
-    if (usaSTTNativo) await motorAndroid.iniciarMedidorNivel(); // en el camino iOS de respaldo, el medidor se conecta solo al abrir su propio stream (ver iniciarEscuchaIOS)
+    // En el camino nativo (Chrome/Android) no se pide micrófono aquí -- SpeechRecognition pide
+    // su propio permiso al arrancar (ver motorAndroid.iniciarEscucha, llamado dentro de hablar()).
+    // Pedirlo dos veces por separado (un stream propio aquí + el interno de SpeechRecognition)
+    // hacía que algunos Android se quedaran con dos sesiones de micrófono compitiendo entre sí
+    // y el reconocimiento nunca llegaba a escuchar de verdad. En el camino iOS de respaldo, el
+    // medidor se conecta solo al abrir su propio stream (ver iniciarEscuchaIOS).
     await hablar(SALUDO_INICIAL); // el saludo no gasta cuota (no llama a asistente-ia); al terminar de decirlo, pasa solo a escuchar
   };
 
@@ -11043,7 +11042,7 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
   // camino de iOS (MediaRecorder + VAD + Whisper, más abajo en este mismo archivo, intacto).
   const motorAndroid = useMotorVozNativo({
     SpeechRecognitionCtor, micMutedRef, sinCreditosRef, estadoRef, abiertoRef,
-    cambiarEstado, setErrorMsg, enviarTurno, nivelAnalyserRef,
+    cambiarEstado, setErrorMsg, enviarTurno,
   });
 
   useEffect(() => {
@@ -11121,18 +11120,28 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
         || candidatasEs.find((v) => /enhanced|premium|neural/i.test(v.name || ""))
         || candidatasEs[0];
       if (vozEs) { u.voice = vozEs; u.lang = vozEs.lang; } else { u.lang = "es-MX"; }
-      const alTerminar = () => { if (usaSTTNativo) volverAEscuchar(); else reanudarMicTrasHablarIOS(); };
+      let yaTermino = false;
+      const alTerminar = () => {
+        if (yaTermino) return; // evita doble ejecución si el evento real llega después del respaldo
+        yaTermino = true;
+        if (watchdog) clearTimeout(watchdog);
+        if (usaSTTNativo) volverAEscuchar(); else reanudarMicTrasHablarIOS();
+      };
       u.onend = alTerminar;
       u.onerror = (e) => { setErrorMsg(`TTS: ${e.error || "error desconocido"}`); alTerminar(); };
+      // Respaldo solo para el camino nativo (Chrome/Android): hay un bug conocido donde
+      // speechSynthesis a veces nunca dispara "onend" ahí, dejando a Arkey "hablando" para
+      // siempre y sin volver a escuchar. En iOS no se ha visto ese problema, así que no se activa
+      // para no tocar su comportamiento -- si no llega ningún evento real en un tiempo generoso
+      // según la longitud del texto, se fuerza el mismo cierre de todos modos.
+      const watchdog = usaSTTNativo ? setTimeout(alTerminar, Math.max(4000, texto.length * 90)) : null;
       window.speechSynthesis.speak(u);
-      // En el camino nativo (Chrome/Android/Mac), seguimos "escuchando" con el mismo reconocedor
-      // mientras la IA habla, únicamente para detectar una interrupción (barge-in) -- ver
-      // r.onresult en voiceModeAndroid.js. En iOS lo evitamos: reactivar el mic mientras se habla
-      // silencia el audio. Antes evitábamos esto en iOS pensando que reactivar el mic mientras
-      // habla causaba el silencio -- resultó que la causa real era el desbloqueo de voz (ver
-      // desbloquearVoz). Ahora lo probamos también en iOS: si el audio se sigue escuchando bien,
-      // se queda así.
-      if (usaSTTNativo) motorAndroid.iniciarEscucha();
+      // Antes se dejaba el micrófono escuchando durante "hablando" para detectar una interrupción
+      // (barge-in). En Android, sin audífonos, el propio audio de Arkey saliendo por la bocina se
+      // vuelve a captar por el micrófono: la app se "auto-interrumpía", transcribía su propia voz
+      // como si fuera el usuario, respondía a eso, se auto-interrumpía otra vez, y así sin parar.
+      // Por eso el micrófono se queda apagado mientras Arkey habla, y solo arranca a escuchar de
+      // verdad cuando termina (alTerminar).
     } catch { if (usaSTTNativo) volverAEscuchar(); else reanudarMicTrasHablarIOS(); }
   }
 
@@ -11256,6 +11265,11 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
                 {!sinCreditos && estado === "permiso" && (errorMsg || "Necesito permiso de micrófono.")}
                 {!sinCreditos && estado === "error" && (errorMsg || "Algo salió mal.")}
               </p>
+              {/* Aviso de diagnóstico: errores del micrófono que no bloquean el flujo (ej. "audio-capture")
+                  no cambian el estado visible de arriba, pero conviene poder verlos para reportar el bug. */}
+              {!sinCreditos && errorMsg && estado !== "permiso" && estado !== "error" && (
+                <p className="text-[10px] gp-text-red text-center">{errorMsg}</p>
+              )}
               <div className="flex items-center gap-2 w-full mt-1">
                 <input
                   type="text"
