@@ -10408,13 +10408,17 @@ const ACCION_FUE_CONFIRMACION_PENDIENTE = (accion) => accion?.resultado?.requier
 
 // Modo Conversación: capa flotante global de voz sobre el mismo Asistente/asistente-ia de
 // siempre (no crea un chatbot aparte). Detecta la plataforma y usa dos caminos:
-//  - Chrome/Edge/Android: SpeechRecognition nativo del navegador, en modo continuo con
-//    reinicio automático — gratis y sin ida y vuelta de red extra.
-//  - Safari iOS (no soporta SpeechRecognition, ni en PWA instalada): graba con MediaRecorder
-//    y detecta el fin de cada turno con un VAD sencillo por energía (Web Audio API), luego
-//    transcribe con la función transcribir-voz (Whisper). Requiere que se haya configurado
-//    OPENAI_API_KEY como secret de Supabase; si no, el error se muestra y se ofrece el chat
-//    de texto como respaldo.
+//  - Chrome/Edge en escritorio (y cualquier otro que traiga SpeechRecognition y no sea
+//    Android): reconocimiento nativo del navegador, en modo continuo con reinicio automático
+//    -- gratis y sin ida y vuelta de red extra.
+//  - Safari iOS (no soporta SpeechRecognition, ni en PWA instalada) y Android (el
+//    reconocimiento nativo del navegador ahí resultó muy poco confiable en la práctica --
+//    duplicaba texto entre reinicios, cancel() de la voz a veces no avisaba, etc.): graba con
+//    MediaRecorder y detecta el fin de cada turno con un VAD sencillo por energía (Web Audio
+//    API), luego transcribe con la función transcribir-voz (Whisper). Tiene costo por consulta
+//    de voz (Whisper cobra por minuto de audio) y algo más de latencia que el camino nativo.
+//    Requiere que se haya configurado OPENAI_API_KEY como secret de Supabase; si no, el error
+//    se muestra y se ofrece el chat de texto como respaldo.
 // El "barge-in" (interrumpir a la IA hablando) usa el mismo micrófono ya abierto en ambos
 // caminos — no hay un modo "siempre escuchando" en segundo plano, solo mientras este panel
 // está abierto, como pide el Documento Maestro.
@@ -10646,7 +10650,15 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
   };
 
   const SpeechRecognitionCtor = typeof window !== "undefined" && (window.SpeechRecognition || window.webkitSpeechRecognition);
-  const usaSTTNativo = !!SpeechRecognitionCtor;
+  const esAndroid = typeof navigator !== "undefined" && /Android/i.test(navigator.userAgent || "");
+  // En Android, el SpeechRecognition nativo del navegador es gratis pero salió muy poco confiable
+  // en la práctica (duplicaba texto entre reinicios, cancel() de la voz a veces no avisaba, etc.
+  // -- varios bugs distintos ya parchados uno por uno). Se decidió con Angel usar en Android el
+  // mismo camino que ya usa iOS: grabar con MediaRecorder + detectar el fin del turno por energía
+  // (VAD) + transcribir con Whisper (función transcribir-voz). Tiene costo por consulta de voz
+  // (Whisper cobra por minuto de audio) y un poco más de latencia, a cambio de comportarse igual
+  // en ambas plataformas y no depender de las inconsistencias del reconocimiento nativo de Android.
+  const usaSTTNativo = !!SpeechRecognitionCtor && !esAndroid;
   // Este Safari (iOS 26) ya trae reconocimiento de voz nativo real, pero sigue teniendo el
   // mismo conflicto de audio que el camino de grabación manual: si el micrófono se reactiva
   // mientras ARKEYONE habla (para detectar una interrupción), el audio de salida se queda mudo.
@@ -10755,7 +10767,7 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
     setDiaSeleccionado(null);
   };
 
-  // ---------- Camino Chrome/Android: SpeechRecognition nativo ----------
+  // ---------- Camino nativo (Chrome/Edge de escritorio, etc. -- Android ya no entra aquí): SpeechRecognition ----------
   function iniciarEscuchaNativa() {
     if (micMutedRef.current) return; // el micrófono está muteado a propósito: no arrancamos hasta que se reactive
     if (sinCreditosRef.current) return; // sin consultas disponibles este mes: Arkey se queda dormido, no escucha
@@ -10831,7 +10843,7 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
     try { r.start(); } catch { cambiarEstado("error"); setErrorMsg("No se pudo iniciar el micrófono."); }
   }
 
-  // ---------- Camino iOS Safari: MediaRecorder + VAD por energía ----------
+  // ---------- Camino de grabación (iOS Safari y Android): MediaRecorder + VAD por energía ----------
   function mimeTypeSoportado() {
     const candidatos = ["audio/mp4", "audio/webm;codecs=opus", "audio/webm"];
     for (const c of candidatos) {
