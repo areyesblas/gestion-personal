@@ -2670,6 +2670,9 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
             </button>
             <img src="/icono-arkeyone.png" alt="ArkeyOne" style={{ height: 34 }} />
             <span className={`gp-serif text-lg font-semibold ${sidebarColapsado ? "md:hidden" : ""}`} style={{ letterSpacing: "0.3px" }}>ARKEYONE</span>
+            {/* Temporal, mientras depuramos los bugs de voz en Android: confirma de un vistazo
+                si un dispositivo ya cargó el último deploy. Quitar cuando ya no haga falta. */}
+            <p className={`text-[10px] gp-text-muted ${sidebarColapsado ? "md:hidden" : ""}`}>build {__COMMIT_HASH__}</p>
             <p className={`text-xs gp-text-muted truncate ${sidebarColapsado ? "md:hidden" : ""}`} style={{ maxWidth: 160 }}>
               {activeOwnerId === misId ? miEmail : `Viendo: ${activeOwnerEmail}`}
             </p>
