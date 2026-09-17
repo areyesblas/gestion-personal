@@ -10686,15 +10686,11 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
   function detenerTodo() {
     // Desconectamos los handlers ANTES de abortar: si no, el propio r.onend puede disparar
     // un r.start() de auto-reinicio (ver iniciarEscuchaNativa) por una condición de carrera
-    // entre el evento asíncrono del navegador y el cierre del panel.
-    try {
-      const r = recognitionRef.current;
-      if (r) {
-        r.onresult = null; r.onerror = null; r.onend = null; r.onstart = null; r.onspeechend = null; r.onaudioend = null;
-        r.abort(); // abort() corta ya, sin esperar un resultado final como sí hace stop()
-      }
-    } catch {}
-    recognitionRef.current = null;
+    // entre el evento asíncrono del navegador y el cierre del panel. Mismo helper que usa
+    // iniciarEscuchaNativa() antes de crear una instancia nueva -- comportamiento idéntico al
+    // que había aquí, solo sin duplicar el código. No toca nada del camino de iOS (streamRef,
+    // audioCtxRef, mediaRecorderRef, más abajo).
+    detenerRecognitionActual();
     try { mediaRecorderRef.current?.stop(); } catch {}
     mediaRecorderRef.current = null;
     try { streamRef.current?.getTracks().forEach((t) => t.stop()); } catch {}
@@ -10786,9 +10782,29 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
   };
 
   // ---------- Camino Chrome/Android: SpeechRecognition nativo ----------
+  // Detiene y limpia por completo la instancia de reconocimiento actual (si había una) antes de
+  // crear una nueva. iniciarEscuchaNativa() se llama desde 3 sitios distintos (barge-in dentro de
+  // hablar(), volverAEscuchar() al terminar de hablar, y alternarMicMuted() al desmutear) sin que
+  // ninguno detuviera antes la instancia anterior -- si la del barge-in seguía viva justo cuando
+  // se crea la siguiente, quedan dos objetos SpeechRecognition compitiendo por la misma sesión de
+  // audio del sistema en Android: la segunda arranca sin error pero nunca recibe resultados (el
+  // mic "parece" escuchar pero no captura audio real). Único punto de entrada para garantizar que
+  // nunca hay dos instancias vivas al mismo tiempo, sin importar desde cuál de los 3 sitios se llame.
+  function detenerRecognitionActual() {
+    const r = recognitionRef.current;
+    if (r) {
+      try {
+        r.onresult = null; r.onerror = null; r.onend = null; r.onstart = null; r.onspeechend = null; r.onaudioend = null;
+        r.abort();
+      } catch {}
+    }
+    recognitionRef.current = null;
+  }
+
   function iniciarEscuchaNativa() {
     if (micMutedRef.current) return; // el micrófono está muteado a propósito: no arrancamos hasta que se reactive
     if (sinCreditosRef.current) return; // sin consultas disponibles este mes: Arkey se queda dormido, no escucha
+    detenerRecognitionActual();
     const r = new SpeechRecognitionCtor();
     r.lang = "es-MX";
     r.continuous = true;
