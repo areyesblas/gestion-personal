@@ -10582,17 +10582,14 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
   // leerTextoMensaje()) Y corta de inmediato lo que ya esté sonando en ese momento (reusa
   // interrumpirVoz(), que ya sabe cortar tanto la respuesta en vivo como una burbuja puntual sin
   // dejar nada colgado -- ver ahí). Desmutear no revive nada, solo deja de silenciar lo que venga
-  // después. A diferencia de la oreja y la boca, SÍ se persiste entre aperturas del panel
-  // (localStorage) -- un mute real no se olvida solo porque cerraste la app.
-  const [audioMuteado, setAudioMuteado] = useState(() => {
-    try { return localStorage.getItem("arkeyone_vm_mute") === "1"; } catch { return false; }
-  });
-  const audioMuteadoRef = useRef(audioMuteado);
+  // después. Igual que la oreja y la boca, NO se persiste entre aperturas del panel -- siempre
+  // arranca activa (sin mutear) al abrir (ver abrir()).
+  const [audioMuteado, setAudioMuteado] = useState(false);
+  const audioMuteadoRef = useRef(false);
+  const cambiarAudioMuteado = (v) => { audioMuteadoRef.current = v; setAudioMuteado(v); };
   function alternarAudioMuteado() {
     const nuevo = !audioMuteadoRef.current;
-    audioMuteadoRef.current = nuevo;
-    setAudioMuteado(nuevo);
-    try { localStorage.setItem("arkeyone_vm_mute", nuevo ? "1" : "0"); } catch {}
+    cambiarAudioMuteado(nuevo);
     if (nuevo) interrumpirVoz(); // corta ya lo que esté sonando, no solo lo que venga después
   }
 
@@ -10786,8 +10783,9 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
     setErrorMsg("");
     abiertoRef.current = true;
     setAbierto(true);
-    cambiarEscuchaActiva(true); // oreja y boca siempre arrancan encendidas -- no se persisten entre aperturas del panel
+    cambiarEscuchaActiva(true); // oreja, boca y bocina siempre arrancan encendidas -- no se persisten entre aperturas del panel
     cambiarVozActiva(true);
+    cambiarAudioMuteado(false);
     cargarUso();
     pedirWakeLock();
     if (!soportaModoVoz) {
