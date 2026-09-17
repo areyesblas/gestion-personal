@@ -10547,7 +10547,6 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
   const chunksRef = useRef([]);
   const empezoHablarRef = useRef(null);
   const silencioDesdeRef = useRef(null);
-  const textoHablandoRef = useRef(""); // lo que Arkey está diciendo en este momento (ver hablar()) -- se usa para distinguir una interrupción real de su propio eco por la bocina, ver esEcoDeArkey()
   const wakeLockRef = useRef(null); // WakeLockSentinel activo mientras el panel está abierto, para que la pantalla no se bloquee sola
 
   // Botón oreja (izquierda del avatar): si el micrófono debe estar escuchando o no. Reemplaza al
@@ -10558,10 +10557,10 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
   const [escuchaActiva, setEscuchaActiva] = useState(true);
   const escuchaActivaRef = useRef(true);
   const cambiarEscuchaActiva = (v) => { escuchaActivaRef.current = v; setEscuchaActiva(v); };
-  // Android no escucha nada mientras Arkey habla (ver hablar()/esAndroid) -- para que la oreja no
+  // Ninguna plataforma escucha nada mientras Arkey habla (ver hablar()) -- para que la oreja no
   // muestre "encendida" sin que en realidad esté pasando nada, se apaga sola (visual y funcional)
   // apenas empieza a hablar, y se restaura al valor real de antes justo al terminar/interrumpir (ver
-  // volverAEscuchar). Este ref guarda ese valor real mientras dura el forzado.
+  // volverAEscuchar/reanudarMicTrasHablarIOS). Este ref guarda ese valor real mientras dura el forzado.
   const escuchaActivaPreHablandoRef = useRef(true);
   // Botón boca (derecha del avatar): mantenerlo presionado corta la voz de Arkey de inmediato --
   // al soltarlo, siempre vuelve a quedar activada para lo que siga (ver alPresionarBoca/
@@ -10610,10 +10609,11 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
     setNivelMic(0);
   }
 
-  // Botón oreja: apaga o enciende la escucha de verdad, sin importar el estado actual -- incluido
-  // mientras "hablando" (donde tanto el camino nativo como iOS pueden estar escuchando para barge-in,
-  // ver hablar()). Al apagar, para todo de inmediato. Al encender, si no está "hablando"/"procesando"
-  // arranca a escuchar ya; si sí lo está, el propio flujo de hablar()/volverAEscuchar()/
+  // Botón oreja: apaga o enciende la escucha de verdad. El botón está deshabilitado mientras
+  // "hablando" (ver el disabled del render -- nada escucha ahí en ninguna plataforma, ver
+  // hablar()), así que esta función solo se llama estando "escuchando"/"procesando"/inactivo. Al
+  // apagar, para todo de inmediato. Al encender, si no está "procesando" arranca a escuchar ya; si
+  // sí lo está, el propio flujo de enviarTurno()/hablar()/volverAEscuchar()/
   // reanudarMicTrasHablarIOS() ya respeta escuchaActivaRef cuando llegue el momento (ver ahí).
   function alternarEscuchaActiva() {
     const nuevo = !escuchaActiva;
@@ -10702,12 +10702,6 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
   // (ver hablar()/iniciarEscuchaNativa). Hoy en la práctica los iPhone reales usan el camino de
   // respaldo de abajo (MediaRecorder + VAD), donde esta variable sí se usa para sus propios ajustes.
   const esIOS = typeof navigator !== "undefined" && /iPad|iPhone|iPod/.test(navigator.userAgent || "");
-  // Confirmado por Angel en dispositivo real: el tercer intento de barge-in por voz en Android
-  // (esEcoDeArkey, filtrado a resultados finales de 2+ palabras) tampoco funciona -- no interrumpe.
-  // Se usa para desactivar la escucha automática durante "hablando" solo en Android (ver hablar()) y
-  // para ajustar el texto de estado (no ofrecer "habla para interrumpir" ahí). Mac/desktop Chrome
-  // sigue escuchando durante "hablando" sin cambios -- nunca se reportó roto ahí.
-  const esAndroid = typeof navigator !== "undefined" && /android/i.test(navigator.userAgent || "");
   const soportaModoVoz = usaSTTNativo || (typeof navigator !== "undefined" && navigator.mediaDevices?.getUserMedia && typeof window !== "undefined" && window.MediaRecorder);
 
   useEffect(() => () => detenerTodo(), []); // limpia todo si el componente se desmonta
@@ -10830,37 +10824,15 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
     setDiaSeleccionado(null);
   };
 
-  // En Android, mientras Arkey habla seguimos el mic abierto para poder detectar que el usuario
-  // le habló encima (barge-in). El problema (bug #3, confirmado en un Motorola G77 real): sin
-  // audífonos, el propio audio de Arkey saliendo por la bocina entra de vuelta por el micrófono y
-  // el reconocedor lo transcribe -- si tratáramos CUALQUIER resultado como interrupción, Arkey se
-  // auto-interrumpiría solo. Para distinguir eco de interrupción real: comparamos lo que el mic
-  // captó contra el texto que Arkey está diciendo en ese momento (se conoce de antemano, es el
-  // parámetro de hablar() -- ver textoHablandoRef). Si la mayoría de las palabras captadas ya
-  // están en lo que Arkey dice, es eco -- se ignora. Si son palabras distintas, es el usuario
-  // interrumpiendo de verdad -- se corta la lectura. Es un heurístico simple (no perfecto): ante
-  // la duda se prefiere de-facto tratarlo como eco (falso negativo) antes que auto-interrumpirse
-  // en bucle otra vez (falso positivo), que fue el bug original.
-  function esEcoDeArkey(oido, textoArkey) {
-    // normalizarTexto (arriba en el archivo) ya quita acentos y pasa a minúsculas; aquí solo
-    // separamos en palabras, quitando puntuación suelta.
-    const palabrasOido = normalizarTexto(oido).replace(/[^\p{L}\p{N}\s]/gu, "").split(/\s+/).filter(Boolean);
-    if (palabrasOido.length === 0) return true; // no se captó nada reconocible todavía
-    const palabrasArkey = new Set(normalizarTexto(textoArkey).replace(/[^\p{L}\p{N}\s]/gu, "").split(/\s+/).filter(Boolean));
-    if (palabrasArkey.size === 0) return false;
-    const coincidencias = palabrasOido.filter((p) => palabrasArkey.has(p)).length;
-    return coincidencias / palabrasOido.length >= 0.6;
-  }
-
   // ---------- Camino Chrome/Android: SpeechRecognition nativo ----------
   // Detiene y limpia por completo la instancia de reconocimiento actual (si había una) antes de
-  // crear una nueva. iniciarEscuchaNativa() se llama desde 3 sitios distintos (barge-in dentro de
-  // hablar(), volverAEscuchar() al terminar de hablar, y alternarEscuchaActiva() al encender) sin que
-  // ninguno detuviera antes la instancia anterior -- si la del barge-in seguía viva justo cuando
-  // se crea la siguiente, quedan dos objetos SpeechRecognition compitiendo por la misma sesión de
-  // audio del sistema en Android: la segunda arranca sin error pero nunca recibe resultados (el
-  // mic "parece" escuchar pero no captura audio real). Único punto de entrada para garantizar que
-  // nunca hay dos instancias vivas al mismo tiempo, sin importar desde cuál de los 3 sitios se llame.
+  // crear una nueva. iniciarEscuchaNativa() se llama desde varios sitios (volverAEscuchar() al
+  // terminar de hablar, alternarEscuchaActiva() al encender) sin que ninguno detuviera antes la
+  // instancia anterior -- si una vieja seguía viva justo cuando se crea la siguiente, quedan dos
+  // objetos SpeechRecognition compitiendo por la misma sesión de audio del sistema en Android: la
+  // segunda arranca sin error pero nunca recibe resultados (el mic "parece" escuchar pero no
+  // captura audio real). Único punto de entrada para garantizar que nunca hay dos instancias vivas
+  // al mismo tiempo, sin importar desde cuál sitio se llame.
   function detenerRecognitionActual() {
     const r = recognitionRef.current;
     if (r) {
@@ -10887,21 +10859,8 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
     let indiceProcesado = 0;
 
     r.onresult = (e) => {
-      // Si la IA está hablando y detectamos voz, puede ser una interrupción real (barge-in) o
-      // el propio eco de Arkey entrando por el mic (ver esEcoDeArkey arriba). Solo se corta la
-      // lectura ante un resultado FINAL (no interino -- más confiable, los interinos son más
-      // propensos a fragmentos sueltos del eco) con al menos 2 palabras, que además no coincida
-      // con lo que Arkey está diciendo.
-      if (estadoRef.current === "hablando") {
-        const ultimoResultado = e.results[e.results.length - 1];
-        if (!ultimoResultado?.isFinal) return;
-        const ultimo = ultimoResultado[0]?.transcript || "";
-        if (ultimo.trim().split(/\s+/).filter(Boolean).length < 2) return;
-        if (esEcoDeArkey(ultimo, textoHablandoRef.current)) return;
-        try { window.speechSynthesis.cancel(); } catch {}
-        cambiarEstado("escuchando");
-        return;
-      }
+      // Ya no se escucha en absoluto mientras "hablando" en ninguna plataforma (ver hablar()) --
+      // este handler solo procesa resultados durante "escuchando".
       if (estadoRef.current !== "escuchando") return;
       let huboCambio = false;
       for (let i = Math.max(e.resultIndex, indiceProcesado); i < e.results.length; i++) {
@@ -11219,20 +11178,22 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
     // (en Android, reiniciar el reconocedor dos veces casi seguidas es justo el patrón que históricamente
     // lo ha dejado "escuchando" sin captar audio real).
     if (estadoRef.current === "escuchando") return;
-    // Si venimos de "hablando" en Android, la oreja se había apagado sola (ver hablar()) -- se
-    // restaura aquí al valor real de antes de forzarla, sea que Arkey terminó de hablar solo o lo
-    // interrumpieron con el botón boca (ambos casos llegan aquí, ver interrumpirVoz()).
-    const veniaDeHablarAndroid = esAndroid && estadoRef.current === "hablando";
-    if (veniaDeHablarAndroid) {
+    // Si venimos de "hablando", la oreja se había apagado sola en las tres plataformas (ver
+    // hablar()) -- se restaura aquí al valor real de antes de forzarla, sea que Arkey terminó de
+    // hablar solo o lo interrumpieron con el botón boca (ambos casos llegan aquí, ver
+    // interrumpirVoz()).
+    const veniaDeHablar = estadoRef.current === "hablando";
+    if (veniaDeHablar) {
       cambiarEscuchaActiva(escuchaActivaPreHablandoRef.current);
     }
     if (!escuchaActivaRef.current) { cambiarEstado("inactivo"); return; } // la oreja está apagada -- no reactivar solo
     cambiarEstado("escuchando");
     if (!usaSTTNativo) { volverAEscucharIOS(); return; }
-    if (veniaDeHablarAndroid) {
+    if (veniaDeHablar) {
       // Pequeña pausa antes de arrancar el reconocedor: si lo hacemos apenas termina de hablar,
-      // Android a veces no soltó del todo la sesión de audio de la síntesis de voz todavía, y el
-      // mic "parece" escuchar pero no captura audio real (reportado por Angel). Se revisa que
+      // a veces no se soltó del todo la sesión de audio de la síntesis de voz todavía, y el
+      // mic "parece" escuchar pero no captura audio real (reportado por Angel en Android; se aplica
+      // igual en Mac/desktop por si acaso, mismo mecanismo de SpeechRecognition). Se revisa que
       // sigamos abiertos y en "escuchando" por si el usuario cerró el panel o pasó algo más
       // mientras tanto.
       setTimeout(() => {
@@ -11451,38 +11412,31 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
   async function hablar(texto) {
     if (!texto || !("speechSynthesis" in window)) { volverAEscuchar(); return; }
     setErrorMsg("");
-    textoHablandoRef.current = texto; // se usa para filtrar el eco propio del barge-in por voz, ver esEcoDeArkey()
     if (!usaSTTNativo) {
-      // El micrófono se queda abierto a propósito mientras Arkey habla (ver asegurarMicAbierto) --
-      // ya no se cierra antes de hablar ni se reabre después. Solo se para la grabación del turno
+      // El micrófono se queda abierto a propósito durante toda la sesión (ver asegurarMicAbierto)
+      // -- no se cierra ni se reabre en cada respuesta. Se asegura aquí (normalmente ya está
+      // abierto desde el primer hablar() de la sesión -- el saludo -- así el diálogo de permiso
+      // del sistema aparece ANTES del saludo hablado). Solo se para la grabación del turno
       // anterior si seguía activa por alguna razón (lo normal es que el flujo de silencio ya la
       // haya parado antes de llegar aquí).
       try { mediaRecorderRef.current?.stop(); } catch {}
       mediaRecorderRef.current = null;
       const ok = await asegurarMicAbierto();
       if (!ok) { volverAEscuchar(); return; }
-      if (!rafRef.current) loopVAD(); // por si se hubiera detenido -- normalmente ya corre desde el primer hablar() de la sesión
-      // La oreja se apaga sola mientras habla en iOS, igual que en Android (ya no escucha nada de
-      // verdad ahí desde que se quitó la interrupción automática por voz) -- se guarda el valor
-      // real de antes para restaurarlo al terminar/interrumpir, ver reanudarMicTrasHablarIOS().
-      escuchaActivaPreHablandoRef.current = escuchaActivaRef.current;
-      cambiarEscuchaActiva(false);
+    } else {
+      // Camino nativo (Android/Mac/desktop): igual que en Android, se apaga explícitamente el
+      // reconocedor de la escucha anterior -- r.stop() es async y a veces no cierra de inmediato,
+      // dejando sus handlers activos de más (mismo fix ya probado en el commit a87266f).
+      detenerRecognitionActual();
     }
     cambiarEstado("hablando");
-    // En Android ya no volvemos a escuchar mientras habla (ver esAndroid arriba): el barge-in por
-    // voz ahí se intentó tres veces y ninguna funcionó de verdad -- confirmado por Angel en
-    // dispositivo real. Si el reconocedor de la escucha anterior seguía vivo -- r.stop() es async y
-    // a veces no cierra de inmediato -- sus handlers seguían activos y podían disparar la rama de
-    // barge-in igual; se apaga aquí explícitamente para no dejarlo vivo (mismo fix ya probado en el
-    // commit a87266f).
-    if (usaSTTNativo && esAndroid) {
-      detenerRecognitionActual();
-      // La oreja se apaga sola mientras habla en Android (no está escuchando nada de verdad, ver
-      // arriba) -- se guarda el valor real de antes para restaurarlo al terminar/interrumpir, ver
-      // volverAEscuchar().
-      escuchaActivaPreHablandoRef.current = escuchaActivaRef.current;
-      cambiarEscuchaActiva(false);
-    }
+    // Regla única para las tres plataformas: mientras Arkey habla, NUNCA se escucha -- la oreja se
+    // apaga sola (visual y funcional) aquí, y se restaura al valor real de antes justo al terminar
+    // de hablar o al interrumpir con el botón boca (ver volverAEscuchar()/
+    // reanudarMicTrasHablarIOS(), que hacen la restauración). Si la oreja ya estaba encendida,
+    // siempre vuelve a quedar encendida y escuchando en cuanto Arkey termine.
+    escuchaActivaPreHablandoRef.current = escuchaActivaRef.current;
+    cambiarEscuchaActiva(false);
     try {
       window.speechSynthesis.cancel();
       await vocesListas();
@@ -11506,15 +11460,9 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
       u.onend = alTerminar;
       u.onerror = (e) => { setErrorMsg(`TTS: ${e.error || "error desconocido"}`); alTerminar(); };
       window.speechSynthesis.speak(u);
-      // En Mac/desktop Chrome, seguimos "escuchando" con el mismo reconocedor mientras la IA habla,
-      // para detectar una interrupción real -- ver r.onresult arriba, filtrado por esEcoDeArkey. En
-      // Android se desactivó (esAndroid, ver arriba): el tercer intento tampoco funcionó de verdad
-      // en dispositivo real -- el único mecanismo de interrupción en Android queda el botón boca.
-      // En iOS no hace falta hacer nada aquí: el mic y el analyser de loopVAD ya están corriendo
-      // desde antes de speak() (ver asegurarMicAbierto arriba) -- la rama "hablando" de loopVAD ya
-      // está escuchando de verdad desde el primer instante, sin el hueco que había antes al pedir
-      // el stream de cero después de hablar.
-      if (usaSTTNativo && !esAndroid) iniciarEscuchaNativa();
+      // No hace falta hacer nada más aquí: en ninguna plataforma se escucha mientras "hablando"
+      // (ver arriba) -- solo queda esperar a que speak() termine (alTerminar) o a que lo
+      // interrumpan con el botón boca (interrumpirVoz()).
     } catch { if (usaSTTNativo) volverAEscuchar(); else reanudarMicTrasHablarIOS(); }
   }
 
@@ -11672,14 +11620,14 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
             <div className="flex flex-col items-center gap-2 py-2">
               <div className="flex items-center gap-4">
                 {/* Oreja: toggle de escuchar. Reemplaza al viejo botón de mutear -- ver alternarEscuchaActiva.
-                    En Android e iOS se apaga sola y no se puede tocar mientras Arkey habla (no escucha
-                    nada de verdad ahí, ver hablar()) -- se reactiva sola al terminar o al interrumpir
-                    con 🗣️. En Mac/desktop no aplica: ahí sigue escuchando durante "hablando". */}
+                    Regla única para las tres plataformas: se apaga sola y no se puede tocar mientras
+                    Arkey habla (no escucha nada de verdad ahí, ver hablar()) -- se reactiva sola al
+                    terminar o al interrumpir con 🗣️. */}
                 <button
                   onClick={alternarEscuchaActiva}
                   title={sinCreditos ? "Sin consultas disponibles este mes" : escuchaActiva ? "Apagar escucha" : "Activar escucha"}
                   className="gp-btn-ghost p-2 rounded text-xl leading-none"
-                  disabled={sinCreditos || ((esAndroid || esIOS) && estado === "hablando")}
+                  disabled={sinCreditos || estado === "hablando"}
                   style={sinCreditos || !escuchaActiva ? { opacity: 0.4, cursor: sinCreditos ? "not-allowed" : undefined } : undefined}
                 >
                   👂
