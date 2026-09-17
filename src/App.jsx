@@ -10424,18 +10424,24 @@ const ACCION_FUE_CONFIRMACION_PENDIENTE = (accion) => accion?.resultado?.requier
 // Arkey: la mascota del Modo Conversación. Un robotcito de antenas y piernas cuyo cuerpo,
 // ojos, boca y antenas reaccionan al estado real de la conversación (escuchando, pensando,
 // hablando) en vez de ser un simple ícono estático.
-function ArkeyRobot({ estado, onClick }) {
+function ArkeyRobot({ estado, onClick, oidosCerrados = false }) {
   const colorCuerpo = "#9A2E1F"; // mismo rojo quemado del botón flotante -- identidad consistente
+  const dormido = estado === "dormido";
+  // "Oídos apagados": ojos cerrados como si durmiera, aunque siga hablando -- usado en iOS cuando
+  // Angel apaga el mic mientras Arkey habla, para que se vea claro que nadie lo puede interrumpir
+  // (ver oidosCerrados, prop pasada solo desde el camino iOS). La boca sigue animada igual: Arkey
+  // sigue hablando de verdad, solo tiene los "oídos" cerrados.
+  const oidosApagados = dormido || (estado === "hablando" && oidosCerrados);
   const colorAntena =
     estado === "escuchando" ? "#22c55e" :
-    estado === "hablando" ? "var(--gold)" :
+    estado === "hablando" ? (oidosCerrados ? "#4b5563" : "var(--gold)") :
     estado === "procesando" ? "#f59e0b" :
-    estado === "dormido" ? "#4b5563" :
+    dormido ? "#4b5563" :
     "#6b7280";
   // "hablando" también es clickeable: sirve de respaldo manual para interrumpir a Arkey (tocarlo
-  // corta la lectura) sin depender de que el barge-in por voz detecte bien la interrupción.
+  // corta la lectura, o en iOS apaga/enciende el mic mientras habla) sin depender de que el
+  // barge-in por voz detecte bien la interrupción.
   const clickable = estado === "escuchando" || estado === "hablando";
-  const dormido = estado === "dormido";
 
   return (
     <div onClick={clickable ? onClick : undefined} style={{ cursor: clickable ? "pointer" : "default" }}>
@@ -10446,7 +10452,7 @@ function ArkeyRobot({ estado, onClick }) {
         @keyframes arkey-blink { 0%,92%,100% { transform: scaleY(1); } 96% { transform: scaleY(.15); } }
         @keyframes arkey-pensar { 0%,100% { opacity: .25; } 50% { opacity: 1; } }
         .arkey-grupo { animation: ${estado === "escuchando" ? "arkey-bounce 1.6s ease-in-out infinite" : "none"}; transform-origin: center; }
-        .arkey-antena-punta { animation: ${estado === "escuchando" || estado === "hablando" ? "arkey-antena 1s ease-in-out infinite" : "none"}; transform-origin: center; }
+        .arkey-antena-punta { animation: ${estado === "escuchando" || (estado === "hablando" && !oidosCerrados) ? "arkey-antena 1s ease-in-out infinite" : "none"}; transform-origin: center; }
         .arkey-ojo { animation: arkey-blink 4s ease-in-out infinite; transform-origin: center; }
         .arkey-boca-hablando { animation: arkey-talk .35s ease-in-out infinite; transform-origin: center; }
         .arkey-punto1 { animation: arkey-pensar 1s ease-in-out infinite; }
@@ -10463,8 +10469,8 @@ function ArkeyRobot({ estado, onClick }) {
         <rect x="18" y="30" width="84" height="72" rx="26" fill={colorCuerpo} />
         {/* cara */}
         <rect x="32" y="48" width="56" height="40" rx="14" fill="#0B2341" />
-        {/* ojos: dormido = arquitos cerrados en vez de círculos, sin parpadeo */}
-        {dormido ? (
+        {/* ojos: cerrados (arquitos) cuando está "dormido" de verdad o con los oídos apagados */}
+        {oidosApagados ? (
           <>
             <path d="M42 66 Q48 70 54 66" stroke="#6b7280" strokeWidth="2.5" strokeLinecap="round" fill="none" />
             <path d="M66 66 Q72 70 78 66" stroke="#6b7280" strokeWidth="2.5" strokeLinecap="round" fill="none" />
@@ -10492,8 +10498,11 @@ function ArkeyRobot({ estado, onClick }) {
         {/* piernas */}
         <rect x="35" y="102" width="14" height="24" rx="6" fill={colorCuerpo} />
         <rect x="71" y="102" width="14" height="24" rx="6" fill={colorCuerpo} />
-        <rect x="30" y="122" width="24" height="8" rx="4" fill="#0B2341" />
-        <rect x="66" y="122" width="24" height="8" rx="4" fill="#0B2341" />
+        {/* tenis blancos */}
+        <rect x="30" y="122" width="24" height="9" rx="4" fill="#FFFFFF" stroke="#0B2341" strokeWidth="1.5" />
+        <rect x="30" y="127" width="24" height="3" rx="1.5" fill="#D1D5DB" />
+        <rect x="66" y="122" width="24" height="9" rx="4" fill="#FFFFFF" stroke="#0B2341" strokeWidth="1.5" />
+        <rect x="66" y="127" width="24" height="3" rx="1.5" fill="#D1D5DB" />
       </svg>
     </div>
   );
@@ -10526,8 +10535,15 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
   const empezoHablarRef = useRef(null);
   const silencioDesdeRef = useRef(null);
   const bargeInDesdeRef = useRef(null);
-  const textoHablandoRef = useRef(""); // lo que Arkey está diciendo en este momento (ver hablar()) -- se usa en Android para distinguir una interrupción real de su propio eco por la bocina, ver esEcoDeArkey()
+  const textoHablandoRef = useRef(""); // lo que Arkey está diciendo en este momento (ver hablar()) -- se usa en Mac/desktop Chrome para distinguir una interrupción real de su propio eco por la bocina, ver esEcoDeArkey()
   const wakeLockRef = useRef(null); // WakeLockSentinel activo mientras el panel está abierto, para que la pantalla no se bloquee sola
+  // iOS: si está armada la escucha (oídos abiertos) mientras Arkey habla -- se resetea a false (oídos
+  // cerrados, nadie lo interrumpe) al inicio de cada hablar(); tocar a Arkey mientras habla la arma o
+  // desarma (ver alTocarArkey). Mientras armada, loopVAD() (rama "hablando") solo interrumpe de
+  // verdad si detecta un nivel de audio sostenido -- no cualquier ruido -- para no auto-escucharse.
+  const [micArmadoHablando, setMicArmadoHablando] = useState(false);
+  const micArmadoHablandoRef = useRef(false);
+  const cambiarMicArmadoHablando = (v) => { micArmadoHablandoRef.current = v; setMicArmadoHablando(v); };
 
   // Mute real del micrófono (distinto de "silenciado", que apaga la voz de la IA): corta lo que
   // el micrófono manda a transcribir, y se ve reflejado en el medidor de nivel bajando a cero.
@@ -10666,11 +10682,9 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
   // (ver hablar()/iniciarEscuchaNativa). Hoy en la práctica los iPhone reales usan el camino de
   // respaldo de abajo (MediaRecorder + VAD), donde esta variable sí se usa para sus propios ajustes.
   const esIOS = typeof navigator !== "undefined" && /iPad|iPhone|iPod/.test(navigator.userAgent || "");
-  // Se probó reactivar la escucha en Android mientras Arkey habla, filtrando su propio eco
-  // (esEcoDeArkey) para detectar una interrupción real -- a petición de Angel se abandona ese
-  // intento (ver android_voz_fixes_pendientes.md) y se vuelve a apagar solo para Android, dejando
-  // el botón de tocar a Arkey (interrumpirHablando) como único mecanismo de interrupción ahí. No
-  // se toca Mac/desktop Chrome, donde este camino nunca se reportó roto.
+  // Usada para el botón de mutear (se oculta en Android, ver más abajo -- el reconocedor ya se
+  // reinicia solo cada pocos segundos ahí, ver android_voz_fixes_pendientes.md) y, dentro de
+  // hablar(), el barge-in por voz también corre en Android (tercer intento, ver esEcoDeArkey).
   const esAndroid = typeof navigator !== "undefined" && /android/i.test(navigator.userAgent || "");
   const soportaModoVoz = usaSTTNativo || (typeof navigator !== "undefined" && navigator.mediaDevices?.getUserMedia && typeof window !== "undefined" && window.MediaRecorder);
 
@@ -10850,10 +10864,15 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
 
     r.onresult = (e) => {
       // Si la IA está hablando y detectamos voz, puede ser una interrupción real (barge-in) o
-      // el propio eco de Arkey entrando por el mic (ver esEcoDeArkey arriba) -- solo se corta la
-      // lectura si lo captado no coincide con lo que Arkey está diciendo.
+      // el propio eco de Arkey entrando por el mic (ver esEcoDeArkey arriba). Solo se corta la
+      // lectura ante un resultado FINAL (no interino -- más confiable, los interinos son más
+      // propensos a fragmentos sueltos del eco) con al menos 2 palabras, que además no coincida
+      // con lo que Arkey está diciendo.
       if (estadoRef.current === "hablando") {
-        const ultimo = e.results[e.results.length - 1]?.[0]?.transcript || "";
+        const ultimoResultado = e.results[e.results.length - 1];
+        if (!ultimoResultado?.isFinal) return;
+        const ultimo = ultimoResultado[0]?.transcript || "";
+        if (ultimo.trim().split(/\s+/).filter(Boolean).length < 2) return;
         if (esEcoDeArkey(ultimo, textoHablandoRef.current)) return;
         try { window.speechSynthesis.cancel(); } catch {}
         cambiarEstado("escuchando");
@@ -11085,7 +11104,12 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
   async function reanudarMicTrasHablarIOS() {
     if (!abiertoRef.current) return;
     cambiarEstado("escuchando");
-    await iniciarEscuchaIOS(); // ya se concedio el permiso antes, no vuelve a preguntar
+    // Si Arkey terminó de hablar solo (sin que lo interrumpieran) y la escucha había quedado
+    // armada (ver alternarEscuchaHablandoIOS), el stream ya está abierto de verdad -- reusarlo
+    // (volverAEscucharIOS) en vez de iniciarEscuchaIOS(), que pediría un stream NUEVO sin cerrar
+    // el anterior primero y lo dejaría filtrado (dos sesiones de mic abiertas a la vez).
+    if (micArmadoHablandoRef.current) volverAEscucharIOS();
+    else await iniciarEscuchaIOS(); // ya se concedio el permiso antes, no vuelve a preguntar
   }
 
   // Espera a que el navegador tenga la lista de voces cargada -- en Safari/iOS a veces esta
@@ -11167,6 +11191,39 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
     try { window.speechSynthesis.cancel(); } catch {}
     if (usaSTTNativo) volverAEscuchar();
     else reanudarMicTrasHablarIOS();
+  }
+
+  // iOS: tocar a Arkey mientras habla arma o desarma la escucha (ver micArmadoHablando arriba) --
+  // a diferencia de interrumpirHablando() (Android/Mac), esto NO corta la lectura de inmediato.
+  // Armar la escucha abre el mic, pero solo interrumpe de verdad si loopVAD() (rama "hablando",
+  // más abajo) detecta un nivel de audio sostenido -- no cualquier ruido -- para distinguir una
+  // interrupción real del propio eco de Arkey saliendo por la bocina. Desarmarla cierra el mic:
+  // así nadie lo puede interrumpir mientras sigue hablando.
+  function alternarEscuchaHablandoIOS() {
+    if (micArmadoHablandoRef.current) {
+      cambiarMicArmadoHablando(false);
+      pausarMicIOS();
+    } else {
+      cambiarMicArmadoHablando(true);
+      iniciarEscuchaIOS().then(() => {
+        // Por si el mic venía muteado de una fase de "escuchando" anterior: al armar a propósito
+        // mientras habla, debe quedar con el audio real llegando, sin importar ese mute previo.
+        try { streamRef.current?.getAudioTracks().forEach((t) => { t.enabled = true; }); } catch {}
+      });
+    }
+  }
+
+  // Toque unificado sobre Arkey -- cada plataforma interpreta "tocarlo" distinto (ver arriba).
+  function alTocarArkey() {
+    desbloquearVoz();
+    if (estadoRef.current === "hablando") {
+      if (esIOS) alternarEscuchaHablandoIOS();
+      else interrumpirHablando(); // Android/Mac: sin cambios, corta la lectura de inmediato
+    } else if (esIOS) {
+      alternarMicMuted(); // fuera de "hablando", en iOS tocar a Arkey es el mismo toggle de mutear de siempre
+    } else {
+      forzarFinTurno(); // Android/Mac: sin cambios
+    }
   }
 
   // Respaldo: escribir en vez de hablar -- corta cualquier escucha/lectura en curso y manda el
@@ -11317,15 +11374,12 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
   async function hablar(texto) {
     if (!texto || !("speechSynthesis" in window)) { volverAEscuchar(); return; }
     setErrorMsg("");
-    textoHablandoRef.current = texto; // se usa en Mac/desktop Chrome para filtrar el eco propio del barge-in, ver esEcoDeArkey() -- en Android esa rama ya no se alcanza, ver esAndroid abajo
-    if (!usaSTTNativo) await pausarMicIOS(); // suelta el mic en iOS para que el audio salga por la bocina, y espera a que cierre de verdad
+    textoHablandoRef.current = texto; // se usa en Android/Mac/desktop Chrome para filtrar el eco propio del barge-in por voz, ver esEcoDeArkey()
+    if (!usaSTTNativo) {
+      cambiarMicArmadoHablando(false); // cada turno arranca con los "oídos" cerrados por defecto -- Angel arma la escucha a propósito tocando a Arkey (ver alTocarArkey)
+      await pausarMicIOS(); // suelta el mic en iOS para que el audio salga por la bocina, y espera a que cierre de verdad
+    }
     cambiarEstado("hablando");
-    // En Android no volvemos a escuchar mientras habla (ver esAndroid más abajo) -- a petición de
-    // Angel se abandonó el intento de barge-in por voz ahí, se usa solo el botón. Si el reconocedor
-    // de la escucha anterior seguía vivo -- r.stop() es async y a veces no cierra de inmediato --
-    // sus handlers seguían activos y podían disparar la rama de barge-in igual; se apaga aquí
-    // explícitamente para no dejarlo vivo (mismo fix que ya se probó en el commit a87266f).
-    if (usaSTTNativo && esAndroid) detenerRecognitionActual();
     try {
       window.speechSynthesis.cancel();
       await vocesListas();
@@ -11349,11 +11403,15 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
       u.onend = alTerminar;
       u.onerror = (e) => { setErrorMsg(`TTS: ${e.error || "error desconocido"}`); alTerminar(); };
       window.speechSynthesis.speak(u);
-      // En el camino nativo de Mac/desktop Chrome, seguimos "escuchando" con el mismo reconocedor
-      // mientras la IA habla, para detectar una interrupción real (barge-in) -- ver r.onresult
-      // arriba, filtrado por esEcoDeArkey. En Android se desactivó (esAndroid): el único mecanismo
-      // de interrupción ahí es tocar a Arkey (interrumpirHablando), ver el botón más abajo.
-      if (usaSTTNativo && !esAndroid) iniciarEscuchaNativa();
+      // Tercer intento de barge-in por voz en Android (a petición explícita de Angel, ver
+      // android_voz_fixes_pendientes.md -- los dos intentos previos se habían abandonado). En el
+      // camino nativo (Chrome/Android/Mac), seguimos "escuchando" con el mismo reconocedor mientras
+      // la IA habla, para detectar una interrupción real -- ver r.onresult arriba, ahora filtrado
+      // por esEcoDeArkey Y limitado a resultados finales con al menos 2 palabras (más estricto que
+      // el intento anterior, para reducir falsos positivos por fragmentos sueltos del propio eco).
+      // iniciarEscuchaNativa() ya apaga cualquier reconocedor anterior como primer paso, así que es
+      // seguro llamarla aquí sin dejar nada vivo de más.
+      if (usaSTTNativo) iniciarEscuchaNativa();
     } catch { if (usaSTTNativo) volverAEscuchar(); else reanudarMicTrasHablarIOS(); }
   }
 
@@ -11458,11 +11516,11 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
 
             <div className="flex flex-col items-center gap-2 py-2">
               <div className="flex items-center gap-3">
-                {/* En Android, a petición de Angel, se quita este botón -- el reconocedor ya se
-                    reinicia solo cada pocos segundos (limitación de la sesión de reconocimiento de
-                    voz de Android, ver diagnóstico del punto 1), así que un botón aparte de mutear
-                    no aporta nada ahí. Se deja para iOS/desktop, donde sí para/reanuda el mic de verdad. */}
-                {!esAndroid && (
+                {/* En Android el botón sobra: el reconocedor ya se reinicia solo cada pocos
+                    segundos (limitación de la sesión de reconocimiento de voz de Android, ver
+                    diagnóstico del punto 1). En iOS, tocar a Arkey ahora hace lo mismo que este
+                    botón (y más, ver alTocarArkey) -- se deja centrado, solo para Mac/desktop. */}
+                {!esAndroid && !esIOS && (
                   <button
                     onClick={alternarMicMuted}
                     title={sinCreditos ? "Sin consultas disponibles este mes" : micMuted ? "Activar micrófono" : "Mutear micrófono"}
@@ -11473,13 +11531,21 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
                     {micMuted || sinCreditos ? <MicOff size={18} /> : <Mic size={18} />}
                   </button>
                 )}
-                <ArkeyRobot estado={estado} onClick={sinCreditos ? undefined : () => { desbloquearVoz(); if (estadoRef.current === "hablando") interrumpirHablando(); else forzarFinTurno(); }} />
+                <ArkeyRobot
+                  estado={estado}
+                  oidosCerrados={esIOS && estado === "hablando" && !micArmadoHablando}
+                  onClick={sinCreditos ? undefined : alTocarArkey}
+                />
               </div>
               <p className="text-xs gp-text-muted text-center">
                 {sinCreditos && "Arkey está dormido 💤"}
                 {!sinCreditos && estado === "escuchando" && "Escuchando…"}
                 {!sinCreditos && estado === "procesando" && "Pensando…"}
-                {!sinCreditos && estado === "hablando" && "Hablando… (puedes interrumpirme)"}
+                {!sinCreditos && estado === "hablando" && (
+                  esIOS
+                    ? (micArmadoHablando ? "Hablando… escuchando (tócame para que no me interrumpas)" : "Hablando… no te escucho (tócame para poder interrumpirme)")
+                    : "Hablando… (puedes interrumpirme)"
+                )}
                 {!sinCreditos && estado === "permiso" && (errorMsg || "Necesito permiso de micrófono.")}
                 {!sinCreditos && estado === "error" && (errorMsg || "Algo salió mal.")}
               </p>
