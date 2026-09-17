@@ -62,12 +62,35 @@ export function useMotorVozNativo({
 
     r.onresult = (e) => {
       if (estadoRef.current !== "escuchando") return;
-      let final = "";
+      let huboCambio = false;
       for (let i = Math.max(e.resultIndex, indiceProcesado); i < e.results.length; i++) {
-        if (e.results[i].isFinal) { final += (final ? " " : "") + e.results[i][0].transcript; indiceProcesado = i + 1; }
+        if (!e.results[i].isFinal) continue;
+        indiceProcesado = i + 1;
+        const nuevo = (e.results[i][0].transcript || "").trim();
+        if (!nuevo) continue;
+        huboCambio = true;
+        const actual = finalBufferRef.current;
+        if (!actual) {
+          finalBufferRef.current = nuevo;
+          continue;
+        }
+        const actualMin = actual.toLowerCase();
+        const nuevoMin = nuevo.toLowerCase();
+        if (nuevoMin.includes(actualMin)) {
+          // En modo continuo, Android a veces no segmenta limpio: en vez de mandar solo la
+          // palabra nueva, re-finaliza el mismo tramo completo (con ligeras correcciones) como
+          // un resultado "nuevo" -- si lo concatenáramos tal cual, el texto se repite y crece sin
+          // parar (bug reportado: "hola hola hola me estas esuchando escuchando" de un solo
+          // "hola me estás escuchando"). Si el resultado nuevo ya incluye completo lo que
+          // teníamos, es una revisión más larga del mismo tramo: se reemplaza, no se concatena.
+          finalBufferRef.current = nuevo;
+        } else if (actualMin.includes(nuevoMin)) {
+          // No aporta nada que no tuviéramos ya -- se ignora.
+        } else {
+          finalBufferRef.current = `${actual} ${nuevo}`;
+        }
       }
-      if (final.trim()) {
-        finalBufferRef.current += (finalBufferRef.current ? " " : "") + final.trim();
+      if (huboCambio && finalBufferRef.current.trim()) {
         if (timerSilencioRef.current) clearTimeout(timerSilencioRef.current);
         // Pequeña pausa antes de mandar, para no cortar al usuario si sigue hablando. Se guarda
         // en un ref (no en una variable local) para que detener() -- llamado al cerrar el panel
