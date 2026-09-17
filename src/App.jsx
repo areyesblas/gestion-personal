@@ -10510,10 +10510,6 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
   const [diasHistorial, setDiasHistorial] = useState(null); // null = no cargado; [] = cargado y vacio
   const [diaSeleccionado, setDiaSeleccionado] = useState(null);
   const [mensajesDia, setMensajesDia] = useState([]);
-  // TEMPORAL -- diagnóstico en pantalla del bug "se reactiva cada ~3s con beep" en Android (ver
-  // iniciarEscuchaNativa). Quitar junto con logDiag() y su render una vez identificada la causa.
-  const [diagLog, setDiagLog] = useState([]);
-  const diagUltimoRef = useRef(0);
 
   const estadoRef = useRef("inactivo");
   const abiertoRef = useRef(false);
@@ -10809,16 +10805,6 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
     return coincidencias / palabrasOido.length >= 0.6;
   }
 
-  // TEMPORAL -- registra un evento con el tiempo transcurrido desde el anterior, para diagnosticar
-  // en pantalla (sin necesitar cable/chrome://inspect) el patrón de reinicio de iniciarEscuchaNativa
-  // en Android. Quitar junto con diagLog/diagUltimoRef y su render una vez resuelto el punto 1.
-  function logDiag(msg) {
-    const ahora = Date.now();
-    const delta = diagUltimoRef.current ? ((ahora - diagUltimoRef.current) / 1000).toFixed(1) + "s" : "--";
-    diagUltimoRef.current = ahora;
-    setDiagLog((prev) => [...prev.slice(-9), `${msg} (+${delta})`]);
-  }
-
   // ---------- Camino Chrome/Android: SpeechRecognition nativo ----------
   // Detiene y limpia por completo la instancia de reconocimiento actual (si había una) antes de
   // crear una nueva. iniciarEscuchaNativa() se llama desde 3 sitios distintos (barge-in dentro de
@@ -10909,9 +10895,7 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
         }, 700);
       }
     };
-    r.onstart = () => { logDiag("onstart"); }; // TEMPORAL, ver logDiag arriba
     r.onerror = (e) => {
-      logDiag(`onerror ${e.error}`); // TEMPORAL, ver logDiag arriba
       if (e.error === "no-speech" || e.error === "aborted") return;
       if (e.error === "not-allowed" || e.error === "service-not-allowed") {
         cambiarEstado("permiso");
@@ -10919,7 +10903,6 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
       }
     };
     r.onend = () => {
-      logDiag("onend"); // TEMPORAL, ver logDiag arriba
       // Si seguimos abiertos y en modo escucha, se reinicia solo (el navegador a veces corta
       // el reconocimiento tras una pausa aunque continuous=true). Si el usuario muteó el mic a
       // propósito (ver alternarMicMuted), no se reinicia hasta que él mismo lo reactive.
@@ -11466,15 +11449,21 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
 
             <div className="flex flex-col items-center gap-2 py-2">
               <div className="flex items-center gap-3">
-                <button
-                  onClick={alternarMicMuted}
-                  title={sinCreditos ? "Sin consultas disponibles este mes" : micMuted ? "Activar micrófono" : "Mutear micrófono"}
-                  className="gp-btn-ghost p-2 rounded"
-                  disabled={sinCreditos}
-                  style={sinCreditos ? { opacity: 0.4, cursor: "not-allowed" } : micMuted ? { color: "#C0392B" } : undefined}
-                >
-                  {micMuted || sinCreditos ? <MicOff size={18} /> : <Mic size={18} />}
-                </button>
+                {/* En Android, a petición de Angel, se quita este botón -- el reconocedor ya se
+                    reinicia solo cada pocos segundos (limitación de la sesión de reconocimiento de
+                    voz de Android, ver diagnóstico del punto 1), así que un botón aparte de mutear
+                    no aporta nada ahí. Se deja para iOS/desktop, donde sí para/reanuda el mic de verdad. */}
+                {!esAndroid && (
+                  <button
+                    onClick={alternarMicMuted}
+                    title={sinCreditos ? "Sin consultas disponibles este mes" : micMuted ? "Activar micrófono" : "Mutear micrófono"}
+                    className="gp-btn-ghost p-2 rounded"
+                    disabled={sinCreditos}
+                    style={sinCreditos ? { opacity: 0.4, cursor: "not-allowed" } : micMuted ? { color: "#C0392B" } : undefined}
+                  >
+                    {micMuted || sinCreditos ? <MicOff size={18} /> : <Mic size={18} />}
+                  </button>
+                )}
                 <ArkeyRobot estado={estado} onClick={sinCreditos ? undefined : () => { desbloquearVoz(); if (estadoRef.current === "hablando") interrumpirHablando(); else forzarFinTurno(); }} />
               </div>
               <p className="text-xs gp-text-muted text-center">
@@ -11485,12 +11474,6 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
                 {!sinCreditos && estado === "permiso" && (errorMsg || "Necesito permiso de micrófono.")}
                 {!sinCreditos && estado === "error" && (errorMsg || "Algo salió mal.")}
               </p>
-              {/* TEMPORAL -- diagnóstico en pantalla del punto 1 (reactivación cada ~3s en Android). Quitar junto con diagLog/logDiag. */}
-              {diagLog.length > 0 && (
-                <div className="w-full text-[10px] font-mono gp-text-muted text-left px-2 py-1 rounded" style={{ background: "rgba(255,255,255,.05)", maxHeight: 90, overflowY: "auto" }}>
-                  {diagLog.map((linea, i) => <div key={i}>{linea}</div>)}
-                </div>
-              )}
               <div className="flex items-center gap-2 w-full mt-1">
                 <input
                   type="text"
