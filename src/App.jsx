@@ -11383,6 +11383,14 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
               {!sinCreditos && errorMsg && estado !== "permiso" && estado !== "error" && (
                 <p className="text-[10px] gp-text-red text-center">{errorMsg}</p>
               )}
+              {/* Temporal: barra de nivel de mic en vivo, para confirmar si el micrófono capta
+                  audio de verdad mientras Arkey habla (diagnóstico de la interrupción por voz).
+                  Quitar después. */}
+              {!sinCreditos && (
+                <div className="w-full" style={{ height: 6, background: "rgba(255,255,255,.15)", borderRadius: 3, overflow: "hidden" }}>
+                  <div style={{ height: "100%", width: `${Math.round(Math.min(1, nivelMic) * 100)}%`, background: nivelMic > 0.25 ? "#22c55e" : "#6b7280", transition: "width 60ms linear" }} />
+                </div>
+              )}
               <div className="flex items-center gap-2 w-full mt-1">
                 <input
                   type="text"
