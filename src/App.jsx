@@ -11141,6 +11141,10 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
 
   async function reanudarMicTrasHablarIOS() {
     if (!abiertoRef.current) return;
+    // La oreja se había apagado sola al entrar a "hablando" (ver hablar()) -- se restaura aquí al
+    // valor real de antes de forzarla, sea que Arkey terminó de hablar solo o lo interrumpieron
+    // con el botón boca (interrumpirVoz() llama esta función solo cuando venimos de "hablando").
+    cambiarEscuchaActiva(escuchaActivaPreHablandoRef.current);
     if (!escuchaActivaRef.current) { cambiarEstado("inactivo"); return; } // la oreja está apagada -- no reactivar solo
     cambiarEstado("escuchando");
     // El mic se queda abierto todo el tiempo mientras el panel está abierto (ver asegurarMicAbierto
@@ -11458,6 +11462,11 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
       const ok = await asegurarMicAbierto();
       if (!ok) { volverAEscuchar(); return; }
       if (!rafRef.current) loopVAD(); // por si se hubiera detenido -- normalmente ya corre desde el primer hablar() de la sesión
+      // La oreja se apaga sola mientras habla en iOS, igual que en Android (ya no escucha nada de
+      // verdad ahí desde que se quitó la interrupción automática por voz) -- se guarda el valor
+      // real de antes para restaurarlo al terminar/interrumpir, ver reanudarMicTrasHablarIOS().
+      escuchaActivaPreHablandoRef.current = escuchaActivaRef.current;
+      cambiarEscuchaActiva(false);
     }
     cambiarEstado("hablando");
     // En Android ya no volvemos a escuchar mientras habla (ver esAndroid arriba): el barge-in por
@@ -11568,40 +11577,42 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
                       const id = `hist-${i}`;
                       return (
                         <div key={i} className={`mb-2 flex ${m.rol === "usuario" ? "justify-end" : "justify-start"}`}>
-                          <div className="relative max-w-[85%] rounded-lg pl-3 pr-7 pt-6 pb-2 text-sm" style={{
+                          <div className={`relative max-w-[85%] rounded-lg px-3 py-2 text-sm ${m.rol === "asistente" ? "pr-12" : "pr-7"}`} style={{
                             background: m.rol === "usuario" ? "var(--gold)" : "var(--panel-2, rgba(255,255,255,.06))",
                             color: m.rol === "usuario" ? "#0B2341" : "inherit",
                           }}>
                             {m.contenido}
-                            <button
-                              onClick={() => copiarTexto(m.contenido, id)}
-                              title="Copiar"
-                              className="absolute top-1 right-1 opacity-60 hover:opacity-100"
-                              style={{ background: "none", border: "none", padding: 2 }}
-                            >
-                              {copiadoId === id ? <Check size={12} /> : <Copy size={12} />}
-                            </button>
-                            {m.rol === "asistente" && (
-                              mensajeReproduciendoId === id ? (
-                                <button
-                                  onClick={detenerReproduccionMensaje}
-                                  title="Detener"
-                                  className="absolute bottom-1 right-1 opacity-60 hover:opacity-100"
-                                  style={{ background: "none", border: "none", padding: 2 }}
-                                >
-                                  <Square size={12} />
-                                </button>
-                              ) : (
-                                <button
-                                  onClick={() => leerTextoMensaje(m.contenido, id)}
-                                  title="Escuchar"
-                                  className="absolute bottom-1 right-1 opacity-60 hover:opacity-100"
-                                  style={{ background: "none", border: "none", padding: 2 }}
-                                >
-                                  <Play size={12} />
-                                </button>
-                              )
-                            )}
+                            <div className="absolute bottom-1 right-1 flex items-center gap-1">
+                              <button
+                                onClick={() => copiarTexto(m.contenido, id)}
+                                title="Copiar"
+                                className="opacity-60 hover:opacity-100"
+                                style={{ background: "none", border: "none", padding: 2 }}
+                              >
+                                {copiadoId === id ? <Check size={12} /> : <Copy size={12} />}
+                              </button>
+                              {m.rol === "asistente" && (
+                                mensajeReproduciendoId === id ? (
+                                  <button
+                                    onClick={detenerReproduccionMensaje}
+                                    title="Detener"
+                                    className="opacity-60 hover:opacity-100"
+                                    style={{ background: "none", border: "none", padding: 2 }}
+                                  >
+                                    <Square size={12} />
+                                  </button>
+                                ) : (
+                                  <button
+                                    onClick={() => leerTextoMensaje(m.contenido, id)}
+                                    title="Escuchar"
+                                    className="opacity-60 hover:opacity-100"
+                                    style={{ background: "none", border: "none", padding: 2 }}
+                                  >
+                                    <Play size={12} />
+                                  </button>
+                                )
+                              )}
+                            </div>
                           </div>
                         </div>
                       );
@@ -11615,40 +11626,42 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
                   const id = `live-${i}`;
                   return (
                     <div key={i} className={`mb-2 flex ${t.rol === "usuario" ? "justify-end" : "justify-start"}`}>
-                      <div className="relative max-w-[85%] rounded-lg pl-3 pr-7 pt-6 pb-2 text-sm" style={{
+                      <div className={`relative max-w-[85%] rounded-lg px-3 py-2 text-sm ${t.rol === "asistente" ? "pr-12" : "pr-7"}`} style={{
                         background: t.rol === "usuario" ? "var(--gold)" : "var(--panel-2, rgba(255,255,255,.06))",
                         color: t.rol === "usuario" ? "#0B2341" : "inherit",
                       }}>
                         {t.texto}
-                        <button
-                          onClick={() => copiarTexto(t.texto, id)}
-                          title="Copiar"
-                          className="absolute top-1 right-1 opacity-60 hover:opacity-100"
-                          style={{ background: "none", border: "none", padding: 2 }}
-                        >
-                          {copiadoId === id ? <Check size={12} /> : <Copy size={12} />}
-                        </button>
-                        {t.rol === "asistente" && (
-                          mensajeReproduciendoId === id ? (
-                            <button
-                              onClick={detenerReproduccionMensaje}
-                              title="Detener"
-                              className="absolute bottom-1 right-1 opacity-60 hover:opacity-100"
-                              style={{ background: "none", border: "none", padding: 2 }}
-                            >
-                              <Square size={12} />
-                            </button>
-                          ) : (
-                            <button
-                              onClick={() => leerTextoMensaje(t.texto, id)}
-                              title="Escuchar"
-                              className="absolute bottom-1 right-1 opacity-60 hover:opacity-100"
-                              style={{ background: "none", border: "none", padding: 2 }}
-                            >
-                              <Play size={12} />
-                            </button>
-                          )
-                        )}
+                        <div className="absolute bottom-1 right-1 flex items-center gap-1">
+                          <button
+                            onClick={() => copiarTexto(t.texto, id)}
+                            title="Copiar"
+                            className="opacity-60 hover:opacity-100"
+                            style={{ background: "none", border: "none", padding: 2 }}
+                          >
+                            {copiadoId === id ? <Check size={12} /> : <Copy size={12} />}
+                          </button>
+                          {t.rol === "asistente" && (
+                            mensajeReproduciendoId === id ? (
+                              <button
+                                onClick={detenerReproduccionMensaje}
+                                title="Detener"
+                                className="opacity-60 hover:opacity-100"
+                                style={{ background: "none", border: "none", padding: 2 }}
+                              >
+                                <Square size={12} />
+                              </button>
+                            ) : (
+                              <button
+                                onClick={() => leerTextoMensaje(t.texto, id)}
+                                title="Escuchar"
+                                className="opacity-60 hover:opacity-100"
+                                style={{ background: "none", border: "none", padding: 2 }}
+                              >
+                                <Play size={12} />
+                              </button>
+                            )
+                          )}
+                        </div>
                       </div>
                     </div>
                   );
@@ -11659,13 +11672,14 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
             <div className="flex flex-col items-center gap-2 py-2">
               <div className="flex items-center gap-4">
                 {/* Oreja: toggle de escuchar. Reemplaza al viejo botón de mutear -- ver alternarEscuchaActiva.
-                    En Android se apaga sola y no se puede tocar mientras Arkey habla (no escucha nada
-                    de verdad ahí, ver hablar()) -- se reactiva sola al terminar o al interrumpir con 🗣️. */}
+                    En Android e iOS se apaga sola y no se puede tocar mientras Arkey habla (no escucha
+                    nada de verdad ahí, ver hablar()) -- se reactiva sola al terminar o al interrumpir
+                    con 🗣️. En Mac/desktop no aplica: ahí sigue escuchando durante "hablando". */}
                 <button
                   onClick={alternarEscuchaActiva}
                   title={sinCreditos ? "Sin consultas disponibles este mes" : escuchaActiva ? "Apagar escucha" : "Activar escucha"}
                   className="gp-btn-ghost p-2 rounded text-xl leading-none"
-                  disabled={sinCreditos || (esAndroid && estado === "hablando")}
+                  disabled={sinCreditos || ((esAndroid || esIOS) && estado === "hablando")}
                   style={sinCreditos || !escuchaActiva ? { opacity: 0.4, cursor: sinCreditos ? "not-allowed" : undefined } : undefined}
                 >
                   👂
@@ -11688,7 +11702,8 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
               </div>
               <p className="text-xs gp-text-muted text-center">
                 {sinCreditos && "Arkey está dormido 💤"}
-                {!sinCreditos && estado === "hablando" && vozActiva && "Hablando... (Para interrumpir presione el botón 🗣️)"}
+                {!sinCreditos && mensajeReproduciendoId !== null && "Hablando..."}
+                {!sinCreditos && mensajeReproduciendoId === null && estado === "hablando" && vozActiva && "Hablando... (Para interrumpir presione el botón 🗣️)"}
                 {!sinCreditos && estado === "escuchando" && escuchaActiva && "Escuchando..."}
                 {!sinCreditos && estado === "procesando" && "Pensando…"}
                 {!sinCreditos && estado === "permiso" && (errorMsg || "Necesito permiso de micrófono.")}
