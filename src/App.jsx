@@ -10769,12 +10769,21 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
   }
 
   const cerrar = () => {
-    // Antes, en iOS, se recargaba la página completa al cerrar el panel para forzar que WebKit
-    // soltara la sesión de audio del sistema (el punto de "grabando" se quedaba encendido). Se
-    // quitó: el reload hacía que Safari no reutilizara el permiso de mic ya otorgado, pidiéndolo
-    // de nuevo cada vez que se reabría el panel. Ahora se usa el mismo camino que Android/desktop
-    // -- detenerTodo() ya incluye el workaround del stream "vacío" para soltar el indicador (ver
-    // arriba), sin necesidad de recargar nada.
+    // En iOS, recargar la página completa al cerrar el panel es la única forma confiable de que
+    // WebKit suelte de verdad la sesión de audio del sistema (el punto/indicador de "grabando" se
+    // quedaba encendido sin esto -- confirmado real en el iPhone de Angel; el workaround más
+    // liviano del stream "vacío" en detenerTodo() no bastaba por sí solo). Se guarda la pantalla
+    // actual (contextoPantalla) para restaurarla justo después del reload, así no se siente como
+    // perder el lugar. Trade-off aceptado a propósito: esto puede hacer que Safari vuelva a pedir
+    // permiso de micrófono la próxima vez que se abra el panel (WebKit no siempre reutiliza el
+    // permiso ya otorgado tras un reload en una PWA instalada) -- se prioriza que el mic quede
+    // realmente apagado sobre evitar ese re-permiso.
+    if (esIOS) {
+      try { localStorage.setItem("arkeyone_reload_vista", JSON.stringify(contextoPantalla || null)); } catch {}
+      try { sessionStorage.setItem("arkeyone_skip_splash", "1"); } catch {} // ya viene de la app abierta, no hace falta ver la animación de bienvenida otra vez
+      window.location.reload();
+      return;
+    }
     detenerTodo();
     abiertoRef.current = false;
     setAbierto(false);
