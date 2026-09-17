@@ -11125,16 +11125,28 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
         if (yaTermino) return; // evita doble ejecución si el evento real llega después del respaldo
         yaTermino = true;
         if (watchdog) clearTimeout(watchdog);
-        if (usaSTTNativo) volverAEscuchar(); else reanudarMicTrasHablarIOS();
+        // Por si se llegó aquí por el respaldo (watchdog) mientras Arkey todavía estaba
+        // hablando de verdad: cancelamos la voz explícitamente ANTES de pasar a escuchar, para
+        // que el micrófono nunca arranque encimado con audio real todavía sonando (si no, se
+        // vuelve a escuchar a sí mismo -- bug reportado en Android real, Motorola G77).
+        try { window.speechSynthesis.cancel(); } catch {}
+        if (usaSTTNativo) {
+          // Pequeño respiro antes de arrancar el micrófono: cancel() detiene la síntesis en JS,
+          // pero el audio ya en el buffer del altavoz puede tardar un instante más en apagarse de
+          // verdad. Sin esta pausa, el micrófono podía alcanzar a captar esa cola de audio.
+          setTimeout(volverAEscuchar, 200);
+        } else {
+          reanudarMicTrasHablarIOS();
+        }
       };
       u.onend = alTerminar;
       u.onerror = (e) => { setErrorMsg(`TTS: ${e.error || "error desconocido"}`); alTerminar(); };
       // Respaldo solo para el camino nativo (Chrome/Android): hay un bug conocido donde
       // speechSynthesis a veces nunca dispara "onend" ahí, dejando a Arkey "hablando" para
       // siempre y sin volver a escuchar. En iOS no se ha visto ese problema, así que no se activa
-      // para no tocar su comportamiento -- si no llega ningún evento real en un tiempo generoso
-      // según la longitud del texto, se fuerza el mismo cierre de todos modos.
-      const watchdog = usaSTTNativo ? setTimeout(alTerminar, Math.max(4000, texto.length * 90)) : null;
+      // para no tocar su comportamiento. El margen es generoso a propósito (mejor tardar de más
+      // en dispararse que cortar a Arkey a media frase y luego escucharse a sí mismo).
+      const watchdog = usaSTTNativo ? setTimeout(alTerminar, Math.max(8000, texto.length * 150)) : null;
       window.speechSynthesis.speak(u);
       // Antes se dejaba el micrófono escuchando durante "hablando" para detectar una interrupción
       // (barge-in). En Android, sin audífonos, el propio audio de Arkey saliendo por la bocina se
