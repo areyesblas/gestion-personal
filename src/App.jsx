@@ -10563,15 +10563,13 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
   // apenas empieza a hablar, y se restaura al valor real de antes justo al terminar/interrumpir (ver
   // volverAEscuchar). Este ref guarda ese valor real mientras dura el forzado.
   const escuchaActivaPreHablandoRef = useRef(true);
-  // Botón boca (derecha del avatar): toque corto = corta la voz de Arkey de inmediato y se
-  // reactiva sola al soltar ("presiona para interrumpir"); mantenerlo presionado 2 segundos = se
-  // apaga de verdad y se queda así hasta que se le dé un toque (ver alPresionarBoca/alSoltarBoca).
-  // Default true al abrir el panel, no se persiste entre sesiones.
+  // Botón boca (derecha del avatar): mantenerlo presionado corta la voz de Arkey de inmediato --
+  // al soltarlo, siempre vuelve a quedar activada para lo que siga (ver alPresionarBoca/
+  // alSoltarBoca) -- no es un interruptor persistente, es "presiona para interrumpir". Default
+  // true al abrir el panel, no se persiste entre sesiones.
   const [vozActiva, setVozActiva] = useState(true);
   const vozActivaRef = useRef(true);
   const cambiarVozActiva = (v) => { vozActivaRef.current = v; setVozActiva(v); };
-  const bocaTimerRef = useRef(null); // cuenta los 2s de presión sostenida, ver alPresionarBoca/alSoltarBoca
-  const bocaApagadoPersistenteRef = useRef(false); // true = se sostuvo 2s -- se queda apagada al soltar, hasta el próximo toque
   // Qué burbuja del chat se está leyendo en voz alta con su propio botón ▶ (distinto de la
   // respuesta en vivo de Arkey, estado "hablando") -- id compuesto por vista+índice (ver render),
   // así no choca entre el historial y la conversación en curso. null = nada sonando así.
@@ -10745,8 +10743,6 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
     rafRef.current = null;
     try { window.speechSynthesis?.cancel(); } catch {}
     cambiarMensajeReproduciendoId(null); // no dejar una burbuja marcada como "sonando" para la próxima vez que se abra el panel
-    if (bocaTimerRef.current) { clearTimeout(bocaTimerRef.current); bocaTimerRef.current = null; } // no dejar el conteo de los 2s del botón boca colgado
-    bocaApagadoPersistenteRef.current = false; // que la próxima vez que se abra, la boca arranque sin quedar apagada de un toque sostenido anterior
     if (timerSilencioRef.current) { clearTimeout(timerSilencioRef.current); timerSilencioRef.current = null; } // corta el envío pendiente de lo último que se dijo, si lo había -- si no, se manda solo y reactiva el mic aunque el panel ya esté cerrado
     finalBufferRef.current = ""; // no dejar texto de un turno a medias colgado para la próxima vez que se abra el panel
     empezoHablarRef.current = null;
@@ -11263,30 +11259,16 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
     else reanudarMicTrasHablarIOS();
   }
 
-  // Botón boca, dos gestos (igual en Android/iOS/web):
-  // - Toque corto (menos de 2s sostenido): corta cualquier voz en curso de inmediato y se
-  //   reactiva sola al soltar -- "presiona para interrumpir", momentáneo.
-  // - Mantener presionado 2s completos: se apaga de verdad y se queda así al soltar, hasta que se
-  //   le dé un toque (corto) para reactivarla -- eso sí es un interruptor persistente.
+  // Botón boca: presiona-para-interrumpir, no es un interruptor persistente. Al presionarlo
+  // (onPointerDown) corta cualquier voz en curso de inmediato; al soltarlo (onPointerUp, o si el
+  // dedo se resbala fuera del botón) siempre vuelve a dejar la voz activa para lo que siga -- así
+  // nunca se queda "apagada" esperando que alguien la reactive.
   function alPresionarBoca() {
-    if (!vozActivaRef.current) {
-      // Estaba apagada de forma persistente (se sostuvo 2s la vez anterior) -- un solo toque la
-      // reactiva, sin esperar nada más ni cortar nada (no había nada sonando).
-      bocaApagadoPersistenteRef.current = false;
-      cambiarVozActiva(true);
-      return;
-    }
-    interrumpirVoz(); // corta lo que esté sonando ya, sea toque corto o el inicio de uno sostenido
-    cambiarVozActiva(false); // visual: se ve "apagada" mientras se decide si el toque fue corto o sostenido
-    bocaTimerRef.current = setTimeout(() => {
-      bocaTimerRef.current = null;
-      bocaApagadoPersistenteRef.current = true; // pasaron los 2s completos sosteniendo -- se queda apagada de verdad
-    }, 2000);
+    cambiarVozActiva(false); // solo visual mientras se mantiene presionado
+    interrumpirVoz();
   }
   function alSoltarBoca() {
-    if (bocaTimerRef.current) { clearTimeout(bocaTimerRef.current); bocaTimerRef.current = null; }
-    if (bocaApagadoPersistenteRef.current) return; // se sostuvo los 2s -- se queda apagada hasta el próximo toque
-    cambiarVozActiva(true); // toque corto -- siempre se reactiva al soltar
+    cambiarVozActiva(true);
   }
 
   // Respaldo: escribir en vez de hablar -- corta cualquier escucha/lectura en curso y manda el
@@ -11710,7 +11692,7 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
                   onPointerUp={sinCreditos ? undefined : alSoltarBoca}
                   onPointerLeave={sinCreditos ? undefined : alSoltarBoca}
                   onPointerCancel={sinCreditos ? undefined : alSoltarBoca}
-                  title={sinCreditos ? "Sin consultas disponibles este mes" : vozActiva ? "Toca para interrumpir · mantén 2s para apagar la voz" : "Toca para reactivar la voz"}
+                  title={sinCreditos ? "Sin consultas disponibles este mes" : "Mantén presionado para interrumpir a Arkey"}
                   className="gp-btn-ghost p-2 rounded text-xl leading-none touch-none"
                   disabled={sinCreditos}
                   style={sinCreditos ? { opacity: 0.4, cursor: "not-allowed" } : !vozActiva ? { opacity: 0.4 } : undefined}
