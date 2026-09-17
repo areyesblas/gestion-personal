@@ -11215,6 +11215,13 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
     setErrorMsg("");
     if (!usaSTTNativo) await pausarMicIOS(); // suelta el mic en iOS para que el audio salga por la bocina, y espera a que cierre de verdad
     cambiarEstado("hablando");
+    // En Android ya no volvemos a escuchar mientras habla (ver esAndroid más abajo), pero si el
+    // reconocedor de la escucha anterior seguía vivo -- r.stop() es async y a veces no cierra de
+    // inmediato -- sus handlers (r.onresult) seguían activos: si captaba el propio audio de Arkey
+    // saliendo por la bocina antes de terminar de cerrarse, disparaba igual el barge-in ("me
+    // interrumpieron") y cortaba el habla a medias, sonando además el beep de "empezó a escuchar"
+    // al reiniciar. Se apaga explícitamente aquí, apenas entramos a "hablando", para no dejarlo vivo.
+    if (usaSTTNativo && esAndroid) detenerRecognitionActual();
     try {
       window.speechSynthesis.cancel();
       await vocesListas();
