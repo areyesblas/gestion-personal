@@ -10510,6 +10510,10 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
   const [diasHistorial, setDiasHistorial] = useState(null); // null = no cargado; [] = cargado y vacio
   const [diaSeleccionado, setDiaSeleccionado] = useState(null);
   const [mensajesDia, setMensajesDia] = useState([]);
+  // TEMPORAL -- diagnóstico en pantalla del bug "se reactiva cada ~3s con beep" en Android (ver
+  // iniciarEscuchaNativa). Quitar junto con logDiag() y su render una vez identificada la causa.
+  const [diagLog, setDiagLog] = useState([]);
+  const diagUltimoRef = useRef(0);
 
   const estadoRef = useRef("inactivo");
   const abiertoRef = useRef(false);
@@ -10578,11 +10582,19 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
         iniciarEscuchaNativa();
       }
     } else {
-      // Camino iOS de respaldo (MediaRecorder + VAD): mutear el track real ya basta -- seguirá
-      // "grabando" pero solo silencio, así que el VAD nunca dispara un envío mientras esté muteado.
-      try { streamRef.current?.getAudioTracks().forEach((t) => { t.enabled = !nuevo; }); } catch {}
+      // Camino iOS de respaldo (MediaRecorder + VAD): antes solo se deshabilitaba el track
+      // (t.enabled = false) -- silencia el audio pero deja el stream "vivo", así que el indicador
+      // de grabación del sistema se quedaba encendido con razón. Ahora se para/reanuda la captura
+      // de verdad, igual que ya hace pausarMicIOS()/iniciarEscuchaIOS() alrededor de hablar(). Solo
+      // se actúa mientras "escuchando": en "hablando"/"procesando" el mic ya lo maneja ese otro
+      // flujo, y reabrirlo aquí de más podría silenciar la voz de Arkey (el motivo por el que
+      // pausarMicIOS existe -- ver ahí).
       empezoHablarRef.current = null;
       silencioDesdeRef.current = null;
+      if (estadoRef.current === "escuchando") {
+        if (nuevo) pausarMicIOS();
+        else iniciarEscuchaIOS();
+      }
     }
   };
 
@@ -10658,6 +10670,12 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
   // (ver hablar()/iniciarEscuchaNativa). Hoy en la práctica los iPhone reales usan el camino de
   // respaldo de abajo (MediaRecorder + VAD), donde esta variable sí se usa para sus propios ajustes.
   const esIOS = typeof navigator !== "undefined" && /iPad|iPhone|iPod/.test(navigator.userAgent || "");
+  // Se probó reactivar la escucha en Android mientras Arkey habla, filtrando su propio eco
+  // (esEcoDeArkey) para detectar una interrupción real -- a petición de Angel se abandona ese
+  // intento (ver android_voz_fixes_pendientes.md) y se vuelve a apagar solo para Android, dejando
+  // el botón de tocar a Arkey (interrumpirHablando) como único mecanismo de interrupción ahí. No
+  // se toca Mac/desktop Chrome, donde este camino nunca se reportó roto.
+  const esAndroid = typeof navigator !== "undefined" && /android/i.test(navigator.userAgent || "");
   const soportaModoVoz = usaSTTNativo || (typeof navigator !== "undefined" && navigator.mediaDevices?.getUserMedia && typeof window !== "undefined" && window.MediaRecorder);
 
   useEffect(() => () => detenerTodo(), []); // limpia todo si el componente se desmonta
@@ -10791,6 +10809,16 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
     return coincidencias / palabrasOido.length >= 0.6;
   }
 
+  // TEMPORAL -- registra un evento con el tiempo transcurrido desde el anterior, para diagnosticar
+  // en pantalla (sin necesitar cable/chrome://inspect) el patrón de reinicio de iniciarEscuchaNativa
+  // en Android. Quitar junto con diagLog/diagUltimoRef y su render una vez resuelto el punto 1.
+  function logDiag(msg) {
+    const ahora = Date.now();
+    const delta = diagUltimoRef.current ? ((ahora - diagUltimoRef.current) / 1000).toFixed(1) + "s" : "--";
+    diagUltimoRef.current = ahora;
+    setDiagLog((prev) => [...prev.slice(-9), `${msg} (+${delta})`]);
+  }
+
   // ---------- Camino Chrome/Android: SpeechRecognition nativo ----------
   // Detiene y limpia por completo la instancia de reconocimiento actual (si había una) antes de
   // crear una nueva. iniciarEscuchaNativa() se llama desde 3 sitios distintos (barge-in dentro de
@@ -10881,7 +10909,9 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
         }, 700);
       }
     };
+    r.onstart = () => { logDiag("onstart"); }; // TEMPORAL, ver logDiag arriba
     r.onerror = (e) => {
+      logDiag(`onerror ${e.error}`); // TEMPORAL, ver logDiag arriba
       if (e.error === "no-speech" || e.error === "aborted") return;
       if (e.error === "not-allowed" || e.error === "service-not-allowed") {
         cambiarEstado("permiso");
@@ -10889,6 +10919,7 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
       }
     };
     r.onend = () => {
+      logDiag("onend"); // TEMPORAL, ver logDiag arriba
       // Si seguimos abiertos y en modo escucha, se reinicia solo (el navegador a veces corta
       // el reconocimiento tras una pausa aunque continuous=true). Si el usuario muteó el mic a
       // propósito (ver alternarMicMuted), no se reinicia hasta que él mismo lo reactive.
@@ -11294,9 +11325,15 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
   async function hablar(texto) {
     if (!texto || !("speechSynthesis" in window)) { volverAEscuchar(); return; }
     setErrorMsg("");
-    textoHablandoRef.current = texto; // se usa en Android para filtrar el eco propio del barge-in, ver esEcoDeArkey()
+    textoHablandoRef.current = texto; // se usa en Mac/desktop Chrome para filtrar el eco propio del barge-in, ver esEcoDeArkey() -- en Android esa rama ya no se alcanza, ver esAndroid abajo
     if (!usaSTTNativo) await pausarMicIOS(); // suelta el mic en iOS para que el audio salga por la bocina, y espera a que cierre de verdad
     cambiarEstado("hablando");
+    // En Android no volvemos a escuchar mientras habla (ver esAndroid más abajo) -- a petición de
+    // Angel se abandonó el intento de barge-in por voz ahí, se usa solo el botón. Si el reconocedor
+    // de la escucha anterior seguía vivo -- r.stop() es async y a veces no cierra de inmediato --
+    // sus handlers seguían activos y podían disparar la rama de barge-in igual; se apaga aquí
+    // explícitamente para no dejarlo vivo (mismo fix que ya se probó en el commit a87266f).
+    if (usaSTTNativo && esAndroid) detenerRecognitionActual();
     try {
       window.speechSynthesis.cancel();
       await vocesListas();
@@ -11320,12 +11357,11 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
       u.onend = alTerminar;
       u.onerror = (e) => { setErrorMsg(`TTS: ${e.error || "error desconocido"}`); alTerminar(); };
       window.speechSynthesis.speak(u);
-      // En el camino nativo (Chrome/Android/Mac), seguimos "escuchando" con el mismo reconocedor
-      // mientras la IA habla, para poder detectar una interrupción real (barge-in) -- ver
-      // r.onresult arriba, que ahora filtra el eco de la propia voz de Arkey (esEcoDeArkey) antes
-      // de tratarlo como interrupción. iniciarEscuchaNativa() ya apaga cualquier reconocedor
-      // anterior como primer paso, así que es seguro llamarla aquí sin dejar nada vivo de más.
-      if (usaSTTNativo) iniciarEscuchaNativa();
+      // En el camino nativo de Mac/desktop Chrome, seguimos "escuchando" con el mismo reconocedor
+      // mientras la IA habla, para detectar una interrupción real (barge-in) -- ver r.onresult
+      // arriba, filtrado por esEcoDeArkey. En Android se desactivó (esAndroid): el único mecanismo
+      // de interrupción ahí es tocar a Arkey (interrumpirHablando), ver el botón más abajo.
+      if (usaSTTNativo && !esAndroid) iniciarEscuchaNativa();
     } catch { if (usaSTTNativo) volverAEscuchar(); else reanudarMicTrasHablarIOS(); }
   }
 
@@ -11449,6 +11485,12 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
                 {!sinCreditos && estado === "permiso" && (errorMsg || "Necesito permiso de micrófono.")}
                 {!sinCreditos && estado === "error" && (errorMsg || "Algo salió mal.")}
               </p>
+              {/* TEMPORAL -- diagnóstico en pantalla del punto 1 (reactivación cada ~3s en Android). Quitar junto con diagLog/logDiag. */}
+              {diagLog.length > 0 && (
+                <div className="w-full text-[10px] font-mono gp-text-muted text-left px-2 py-1 rounded" style={{ background: "rgba(255,255,255,.05)", maxHeight: 90, overflowY: "auto" }}>
+                  {diagLog.map((linea, i) => <div key={i}>{linea}</div>)}
+                </div>
+              )}
               <div className="flex items-center gap-2 w-full mt-1">
                 <input
                   type="text"
