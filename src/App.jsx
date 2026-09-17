@@ -6,7 +6,7 @@ import {
   Users, Activity, Plus, X, Trash2, Pencil, Github, ChevronDown,
   ChevronRight, Bell, Lightbulb, Rocket, MessageCircle, Mail, Globe,
   Target, Contact, BarChart3, FileText, Flame, HeartPulse, Check, Menu, PieChart as PieChartIcon,
-  PiggyBank, Camera, Film, Upload, MapPin, Clock, Mic, Gift, Receipt, Megaphone, ChevronUp, Gem, Download, Sun, Moon, Shield, LogOut, ChevronLeft, Lock, Pill, CalendarClock, Zap, StickyNote, Search, Sparkles, Send, Bot, Square, Settings, CalendarRange, Palette, Eye, EyeOff, Sliders, Volume2, Play, Copy,
+  PiggyBank, Camera, Film, Upload, MapPin, Clock, Mic, Gift, Receipt, Megaphone, ChevronUp, Gem, Download, Sun, Moon, Shield, LogOut, ChevronLeft, Lock, Pill, CalendarClock, Zap, StickyNote, Search, Sparkles, Send, Bot, Square, Settings, CalendarRange, Palette, Eye, EyeOff, Sliders, Volume2, VolumeX, Play, Copy,
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
@@ -10577,6 +10577,23 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
   const cambiarMensajeReproduciendoId = (v) => { mensajeReproduciendoIdRef.current = v; setMensajeReproduciendoId(v); };
   const [copiadoId, setCopiadoId] = useState(null); // id del mensaje cuyo botón de copiar muestra el check de "copiado" un instante
 
+  // Silenciar el audio (bocina en el header, junto al historial): simula el botón físico de
+  // silencio del dispositivo -- no toca la conversación en absoluto (el estado, el mic, la oreja,
+  // la boca siguen igual), solo pone el volumen de lo que se dice en 0. A diferencia de la oreja y
+  // la boca, SÍ se persiste entre aperturas del panel (localStorage), igual que un mute real no se
+  // olvida solo porque cerraste la app. Solo afecta utterances nuevas -- una que ya esté sonando
+  // sigue sonando hasta que termine (SpeechSynthesisUtterance.volume no se puede cambiar en vivo).
+  const [audioMuteado, setAudioMuteado] = useState(() => {
+    try { return localStorage.getItem("arkeyone_vm_mute") === "1"; } catch { return false; }
+  });
+  const audioMuteadoRef = useRef(audioMuteado);
+  function alternarAudioMuteado() {
+    const nuevo = !audioMuteadoRef.current;
+    audioMuteadoRef.current = nuevo;
+    setAudioMuteado(nuevo);
+    try { localStorage.setItem("arkeyone_vm_mute", nuevo ? "1" : "0"); } catch {}
+  }
+
   const [nivelMic, setNivelMic] = useState(0); // 0..1, para la barra visual del nivel captado por el micrófono
   const nivelAnalyserRef = useRef(null); // apunta al analyser del VAD en el camino iOS de respaldo (en el camino nativo no hay acceso al audio crudo)
   const medidorIntervalRef = useRef(null);
@@ -11343,6 +11360,7 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
     try {
       window.speechSynthesis.cancel();
       const u = new SpeechSynthesisUtterance(texto);
+      u.volume = audioMuteadoRef.current ? 0 : 1;
       const voces = window.speechSynthesis.getVoices();
       const candidatasEs = voces.filter((v) => v.lang?.toLowerCase().startsWith("es"));
       const vozEs = candidatasEs.find((v) => v.lang?.toLowerCase() === "es-mx") || candidatasEs[0];
@@ -11445,6 +11463,7 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
       // del micrófono a veces se queda mudo sin avisar. Este respiro lo evita.
       await new Promise((resolve) => setTimeout(resolve, 150));
       const u = new SpeechSynthesisUtterance(texto);
+      u.volume = audioMuteadoRef.current ? 0 : 1; // bocina del header -- silencia como el mute físico, sin tocar el resto del flujo
       // Buscar una voz en español instalada de verdad en vez de solo fijar 'lang': en Safari, si
       // no existe una voz que haga match exacto con el lang pedido, a veces se queda muda sin dar
       // ningún error (a diferencia de Chrome, que sí improvisa con la voz más cercana). Entre las
@@ -11491,6 +11510,14 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
             <div className="flex items-center justify-between mb-1">
               <h2 className="text-lg font-semibold flex items-center gap-2"><Bot size={20} className="gp-text-gold" /> Arkey</h2>
               <div className="flex items-center gap-1">
+                <button
+                  onClick={alternarAudioMuteado}
+                  title={audioMuteado ? "Activar sonido" : "Silenciar sonido"}
+                  className="gp-btn-ghost p-2 rounded"
+                  style={audioMuteado ? { color: "#C0392B" } : undefined}
+                >
+                  {audioMuteado ? <VolumeX size={16} /> : <Volume2 size={16} />}
+                </button>
                 <button onClick={abrirHistorial} title="Conversaciones anteriores" className="gp-btn-ghost p-2 rounded"><Clock size={16} /></button>
                 <button onClick={cerrar} className="gp-btn-ghost p-2 rounded"><X size={18} /></button>
               </div>
