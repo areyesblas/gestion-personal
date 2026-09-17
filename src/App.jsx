@@ -10545,6 +10545,11 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
   const [escuchaActiva, setEscuchaActiva] = useState(true);
   const escuchaActivaRef = useRef(true);
   const cambiarEscuchaActiva = (v) => { escuchaActivaRef.current = v; setEscuchaActiva(v); };
+  // Android no escucha nada mientras Arkey habla (ver hablar()/esAndroid) -- para que la oreja no
+  // muestre "encendida" sin que en realidad esté pasando nada, se apaga sola (visual y funcional)
+  // apenas empieza a hablar, y se restaura al valor real de antes justo al terminar/interrumpir (ver
+  // volverAEscuchar). Este ref guarda ese valor real mientras dura el forzado.
+  const escuchaActivaPreHablandoRef = useRef(true);
   // Botón boca (derecha del avatar): si Arkey debe leer sus respuestas en voz alta. Apagarlo
   // mientras habla la corta de inmediato (ver alternarVozActiva); apagado, las respuestas se
   // muestran solo como texto (ver enviarTurno) -- nunca se entra a estado "hablando". Default true
@@ -11005,13 +11010,17 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
       const rms = Math.sqrt(suma / buffer.length);
       const ahora = Date.now();
       // Umbral más alto mientras la IA habla: evita que su propia voz saliendo de la bocina
-      // (si el usuario no trae audífonos) dispare una interrupción falsa.
-      const UMBRAL = estadoRef.current === "hablando" ? 0.05 : 0.012;
+      // (si el usuario no trae audífonos) dispare una interrupción falsa. A petición de Angel
+      // ("que sea más sensible a la interrupción por voz"), se bajó de 0.05 a 0.032 y el tiempo
+      // sostenido que se exige antes de interrumpir de verdad, de 250ms a 140ms -- interrumpe más
+      // rápido y con menos volumen, a cambio de algo más de riesgo de falso positivo por eco.
+      const UMBRAL = estadoRef.current === "hablando" ? 0.032 : 0.012;
+      const SOSTENIDO_MS = 140;
 
       if (estadoRef.current === "hablando") {
         if (rms > UMBRAL) {
           if (!bargeInDesdeRef.current) bargeInDesdeRef.current = ahora;
-          else if (ahora - bargeInDesdeRef.current > 250) {
+          else if (ahora - bargeInDesdeRef.current > SOSTENIDO_MS) {
             bargeInDesdeRef.current = null;
             try { window.speechSynthesis.cancel(); } catch {}
             cambiarEstado("escuchando");
@@ -11168,6 +11177,12 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
   // iOS todavia vivo) -- solo reinicia la grabacion, no vuelve a pedir permiso ni abre stream nuevo.
   function volverAEscuchar() {
     if (!abiertoRef.current) return;
+    // Si venimos de "hablando" en Android, la oreja se había apagado sola (ver hablar()) -- se
+    // restaura aquí al valor real de antes de forzarla, sea que Arkey terminó de hablar solo o lo
+    // interrumpieron con el botón boca (ambos casos llegan aquí, ver interrumpirHablando()).
+    if (esAndroid && estadoRef.current === "hablando") {
+      cambiarEscuchaActiva(escuchaActivaPreHablandoRef.current);
+    }
     if (!escuchaActivaRef.current) { cambiarEstado("inactivo"); return; } // la oreja está apagada -- no reactivar solo
     cambiarEstado("escuchando");
     if (usaSTTNativo) iniciarEscuchaNativa();
@@ -11355,7 +11370,14 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
     // a veces no cierra de inmediato -- sus handlers seguían activos y podían disparar la rama de
     // barge-in igual; se apaga aquí explícitamente para no dejarlo vivo (mismo fix ya probado en el
     // commit a87266f).
-    if (usaSTTNativo && esAndroid) detenerRecognitionActual();
+    if (usaSTTNativo && esAndroid) {
+      detenerRecognitionActual();
+      // La oreja se apaga sola mientras habla en Android (no está escuchando nada de verdad, ver
+      // arriba) -- se guarda el valor real de antes para restaurarlo al terminar/interrumpir, ver
+      // volverAEscuchar().
+      escuchaActivaPreHablandoRef.current = escuchaActivaRef.current;
+      cambiarEscuchaActiva(false);
+    }
     try {
       window.speechSynthesis.cancel();
       await vocesListas();
@@ -11502,13 +11524,15 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
 
             <div className="flex flex-col items-center gap-2 py-2">
               <div className="flex items-center gap-4">
-                {/* Oreja: toggle de escuchar. Reemplaza al viejo botón de mutear -- ver alternarEscuchaActiva. */}
+                {/* Oreja: toggle de escuchar. Reemplaza al viejo botón de mutear -- ver alternarEscuchaActiva.
+                    En Android se apaga sola y no se puede tocar mientras Arkey habla (no escucha nada
+                    de verdad ahí, ver hablar()) -- se reactiva sola al terminar o al interrumpir con 🗣️. */}
                 <button
                   onClick={alternarEscuchaActiva}
                   title={sinCreditos ? "Sin consultas disponibles este mes" : escuchaActiva ? "Apagar escucha" : "Activar escucha"}
                   className="gp-btn-ghost p-2 rounded text-xl leading-none"
-                  disabled={sinCreditos}
-                  style={sinCreditos ? { opacity: 0.4, cursor: "not-allowed" } : !escuchaActiva ? { opacity: 0.4 } : undefined}
+                  disabled={sinCreditos || (esAndroid && estado === "hablando")}
+                  style={sinCreditos || !escuchaActiva ? { opacity: 0.4, cursor: sinCreditos ? "not-allowed" : undefined } : undefined}
                 >
                   👂
                 </button>
