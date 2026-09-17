@@ -10677,6 +10677,12 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
   // (ver hablar()/iniciarEscuchaNativa). Hoy en la práctica los iPhone reales usan el camino de
   // respaldo de abajo (MediaRecorder + VAD), donde esta variable sí se usa para sus propios ajustes.
   const esIOS = typeof navigator !== "undefined" && /iPad|iPhone|iPod/.test(navigator.userAgent || "");
+  // Confirmado por Angel en dispositivo real: el tercer intento de barge-in por voz en Android
+  // (esEcoDeArkey, filtrado a resultados finales de 2+ palabras) tampoco funciona -- no interrumpe.
+  // Se usa para desactivar la escucha automática durante "hablando" solo en Android (ver hablar()) y
+  // para ajustar el texto de estado (no ofrecer "habla para interrumpir" ahí). Mac/desktop Chrome
+  // sigue escuchando durante "hablando" sin cambios -- nunca se reportó roto ahí.
+  const esAndroid = typeof navigator !== "undefined" && /android/i.test(navigator.userAgent || "");
   const soportaModoVoz = usaSTTNativo || (typeof navigator !== "undefined" && navigator.mediaDevices?.getUserMedia && typeof window !== "undefined" && window.MediaRecorder);
 
   useEffect(() => () => detenerTodo(), []); // limpia todo si el componente se desmonta
@@ -11343,6 +11349,13 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
     textoHablandoRef.current = texto; // se usa para filtrar el eco propio del barge-in por voz, ver esEcoDeArkey()
     if (!usaSTTNativo) await pausarMicIOS(); // suelta el mic en iOS para que el audio salga por la bocina, y espera a que cierre de verdad
     cambiarEstado("hablando");
+    // En Android ya no volvemos a escuchar mientras habla (ver esAndroid arriba): el barge-in por
+    // voz ahí se intentó tres veces y ninguna funcionó de verdad -- confirmado por Angel en
+    // dispositivo real. Si el reconocedor de la escucha anterior seguía vivo -- r.stop() es async y
+    // a veces no cierra de inmediato -- sus handlers seguían activos y podían disparar la rama de
+    // barge-in igual; se apaga aquí explícitamente para no dejarlo vivo (mismo fix ya probado en el
+    // commit a87266f).
+    if (usaSTTNativo && esAndroid) detenerRecognitionActual();
     try {
       window.speechSynthesis.cancel();
       await vocesListas();
@@ -11366,17 +11379,13 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
       u.onend = alTerminar;
       u.onerror = (e) => { setErrorMsg(`TTS: ${e.error || "error desconocido"}`); alTerminar(); };
       window.speechSynthesis.speak(u);
-      // Tercer intento de barge-in por voz en Android (a petición explícita de Angel, ver
-      // android_voz_fixes_pendientes.md -- los dos intentos previos se habían abandonado). En el
-      // camino nativo (Chrome/Android/Mac), seguimos "escuchando" con el mismo reconocedor mientras
-      // la IA habla, para detectar una interrupción real -- ver r.onresult arriba, ahora filtrado
-      // por esEcoDeArkey Y limitado a resultados finales con al menos 2 palabras (más estricto que
-      // el intento anterior, para reducir falsos positivos por fragmentos sueltos del propio eco).
-      // iniciarEscuchaNativa() ya apaga cualquier reconocedor anterior como primer paso, así que es
-      // seguro llamarla aquí sin dejar nada vivo de más.
-      if (usaSTTNativo) {
+      // En Mac/desktop Chrome, seguimos "escuchando" con el mismo reconocedor mientras la IA habla,
+      // para detectar una interrupción real -- ver r.onresult arriba, filtrado por esEcoDeArkey. En
+      // Android se desactivó (esAndroid, ver arriba): el tercer intento tampoco funcionó de verdad
+      // en dispositivo real -- el único mecanismo de interrupción en Android queda el botón boca.
+      if (usaSTTNativo && !esAndroid) {
         iniciarEscuchaNativa();
-      } else {
+      } else if (!usaSTTNativo) {
         // A petición explícita de Angel: iOS ahora también escucha automáticamente mientras habla,
         // igual que Android/Mac (antes se necesitaba tocar el avatar para "armarlo" -- ya no existe
         // esa interacción). Reusa loopVAD() (rama "hablando", sin cambios) para distinguir una
@@ -11517,7 +11526,11 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
               </div>
               <p className="text-xs gp-text-muted text-center">
                 {sinCreditos && "Arkey está dormido 💤"}
-                {!sinCreditos && estado === "hablando" && vozActiva && "Hablando... (Para interrumpir hable o presione el botón 🗣️)"}
+                {!sinCreditos && estado === "hablando" && vozActiva && (
+                  esAndroid
+                    ? "Hablando... (Para interrumpir presione el botón 🗣️)"
+                    : "Hablando... (Para interrumpir hable o presione el botón 🗣️)"
+                )}
                 {!sinCreditos && estado === "escuchando" && escuchaActiva && "Escuchando..."}
                 {!sinCreditos && estado === "procesando" && "Pensando…"}
                 {!sinCreditos && estado === "permiso" && (errorMsg || "Necesito permiso de micrófono.")}
