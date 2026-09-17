@@ -10513,6 +10513,7 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
   const abiertoRef = useRef(false);
   const scrollRef = useRef(null); // contenedor de mensajes: se usa para auto-scroll al fondo
   const timerSilencioRef = useRef(null); // temporizador de 700ms que decide cuándo mandar lo que se dijo (ver iniciarEscuchaNativa); debe poder cancelarse desde detenerTodo()
+  const finalBufferRef = useRef(""); // texto final acumulado del turno actual (camino nativo); vive fuera del reconocedor porque cada reinicio (ver r.onend) crea uno nuevo, y debe sobrevivir a esos reinicios sin duplicarse
   const recognitionRef = useRef(null);
   const streamRef = useRef(null);
   const audioCtxRef = useRef(null);
@@ -10676,6 +10677,7 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
     rafRef.current = null;
     try { window.speechSynthesis?.cancel(); } catch {}
     if (timerSilencioRef.current) { clearTimeout(timerSilencioRef.current); timerSilencioRef.current = null; } // corta el envío pendiente de lo último que se dijo, si lo había -- si no, se manda solo y reactiva el mic aunque el panel ya esté cerrado
+    finalBufferRef.current = ""; // no dejar texto de un turno a medias colgado para la próxima vez que se abra el panel
     empezoHablarRef.current = null;
     silencioDesdeRef.current = null;
     bargeInDesdeRef.current = null;
@@ -10779,7 +10781,11 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
     r.lang = "es-MX";
     r.continuous = true;
     r.interimResults = true;
-    let finalBuffer = "";
+    // Marcador propio de hasta dónde ya se agregó a finalBufferRef, en vez de confiar a ciegas en
+    // e.resultIndex (no es confiable en Android en modo continuo). Como esta sesión es un objeto
+    // SpeechRecognition recién creado (ver detenerRecognitionActual arriba), e.results empieza
+    // vacío de verdad y arrancar en 0 es correcto.
+    let indiceProcesado = 0;
 
     r.onresult = (e) => {
       // Si la IA está hablando y detectamos cualquier voz, es una interrupción (barge-in):
@@ -10790,12 +10796,34 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
         return;
       }
       if (estadoRef.current !== "escuchando") return;
-      let final = "";
-      for (let i = e.resultIndex; i < e.results.length; i++) {
-        if (e.results[i].isFinal) final += e.results[i][0].transcript;
+      let huboCambio = false;
+      for (let i = Math.max(e.resultIndex, indiceProcesado); i < e.results.length; i++) {
+        if (!e.results[i].isFinal) continue;
+        indiceProcesado = i + 1;
+        const nuevo = (e.results[i][0].transcript || "").trim();
+        if (!nuevo) continue;
+        huboCambio = true;
+        const actual = finalBufferRef.current;
+        if (!actual) {
+          finalBufferRef.current = nuevo;
+          continue;
+        }
+        const actualMin = actual.toLowerCase();
+        const nuevoMin = nuevo.toLowerCase();
+        if (nuevoMin.includes(actualMin)) {
+          // En modo continuo, Android a veces no segmenta limpio: en vez de mandar solo la
+          // palabra nueva, re-finaliza el mismo tramo completo (con ligeras correcciones) como
+          // un resultado "final" adicional -- si se concatenara tal cual, el texto se repite y
+          // crece sin parar. Si el resultado nuevo ya incluye completo lo que teníamos, es una
+          // revisión más larga del mismo tramo: se reemplaza, no se concatena.
+          finalBufferRef.current = nuevo;
+        } else if (actualMin.includes(nuevoMin)) {
+          // No aporta nada que no tuviéramos ya -- se ignora.
+        } else {
+          finalBufferRef.current = `${actual} ${nuevo}`;
+        }
       }
-      if (final.trim()) {
-        finalBuffer += (finalBuffer ? " " : "") + final.trim();
+      if (huboCambio && finalBufferRef.current.trim()) {
         if (timerSilencioRef.current) clearTimeout(timerSilencioRef.current);
         // Pequeña pausa antes de mandar, para no cortar al usuario si sigue hablando. Se guarda
         // en un ref (no en una variable local) para que detenerTodo() -- llamado al cerrar el
@@ -10803,8 +10831,8 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
         // cerrado, y al terminar de responder reactiva el micrófono solo (bug reportado).
         timerSilencioRef.current = setTimeout(() => {
           timerSilencioRef.current = null;
-          const texto = finalBuffer.trim();
-          finalBuffer = "";
+          const texto = finalBufferRef.current.trim();
+          finalBufferRef.current = "";
           if (texto) {
             try { r.stop(); } catch {}
             enviarTurno(texto);
@@ -10823,8 +10851,11 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
       // Si seguimos abiertos y en modo escucha, se reinicia solo (el navegador a veces corta
       // el reconocimiento tras una pausa aunque continuous=true). Si el usuario muteó el mic a
       // propósito (ver alternarMicMuted), no se reinicia hasta que él mismo lo reactive.
+      // IMPORTANTE: se reinicia con un objeto SpeechRecognition NUEVO (iniciarEscuchaNativa), no
+      // llamando r.start() sobre este mismo objeto -- en Android, reusar el mismo objeto a veces
+      // no reinicia de verdad su lista interna de resultados, duplicando el texto acumulado.
       if (abiertoRef.current && estadoRef.current === "escuchando" && !micMutedRef.current) {
-        try { r.start(); } catch {}
+        iniciarEscuchaNativa();
       }
     };
     recognitionRef.current = r;
