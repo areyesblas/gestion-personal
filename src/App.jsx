@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { supabase } from "./supabaseClient";
-import { useMotorVozNativo } from "./voiceModeAndroid";
 import * as XLSX from "xlsx";
 import {
   LayoutDashboard, FolderKanban, CheckSquare, Wallet, AlertTriangle,
@@ -10412,13 +10411,17 @@ const ACCION_FUE_CONFIRMACION_PENDIENTE = (accion) => accion?.resultado?.requier
 
 // Modo Conversación: capa flotante global de voz sobre el mismo Asistente/asistente-ia de
 // siempre (no crea un chatbot aparte). Detecta la plataforma y usa dos caminos:
-//  - Chrome/Edge/Android: SpeechRecognition nativo del navegador, en modo continuo con
-//    reinicio automático — gratis y sin ida y vuelta de red extra.
-//  - Safari iOS (no soporta SpeechRecognition, ni en PWA instalada): graba con MediaRecorder
-//    y detecta el fin de cada turno con un VAD sencillo por energía (Web Audio API), luego
-//    transcribe con la función transcribir-voz (Whisper). Requiere que se haya configurado
-//    OPENAI_API_KEY como secret de Supabase; si no, el error se muestra y se ofrece el chat
-//    de texto como respaldo.
+//  - Chrome/Edge en escritorio (y cualquier otro que traiga SpeechRecognition y no sea
+//    Android): reconocimiento nativo del navegador, en modo continuo con reinicio automático
+//    -- gratis y sin ida y vuelta de red extra.
+//  - Safari iOS (no soporta SpeechRecognition, ni en PWA instalada) y Android (el
+//    reconocimiento nativo del navegador ahí resultó muy poco confiable en la práctica --
+//    duplicaba texto entre reinicios, cancel() de la voz a veces no avisaba, etc.): graba con
+//    MediaRecorder y detecta el fin de cada turno con un VAD sencillo por energía (Web Audio
+//    API), luego transcribe con la función transcribir-voz (Whisper). Tiene costo por consulta
+//    de voz (Whisper cobra por minuto de audio) y algo más de latencia que el camino nativo.
+//    Requiere que se haya configurado OPENAI_API_KEY como secret de Supabase; si no, el error
+//    se muestra y se ofrece el chat de texto como respaldo.
 // El "barge-in" (interrumpir a la IA hablando) usa el mismo micrófono ya abierto en ambos
 // caminos — no hay un modo "siempre escuchando" en segundo plano, solo mientras este panel
 // está abierto, como pide el Documento Maestro.
@@ -10433,6 +10436,9 @@ function ArkeyRobot({ estado, onClick }) {
     estado === "procesando" ? "#f59e0b" :
     estado === "dormido" ? "#4b5563" :
     "#6b7280";
+  // A propósito, "hablando" NO es clickeable: la interrupción a media respuesta es solo por voz
+  // (hablarle encima, ver loopVAD), no por toque -- decisión de Angel para que un toque accidental
+  // sobre el robot mientras Arkey habla no lo corte quien no quería interrumpirlo.
   const clickable = estado === "escuchando";
   const dormido = estado === "dormido";
 
@@ -10513,6 +10519,10 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
   const estadoRef = useRef("inactivo");
   const abiertoRef = useRef(false);
   const scrollRef = useRef(null); // contenedor de mensajes: se usa para auto-scroll al fondo
+  const timerSilencioRef = useRef(null); // temporizador de 700ms que decide cuándo mandar lo que se dijo (ver iniciarEscuchaNativa); debe poder cancelarse desde detenerTodo()
+  const finalBufferRef = useRef(""); // texto final acumulado del turno actual (camino nativo); vive fuera del reconocedor porque cada reinicio (ver r.onend) crea uno nuevo, y debe sobrevivir a esos reinicios
+  const recognitionRef = useRef(null);
+  const alTerminarHablaRef = useRef(null); // función para forzar el fin del habla actual sin esperar el evento del navegador (ver forzarFinTurno: en Android, speechSynthesis.cancel() a veces no dispara ni onend ni onerror)
   const streamRef = useRef(null);
   const audioCtxRef = useRef(null);
   const analyserRef = useRef(null);
@@ -10528,7 +10538,7 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
   const [micMuted, setMicMuted] = useState(false);
   const micMutedRef = useRef(false);
   const [nivelMic, setNivelMic] = useState(0); // 0..1, para la barra visual del nivel captado por el micrófono
-  const nivelAnalyserRef = useRef(null); // apunta al analyser activo (el de VAD en iOS de respaldo, o el paralelo del motor nativo -- ver voiceModeAndroid.js)
+  const nivelAnalyserRef = useRef(null); // apunta al analyser del VAD en el camino iOS de respaldo (en el camino nativo no hay acceso al audio crudo)
   const medidorIntervalRef = useRef(null);
 
   const cambiarEstado = (nuevo) => { estadoRef.current = nuevo; setEstado(nuevo); };
@@ -10561,16 +10571,15 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
   }
 
   // Botón de mutear micrófono: distinto del botón de silenciar voz. Aquí el objetivo es que deje
-  // de transmitirse lo que el micrófono capta -- ni se transcribe ni dispara barge-in -- y que el
-  // medidor baje a cero de verdad, hasta que el usuario lo reactive.
+  // de transmitirse lo que el micrófono capta -- ni se transcribe ni dispara barge-in.
   const alternarMicMuted = () => {
     const nuevo = !micMuted;
     cambiarMicMuted(nuevo);
     if (usaSTTNativo) {
       if (nuevo) {
-        motorAndroid.detenerEscuchaActual(); // corta ya lo que esté escuchando (turno normal o barge-in)
+        try { recognitionRef.current?.stop(); } catch {} // corta ya lo que esté escuchando (turno normal o barge-in)
       } else if (abiertoRef.current && (estadoRef.current === "escuchando" || estadoRef.current === "hablando")) {
-        motorAndroid.iniciarEscucha();
+        iniciarEscuchaNativa();
       }
     } else {
       // Camino iOS de respaldo (MediaRecorder + VAD): mutear el track real ya basta -- seguirá
@@ -10647,7 +10656,15 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
   };
 
   const SpeechRecognitionCtor = typeof window !== "undefined" && (window.SpeechRecognition || window.webkitSpeechRecognition);
-  const usaSTTNativo = !!SpeechRecognitionCtor;
+  const esAndroid = typeof navigator !== "undefined" && /Android/i.test(navigator.userAgent || "");
+  // En Android, el SpeechRecognition nativo del navegador es gratis pero salió muy poco confiable
+  // en la práctica (duplicaba texto entre reinicios, cancel() de la voz a veces no avisaba, etc.
+  // -- varios bugs distintos ya parchados uno por uno). Se decidió con Angel usar en Android el
+  // mismo camino que ya usa iOS: grabar con MediaRecorder + detectar el fin del turno por energía
+  // (VAD) + transcribir con Whisper (función transcribir-voz). Tiene costo por consulta de voz
+  // (Whisper cobra por minuto de audio) y un poco más de latencia, a cambio de comportarse igual
+  // en ambas plataformas y no depender de las inconsistencias del reconocimiento nativo de Android.
+  const usaSTTNativo = !!SpeechRecognitionCtor && !esAndroid;
   // Este Safari (iOS 26) ya trae reconocimiento de voz nativo real, pero sigue teniendo el
   // mismo conflicto de audio que el camino de grabación manual: si el micrófono se reactiva
   // mientras ARKEYONE habla (para detectar una interrupción), el audio de salida se queda mudo.
@@ -10658,7 +10675,17 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
   useEffect(() => () => detenerTodo(), []); // limpia todo si el componente se desmonta
 
   function detenerTodo() {
-    motorAndroid.detener(); // libera el reconocedor nativo y su medidor -- ver voiceModeAndroid.js
+    // Desconectamos los handlers ANTES de abortar: si no, el propio r.onend puede disparar
+    // un r.start() de auto-reinicio (ver iniciarEscuchaNativa) por una condición de carrera
+    // entre el evento asíncrono del navegador y el cierre del panel.
+    try {
+      const r = recognitionRef.current;
+      if (r) {
+        r.onresult = null; r.onerror = null; r.onend = null; r.onstart = null; r.onspeechend = null; r.onaudioend = null;
+        r.abort(); // abort() corta ya, sin esperar un resultado final como sí hace stop()
+      }
+    } catch {}
+    recognitionRef.current = null;
     try { mediaRecorderRef.current?.stop(); } catch {}
     mediaRecorderRef.current = null;
     try { streamRef.current?.getTracks().forEach((t) => t.stop()); } catch {}
@@ -10669,6 +10696,9 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
     rafRef.current = null;
     try { window.speechSynthesis?.cancel(); } catch {}
+    alTerminarHablaRef.current = null; // no dejar una función de un habla ya cerrada colgada para la próxima vez que se abra el panel
+    if (timerSilencioRef.current) { clearTimeout(timerSilencioRef.current); timerSilencioRef.current = null; } // corta el envío pendiente de lo último que se dijo, si lo había -- si no, se manda solo y reactiva el mic aunque el panel ya esté cerrado
+    finalBufferRef.current = ""; // no dejar texto de un turno a medias colgado para la próxima vez que se abra el panel
     empezoHablarRef.current = null;
     silencioDesdeRef.current = null;
     bargeInDesdeRef.current = null;
@@ -10690,6 +10720,41 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
     }
   }
 
+  // Camino de grabación (iOS/Android): abre el stream de micrófono + analyser de VAD si todavía
+  // no hay uno activo, y lo deja así -- a propósito NO se cierra entre turnos ni mientras Arkey
+  // habla (ver hablar()), para poder detectar por energía que el usuario empezó a hablar encima
+  // de él y cortarlo sin tener que tocar el robot (loopVAD, rama "hablando").
+  // Riesgo conocido y aceptado (decisión de Angel): en iOS, Safari a veces enruta la salida de
+  // audio al auricular en vez de la bocina mientras el micrófono sigue abierto, así que la voz
+  // de Arkey puede sonar muy bajito durante "hablando". Antes se evitaba esto cerrando el
+  // micrófono antes de cada respuesta hablada (ver pausarMicIOS en el historial) a costa de no
+  // tener interrupción por voz en iOS -- se decidió preferir la interrupción por voz.
+  // Llamarlo al abrir el panel (antes del saludo) también sirve para que el diálogo de permiso
+  // del sistema aparezca ANTES del saludo hablado, en vez de después.
+  async function asegurarMicAbierto() {
+    if (usaSTTNativo) return true; // el camino nativo pide su propio permiso al arrancar SpeechRecognition (ver iniciarEscuchaNativa)
+    if (streamRef.current) return true; // ya está abierto de un turno anterior
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+      stream.getAudioTracks().forEach((t) => { t.enabled = !micMutedRef.current; });
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      const ctx = new AudioCtx();
+      audioCtxRef.current = ctx;
+      const source = ctx.createMediaStreamSource(stream);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 2048;
+      source.connect(analyser);
+      analyserRef.current = analyser;
+      nivelAnalyserRef.current = analyser; // mismo analyser sirve para el VAD y para el medidor visual
+      return true;
+    } catch {
+      cambiarEstado("permiso");
+      setErrorMsg("ARKEYONE necesita permiso de micrófono para el Modo Conversación.");
+      return false;
+    }
+  }
+
   const abrir = async () => {
     setTranscripciones([{ rol: "asistente", texto: SALUDO_INICIAL }]);
     setErrorMsg("");
@@ -10702,12 +10767,14 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
       return;
     }
     iniciarMedidorVisual();
-    // En el camino nativo (Chrome/Android) no se pide micrófono aquí -- SpeechRecognition pide
-    // su propio permiso al arrancar (ver motorAndroid.iniciarEscucha, llamado dentro de hablar()).
+    // En el camino nativo (Chrome/Android/Mac) no se pide micrófono aquí -- SpeechRecognition
+    // pide su propio permiso al arrancar (ver iniciarEscuchaNativa, llamado dentro de hablar()).
     // Pedirlo dos veces por separado (un stream propio aquí + el interno de SpeechRecognition)
     // hacía que algunos Android se quedaran con dos sesiones de micrófono compitiendo entre sí
-    // y el reconocimiento nunca llegaba a escuchar de verdad. En el camino iOS de respaldo, el
-    // medidor se conecta solo al abrir su propio stream (ver iniciarEscuchaIOS).
+    // y el reconocimiento nunca llegaba a escuchar de verdad.
+    const permisoOk = await asegurarMicAbierto();
+    if (!permisoOk) return; // ya se mostró el error de permiso -- no tiene caso hablar el saludo si no vamos a poder escuchar la respuesta
+    if (!usaSTTNativo) loopVAD(); // arranca ya, para poder detectar una interrupción por voz desde el saludo mismo
     await hablar(SALUDO_INICIAL); // el saludo no gasta cuota (no llama a asistente-ia); al terminar de decirlo, pasa solo a escuchar
   };
 
@@ -10743,11 +10810,83 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
     setDiaSeleccionado(null);
   };
 
-  // Camino Chrome/Android (SpeechRecognition nativo): implementación en voiceModeAndroid.js --
-  // separada a propósito para poder seguir ajustándola sin arriesgar tocar el camino de iOS de
-  // aquí abajo (MediaRecorder + VAD + Whisper). Ver motorAndroid más abajo.
+  // ---------- Camino nativo (Chrome/Edge de escritorio, etc. -- Android ya no entra aquí): SpeechRecognition ----------
+  function iniciarEscuchaNativa() {
+    if (micMutedRef.current) return; // el micrófono está muteado a propósito: no arrancamos hasta que se reactive
+    if (sinCreditosRef.current) return; // sin consultas disponibles este mes: Arkey se queda dormido, no escucha
+    // Si ya había un reconocedor corriendo (ej. el que se deja escuchando durante "hablando" para
+    // detectar barge-in) hay que cerrarlo primero: el sistema de reconocimiento de voz de Android
+    // solo permite una sesión activa a la vez, y si se arranca una nueva sin cerrar la anterior,
+    // ninguna de las dos termina escuchando bien (y de paso suenan los tonos de inicio/fin de
+    // Android en conflicto uno con otro -- el "ruido" reportado en Android).
+    const anterior = recognitionRef.current;
+    if (anterior) {
+      try { anterior.onresult = null; anterior.onerror = null; anterior.onend = null; anterior.onstart = null; } catch {}
+      try { anterior.abort(); } catch {}
+    }
+    const r = new SpeechRecognitionCtor();
+    r.lang = "es-MX";
+    r.continuous = true;
+    r.interimResults = true;
+    // Marcador propio de hasta dónde ya se agregó a finalBufferRef, en vez de confiar a ciegas en
+    // e.resultIndex (no es confiable en Android en modo continuo). Como esta sesión es un objeto
+    // SpeechRecognition recién creado, e.results empieza vacío de verdad y arrancar en 0 es correcto.
+    let indiceProcesado = 0;
 
-  // ---------- Camino iOS Safari: MediaRecorder + VAD por energía ----------
+    r.onresult = (e) => {
+      if (estadoRef.current !== "escuchando") return;
+      let final = "";
+      for (let i = Math.max(e.resultIndex, indiceProcesado); i < e.results.length; i++) {
+        if (e.results[i].isFinal) { final += (final ? " " : "") + e.results[i][0].transcript; indiceProcesado = i + 1; }
+      }
+      if (final.trim()) {
+        finalBufferRef.current += (finalBufferRef.current ? " " : "") + final.trim();
+        if (timerSilencioRef.current) clearTimeout(timerSilencioRef.current);
+        // Pequeña pausa antes de mandar, para no cortar al usuario si sigue hablando. Se guarda
+        // en un ref (no en una variable local) para que detenerTodo() -- llamado al cerrar el
+        // panel -- pueda cancelarlo; si no, este envío se dispara igual aunque el panel ya esté
+        // cerrado, y al terminar de responder reactiva el micrófono solo (bug reportado).
+        timerSilencioRef.current = setTimeout(() => {
+          timerSilencioRef.current = null;
+          const texto = finalBufferRef.current.trim();
+          finalBufferRef.current = "";
+          if (texto) {
+            try { r.stop(); } catch {}
+            enviarTurno(texto);
+          }
+        }, 700);
+      }
+    };
+    r.onerror = (e) => {
+      if (e.error === "no-speech" || e.error === "aborted") return;
+      if (e.error === "not-allowed" || e.error === "service-not-allowed") {
+        cambiarEstado("permiso");
+        setErrorMsg("ARKEYONE necesita permiso de micrófono para el Modo Conversación.");
+        return;
+      }
+      // Cualquier otro error (ej. "audio-capture", "network"): antes se ignoraba en silencio y
+      // el panel se quedaba mostrando "Escuchando…" sin que nada funcionara de verdad. Mejor
+      // avisar y dejar que r.onend intente reiniciar solo si seguimos en modo escucha.
+      setErrorMsg(`Mic: ${e.error || "error desconocido"}`);
+    };
+    r.onend = () => {
+      // Si seguimos abiertos y en modo escucha, se reinicia solo (el navegador a veces corta
+      // el reconocimiento tras una pausa aunque continuous=true). Si el usuario muteó el mic a
+      // propósito (ver alternarMicMuted), no se reinicia hasta que él mismo lo reactive.
+      // IMPORTANTE: se reinicia con un objeto SpeechRecognition NUEVO (iniciarEscuchaNativa), no
+      // llamando r.start() sobre este mismo objeto -- en Android, reusar el mismo objeto a veces
+      // no reinicia de verdad su lista interna de resultados, y el siguiente onresult vuelve a
+      // traer resultados ya finalizados antes, duplicando el texto acumulado (bug reportado: el
+      // texto se repetía y crecía sin parar). Un objeto nuevo garantiza que sí empieza de cero.
+      if (abiertoRef.current && estadoRef.current === "escuchando" && !micMutedRef.current) {
+        iniciarEscuchaNativa();
+      }
+    };
+    recognitionRef.current = r;
+    try { r.start(); } catch { cambiarEstado("error"); setErrorMsg("No se pudo iniciar el micrófono."); }
+  }
+
+  // ---------- Camino de grabación (iOS Safari y Android): MediaRecorder + VAD por energía ----------
   function mimeTypeSoportado() {
     const candidatos = ["audio/mp4", "audio/webm;codecs=opus", "audio/webm"];
     for (const c of candidatos) {
@@ -10758,25 +10897,10 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
 
   async function iniciarEscuchaIOS() {
     if (sinCreditosRef.current) return; // sin consultas disponibles este mes: Arkey se queda dormido, no escucha
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      streamRef.current = stream;
-      stream.getAudioTracks().forEach((t) => { t.enabled = !micMutedRef.current; });
-      const AudioCtx = window.AudioContext || window.webkitAudioContext;
-      const ctx = new AudioCtx();
-      audioCtxRef.current = ctx;
-      const source = ctx.createMediaStreamSource(stream);
-      const analyser = ctx.createAnalyser();
-      analyser.fftSize = 2048;
-      source.connect(analyser);
-      analyserRef.current = analyser;
-      nivelAnalyserRef.current = analyser; // mismo analyser sirve para el VAD y para el medidor visual
-      iniciarSegmentoGrabacion();
-      loopVAD();
-    } catch {
-      cambiarEstado("permiso");
-      setErrorMsg("ARKEYONE necesita permiso de micrófono para el Modo Conversación.");
-    }
+    const ok = await asegurarMicAbierto(); // normalmente ya está abierto desde el turno anterior -- ver su comentario
+    if (!ok) return; // ya se mostró el error de permiso
+    iniciarSegmentoGrabacion();
+    if (!rafRef.current) loopVAD(); // por si el loop se hubiera detenido por alguna razón -- normalmente ya está corriendo desde abrir()
   }
 
   function iniciarSegmentoGrabacion() {
@@ -10817,8 +10941,11 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
           else if (ahora - bargeInDesdeRef.current > 250) {
             bargeInDesdeRef.current = null;
             try { window.speechSynthesis.cancel(); } catch {}
-            cambiarEstado("escuchando");
-            iniciarSegmentoGrabacion();
+            // Mismo mecanismo que tocar el robot (forzarFinTurno): usa el alTerminar de hablar()
+            // en vez de cambiar el estado a mano, para no pelearse con el respaldo por
+            // temporizador de hablar() (evita arrancar dos veces la escucha si cancel() también
+            // dispara el onerror de la utterance).
+            alTerminarHablaRef.current?.();
           }
         } else {
           bargeInDesdeRef.current = null;
@@ -10885,24 +11012,6 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
     iniciarSegmentoGrabacion();
   }
 
-  // En iOS, mientras el microfono sigue abierto (lo necesitamos para el barge-in), Safari a
-  // veces enruta la salida de audio al auricular en vez de la bocina -- se oye casi nada salvo
-  // que el telefono este pegado al oido. Por eso, justo antes de que ARKEYONE hable, soltamos
-  // el microfono por completo (para forzar la ruta normal de audio) y lo volvemos a abrir al
-  // terminar. Efecto secundario aceptado: en iOS no hay barge-in mientras la IA esta hablando
-  // (en Chrome/Android si sigue habiendo, porque ese camino no depende de audio del dispositivo).
-  async function pausarMicIOS() {
-    try { mediaRecorderRef.current?.stop(); } catch {}
-    mediaRecorderRef.current = null;
-    if (rafRef.current) cancelAnimationFrame(rafRef.current);
-    rafRef.current = null;
-    try { streamRef.current?.getTracks().forEach((t) => t.stop()); } catch {}
-    streamRef.current = null;
-    try { await audioCtxRef.current?.close(); } catch {} // esperamos de verdad a que cierre, si no iOS puede tardar en soltar la sesion de audio de grabacion
-    audioCtxRef.current = null;
-    analyserRef.current = null;
-  }
-
   async function reanudarMicTrasHablarIOS() {
     if (!abiertoRef.current) return;
     cambiarEstado("escuchando");
@@ -10960,17 +11069,19 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
   function volverAEscuchar() {
     if (!abiertoRef.current) return;
     cambiarEstado("escuchando");
-    if (usaSTTNativo) motorAndroid.iniciarEscucha();
+    if (usaSTTNativo) iniciarEscuchaNativa();
     else volverAEscucharIOS();
   }
 
   // Respaldo manual: si la deteccion automatica de silencio no funciona bien en el microfono
   // de este dispositivo (cada telefono es distinto), tocar el circulo mientras esta "escuchando"
-  // corta el turno ahi mismo y lo manda, en vez de quedarse grabando para siempre.
+  // corta el turno ahi mismo y lo manda, en vez de quedarse grabando para siempre. Tocarlo
+  // mientras Arkey está "hablando" lo interrumpe -- el micrófono ya no escucha solo mientras
+  // habla (ver hablar()), así que esta es la única forma de cortarlo a medio turno.
   function forzarFinTurno() {
-    if (estadoRef.current !== "escuchando") return;
+    if (estadoRef.current !== "escuchando") return; // interrumpir a Arkey hablando es solo por voz (loopVAD), no por toque -- ver ArkeyRobot
     if (usaSTTNativo) {
-      motorAndroid.detenerEscuchaActual(); // dispara el ultimo resultado final pendiente y sigue el flujo normal
+      try { recognitionRef.current?.stop(); } catch {} // dispara el ultimo resultado final pendiente y sigue el flujo normal
     } else {
       finalizarSegmentoYEnviar();
     }
@@ -10982,7 +11093,7 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
   const enviarTextoManual = () => {
     const t = textoManual.trim();
     if (!t) return;
-    motorAndroid.detenerEscuchaActual();
+    try { recognitionRef.current?.stop(); } catch {}
     try { window.speechSynthesis.cancel(); } catch {}
     setTextoManual("");
     enviarTurno(t);
@@ -11036,21 +11147,11 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
   // Se agotaron las consultas del mes: Arkey "se duerme" -- el micrófono se bloquea por completo
   // y no vuelve a arrancar solo, hasta que exista un botón de créditos extra (fase futura).
   const sinCreditos = !!uso && uso.limite != null && uso.usadas >= uso.limite;
-  const sinCreditosRef = useRef(false); // se lee desde funciones con closures viejas (ej. el motor nativo) que no ven el re-render todavía
+  const sinCreditosRef = useRef(false); // se lee desde funciones con closures viejas (ej. iniciarEscuchaNativa) que no ven el re-render todavía
   useEffect(() => { sinCreditosRef.current = sinCreditos; }, [sinCreditos]);
-
-  // Motor de voz del camino nativo del navegador (Chrome/Edge de escritorio, Android) -- ver
-  // voiceModeAndroid.js. Separado a propósito: es el camino que más bugs específicos de Android
-  // dio, así que vive en su propio archivo para poder seguir ajustándolo sin arriesgar tocar el
-  // camino de iOS (MediaRecorder + VAD + Whisper, más abajo en este mismo archivo, intacto).
-  const motorAndroid = useMotorVozNativo({
-    SpeechRecognitionCtor, micMutedRef, sinCreditosRef, estadoRef, abiertoRef,
-    cambiarEstado, setErrorMsg, enviarTurno,
-  });
-
   useEffect(() => {
     if (!sinCreditos) return;
-    motorAndroid.detenerEscuchaActual();
+    try { recognitionRef.current?.stop(); } catch {}
     try { window.speechSynthesis?.cancel(); } catch {}
     cambiarEstado("dormido");
   }, [sinCreditos]);
@@ -11102,7 +11203,15 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
   async function hablar(texto) {
     if (!texto || !("speechSynthesis" in window)) { volverAEscuchar(); return; }
     setErrorMsg("");
-    if (!usaSTTNativo) await pausarMicIOS(); // suelta el mic en iOS para que el audio salga por la bocina, y espera a que cierre de verdad
+    if (!usaSTTNativo) {
+      // El micrófono se queda abierto a propósito durante "hablando" (ver asegurarMicAbierto):
+      // solo se detiene la grabación del turno anterior si seguía activa por alguna razón (lo
+      // normal es que finalizarSegmentoYEnviar ya la haya parado antes de llegar aquí).
+      try { mediaRecorderRef.current?.stop(); } catch {}
+      mediaRecorderRef.current = null;
+      const ok = await asegurarMicAbierto();
+      if (!ok) { volverAEscuchar(); return; }
+    }
     cambiarEstado("hablando");
     try {
       window.speechSynthesis.cancel();
@@ -11123,44 +11232,29 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
         || candidatasEs.find((v) => /enhanced|premium|neural/i.test(v.name || ""))
         || candidatasEs[0];
       if (vozEs) { u.voice = vozEs; u.lang = vozEs.lang; } else { u.lang = "es-MX"; }
-      // IMPORTANTE: la rama else (iOS) de acá abajo debe quedar SIEMPRE igual a como estaba antes
-      // de que empezáramos a tocar el camino de Android -- nada de guards ni cancel() extra ahí,
-      // ni siquiera "inofensivos". Todo lo nuevo (respaldo por temporizador, evitar que el mic
-      // arranque con audio de Arkey todavía sonando) vive exclusivamente en la rama usaSTTNativo.
       let yaTermino = false;
       const alTerminar = () => {
-        if (usaSTTNativo) {
-          if (yaTermino) return; // evita doble ejecución si el evento real llega después del respaldo
-          yaTermino = true;
-          if (watchdog) clearTimeout(watchdog);
-          // Por si se llegó aquí por el respaldo (watchdog) mientras Arkey todavía estaba
-          // hablando de verdad: cancelamos la voz explícitamente ANTES de pasar a escuchar, para
-          // que el micrófono nunca arranque encimado con audio real todavía sonando (si no, se
-          // vuelve a escuchar a sí mismo -- bug reportado en Android real, Motorola G77).
-          try { window.speechSynthesis.cancel(); } catch {}
-          // Pequeño respiro antes de arrancar el micrófono: cancel() detiene la síntesis en JS,
-          // pero el audio ya en el buffer del altavoz puede tardar un instante más en apagarse de
-          // verdad. Sin esta pausa, el micrófono podía alcanzar a captar esa cola de audio.
-          setTimeout(volverAEscuchar, 200);
-        } else {
-          reanudarMicTrasHablarIOS();
-        }
+        if (yaTermino) return; // evita doble ejecución si el evento real llega después del respaldo (o de un toque manual, ver forzarFinTurno)
+        yaTermino = true;
+        clearTimeout(watchdog);
+        alTerminarHablaRef.current = null;
+        if (usaSTTNativo) volverAEscuchar(); else reanudarMicTrasHablarIOS();
       };
+      alTerminarHablaRef.current = alTerminar; // permite a forzarFinTurno cortar YA, sin depender de que el navegador dispare onend/onerror
       u.onend = alTerminar;
       u.onerror = (e) => { setErrorMsg(`TTS: ${e.error || "error desconocido"}`); alTerminar(); };
-      // Respaldo solo para el camino nativo (Chrome/Android): hay un bug conocido donde
-      // speechSynthesis a veces nunca dispara "onend" ahí, dejando a Arkey "hablando" para
-      // siempre y sin volver a escuchar. En iOS no se ha visto ese problema, así que no se activa
-      // para no tocar su comportamiento. El margen es generoso a propósito (mejor tardar de más
-      // en dispararse que cortar a Arkey a media frase y luego escucharse a sí mismo).
-      const watchdog = usaSTTNativo ? setTimeout(alTerminar, Math.max(8000, texto.length * 150)) : null;
+      // Respaldo: en Chrome/Android hay un bug conocido donde speechSynthesis a veces nunca
+      // dispara "onend" (se queda "hablando" sin avisar), y entonces nunca se vuelve a escuchar.
+      // Si no llega ningún evento real en un tiempo generoso según la longitud del texto, se
+      // fuerza el mismo cierre de todos modos.
+      const watchdog = setTimeout(alTerminar, Math.max(4000, texto.length * 90));
       window.speechSynthesis.speak(u);
       // Antes se dejaba el micrófono escuchando durante "hablando" para detectar una interrupción
       // (barge-in). En Android, sin audífonos, el propio audio de Arkey saliendo por la bocina se
       // vuelve a captar por el micrófono: la app se "auto-interrumpía", transcribía su propia voz
-      // como si fuera el usuario, respondía a eso, se auto-interrumpía otra vez, y así sin parar.
-      // Por eso el micrófono se queda apagado mientras Arkey habla, y solo arranca a escuchar de
-      // verdad cuando termina (alTerminar).
+      // como si fuera el usuario, respondía a eso, se auto-interrumpía otra vez, y así sin parar
+      // (el bug reportado de "escucha todo y se vuelve loco"). Por eso ahora el micrófono se queda
+      // apagado mientras Arkey habla, y solo arranca a escuchar de verdad cuando termina (alTerminar).
     } catch { if (usaSTTNativo) volverAEscuchar(); else reanudarMicTrasHablarIOS(); }
   }
 
