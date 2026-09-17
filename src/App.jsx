@@ -10782,8 +10782,9 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
     // Pedirlo dos veces por separado (un stream propio aquí + el interno de SpeechRecognition)
     // hacía que algunos Android se quedaran con dos sesiones de micrófono compitiendo entre sí
     // y el reconocimiento nunca llegaba a escuchar de verdad ("saluda pero no escucha"). En el
-    // camino iOS de respaldo, el medidor se conecta solo al abrir su propio stream (ver
-    // iniciarEscuchaIOS).
+    // camino iOS de respaldo, hablar() abre el micrófono (asegurarMicAbierto) antes de decir el
+    // saludo -- así el diálogo de permiso del sistema aparece ANTES del saludo hablado, y ese
+    // mismo stream se queda abierto el resto de la sesión (ver el comentario en asegurarMicAbierto).
     await hablar(SALUDO_INICIAL); // el saludo no gasta cuota (no llama a asistente-ia); al terminar de decirlo, pasa solo a escuchar
   };
 
@@ -10971,13 +10972,20 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
     return "";
   }
 
-  async function iniciarEscuchaIOS() {
-    if (!escuchaActivaRef.current) return; // la oreja está apagada -- no arrancamos hasta que se reactive (ver alternarEscuchaActiva)
-    if (sinCreditosRef.current) return; // sin consultas disponibles este mes: Arkey se queda dormido, no escucha
+  // El micrófono se abre una sola vez y se queda abierto mientras el panel siga abierto -- no se
+  // cierra ni se reabre en cada respuesta de Arkey. Antes sí se cerraba y reabría alrededor de
+  // cada "hablando" (ver pausarMicIOS/git), lo que dejaba un hueco real de tiempo -- el de pedir
+  // getUserMedia y armar el AudioContext de cero -- durante el cual no había nada escuchando: por
+  // eso la interrupción por voz se sentía poco sensible aunque se bajara el umbral. Trade-off
+  // aceptado de nuevo por Angel (como al principio, antes de que existiera pausarMicIOS): con el
+  // mic siempre abierto, a veces Safari puede enrutar el audio distinto y la voz de Arkey sonar
+  // más bajito.
+  async function asegurarMicAbierto() {
+    if (streamRef.current?.getAudioTracks().some((t) => t.readyState === "live")) return true; // ya está abierto de antes
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
-      stream.getAudioTracks().forEach((t) => { t.enabled = true; }); // si llegamos aquí, escuchaActivaRef ya es true -- siempre debe quedar con audio real
+      stream.getAudioTracks().forEach((t) => { t.enabled = true; });
       const AudioCtx = window.AudioContext || window.webkitAudioContext;
       const ctx = new AudioCtx();
       audioCtxRef.current = ctx;
@@ -10987,12 +10995,22 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
       source.connect(analyser);
       analyserRef.current = analyser;
       nivelAnalyserRef.current = analyser; // mismo analyser sirve para el VAD y para el medidor visual
-      iniciarSegmentoGrabacion();
-      loopVAD();
+      return true;
     } catch {
       cambiarEstado("permiso");
       setErrorMsg("ARKEYONE necesita permiso de micrófono para el Modo Conversación.");
+      return false;
     }
+  }
+
+  async function iniciarEscuchaIOS() {
+    if (!escuchaActivaRef.current) return false; // la oreja está apagada -- no arrancamos hasta que se reactive (ver alternarEscuchaActiva)
+    if (sinCreditosRef.current) return false; // sin consultas disponibles este mes: Arkey se queda dormido, no escucha
+    const ok = await asegurarMicAbierto();
+    if (!ok) return false;
+    iniciarSegmentoGrabacion();
+    if (!rafRef.current) loopVAD(); // por si el loop se hubiera detenido -- normalmente ya corre desde abrir()
+    return true;
   }
 
   function iniciarSegmentoGrabacion() {
@@ -11106,11 +11124,13 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
     iniciarSegmentoGrabacion();
   }
 
-  // En iOS, mientras el microfono sigue abierto, Safari a veces enruta la salida de audio al
-  // auricular en vez de la bocina -- se oye casi nada salvo que el telefono este pegado al oido.
-  // Por eso, justo antes de que ARKEYONE empiece a hablar, soltamos el microfono por completo
-  // (para forzar la ruta normal de audio) -- hablar() lo vuelve a abrir apenas arranca speak(),
-  // aceptando el riesgo de que a veces esto silencie la voz (decisión explícita de Angel).
+  // Cierre completo del micrófono en iOS -- YA NO se llama automáticamente antes de cada
+  // hablar() (eso fue lo que hacía sentir poco sensible la interrupción por voz: reabrir de cero
+  // tarda un rato real durante el cual no hay nada escuchando, ver asegurarMicAbierto). Ahora solo
+  // se usa para el apagado explícito de la oreja (alternarEscuchaActiva) y para el cierre completo
+  // del panel (detenerTodo). Efecto secundario aceptado de nuevo (decisión explícita de Angel):
+  // con el mic siempre abierto mientras Arkey habla, Safari a veces enruta el audio al auricular
+  // en vez de la bocina y la voz de Arkey puede sonar más bajito.
   async function pausarMicIOS() {
     try { mediaRecorderRef.current?.stop(); } catch {}
     mediaRecorderRef.current = null;
@@ -11127,11 +11147,11 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
     if (!abiertoRef.current) return;
     if (!escuchaActivaRef.current) { cambiarEstado("inactivo"); return; } // la oreja está apagada -- no reactivar solo
     cambiarEstado("escuchando");
-    // Si Arkey terminó de hablar (solo, o porque lo interrumpieron) el mic ya estaba abierto de
-    // verdad desde hablar() (escucha automática durante "hablando", ver ahí) -- reusar ese stream
-    // (volverAEscucharIOS) en vez de pedir uno nuevo, que lo dejaría filtrado (dos sesiones de mic
-    // abiertas a la vez). Si por lo que sea no quedó un stream vivo (ej. falló al abrirlo durante
-    // "hablando"), se pide uno nuevo.
+    // El mic se queda abierto todo el tiempo mientras el panel está abierto (ver asegurarMicAbierto
+    // en hablar()) -- reusar ese stream (volverAEscucharIOS) en vez de pedir uno nuevo, que lo
+    // dejaría filtrado (dos sesiones de mic abiertas a la vez). Si por lo que sea no quedó un
+    // stream vivo (ej. falló al abrirlo, o la oreja estaba apagada y se acaba de reactivar), se
+    // pide uno nuevo.
     const vivo = streamRef.current?.getAudioTracks().some((t) => t.readyState === "live");
     if (vivo) volverAEscucharIOS();
     else await iniciarEscuchaIOS(); // ya se concedio el permiso antes, no vuelve a preguntar
@@ -11396,7 +11416,17 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
     if (!texto || !("speechSynthesis" in window)) { volverAEscuchar(); return; }
     setErrorMsg("");
     textoHablandoRef.current = texto; // se usa para filtrar el eco propio del barge-in por voz, ver esEcoDeArkey()
-    if (!usaSTTNativo) await pausarMicIOS(); // suelta el mic en iOS para que el audio salga por la bocina, y espera a que cierre de verdad
+    if (!usaSTTNativo) {
+      // El micrófono se queda abierto a propósito mientras Arkey habla (ver asegurarMicAbierto) --
+      // ya no se cierra antes de hablar ni se reabre después. Solo se para la grabación del turno
+      // anterior si seguía activa por alguna razón (lo normal es que el flujo de silencio ya la
+      // haya parado antes de llegar aquí).
+      try { mediaRecorderRef.current?.stop(); } catch {}
+      mediaRecorderRef.current = null;
+      const ok = await asegurarMicAbierto();
+      if (!ok) { volverAEscuchar(); return; }
+      if (!rafRef.current) loopVAD(); // por si se hubiera detenido -- normalmente ya corre desde el primer hablar() de la sesión
+    }
     cambiarEstado("hablando");
     // En Android ya no volvemos a escuchar mientras habla (ver esAndroid arriba): el barge-in por
     // voz ahí se intentó tres veces y ninguna funcionó de verdad -- confirmado por Angel en
@@ -11439,17 +11469,11 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
       // para detectar una interrupción real -- ver r.onresult arriba, filtrado por esEcoDeArkey. En
       // Android se desactivó (esAndroid, ver arriba): el tercer intento tampoco funcionó de verdad
       // en dispositivo real -- el único mecanismo de interrupción en Android queda el botón boca.
-      if (usaSTTNativo && !esAndroid) {
-        iniciarEscuchaNativa();
-      } else if (!usaSTTNativo) {
-        // A petición explícita de Angel: iOS ahora también escucha automáticamente mientras habla,
-        // igual que Android/Mac (antes se necesitaba tocar el avatar para "armarlo" -- ya no existe
-        // esa interacción). Reusa loopVAD() (rama "hablando", sin cambios) para distinguir una
-        // interrupción real del propio eco por la bocina -- riesgo conocido y aceptado: reabrir el
-        // mic mientras habla a veces silencia la voz de Arkey en Safari. iniciarEscuchaIOS() ya
-        // revisa la oreja (escuchaActivaRef) por su cuenta antes de arrancar, ver ahí.
-        iniciarEscuchaIOS();
-      }
+      // En iOS no hace falta hacer nada aquí: el mic y el analyser de loopVAD ya están corriendo
+      // desde antes de speak() (ver asegurarMicAbierto arriba) -- la rama "hablando" de loopVAD ya
+      // está escuchando de verdad desde el primer instante, sin el hueco que había antes al pedir
+      // el stream de cero después de hablar.
+      if (usaSTTNativo && !esAndroid) iniciarEscuchaNativa();
     } catch { if (usaSTTNativo) volverAEscuchar(); else reanudarMicTrasHablarIOS(); }
   }
 
