@@ -10445,6 +10445,8 @@ function ArkeyRobot({ estado }) {
         @keyframes arkey-blink { 0%,92%,100% { transform: scaleY(1); } 96% { transform: scaleY(.15); } }
         @keyframes arkey-pensar { 0%,100% { opacity: .25; } 50% { opacity: 1; } }
         @keyframes arkey-pie-tap { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
+        @keyframes arkey-brazo-izq-mov { 0%,100% { transform: rotate(-10deg); } 50% { transform: rotate(20deg); } }
+        @keyframes arkey-brazo-der-mov { 0%,100% { transform: rotate(10deg); } 50% { transform: rotate(-20deg); } }
         .arkey-grupo { animation: ${estado === "escuchando" ? "arkey-bounce 1.6s ease-in-out infinite" : "none"}; transform-origin: center; }
         .arkey-antena-punta { animation: ${estado === "escuchando" || estado === "hablando" ? "arkey-antena 1s ease-in-out infinite" : "none"}; transform-origin: center; }
         .arkey-ojo { animation: arkey-blink 4s ease-in-out infinite; transform-origin: center; }
@@ -10454,6 +10456,8 @@ function ArkeyRobot({ estado }) {
         .arkey-punto3 { animation: arkey-pensar 1s ease-in-out .4s infinite; }
         .arkey-pie-izq { animation: ${estado === "hablando" ? "arkey-pie-tap .5s ease-in-out infinite" : "none"}; transform-origin: center; }
         .arkey-pie-der { animation: ${estado === "hablando" ? "arkey-pie-tap .5s ease-in-out infinite .25s" : "none"}; transform-origin: center; }
+        .arkey-brazo-izq { animation: ${estado === "hablando" ? "arkey-brazo-izq-mov .6s ease-in-out infinite" : "none"}; }
+        .arkey-brazo-der { animation: ${estado === "hablando" ? "arkey-brazo-der-mov .6s ease-in-out infinite .3s" : "none"}; }
       `}</style>
       <svg width="118" height="147" viewBox="0 0 120 150" className="arkey-grupo">
         {/* antenas */}
@@ -10491,6 +10495,16 @@ function ArkeyRobot({ estado }) {
         ) : (
           <rect x="52" y="77" width="16" height="2.5" rx="1.25" fill="var(--gold)" opacity=".7" />
         )}
+        {/* brazos + manitas: cada uno gira desde el hombro (transform-origin en el punto donde
+            pegan al cuerpo) para poder "gesticular" mientras habla */}
+        <g className="arkey-brazo-izq" transform-origin="18 52">
+          <rect x="2" y="47" width="18" height="10" rx="5" fill={colorCuerpo} />
+          <circle cx="6" cy="52" r="6.5" fill={colorCuerpo} />
+        </g>
+        <g className="arkey-brazo-der" transform-origin="102 52">
+          <rect x="100" y="47" width="18" height="10" rx="5" fill={colorCuerpo} />
+          <circle cx="114" cy="52" r="6.5" fill={colorCuerpo} />
+        </g>
         {/* piernas + tenis blancos: cada una en su propio grupo para poder "taconear" al hablar */}
         <g className="arkey-pie-izq">
           <rect x="35" y="102" width="14" height="24" rx="6" fill={colorCuerpo} />
@@ -11010,12 +11024,13 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
       const rms = Math.sqrt(suma / buffer.length);
       const ahora = Date.now();
       // Umbral más alto mientras la IA habla: evita que su propia voz saliendo de la bocina
-      // (si el usuario no trae audífonos) dispare una interrupción falsa. A petición de Angel
-      // ("que sea más sensible a la interrupción por voz"), se bajó de 0.05 a 0.032 y el tiempo
-      // sostenido que se exige antes de interrumpir de verdad, de 250ms a 140ms -- interrumpe más
-      // rápido y con menos volumen, a cambio de algo más de riesgo de falso positivo por eco.
-      const UMBRAL = estadoRef.current === "hablando" ? 0.032 : 0.012;
-      const SOSTENIDO_MS = 140;
+      // (si el usuario no trae audífonos) dispare una interrupción falsa. Segunda vuelta de ajuste
+      // a petición de Angel ("sigue sin sentirse suficientemente sensible"): de 0.032 a 0.018 (ya
+      // muy cerca del umbral normal de 0.012) y de 140ms a 80ms sostenidos -- casi cualquier voz
+      // real la corta casi de inmediato. Si ahora se auto-interrumpe con su propio eco sin
+      // audífonos, ese es el próximo síntoma a esperar -- hay que subir estos números de nuevo.
+      const UMBRAL = estadoRef.current === "hablando" ? 0.018 : 0.012;
+      const SOSTENIDO_MS = 80;
 
       if (estadoRef.current === "hablando") {
         if (rms > UMBRAL) {
