@@ -11192,16 +11192,35 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
   // iOS todavia vivo) -- solo reinicia la grabacion, no vuelve a pedir permiso ni abre stream nuevo.
   function volverAEscuchar() {
     if (!abiertoRef.current) return;
+    // Esta función puede llegar a llamarse dos veces seguidas para el mismo fin de turno (ej.
+    // interrumpirHablando() la llama directo, y el cancel() que hace ahí puede además disparar
+    // u.onend/u.onerror -> alTerminar() -> esta misma función otra vez) -- si la primera ya nos dejó
+    // "escuchando", ignorar la segunda en vez de reiniciar el reconocedor de nuevo sin necesidad
+    // (en Android, reiniciar el reconocedor dos veces casi seguidas es justo el patrón que históricamente
+    // lo ha dejado "escuchando" sin captar audio real).
+    if (estadoRef.current === "escuchando") return;
     // Si venimos de "hablando" en Android, la oreja se había apagado sola (ver hablar()) -- se
     // restaura aquí al valor real de antes de forzarla, sea que Arkey terminó de hablar solo o lo
     // interrumpieron con el botón boca (ambos casos llegan aquí, ver interrumpirHablando()).
-    if (esAndroid && estadoRef.current === "hablando") {
+    const veniaDeHablarAndroid = esAndroid && estadoRef.current === "hablando";
+    if (veniaDeHablarAndroid) {
       cambiarEscuchaActiva(escuchaActivaPreHablandoRef.current);
     }
     if (!escuchaActivaRef.current) { cambiarEstado("inactivo"); return; } // la oreja está apagada -- no reactivar solo
     cambiarEstado("escuchando");
-    if (usaSTTNativo) iniciarEscuchaNativa();
-    else volverAEscucharIOS();
+    if (!usaSTTNativo) { volverAEscucharIOS(); return; }
+    if (veniaDeHablarAndroid) {
+      // Pequeña pausa antes de arrancar el reconocedor: si lo hacemos apenas termina de hablar,
+      // Android a veces no soltó del todo la sesión de audio de la síntesis de voz todavía, y el
+      // mic "parece" escuchar pero no captura audio real (reportado por Angel). Se revisa que
+      // sigamos abiertos y en "escuchando" por si el usuario cerró el panel o pasó algo más
+      // mientras tanto.
+      setTimeout(() => {
+        if (abiertoRef.current && estadoRef.current === "escuchando") iniciarEscuchaNativa();
+      }, 300);
+    } else {
+      iniciarEscuchaNativa();
+    }
   }
 
   // Cortar a Arkey mientras habla (usado por el botón boca al apagarse, ver alternarVozActiva).
