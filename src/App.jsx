@@ -6,7 +6,7 @@ import {
   Users, Activity, Plus, X, Trash2, Pencil, Github, ChevronDown,
   ChevronRight, Bell, Lightbulb, Rocket, MessageCircle, Mail, Globe,
   Target, Contact, BarChart3, FileText, Flame, HeartPulse, Check, Menu, PieChart as PieChartIcon,
-  PiggyBank, Camera, Film, Upload, MapPin, Clock, Mic, Gift, Receipt, Megaphone, ChevronUp, Gem, Download, Sun, Moon, Shield, LogOut, ChevronLeft, Lock, Pill, CalendarClock, Zap, StickyNote, Search, Sparkles, Send, Bot, Square, Settings, CalendarRange, Palette, Eye, EyeOff, Sliders, Volume2,
+  PiggyBank, Camera, Film, Upload, MapPin, Clock, Mic, Gift, Receipt, Megaphone, ChevronUp, Gem, Download, Sun, Moon, Shield, LogOut, ChevronLeft, Lock, Pill, CalendarClock, Zap, StickyNote, Search, Sparkles, Send, Bot, Square, Settings, CalendarRange, Palette, Eye, EyeOff, Sliders, Volume2, Play, Copy,
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
@@ -10547,7 +10547,6 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
   const chunksRef = useRef([]);
   const empezoHablarRef = useRef(null);
   const silencioDesdeRef = useRef(null);
-  const bargeInDesdeRef = useRef(null);
   const textoHablandoRef = useRef(""); // lo que Arkey está diciendo en este momento (ver hablar()) -- se usa para distinguir una interrupción real de su propio eco por la bocina, ver esEcoDeArkey()
   const wakeLockRef = useRef(null); // WakeLockSentinel activo mientras el panel está abierto, para que la pantalla no se bloquee sola
 
@@ -10564,13 +10563,20 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
   // apenas empieza a hablar, y se restaura al valor real de antes justo al terminar/interrumpir (ver
   // volverAEscuchar). Este ref guarda ese valor real mientras dura el forzado.
   const escuchaActivaPreHablandoRef = useRef(true);
-  // Botón boca (derecha del avatar): si Arkey debe leer sus respuestas en voz alta. Apagarlo
-  // mientras habla la corta de inmediato (ver alternarVozActiva); apagado, las respuestas se
-  // muestran solo como texto (ver enviarTurno) -- nunca se entra a estado "hablando". Default true
-  // al abrir el panel, no se persiste entre sesiones.
+  // Botón boca (derecha del avatar): mantenerlo presionado corta la voz de Arkey de inmediato --
+  // al soltarlo, siempre vuelve a quedar activada para lo que siga (ver alPresionarBoca/
+  // alSoltarBoca) -- no es un interruptor persistente, es "presiona para interrumpir". Default
+  // true al abrir el panel, no se persiste entre sesiones.
   const [vozActiva, setVozActiva] = useState(true);
   const vozActivaRef = useRef(true);
   const cambiarVozActiva = (v) => { vozActivaRef.current = v; setVozActiva(v); };
+  // Qué burbuja del chat se está leyendo en voz alta con su propio botón ▶ (distinto de la
+  // respuesta en vivo de Arkey, estado "hablando") -- id compuesto por vista+índice (ver render),
+  // así no choca entre el historial y la conversación en curso. null = nada sonando así.
+  const [mensajeReproduciendoId, setMensajeReproduciendoId] = useState(null);
+  const mensajeReproduciendoIdRef = useRef(null);
+  const cambiarMensajeReproduciendoId = (v) => { mensajeReproduciendoIdRef.current = v; setMensajeReproduciendoId(v); };
+  const [copiadoId, setCopiadoId] = useState(null); // id del mensaje cuyo botón de copiar muestra el check de "copiado" un instante
 
   const [nivelMic, setNivelMic] = useState(0); // 0..1, para la barra visual del nivel captado por el micrófono
   const nivelAnalyserRef = useRef(null); // apunta al analyser del VAD en el camino iOS de respaldo (en el camino nativo no hay acceso al audio crudo)
@@ -10736,11 +10742,11 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
     rafRef.current = null;
     try { window.speechSynthesis?.cancel(); } catch {}
+    cambiarMensajeReproduciendoId(null); // no dejar una burbuja marcada como "sonando" para la próxima vez que se abra el panel
     if (timerSilencioRef.current) { clearTimeout(timerSilencioRef.current); timerSilencioRef.current = null; } // corta el envío pendiente de lo último que se dijo, si lo había -- si no, se manda solo y reactiva el mic aunque el panel ya esté cerrado
     finalBufferRef.current = ""; // no dejar texto de un turno a medias colgado para la próxima vez que se abra el panel
     empezoHablarRef.current = null;
     silencioDesdeRef.current = null;
-    bargeInDesdeRef.current = null;
 
     detenerMedidorVisual();
     nivelAnalyserRef.current = null;
@@ -11041,27 +11047,17 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
       }
       const rms = Math.sqrt(suma / buffer.length);
       const ahora = Date.now();
-      // Umbral más alto mientras la IA habla: evita que su propia voz saliendo de la bocina
-      // (si el usuario no trae audífonos) dispare una interrupción falsa. Segunda vuelta de ajuste
-      // a petición de Angel ("sigue sin sentirse suficientemente sensible"): de 0.032 a 0.018 (ya
-      // muy cerca del umbral normal de 0.012) y de 140ms a 80ms sostenidos -- casi cualquier voz
-      // real la corta casi de inmediato. Si ahora se auto-interrumpe con su propio eco sin
-      // audífonos, ese es el próximo síntoma a esperar -- hay que subir estos números de nuevo.
-      const UMBRAL = estadoRef.current === "hablando" ? 0.018 : 0.012;
-      const SOSTENIDO_MS = 80;
+      const UMBRAL = 0.012;
 
+      // La interrupción automática por voz mientras "hablando" se desactivó a petición de Angel:
+      // iOS ahora se comporta igual que Android -- la única forma de interrumpir a Arkey es el
+      // botón boca (ver interrumpirVoz/alPresionarBoca). Antes esta rama comparaba el nivel de
+      // audio contra un umbral más alto (para distinguir el propio eco de Arkey de una
+      // interrupción real) y cancelaba la síntesis -- ya no hace nada, se deja el bloque vacío en
+      // vez de borrar por completo el "if" para que quede claro dónde vivía esa lógica si hace
+      // falta reactivarla.
       if (estadoRef.current === "hablando") {
-        if (rms > UMBRAL) {
-          if (!bargeInDesdeRef.current) bargeInDesdeRef.current = ahora;
-          else if (ahora - bargeInDesdeRef.current > SOSTENIDO_MS) {
-            bargeInDesdeRef.current = null;
-            try { window.speechSynthesis.cancel(); } catch {}
-            cambiarEstado("escuchando");
-            iniciarSegmentoGrabacion();
-          }
-        } else {
-          bargeInDesdeRef.current = null;
-        }
+        // (intencionalmente sin acción)
       } else if (estadoRef.current === "escuchando") {
         if (rms > UMBRAL) {
           if (!empezoHablarRef.current) empezoHablarRef.current = ahora;
@@ -11213,7 +11209,7 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
   function volverAEscuchar() {
     if (!abiertoRef.current) return;
     // Esta función puede llegar a llamarse dos veces seguidas para el mismo fin de turno (ej.
-    // interrumpirHablando() la llama directo, y el cancel() que hace ahí puede además disparar
+    // interrumpirVoz() la llama directo, y el cancel() que hace ahí puede además disparar
     // u.onend/u.onerror -> alTerminar() -> esta misma función otra vez) -- si la primera ya nos dejó
     // "escuchando", ignorar la segunda en vez de reiniciar el reconocedor de nuevo sin necesidad
     // (en Android, reiniciar el reconocedor dos veces casi seguidas es justo el patrón que históricamente
@@ -11221,7 +11217,7 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
     if (estadoRef.current === "escuchando") return;
     // Si venimos de "hablando" en Android, la oreja se había apagado sola (ver hablar()) -- se
     // restaura aquí al valor real de antes de forzarla, sea que Arkey terminó de hablar solo o lo
-    // interrumpieron con el botón boca (ambos casos llegan aquí, ver interrumpirHablando()).
+    // interrumpieron con el botón boca (ambos casos llegan aquí, ver interrumpirVoz()).
     const veniaDeHablarAndroid = esAndroid && estadoRef.current === "hablando";
     if (veniaDeHablarAndroid) {
       cambiarEscuchaActiva(escuchaActivaPreHablandoRef.current);
@@ -11243,27 +11239,32 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
     }
   }
 
-  // Cortar a Arkey mientras habla (usado por el botón boca al apagarse, ver alternarVozActiva).
+  // Corta CUALQUIER voz en curso: la respuesta en vivo de Arkey (estado "hablando") y/o la lectura
+  // puntual de una burbuja desde su botón ▶ (ver mensajeReproduciendoId/leerTextoMensaje) -- lo que
+  // esté sonando en ese momento. Usado por el botón boca al presionarse (ver alPresionarBoca).
   // No basta con cancelar la síntesis y esperar a que u.onend/u.onerror dispare alTerminar() (ver
   // hablar()) -- no todos los navegadores garantizan ese evento tras cancel(), y dejarlo colgado
-  // en "hablando" sería peor que el bug que se quiere evitar. Se hace el cambio de estado directo,
-  // igual que ya hace r.onresult para el barge-in por voz (arriba); si el evento sí llega después,
-  // volverAEscuchar()/reanudarMicTrasHablarIOS() ya toleran que se llamen dos veces sin problema.
-  function interrumpirHablando() {
-    if (estadoRef.current !== "hablando") return;
+  // en "hablando" sería peor que el bug que se quiere evitar. Se hace el cambio de estado directo;
+  // si el evento sí llega después, volverAEscuchar()/reanudarMicTrasHablarIOS() ya toleran que se
+  // llamen dos veces sin problema.
+  function interrumpirVoz() {
     try { window.speechSynthesis.cancel(); } catch {}
+    if (mensajeReproduciendoIdRef.current !== null) cambiarMensajeReproduciendoId(null);
+    if (estadoRef.current !== "hablando") return;
     if (usaSTTNativo) volverAEscuchar();
     else reanudarMicTrasHablarIOS();
   }
 
-  // Botón boca: si Arkey debe leer sus respuestas en voz alta. Apagarlo mientras habla la corta de
-  // inmediato (reusa interrumpirHablando(), que ya respeta la oreja para decidir a dónde pasar).
-  // Apagarlo en cualquier otro momento solo queda guardado para la próxima respuesta (ver
-  // enviarTurno) -- no hace falta ninguna acción inmediata ahí.
-  function alternarVozActiva() {
-    const nuevo = !vozActiva;
-    cambiarVozActiva(nuevo);
-    if (!nuevo && estadoRef.current === "hablando") interrumpirHablando();
+  // Botón boca: presiona-para-interrumpir, no es un interruptor persistente. Al presionarlo
+  // (onPointerDown) corta cualquier voz en curso de inmediato; al soltarlo (onPointerUp, o si el
+  // dedo se resbala fuera del botón) siempre vuelve a dejar la voz activa para lo que siga -- así
+  // nunca se queda "apagada" esperando que alguien la reactive.
+  function alPresionarBoca() {
+    cambiarVozActiva(false); // solo visual mientras se mantiene presionado
+    interrumpirVoz();
+  }
+  function alSoltarBoca() {
+    cambiarVozActiva(true);
   }
 
   // Respaldo: escribir en vez de hablar -- corta cualquier escucha/lectura en curso y manda el
@@ -11369,8 +11370,10 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
   }, [abierto]);
 
   // Reproducir un mensaje ya escrito en el historial o en la conversación actual, sin tocar el
-  // estado de "escuchando/procesando/hablando" del modo voz en vivo -- solo suena y ya.
-  function leerTextoMensaje(texto) {
+  // estado de "escuchando/procesando/hablando" del modo voz en vivo -- solo suena y ya. Marca esa
+  // burbuja como la que está sonando (id) para que su botón cambie a "detener" (ver render); se
+  // limpia sola al terminar, o vía interrumpirVoz() (botón boca) o detenerReproduccionMensaje().
+  function leerTextoMensaje(texto, id) {
     if (!texto || !("speechSynthesis" in window)) return;
     try {
       window.speechSynthesis.cancel();
@@ -11379,7 +11382,36 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
       const candidatasEs = voces.filter((v) => v.lang?.toLowerCase().startsWith("es"));
       const vozEs = candidatasEs.find((v) => v.lang?.toLowerCase() === "es-mx") || candidatasEs[0];
       if (vozEs) { u.voice = vozEs; u.lang = vozEs.lang; } else { u.lang = "es-MX"; }
+      const terminar = () => { if (mensajeReproduciendoIdRef.current === id) cambiarMensajeReproduciendoId(null); };
+      u.onend = terminar;
+      u.onerror = terminar;
+      cambiarMensajeReproduciendoId(id);
       window.speechSynthesis.speak(u);
+    } catch {}
+  }
+
+  function detenerReproduccionMensaje() {
+    try { window.speechSynthesis.cancel(); } catch {}
+    cambiarMensajeReproduciendoId(null);
+  }
+
+  // Copiar el texto de una burbuja al portapapeles -- muestra un check un instante como feedback.
+  async function copiarTexto(texto, id) {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(texto);
+      } else {
+        const ta = document.createElement("textarea");
+        ta.value = texto;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand("copy");
+        document.body.removeChild(ta);
+      }
+      setCopiadoId(id);
+      setTimeout(() => setCopiadoId((actual) => (actual === id ? null : actual)), 1500);
     } catch {}
   }
 
@@ -11532,51 +11564,95 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
                       <button onClick={() => setDiaSeleccionado(null)} className="text-xs gp-text-muted">← Ver otros días</button>
                       <button onClick={() => eliminarDiaHistorial(diaSeleccionado)} className="text-xs" style={{ color: "#C0392B" }}>Eliminar este día</button>
                     </div>
-                    {mensajesDia.map((m, i) => (
-                      <div key={i} className={`mb-2 flex ${m.rol === "usuario" ? "justify-end" : "justify-start"}`}>
-                        <div className={`relative max-w-[85%] rounded-lg px-3 py-2 text-sm ${m.rol === "asistente" ? "pr-7" : ""}`} style={{
-                          background: m.rol === "usuario" ? "var(--gold)" : "var(--panel-2, rgba(255,255,255,.06))",
-                          color: m.rol === "usuario" ? "#0B2341" : "inherit",
-                        }}>
-                          {m.contenido}
-                          {m.rol === "asistente" && (
+                    {mensajesDia.map((m, i) => {
+                      const id = `hist-${i}`;
+                      return (
+                        <div key={i} className={`mb-2 flex ${m.rol === "usuario" ? "justify-end" : "justify-start"}`}>
+                          <div className="relative max-w-[85%] rounded-lg pl-3 pr-7 pt-6 pb-2 text-sm" style={{
+                            background: m.rol === "usuario" ? "var(--gold)" : "var(--panel-2, rgba(255,255,255,.06))",
+                            color: m.rol === "usuario" ? "#0B2341" : "inherit",
+                          }}>
+                            {m.contenido}
                             <button
-                              onClick={() => leerTextoMensaje(m.contenido)}
-                              title="Escuchar"
-                              className="absolute bottom-1 right-1 opacity-60 hover:opacity-100"
+                              onClick={() => copiarTexto(m.contenido, id)}
+                              title="Copiar"
+                              className="absolute top-1 right-1 opacity-60 hover:opacity-100"
                               style={{ background: "none", border: "none", padding: 2 }}
                             >
-                              <Volume2 size={12} />
+                              {copiadoId === id ? <Check size={12} /> : <Copy size={12} />}
                             </button>
-                          )}
+                            {m.rol === "asistente" && (
+                              mensajeReproduciendoId === id ? (
+                                <button
+                                  onClick={detenerReproduccionMensaje}
+                                  title="Detener"
+                                  className="absolute bottom-1 right-1 opacity-60 hover:opacity-100"
+                                  style={{ background: "none", border: "none", padding: 2 }}
+                                >
+                                  <Square size={12} />
+                                </button>
+                              ) : (
+                                <button
+                                  onClick={() => leerTextoMensaje(m.contenido, id)}
+                                  title="Escuchar"
+                                  className="absolute bottom-1 right-1 opacity-60 hover:opacity-100"
+                                  style={{ background: "none", border: "none", padding: 2 }}
+                                >
+                                  <Play size={12} />
+                                </button>
+                              )
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </>
                 )}
               </div>
             ) : (
               <div ref={scrollRef} className="flex-1 overflow-y-auto mb-3" style={{ minHeight: 80 }}>
-                {transcripciones.map((t, i) => (
-                  <div key={i} className={`mb-2 flex ${t.rol === "usuario" ? "justify-end" : "justify-start"}`}>
-                    <div className={`relative max-w-[85%] rounded-lg px-3 py-2 text-sm ${t.rol === "asistente" ? "pr-7" : ""}`} style={{
-                      background: t.rol === "usuario" ? "var(--gold)" : "var(--panel-2, rgba(255,255,255,.06))",
-                      color: t.rol === "usuario" ? "#0B2341" : "inherit",
-                    }}>
-                      {t.texto}
-                      {t.rol === "asistente" && (
+                {transcripciones.map((t, i) => {
+                  const id = `live-${i}`;
+                  return (
+                    <div key={i} className={`mb-2 flex ${t.rol === "usuario" ? "justify-end" : "justify-start"}`}>
+                      <div className="relative max-w-[85%] rounded-lg pl-3 pr-7 pt-6 pb-2 text-sm" style={{
+                        background: t.rol === "usuario" ? "var(--gold)" : "var(--panel-2, rgba(255,255,255,.06))",
+                        color: t.rol === "usuario" ? "#0B2341" : "inherit",
+                      }}>
+                        {t.texto}
                         <button
-                          onClick={() => leerTextoMensaje(t.texto)}
-                          title="Escuchar"
-                          className="absolute bottom-1 right-1 opacity-60 hover:opacity-100"
+                          onClick={() => copiarTexto(t.texto, id)}
+                          title="Copiar"
+                          className="absolute top-1 right-1 opacity-60 hover:opacity-100"
                           style={{ background: "none", border: "none", padding: 2 }}
                         >
-                          <Volume2 size={12} />
+                          {copiadoId === id ? <Check size={12} /> : <Copy size={12} />}
                         </button>
-                      )}
+                        {t.rol === "asistente" && (
+                          mensajeReproduciendoId === id ? (
+                            <button
+                              onClick={detenerReproduccionMensaje}
+                              title="Detener"
+                              className="absolute bottom-1 right-1 opacity-60 hover:opacity-100"
+                              style={{ background: "none", border: "none", padding: 2 }}
+                            >
+                              <Square size={12} />
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => leerTextoMensaje(t.texto, id)}
+                              title="Escuchar"
+                              className="absolute bottom-1 right-1 opacity-60 hover:opacity-100"
+                              style={{ background: "none", border: "none", padding: 2 }}
+                            >
+                              <Play size={12} />
+                            </button>
+                          )
+                        )}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
 
@@ -11595,11 +11671,15 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
                   👂
                 </button>
                 <ArkeyRobot estado={estado} />
-                {/* Boca: toggle de voz de Arkey -- este botón ES el mecanismo de interrupción (ver alternarVozActiva). */}
+                {/* Boca: presiona-para-interrumpir (ver alPresionarBoca/alSoltarBoca) -- no es un
+                    interruptor persistente, siempre vuelve a quedar activada al soltar. */}
                 <button
-                  onClick={alternarVozActiva}
-                  title={sinCreditos ? "Sin consultas disponibles este mes" : vozActiva ? "Apagar voz de Arkey" : "Activar voz de Arkey"}
-                  className="gp-btn-ghost p-2 rounded text-xl leading-none"
+                  onPointerDown={sinCreditos ? undefined : alPresionarBoca}
+                  onPointerUp={sinCreditos ? undefined : alSoltarBoca}
+                  onPointerLeave={sinCreditos ? undefined : alSoltarBoca}
+                  onPointerCancel={sinCreditos ? undefined : alSoltarBoca}
+                  title={sinCreditos ? "Sin consultas disponibles este mes" : "Mantén presionado para interrumpir a Arkey"}
+                  className="gp-btn-ghost p-2 rounded text-xl leading-none touch-none"
                   disabled={sinCreditos}
                   style={sinCreditos ? { opacity: 0.4, cursor: "not-allowed" } : !vozActiva ? { opacity: 0.4 } : undefined}
                 >
@@ -11608,11 +11688,7 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
               </div>
               <p className="text-xs gp-text-muted text-center">
                 {sinCreditos && "Arkey está dormido 💤"}
-                {!sinCreditos && estado === "hablando" && vozActiva && (
-                  esAndroid
-                    ? "Hablando... (Para interrumpir presione el botón 🗣️)"
-                    : "Hablando... (Para interrumpir hable o presione el botón 🗣️)"
-                )}
+                {!sinCreditos && estado === "hablando" && vozActiva && "Hablando... (Para interrumpir presione el botón 🗣️)"}
                 {!sinCreditos && estado === "escuchando" && escuchaActiva && "Escuchando..."}
                 {!sinCreditos && estado === "procesando" && "Pensando…"}
                 {!sinCreditos && estado === "permiso" && (errorMsg || "Necesito permiso de micrófono.")}
