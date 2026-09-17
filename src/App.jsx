@@ -2671,7 +2671,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
             <span className={`gp-serif text-lg font-semibold ${sidebarColapsado ? "md:hidden" : ""}`} style={{ letterSpacing: "0.3px" }}>ARKEYONE</span>
             {/* Temporal, mientras depuramos los bugs de voz en Android/iOS: confirma de un
                 vistazo si un dispositivo ya cargó el último deploy. Quitar cuando ya no haga falta. */}
-            <p className={`text-[10px] gp-text-muted ${sidebarColapsado ? "md:hidden" : ""}`}>build {__COMMIT_HASH__}</p>
+            <p className={`text-[10px] gp-text-muted ${sidebarColapsado ? "md:hidden" : ""}`}>commit {__COMMIT_HASH__}</p>
             <p className={`text-xs gp-text-muted truncate ${sidebarColapsado ? "md:hidden" : ""}`} style={{ maxWidth: 160 }}>
               {activeOwnerId === misId ? miEmail : `Viendo: ${activeOwnerEmail}`}
             </p>
@@ -10654,6 +10654,12 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
   // mientras ARKEYONE habla (para detectar una interrupción), el audio de salida se queda mudo.
   // Por eso, en iOS nunca reactivamos el micrófono durante "hablando", sea cual sea el camino.
   const esIOS = typeof navigator !== "undefined" && /iPad|iPhone|iPod/.test(navigator.userAgent || "");
+  // Confirmado en un Motorola G77 real: si el reconocedor nativo sigue activo mientras ARKEYONE
+  // habla (para detectar barge-in), sin audífonos el propio audio saliendo por la bocina del
+  // teléfono entra de vuelta por el micrófono y se interpreta como que el usuario lo interrumpió
+  // -- corta el saludo a medias y se auto-interrumpe en bucle sin que nadie diga nada. Se usa
+  // solo para desactivar esa escucha-mientras-habla en Android (ver hablar()), sin tocar iOS.
+  const esAndroid = typeof navigator !== "undefined" && /android/i.test(navigator.userAgent || "");
   const soportaModoVoz = usaSTTNativo || (typeof navigator !== "undefined" && navigator.mediaDevices?.getUserMedia && typeof window !== "undefined" && window.MediaRecorder);
 
   useEffect(() => () => detenerTodo(), []); // limpia todo si el componente se desmonta
@@ -11232,13 +11238,16 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
       u.onend = alTerminar;
       u.onerror = (e) => { setErrorMsg(`TTS: ${e.error || "error desconocido"}`); alTerminar(); };
       window.speechSynthesis.speak(u);
-      // En el camino nativo (Chrome/Android/Mac), seguimos "escuchando" con el mismo reconocedor
-      // mientras la IA habla, únicamente para detectar una interrupción (barge-in) -- ver
-      // r.onresult arriba. En iOS lo evitamos: reactivar el mic mientras se habla silencia el audio.
+      // En el camino nativo (Chrome/Mac), seguimos "escuchando" con el mismo reconocedor mientras
+      // la IA habla, únicamente para detectar una interrupción (barge-in) -- ver r.onresult arriba.
+      // En Android lo evitamos (ver esAndroid arriba): sin audífonos, Arkey se escucha a sí mismo
+      // y se auto-interrumpe en bucle -- se pierde el barge-in por voz en Android a cambio de que
+      // el saludo y las respuestas se digan completas. En iOS lo evitamos por otra razón: reactivar
+      // el mic mientras se habla silencia el audio.
       // Antes evitábamos esto en iOS pensando que reactivar el mic mientras habla causaba el
       // silencio -- resultó que la causa real era el desbloqueo de voz (ver desbloquearVoz).
       // Ahora lo probamos también en iOS: si el audio se sigue escuchando bien, se queda así.
-      if (usaSTTNativo) iniciarEscuchaNativa();
+      if (usaSTTNativo && !esAndroid) iniciarEscuchaNativa();
     } catch { if (usaSTTNativo) volverAEscuchar(); else reanudarMicTrasHablarIOS(); }
   }
 
