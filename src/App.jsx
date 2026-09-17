@@ -11123,17 +11123,21 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
         || candidatasEs.find((v) => /enhanced|premium|neural/i.test(v.name || ""))
         || candidatasEs[0];
       if (vozEs) { u.voice = vozEs; u.lang = vozEs.lang; } else { u.lang = "es-MX"; }
+      // IMPORTANTE: la rama else (iOS) de acá abajo debe quedar SIEMPRE igual a como estaba antes
+      // de que empezáramos a tocar el camino de Android -- nada de guards ni cancel() extra ahí,
+      // ni siquiera "inofensivos". Todo lo nuevo (respaldo por temporizador, evitar que el mic
+      // arranque con audio de Arkey todavía sonando) vive exclusivamente en la rama usaSTTNativo.
       let yaTermino = false;
       const alTerminar = () => {
-        if (yaTermino) return; // evita doble ejecución si el evento real llega después del respaldo
-        yaTermino = true;
-        if (watchdog) clearTimeout(watchdog);
-        // Por si se llegó aquí por el respaldo (watchdog) mientras Arkey todavía estaba
-        // hablando de verdad: cancelamos la voz explícitamente ANTES de pasar a escuchar, para
-        // que el micrófono nunca arranque encimado con audio real todavía sonando (si no, se
-        // vuelve a escuchar a sí mismo -- bug reportado en Android real, Motorola G77).
-        try { window.speechSynthesis.cancel(); } catch {}
         if (usaSTTNativo) {
+          if (yaTermino) return; // evita doble ejecución si el evento real llega después del respaldo
+          yaTermino = true;
+          if (watchdog) clearTimeout(watchdog);
+          // Por si se llegó aquí por el respaldo (watchdog) mientras Arkey todavía estaba
+          // hablando de verdad: cancelamos la voz explícitamente ANTES de pasar a escuchar, para
+          // que el micrófono nunca arranque encimado con audio real todavía sonando (si no, se
+          // vuelve a escuchar a sí mismo -- bug reportado en Android real, Motorola G77).
+          try { window.speechSynthesis.cancel(); } catch {}
           // Pequeño respiro antes de arrancar el micrófono: cancel() detiene la síntesis en JS,
           // pero el audio ya en el buffer del altavoz puede tardar un instante más en apagarse de
           // verdad. Sin esta pausa, el micrófono podía alcanzar a captar esa cola de audio.
