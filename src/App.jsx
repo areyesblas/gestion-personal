@@ -10578,11 +10578,12 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
   const [copiadoId, setCopiadoId] = useState(null); // id del mensaje cuyo botón de copiar muestra el check de "copiado" un instante
 
   // Silenciar el audio (bocina en el header, junto al historial): simula el botón físico de
-  // silencio del dispositivo -- no toca la conversación en absoluto (el estado, el mic, la oreja,
-  // la boca siguen igual), solo pone el volumen de lo que se dice en 0. A diferencia de la oreja y
-  // la boca, SÍ se persiste entre aperturas del panel (localStorage), igual que un mute real no se
-  // olvida solo porque cerraste la app. Solo afecta utterances nuevas -- una que ya esté sonando
-  // sigue sonando hasta que termine (SpeechSynthesisUtterance.volume no se puede cambiar en vivo).
+  // silencio del dispositivo. Pone en 0 el volumen de las utterances nuevas (ver hablar()/
+  // leerTextoMensaje()) Y corta de inmediato lo que ya esté sonando en ese momento (reusa
+  // interrumpirVoz(), que ya sabe cortar tanto la respuesta en vivo como una burbuja puntual sin
+  // dejar nada colgado -- ver ahí). Desmutear no revive nada, solo deja de silenciar lo que venga
+  // después. A diferencia de la oreja y la boca, SÍ se persiste entre aperturas del panel
+  // (localStorage) -- un mute real no se olvida solo porque cerraste la app.
   const [audioMuteado, setAudioMuteado] = useState(() => {
     try { return localStorage.getItem("arkeyone_vm_mute") === "1"; } catch { return false; }
   });
@@ -10592,6 +10593,7 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
     audioMuteadoRef.current = nuevo;
     setAudioMuteado(nuevo);
     try { localStorage.setItem("arkeyone_vm_mute", nuevo ? "1" : "0"); } catch {}
+    if (nuevo) interrumpirVoz(); // corta ya lo que esté sonando, no solo lo que venga después
   }
 
   const [nivelMic, setNivelMic] = useState(0); // 0..1, para la barra visual del nivel captado por el micrófono
