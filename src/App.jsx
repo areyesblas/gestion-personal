@@ -10529,10 +10529,7 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
   const [micMuted, setMicMuted] = useState(false);
   const micMutedRef = useRef(false);
   const [nivelMic, setNivelMic] = useState(0); // 0..1, para la barra visual del nivel captado por el micrófono
-  const nivelAnalyserRef = useRef(null); // apunta al analyser activo (el de VAD en iOS de respaldo, o el paralelo en el camino nativo)
-  const medidorStreamRef = useRef(null); // stream propio solo para medir nivel en el camino nativo (Chrome/Android/iOS Safari 26), que no expone el audio crudo
-  const medidorCtxRef = useRef(null);
-  const medidorAnalyserRef = useRef(null);
+  const nivelAnalyserRef = useRef(null); // apunta al analyser del VAD en el camino iOS de respaldo (en el camino nativo no hay acceso al audio crudo)
   const medidorIntervalRef = useRef(null);
 
   const cambiarEstado = (nuevo) => { estadoRef.current = nuevo; setEstado(nuevo); };
@@ -10564,30 +10561,8 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
     setNivelMic(0);
   }
 
-  // Camino nativo (Chrome/Android/iOS Safari 26): SpeechRecognition no expone el audio crudo del
-  // micrófono, así que para poder mostrar el nivel (y mutear de verdad lo que se manda a
-  // transcribir) abrimos un stream propio en paralelo, solo para medir y para el track.enabled.
-  async function iniciarMedidorNivelNativo() {
-    if (medidorStreamRef.current || !navigator.mediaDevices?.getUserMedia) return;
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      medidorStreamRef.current = stream;
-      stream.getAudioTracks().forEach((t) => { t.enabled = !micMutedRef.current; });
-      const AudioCtx = window.AudioContext || window.webkitAudioContext;
-      const ctx = new AudioCtx();
-      medidorCtxRef.current = ctx;
-      const source = ctx.createMediaStreamSource(stream);
-      const analyser = ctx.createAnalyser();
-      analyser.fftSize = 1024;
-      source.connect(analyser);
-      medidorAnalyserRef.current = analyser;
-      nivelAnalyserRef.current = analyser;
-    } catch {} // si falla, el reconocimiento sigue funcionando normal, solo no hay medidor visual
-  }
-
   // Botón de mutear micrófono: distinto del botón de silenciar voz. Aquí el objetivo es que deje
-  // de transmitirse lo que el micrófono capta -- ni se transcribe ni dispara barge-in -- y que el
-  // medidor baje a cero de verdad, hasta que el usuario lo reactive.
+  // de transmitirse lo que el micrófono capta -- ni se transcribe ni dispara barge-in.
   const alternarMicMuted = () => {
     const nuevo = !micMuted;
     cambiarMicMuted(nuevo);
@@ -10597,7 +10572,6 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
       } else if (abiertoRef.current && (estadoRef.current === "escuchando" || estadoRef.current === "hablando")) {
         iniciarEscuchaNativa();
       }
-      try { medidorStreamRef.current?.getAudioTracks().forEach((t) => { t.enabled = !nuevo; }); } catch {}
     } else {
       // Camino iOS de respaldo (MediaRecorder + VAD): mutear el track real ya basta -- seguirá
       // "grabando" pero solo silencio, así que el VAD nunca dispara un envío mientras esté muteado.
@@ -10708,11 +10682,6 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
 
     detenerMedidorVisual();
     nivelAnalyserRef.current = null;
-    try { medidorStreamRef.current?.getTracks().forEach((t) => t.stop()); } catch {}
-    medidorStreamRef.current = null;
-    try { medidorCtxRef.current?.close(); } catch {}
-    medidorCtxRef.current = null;
-    medidorAnalyserRef.current = null;
     cambiarMicMuted(false); // que la próxima vez que se abra, arranque siempre sin mutear
 
     // Bug conocido de WebKit en iOS: con reconocimiento nativo continuo, abort() detiene el
@@ -10740,12 +10709,13 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
       return;
     }
     iniciarMedidorVisual();
-    // IMPORTANTE: se espera (await) a que termine de pedir permiso de micrófono para el medidor
-    // ANTES de arrancar el reconocimiento nativo. Si se piden casi al mismo tiempo (como estaba
-    // antes, sin await), iOS muestra el diálogo de permiso DOS veces -- una por cada camino que
-    // pide el micrófono por su cuenta. Pidiéndolo una sola vez y esperando la respuesta, el
-    // reconocimiento que arranca después ya encuentra el permiso concedido y no vuelve a preguntar.
-    if (usaSTTNativo) await iniciarMedidorNivelNativo(); // en el camino iOS de respaldo, el medidor se conecta solo al abrir su propio stream (ver iniciarEscuchaIOS)
+    // En el camino nativo (Chrome/Android) no se pide micrófono aquí -- SpeechRecognition pide
+    // su propio permiso al arrancar (ver iniciarEscuchaNativa, llamado dentro de hablar()).
+    // Pedirlo dos veces por separado (un stream propio aquí + el interno de SpeechRecognition)
+    // hacía que algunos Android se quedaran con dos sesiones de micrófono compitiendo entre sí
+    // y el reconocimiento nunca llegaba a escuchar de verdad ("saluda pero no escucha"). En el
+    // camino iOS de respaldo, el medidor se conecta solo al abrir su propio stream (ver
+    // iniciarEscuchaIOS).
     await hablar(SALUDO_INICIAL); // el saludo no gasta cuota (no llama a asistente-ia); al terminar de decirlo, pasa solo a escuchar
   };
 
