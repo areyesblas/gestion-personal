@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { supabase } from "./supabaseClient";
 import LoginScreenNuevo from "./components/auth/LoginScreen";
+import AuthCard, { AuthField, AuthPasswordField, AuthButton, AuthBanner, AuthBackLink } from "./components/auth/AuthCard";
 import * as XLSX from "xlsx";
 import {
   LayoutDashboard, FolderKanban, CheckSquare, Wallet, AlertTriangle,
@@ -1047,16 +1048,16 @@ function MedidorPassword({ password }) {
   const { criterios, cumplidos } = evaluarPassword(password);
   if (!password) return null;
   const nivel = cumplidos <= 2 ? "Débil" : cumplidos <= 4 ? "Media" : "Fuerte";
-  const color = cumplidos <= 2 ? "var(--red)" : cumplidos <= 4 ? "var(--gold)" : "var(--teal)";
+  const color = cumplidos <= 2 ? "#EF4444" : cumplidos <= 4 ? "#D97706" : "#16A34A";
   return (
-    <div className="mb-3">
+    <div className="mb-3.5">
       <div className="flex gap-1 mb-1">
         {[0, 1, 2, 3, 4].map((i) => (
-          <div key={i} className="h-1 rounded flex-1" style={{ background: i < cumplidos ? color : "var(--border)" }} />
+          <div key={i} className="h-1 rounded flex-1" style={{ background: i < cumplidos ? color : "#E1E8F7" }} />
         ))}
       </div>
-      <p className="text-xs" style={{ color }}>{nivel}</p>
-      <p className="text-xs gp-text-muted mt-1">
+      <p className="text-xs font-semibold" style={{ color }}>{nivel}</p>
+      <p className="text-xs text-[#6B7280] mt-1">
         Mínimo 8 caracteres, con mayúscula, minúscula y número
         {criterios.especial ? " (y un carácter especial — bien)" : ""}.
       </p>
@@ -1172,7 +1173,7 @@ function DocumentoLegal({ titulo, texto, onVolver, tema }) {
 // Crear cuenta y recuperar contraseña vivían como "modos" dentro del Login viejo.
 // Se extraen aquí, sin cambiar su lógica/copys, para que el nuevo LoginScreen
 // (src/components/auth/) los abra vía onCreateAccount/onForgotPassword.
-function CrearCuentaScreen({ tema, onVolver }) {
+function CrearCuentaScreen({ onVolver }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -1218,30 +1219,48 @@ function CrearCuentaScreen({ tema, onVolver }) {
   };
 
   return (
-    <div className={`gp-root gp-sidebar-area flex items-center justify-center ${claseTema(tema)}`} style={{ minHeight: "100vh" }}>
-      <Tokens tema={tema} />
-      <form onSubmit={handleSubmit} className="gp-panel p-6 w-full max-w-sm relative">
-        <div className="flex flex-col items-center text-center mb-4">
-          <img src="/logo-arkeyone.png" alt="ArkeyOne" style={{ height: 108 }} className="mb-2" />
-          <p className="text-xs gp-text-gold tracking-wide mb-3">La llave que alinea tu mundo</p>
-          <p className="text-xs gp-text-muted">Crea tu cuenta.</p>
-        </div>
-        <Field label="Correo"><input type="email" required className="gp-input" value={email} onChange={(e) => setEmail(e.target.value)} /></Field>
-        <Field label="Contraseña"><CampoPassword required value={password} onChange={(e) => setPassword(e.target.value)} /></Field>
+    <AuthCard>
+      <h1 className="text-[22px] font-bold text-[#0A2D6B] text-center mb-1">Crea tu cuenta</h1>
+      <p className="text-[13.5px] text-[#6B7280] text-center mb-6">Empieza a ordenar tu mundo.</p>
+
+      {error && <AuthBanner type="error">{error}</AuthBanner>}
+      {aviso && <AuthBanner type="success">{aviso}</AuthBanner>}
+
+      <form onSubmit={handleSubmit}>
+        <AuthField
+          icon={<Mail size={18} className="text-[#8CA0C6] shrink-0" />}
+          label="Correo electrónico"
+          type="email"
+          required
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          autoComplete="email"
+        />
+        <AuthPasswordField
+          label="Contraseña"
+          required
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          autoComplete="new-password"
+        />
         <MedidorPassword password={password} />
-        <Field label="Confirmar contraseña"><CampoPassword required value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} /></Field>
-        {error && <p className="text-xs gp-text-red mb-3">{error}</p>}
-        {aviso && <p className="text-xs gp-text-teal mb-3">{aviso}</p>}
-        <button type="submit" disabled={loading} className="gp-btn w-full py-2 text-sm mt-1">
-          {loading ? "Un momento…" : "Crear cuenta"}
-        </button>
-        <button type="button" onClick={onVolver} className="text-xs gp-text-muted w-full text-center mt-3">← Regresar a iniciar sesión</button>
+        <AuthPasswordField
+          label="Confirmar contraseña"
+          required
+          value={confirmPassword}
+          onChange={(e) => setConfirmPassword(e.target.value)}
+          autoComplete="new-password"
+        />
+        <AuthButton type="submit" disabled={loading}>
+          {loading ? <span className="w-4 h-4 rounded-full border-2 border-white/40 border-t-white animate-spin" /> : "Crear cuenta"}
+        </AuthButton>
       </form>
-    </div>
+      <AuthBackLink onClick={onVolver}>← Regresar a iniciar sesión</AuthBackLink>
+    </AuthCard>
   );
 }
 
-function RecuperarPasswordScreen({ tema, onVolver }) {
+function RecuperarPasswordScreen({ onVolver }) {
   const [email, setEmail] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -1260,27 +1279,33 @@ function RecuperarPasswordScreen({ tema, onVolver }) {
   };
 
   return (
-    <div className={`gp-root gp-sidebar-area flex items-center justify-center ${claseTema(tema)}`} style={{ minHeight: "100vh" }}>
-      <Tokens tema={tema} />
-      <form onSubmit={handleSubmit} className="gp-panel p-6 w-full max-w-sm relative">
-        <div className="flex flex-col items-center text-center mb-4">
-          <img src="/logo-arkeyone.png" alt="ArkeyOne" style={{ height: 108 }} className="mb-2" />
-          <p className="text-xs gp-text-gold tracking-wide mb-3">La llave que alinea tu mundo</p>
-          <p className="text-xs gp-text-muted">Te mandamos un enlace para poner una contraseña nueva.</p>
-        </div>
-        <Field label="Correo"><input type="email" required className="gp-input" value={email} onChange={(e) => setEmail(e.target.value)} /></Field>
-        {error && <p className="text-xs gp-text-red mb-3">{error}</p>}
-        {aviso && <p className="text-xs gp-text-teal mb-3">{aviso}</p>}
-        <button type="submit" disabled={loading} className="gp-btn w-full py-2 text-sm mt-1">
-          {loading ? "Un momento…" : "Enviar enlace de recuperación"}
-        </button>
-        <button type="button" onClick={onVolver} className="text-xs gp-text-muted w-full text-center mt-3">← Regresar a iniciar sesión</button>
+    <AuthCard>
+      <h1 className="text-[22px] font-bold text-[#0A2D6B] text-center mb-1">¿Olvidaste tu contraseña?</h1>
+      <p className="text-[13.5px] text-[#6B7280] text-center mb-6">Te mandamos un enlace para poner una contraseña nueva.</p>
+
+      {error && <AuthBanner type="error">{error}</AuthBanner>}
+      {aviso && <AuthBanner type="success">{aviso}</AuthBanner>}
+
+      <form onSubmit={handleSubmit}>
+        <AuthField
+          icon={<Mail size={18} className="text-[#8CA0C6] shrink-0" />}
+          label="Correo electrónico"
+          type="email"
+          required
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          autoComplete="email"
+        />
+        <AuthButton type="submit" disabled={loading}>
+          {loading ? <span className="w-4 h-4 rounded-full border-2 border-white/40 border-t-white animate-spin" /> : "Enviar enlace de recuperación"}
+        </AuthButton>
       </form>
-    </div>
+      <AuthBackLink onClick={onVolver}>← Regresar a iniciar sesión</AuthBackLink>
+    </AuthCard>
   );
 }
 
-function NuevaPasswordScreen({ onListo, tema }) {
+function NuevaPasswordScreen({ onListo }) {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState("");
@@ -1306,27 +1331,43 @@ function NuevaPasswordScreen({ onListo, tema }) {
   };
 
   return (
-    <div className={`gp-root gp-sidebar-area flex items-center justify-center ${claseTema(tema)}`} style={{ minHeight: "100vh" }}>
-      <Tokens tema={tema} />
-      <div className="gp-panel p-6 w-full max-w-sm">
-        <img src="/logo-arkeyone.png" alt="ArkeyOne" style={{ height: 108 }} className="mb-3" />
-        {listo ? (
-          <>
-            <p className="text-sm mb-4">Tu contraseña ya se actualizó. Ya puedes seguir usando tu cuenta con la nueva.</p>
-            <button onClick={onListo} className="gp-btn w-full py-2 text-sm">Continuar</button>
-          </>
-        ) : (
+    <AuthCard>
+      {listo ? (
+        <>
+          <h1 className="text-[22px] font-bold text-[#0A2D6B] text-center mb-1">¡Listo!</h1>
+          <p className="text-[13.5px] text-[#6B7280] text-center mb-6">
+            Tu contraseña ya se actualizó. Ya puedes seguir usando tu cuenta con la nueva.
+          </p>
+          <AuthButton onClick={onListo}>Continuar</AuthButton>
+        </>
+      ) : (
+        <>
+          <h1 className="text-[22px] font-bold text-[#0A2D6B] text-center mb-1">Pon tu contraseña nueva</h1>
+          <p className="text-[13.5px] text-[#6B7280] text-center mb-6">Elige una contraseña que no hayas usado antes.</p>
+          {error && <AuthBanner type="error">{error}</AuthBanner>}
           <form onSubmit={handleSubmit}>
-            <p className="text-xs gp-text-muted mb-4">Pon tu contraseña nueva.</p>
-            <Field label="Contraseña nueva"><CampoPassword required value={password} onChange={(e) => setPassword(e.target.value)} /></Field>
+            <AuthPasswordField
+              label="Contraseña nueva"
+              required
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoComplete="new-password"
+            />
             <MedidorPassword password={password} />
-            <Field label="Confirmar contraseña"><CampoPassword required value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} /></Field>
-            {error && <p className="text-xs gp-text-red mb-3">{error}</p>}
-            <button type="submit" disabled={loading} className="gp-btn w-full py-2 text-sm mt-1">{loading ? "Un momento…" : "Guardar contraseña nueva"}</button>
+            <AuthPasswordField
+              label="Confirmar contraseña"
+              required
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              autoComplete="new-password"
+            />
+            <AuthButton type="submit" disabled={loading}>
+              {loading ? <span className="w-4 h-4 rounded-full border-2 border-white/40 border-t-white animate-spin" /> : "Guardar contraseña nueva"}
+            </AuthButton>
           </form>
-        )}
-      </div>
-    </div>
+        </>
+      )}
+    </AuthCard>
   );
 }
 
@@ -1629,13 +1670,13 @@ export default function App() {
       </div>
     );
   } else if (recuperando) {
-    pantalla = <NuevaPasswordScreen onListo={() => setRecuperando(false)} tema={tema} toggleTema={toggleTema} />;
+    pantalla = <NuevaPasswordScreen onListo={() => setRecuperando(false)} />;
   } else if (!session) {
     pantalla =
       vistaAuth === "crear" ? (
-        <CrearCuentaScreen tema={tema} onVolver={() => setVistaAuth("login")} />
+        <CrearCuentaScreen onVolver={() => setVistaAuth("login")} />
       ) : vistaAuth === "recuperar" ? (
-        <RecuperarPasswordScreen tema={tema} onVolver={() => setVistaAuth("login")} />
+        <RecuperarPasswordScreen onVolver={() => setVistaAuth("login")} />
       ) : (
         <LoginScreenNuevo
           onCreateAccount={() => setVistaAuth("crear")}
