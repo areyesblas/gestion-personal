@@ -10,7 +10,7 @@
 // pensado para pantalla completa y teclado móvil.
 
 import { useState } from 'react';
-import { Mail, Lock, Eye, EyeOff, ArrowRight, ShieldCheck, Globe, Check } from 'lucide-react';
+import { Mail, Lock, Eye, EyeOff, ArrowRight, ShieldCheck, Check } from 'lucide-react';
 import ArkeyOneLogo from './ArkeyOneLogo';
 import { useLoginForm, BANNER_COPY } from './useLoginForm';
 import { usePlatform } from './platform';
@@ -87,20 +87,14 @@ export default function LoginMobile({ platform: platformProp, onCreateAccount, o
         className="relative z-10 flex-1 flex flex-col px-6"
         style={{ paddingTop: 'calc(18px + env(safe-area-inset-top, 0px))' }}
       >
-        <div className="flex justify-end">
-          <button className="flex items-center gap-1 text-xs font-semibold text-[#0A2D6B] bg-white/75 px-2.5 py-1.5 rounded-full">
-            <Globe size={14} /> ES ▾
-          </button>
-        </div>
-
-        <div className="flex flex-col items-center text-center mt-6 mb-6">
+        <div className="flex flex-col items-center text-center mt-10 mb-6">
           <ArkeyOneLogo width={150} />
           <p className="text-xs font-medium text-white/90 mt-2 drop-shadow-sm">Ordena tu mundo, mejora tu vida.</p>
         </div>
 
         <form
           onSubmit={handleSubmit}
-          className="bg-white shadow-[0_16px_34px_-14px_rgba(10,45,107,.28)] px-5.5 pt-6 pb-4.5"
+          className="bg-white shadow-[0_16px_34px_-14px_rgba(10,45,107,.28)] px-7 pt-7 pb-7"
           style={{ borderRadius: cardRadius }}
         >
           {bannerType && (
@@ -121,7 +115,7 @@ export default function LoginMobile({ platform: platformProp, onCreateAccount, o
           )}
 
           <h1 className="text-[18px] font-bold text-[#0A2D6B] text-center mb-0.5">Bienvenido de nuevo</h1>
-          <p className="text-xs text-[#6B7280] text-center mb-4.5">Inicia sesión en tu centro de mando.</p>
+          <p className="text-xs text-[#6B7280] text-center mb-7">Inicia sesión en tu centro de mando.</p>
 
           {/* ---- Email ---- */}
           {isAndroid ? (
@@ -223,7 +217,7 @@ export default function LoginMobile({ platform: platformProp, onCreateAccount, o
             )}
           </button>
 
-          <p className="text-center text-xs text-[#6B7280] mb-3 mt-4.5">
+          <p className="text-center text-xs text-[#6B7280] mb-3 mt-7">
             ¿No tienes cuenta?{' '}
             <button type="button" onClick={onCreateAccount} className="text-[#007AFF] font-semibold">
               Crear cuenta
@@ -287,8 +281,10 @@ function FloatingField({ icon, label, type, value, onChange, radius, trailing })
         {trailing}
       </div>
       <label
-        className={`absolute left-3.5 px-1 pointer-events-none transition-all ${
-          active ? '-top-2 text-[11px] font-semibold text-[#007AFF] bg-white' : 'top-1/2 -translate-y-1/2 text-[13px] text-[#8CA0C6]'
+        className={`absolute px-1 pointer-events-none transition-all ${
+          active
+            ? '-top-2 left-3.5 text-[11px] font-semibold text-[#007AFF] bg-white'
+            : 'top-1/2 -translate-y-1/2 left-[42px] text-[13px] text-[#8CA0C6]'
         }`}
       >
         {label}

@@ -5,7 +5,7 @@
 // de la vista móvil — usa el espacio horizontal para vender el producto
 // antes de pedir credenciales.
 
-import { Mail, Lock, Eye, EyeOff, ArrowRight, ShieldCheck, Globe, Check } from 'lucide-react';
+import { Mail, Lock, Eye, EyeOff, ArrowRight, ShieldCheck, Check } from 'lucide-react';
 import ArkeyOneLogo from './ArkeyOneLogo';
 import { useLoginForm, BANNER_COPY } from './useLoginForm';
 import bgWebJpg from '../../assets/login-bg-web.jpg';
@@ -95,9 +95,6 @@ export default function LoginWeb({ onCreateAccount, onForgotPassword }) {
           <a href="/about" className="hover:text-[#0A2D6B]">Acerca de</a>
           <a href="/blog" className="hover:text-[#0A2D6B]">Blog</a>
           <a href="/soporte" className="hover:text-[#0A2D6B]">Soporte</a>
-          <button className="flex items-center gap-1.5 border border-[#d8e3f8] bg-white px-3 py-1.5 rounded-full text-[13px] font-semibold text-[#0A2D6B]">
-            <Globe size={14} /> ES ▾
-          </button>
         </div>
 
         <div className="flex-1 flex items-center justify-center px-11 pb-16">
