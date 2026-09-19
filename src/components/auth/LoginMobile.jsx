@@ -14,6 +14,8 @@ import { Mail, Lock, Eye, EyeOff, ArrowRight, ShieldCheck, Globe, Check } from '
 import ArkeyOneLogo from './ArkeyOneLogo';
 import { useLoginForm, BANNER_COPY } from './useLoginForm';
 import { usePlatform } from './platform';
+import bgMobileJpg from '../../assets/login-bg-mobile.jpg';
+import bgMobileWebp from '../../assets/login-bg-mobile.webp';
 
 function Ripple() {
   const [ripples, setRipples] = useState([]);
@@ -59,11 +61,26 @@ export default function LoginMobile({ platform: platformProp, onCreateAccount, o
       <style>{`@keyframes arkeyone-ripple { to { transform: scale(3.2); opacity: 0; } }`}</style>
 
       <div className="absolute inset-0 z-0">
+        <picture>
+          <source srcSet={bgMobileWebp} type="image/webp" />
+          <img
+            src={bgMobileJpg}
+            alt=""
+            className="absolute inset-0 w-full h-full object-cover"
+            style={{ objectPosition: '62% 40%' }}
+          />
+        </picture>
+        {/* Scrim: oscurece arriba (logo/tagline/idioma) y abajo (footer);
+            la card queda sobre fondo blanco propio, no necesita scrim. */}
         <div
           className="absolute inset-0"
-          style={{ background: 'linear-gradient(180deg,#E4EEFF 0%,#C9DEFB 38%,#8FB6EE 62%,#3F6FC9 100%)' }}
+          style={{
+            backgroundImage: `
+              linear-gradient(180deg, rgba(4,14,34,.55) 0%, rgba(4,14,34,.18) 26%, rgba(4,14,34,0) 40%),
+              linear-gradient(180deg, rgba(4,14,34,0) 62%, rgba(4,14,34,.6) 100%)
+            `,
+          }}
         />
-        <div className="absolute inset-0" style={{ background: 'linear-gradient(180deg,rgba(233,238,249,0) 0%,#F8FAFF 46%)' }} />
       </div>
 
       <div
@@ -78,7 +95,7 @@ export default function LoginMobile({ platform: platformProp, onCreateAccount, o
 
         <div className="flex flex-col items-center text-center mt-6 mb-6">
           <ArkeyOneLogo width={150} />
-          <p className="text-xs font-medium text-[#274a86] mt-2">Ordena tu mundo, mejora tu vida.</p>
+          <p className="text-xs font-medium text-white/90 mt-2 drop-shadow-sm">Ordena tu mundo, mejora tu vida.</p>
         </div>
 
         <form
@@ -218,7 +235,7 @@ export default function LoginMobile({ platform: platformProp, onCreateAccount, o
         </form>
 
         <div className="mt-auto text-center py-4" style={{ paddingBottom: 'calc(16px + env(safe-area-inset-bottom, 0px))' }}>
-          <span className="text-[12.5px] font-semibold" style={{ color: '#1c3a70' }}>Más orden. Más vida.</span>
+          <span className="text-[12.5px] font-semibold text-white drop-shadow-sm">Más orden. Más vida.</span>
           <div className="w-[34px] h-[2.5px] rounded mt-2 mx-auto" style={{ background: '#60A5FA' }} />
         </div>
       </div>
