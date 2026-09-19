@@ -175,7 +175,7 @@ export default function LoginMobile({ platform: platformProp, onCreateAccount, o
             />
           )}
 
-          <div className="flex items-center justify-between mb-4 text-xs mt-0.5">
+          <div className="flex items-center justify-between mb-5 text-xs mt-1">
             <label className="flex items-center gap-1.5 text-[#334467] font-medium">
               {isAndroid ? (
                 <button
@@ -210,7 +210,7 @@ export default function LoginMobile({ platform: platformProp, onCreateAccount, o
             type="submit"
             disabled={!canSubmit}
             {...(isAndroid ? { onPointerDown: btnRipple.onPointerDown } : {})}
-            className={`relative overflow-hidden w-full bg-[#007AFF] disabled:opacity-55 text-white py-3 text-[13.5px] font-bold flex items-center justify-center gap-1.5 transition ${!isAndroid ? 'active:scale-[0.97]' : ''}`}
+            className={`relative overflow-hidden w-full bg-[#007AFF] disabled:opacity-55 disabled:shadow-none text-white py-3.5 text-[13.5px] font-bold tracking-wide flex items-center justify-center gap-1.5 shadow-[0_10px_20px_-8px_rgba(0,122,255,.55)] transition ${!isAndroid ? 'active:scale-[0.97]' : ''}`}
             style={{ borderRadius: btnRadius }}
           >
             {isAndroid && btnRipple.nodes}
@@ -223,7 +223,7 @@ export default function LoginMobile({ platform: platformProp, onCreateAccount, o
             )}
           </button>
 
-          <p className="text-center text-xs text-[#6B7280] mb-2.5 mt-4">
+          <p className="text-center text-xs text-[#6B7280] mb-3 mt-4.5">
             ¿No tienes cuenta?{' '}
             <button type="button" onClick={onCreateAccount} className="text-[#007AFF] font-semibold">
               Crear cuenta
@@ -243,11 +243,11 @@ export default function LoginMobile({ platform: platformProp, onCreateAccount, o
   );
 }
 
-// ---- iOS: input relleno, sin borde visible hasta el foco ----
+// ---- iOS: input relleno, con borde sutil en reposo para separarse de la card blanca ----
 function IOSField({ icon, placeholder, type, value, onChange, radius, trailing }) {
   return (
     <div
-      className="flex items-center gap-2.5 bg-[#F1F4FB] border-[1.5px] border-transparent focus-within:border-[#007AFF] focus-within:bg-white focus-within:ring-4 focus-within:ring-[#007AFF]/10 px-3.5 py-3 mb-3.5 transition"
+      className="flex items-center gap-2.5 bg-[#F6F8FD] border-[1.5px] border-[#E7EBF5] focus-within:border-[#007AFF] focus-within:bg-white focus-within:ring-4 focus-within:ring-[#007AFF]/10 px-3.5 py-3 mb-3.5 transition"
       style={{ borderRadius: radius }}
     >
       {icon}
