@@ -89,7 +89,7 @@ export default function LoginWeb({ onCreateAccount, onForgotPassword }) {
 
       {/* ---- Panel de login ---- */}
       <div className="flex-1 min-w-[420px] flex flex-col relative z-10">
-        <div className="flex-1 flex items-center justify-center pl-8 pr-20">
+        <div className="flex-1 flex items-center justify-start pl-16">
           <form
             onSubmit={handleSubmit}
             className="w-full max-w-[400px] bg-[#EAF1FC] rounded-[18px] shadow-[0_20px_50px_-18px_rgba(10,45,107,.28)] px-8 pt-9 pb-7"
