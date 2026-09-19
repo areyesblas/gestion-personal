@@ -2,6 +2,16 @@ import React, { useState, useEffect, useLayoutEffect, useMemo, useRef } from "re
 import { supabase } from "./supabaseClient";
 import LoginScreenNuevo from "./components/auth/LoginScreen";
 import AuthCard, { AuthField, AuthPasswordField, AuthButton, AuthBanner, AuthBackLink } from "./components/auth/AuthCard";
+import DashboardHeader from "./components/dashboard/DashboardHeader";
+import DashboardSaludo from "./components/dashboard/DashboardSaludo";
+import StatCardsRow from "./components/dashboard/StatCardsRow";
+import TareasHoyWidget from "./components/dashboard/TareasHoyWidget";
+import AgendaHoyWidget from "./components/dashboard/AgendaHoyWidget";
+import ProyectosMiniWidget from "./components/dashboard/ProyectosMiniWidget";
+import NotasRapidasWidget from "./components/dashboard/NotasRapidasWidget";
+import AccesosRapidosWidget from "./components/dashboard/AccesosRapidosWidget";
+import HabitosHoyWidget from "./components/dashboard/HabitosHoyWidget";
+import DashboardBannerFinal from "./components/dashboard/DashboardBannerFinal";
 import * as XLSX from "xlsx";
 import {
   LayoutDashboard, FolderKanban, CheckSquare, Wallet, AlertTriangle,
@@ -38,7 +48,7 @@ const Tokens = ({ tema = "oscuro" }) => (
     .gp-root.tema-naranja-claro{ --bg:#FBEEE1; --panel:#FFF7EF; --panel-hi:#F7E2CB; --border:#EFCBA3; --text:#4A2A0F; --muted:#9C7A55; --panel-2:rgba(74,42,15,.06); }
     .gp-serif{ font-family:'Poppins',sans-serif; font-weight:600; }
     .gp-mono{ font-family:'IBM Plex Mono',monospace; }
-    .gp-panel{ background:var(--panel); border:1px solid var(--border); border-radius:6px; }
+    .gp-panel{ background:var(--panel); border:1px solid var(--border); border-radius:14px; }
     .gp-panel-hi:hover{ background:var(--panel-hi); }
     .gp-border{ border-color:var(--border); }
     .gp-input{ background:var(--bg); border:1px solid var(--border); color:var(--text);
@@ -1984,6 +1994,17 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
     setReauthError("");
   };
 
+  // Accesos rápidos del Centro de mando ("Nueva tarea"/"Nueva cita"/"Nuevo proyecto"/"Nuevo
+  // gasto"): guarda qué se quiere crear y en qué módulo, navega ahí (respetando el candado de
+  // VISTAS_SENSIBLES si aplica), y la pantalla destino abre su propio formulario de "Nuevo" sola
+  // (ver el useEffect de `crearAlEntrar` en Proyectos/Pendientes/Finanzas/Citas).
+  const [accionRapidaCrear, setAccionRapidaCrear] = useState(null);
+  const irACrear = (modulo, preset = {}) => {
+    setAccionRapidaCrear({ modulo, preset });
+    irAVista(modulo);
+  };
+  const consumirAccionRapidaCrear = () => setAccionRapidaCrear(null);
+
   // Crea un contacto solo con el nombre, sin salir del formulario que lo pidió (mismo patrón que
   // ya usan Citas y la captura rápida de Salud). tipos por default: el que se le pida (p.ej.
   // "Colaborador" al asignarlo desde una tarea, "Otro" en los demás casos).
@@ -2805,7 +2826,25 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
               {refrescando ? "Actualizando…" : pullDist > 60 ? "Suelta para actualizar ↓" : "Desliza hacia abajo para actualizar…"}
             </div>
           )}
-          {view === "dashboard" && <Dashboard data={data} setView={irAVista} onAddSaldo={(i) => addItem("saldoInicial", i)} onVerProyecto={irADetalleProyecto} onEditPendiente={(id, p) => editItem("pendientes", id, p)} sensibleDesbloqueadoHasta={sensibleDesbloqueadoHasta} onDesbloquear={desbloquearSensibleAqui} />}
+          {view === "dashboard" && (
+            <Dashboard
+              data={data}
+              setView={irAVista}
+              onAddSaldo={(i) => addItem("saldoInicial", i)}
+              onVerProyecto={irADetalleProyecto}
+              onEditPendiente={(id, p) => editItem("pendientes", id, p)}
+              sensibleDesbloqueadoHasta={sensibleDesbloqueadoHasta}
+              onDesbloquear={desbloquearSensibleAqui}
+              miEmail={miEmail}
+              notifNoLeidas={notifNoLeidas}
+              onBuscar={() => setBusquedaAbierta(true)}
+              onNotificaciones={() => setNotifPanelAbierto(true)}
+              onAddNota={(i) => addItem("notas", i)}
+              onEditHabito={(id, p) => editItem("habitos", id, p)}
+              modulosPermitidos={modulosPermitidos}
+              onCrearRapido={irACrear}
+            />
+          )}
           {view === "papelera" && <Papelera onRestore={restoreItem} onPermanentDelete={permanentDelete} ownerId={activeOwnerId} />}
           {view === "colaboradores" && <Colaboradores misId={misId} miEmail={miEmail} contactos={data.contactos} />}
           {view === "admin" && <AdminUsuarios adminUid={ADMIN_UID} adminEmail={miEmail} />}
@@ -2835,7 +2874,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
             />
           )}
           {view === "proyectos" && (
-            <Proyectos data={data} onAdd={(i) => addItem("proyectos", i)} onEdit={(id, p) => editItem("proyectos", id, p)} onRemove={(id) => askDelete("proyectos", id)} onAddComentario={(i) => addItem("comentarios", i)} onRemoveComentario={(id) => askDelete("comentarios", id)} onVerDetalle={irADetalleProyecto} />
+            <Proyectos data={data} onAdd={(i) => addItem("proyectos", i)} onEdit={(id, p) => editItem("proyectos", id, p)} onRemove={(id) => askDelete("proyectos", id)} onAddComentario={(i) => addItem("comentarios", i)} onRemoveComentario={(id) => askDelete("comentarios", id)} onVerDetalle={irADetalleProyecto} crearAlEntrar={accionRapidaCrear?.modulo === "proyectos" ? accionRapidaCrear : null} onConsumirCrearAlEntrar={consumirAccionRapidaCrear} />
           )}
           {view === "proyecto-detalle" && (
             <ProyectoDetalle
@@ -2875,6 +2914,8 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
                   console.error("Error al notificar la asignación:", err);
                 }
               }}
+              crearAlEntrar={accionRapidaCrear?.modulo === "pendientes" ? accionRapidaCrear : null}
+              onConsumirCrearAlEntrar={consumirAccionRapidaCrear}
             />
           )}
           {(view === "finanzas" || view === "facturas") && (
@@ -2882,7 +2923,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
               key={view}
               data={data}
               tabInicial={view === "facturas" ? "facturas" : "movimientos"}
-              finanzasProps={{ onAdd: (i) => addItem("finanzas", i), onEdit: (id, p) => editItem("finanzas", id, p), onRemove: (id) => askDelete("finanzas", id) }}
+              finanzasProps={{ onAdd: (i) => addItem("finanzas", i), onEdit: (id, p) => editItem("finanzas", id, p), onRemove: (id) => askDelete("finanzas", id), crearAlEntrar: accionRapidaCrear?.modulo === "finanzas" ? accionRapidaCrear : null, onConsumirCrearAlEntrar: consumirAccionRapidaCrear }}
               facturasProps={{ onAdd: (i) => addItem("facturas", i), onEdit: (id, p) => editItem("facturas", id, p), onRemove: (id) => askDelete("facturas", id), onAddComentario: (i) => addItem("comentarios", i), onRemoveComentario: (id) => askDelete("comentarios", id), onAddFinanzas: (i) => addItem("finanzas", i) }}
             />
           )}
@@ -2968,7 +3009,9 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
           )}
           {view === "citas" && (
             <Citas data={data} onAdd={(i) => addItem("citas", i)} onEdit={(id, p) => editItem("citas", id, p)} onRemove={(id) => askDelete("citas", id)} onCrearTarea={(t) => addItem("pendientes", t)}
-              onCrearContacto={(nombre) => { const nid = uid(); addItem("contactos", { id: nid, nombre, tipos: ["Otro"] }); return nid; }} />
+              onCrearContacto={(nombre) => { const nid = uid(); addItem("contactos", { id: nid, nombre, tipos: ["Otro"] }); return nid; }}
+              crearAlEntrar={accionRapidaCrear?.modulo === "citas" ? accionRapidaCrear : null}
+              onConsumirCrearAlEntrar={consumirAccionRapidaCrear} />
           )}
           {view === "notas" && (
             <Notas data={data} ownerId={activeOwnerId} onAdd={(i) => addItem("notas", i)} onEdit={(id, p) => editItem("notas", id, p)} onRemove={(id) => askDelete("notas", id)} />
@@ -3901,8 +3944,9 @@ function Papelera({ onRestore, onPermanentDelete, ownerId }) {
   );
 }
 
-function Dashboard({ data, setView, onAddSaldo, onVerProyecto, onEditPendiente, sensibleDesbloqueadoHasta, onDesbloquear }) {
+function Dashboard({ data, setView, onAddSaldo, onVerProyecto, onEditPendiente, sensibleDesbloqueadoHasta, onDesbloquear, miEmail, notifNoLeidas, onBuscar, onNotificaciones, onAddNota, onEditHabito, modulosPermitidos, onCrearRapido }) {
   const [saldoModal, setSaldoModal] = useState(false);
+  const [personalizarModal, setPersonalizarModal] = useState(false);
   const saldo = calcularSaldo(data);
   const hoy = todayISO();
   const mesActual = hoy.slice(0, 7);
@@ -3987,6 +4031,42 @@ function Dashboard({ data, setView, onAddSaldo, onVerProyecto, onEditPendiente, 
     .filter((c) => { const dd = Math.round((new Date(c.fechaHora).setHours(0, 0, 0, 0) - new Date(hoy + "T00:00:00").getTime()) / 86400000); return dd >= 0 && dd <= 7; })
     .sort((a, b) => new Date(a.fechaHora) - new Date(b.fechaHora));
 
+  // --- Datos para el nuevo look del Centro de mando (header/saludo/tarjetas/3 columnas):
+  // se calculan aquí, a partir de lo mismo que ya usa el resto de la pantalla, y se pasan ya
+  // resueltos a los widgets de src/components/dashboard/* (sin imports cruzados).
+  const primerNombreRaw = (miEmail || "").split("@")[0]?.split(/[._-]/)[0];
+  const primerNombre = primerNombreRaw ? primerNombreRaw.charAt(0).toUpperCase() + primerNombreRaw.slice(1) : "";
+
+  const tareasPendientesTotal = data.pendientes.filter((p) => p.estatus !== "Completada").length;
+
+  const toggleTareaHoy = (pendienteId, hecha) => {
+    if (hecha) {
+      setTachadas((prev) => { const n = new Set(prev); n.delete(pendienteId); return n; });
+      onEditPendiente(pendienteId, { estatus: "Pendiente" });
+    } else {
+      setTachadas((prev) => new Set(prev).add(pendienteId));
+      onEditPendiente(pendienteId, { estatus: "Completada" });
+    }
+  };
+  const accionesHoyView = accionesHoy.map((a) => ({
+    id: a.id, texto: a.texto || a.origen, sub: a.sub, irA: a.irA, pendienteId: a.pendienteId,
+    hecha: a.pendienteId ? tachadas.has(a.pendienteId) : false,
+    estado: a.dd < 0 ? "Vencida" : a.dd === 0 ? "Hoy" : a.dd === 1 ? "Mañana" : `${a.dd}d`,
+    tono: a.dd < 0 ? "red" : a.dd === 0 ? "gold" : "muted",
+  }));
+
+  const citasHoy = data.citas
+    .filter((c) => Math.round((new Date(c.fechaHora).setHours(0, 0, 0, 0) - new Date(hoy + "T00:00:00").getTime()) / 86400000) === 0)
+    .sort((a, b) => new Date(a.fechaHora) - new Date(b.fechaHora));
+
+  const habitosHoyView = (data.habitos || [])
+    .filter((h) => aplicaHoy(h, hoy))
+    .map((h) => ({ ...h, hecho: (h.fechas || []).includes(hoy) }));
+  const toggleHabitoHoy = (h) => {
+    const fechas = h.hecho ? (h.fechas || []).filter((f) => f !== hoy) : [...(h.fechas || []), hoy];
+    onEditHabito(h.id, { fechas });
+  };
+
   // Alertas importantes: vencimientos/renovaciones que no son "tareas" en sí — documentos, activos
   // digitales y facturas. Ventana un poco más amplia (14 días) porque son avisos tempranos, no
   // acciones inmediatas del día.
@@ -4038,6 +4118,37 @@ function Dashboard({ data, setView, onAddSaldo, onVerProyecto, onEditPendiente, 
 
   return (
     <div>
+      <DashboardHeader primerNombre={primerNombre} onBuscar={onBuscar} onNotificaciones={onNotificaciones} notifNoLeidas={notifNoLeidas} />
+      <DashboardSaludo primerNombre={primerNombre} />
+      <StatCardsRow
+        activos={activos}
+        tareasPendientes={tareasPendientesTotal}
+        ingresos={fmtMoney(ingresos)}
+        egresos={fmtMoney(egresos)}
+        sensibleDesbloqueado={sensibleDesbloqueado}
+        onDesbloquear={onDesbloquear}
+        onPersonalizarClick={() => setPersonalizarModal(true)}
+      />
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-5">
+        <TareasHoyWidget items={accionesHoyView} onToggle={toggleTareaHoy} onVerTodas={() => setView("pendientes")} />
+        <AgendaHoyWidget citas={citasHoy} onVerCalendario={() => setView("citas")} />
+        <div className="flex flex-col gap-4">
+          <ProyectosMiniWidget proyectos={avancePorProyecto} onVerTodos={() => setView("proyectos")} />
+          <NotasRapidasWidget onAddNota={onAddNota} />
+          <AccesosRapidosWidget onCrear={onCrearRapido} modulosPermitidos={modulosPermitidos} />
+        </div>
+      </div>
+      <HabitosHoyWidget habitos={habitosHoyView} onToggle={toggleHabitoHoy} onVerTodos={() => setView("habitos")} />
+      <DashboardBannerFinal />
+
+      {personalizarModal && (
+        <Modal title="Personalizar panel" onClose={() => setPersonalizarModal(false)}>
+          <p className="text-sm gp-text-muted mb-4">Muy pronto vas a poder elegir qué widgets ver aquí y en qué orden. Por ahora esta es la vista estándar del Centro de mando.</p>
+          <button onClick={() => setPersonalizarModal(false)} className="gp-btn w-full py-2 text-sm">Entendido</button>
+        </Modal>
+      )}
+
+      <p className="text-xs gp-text-muted uppercase tracking-wide mb-2 mt-2">Más detalle</p>
       <h2 className="gp-serif text-2xl mb-1">Centro de mando</h2>
       <p className="text-sm gp-text-muted mb-6">{saludo}. Esto es lo que requiere tu atención.</p>
 
@@ -4368,7 +4479,7 @@ function repartoCostosProyecto(data, proyectoId) {
   return Object.values(grupos).sort((a, b) => (a.esYo ? -1 : b.esYo ? 1 : a.nombre.localeCompare(b.nombre)));
 }
 
-function Proyectos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveComentario, onVerDetalle }) {
+function Proyectos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveComentario, onVerDetalle, crearAlEntrar, onConsumirCrearAlEntrar }) {
   const [modal, setModal] = useState(null);
   const [expanded, setExpanded] = useState(null);
   const [notaTexto, setNotaTexto] = useState("");
@@ -4376,6 +4487,12 @@ function Proyectos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
   const [busqueda, setBusqueda] = useState("");
 
   const empty = { nombre: "", categoria: CATS[0], estatus: "Idea", modo: "Finito", monetizacion: MONETIZACION[0], descripcion: "", github: "", githubSubido: false, notas: [], prioridad: "Media", fechaRevision: "" };
+
+  // Accesos rápidos del Centro de mando: si se navegó aquí pidiendo crear directo, abre el
+  // formulario solo (ver irACrear en AppLoggedIn) y limpia la señal para no reabrirlo después.
+  useEffect(() => {
+    if (crearAlEntrar) { setModal({ item: { ...empty, ...(crearAlEntrar.preset || {}) } }); onConsumirCrearAlEntrar(); }
+  }, [crearAlEntrar]);
 
   const camposOrden = {
     alfabetico: { get: (p) => p.nombre, tipo: "texto" },
@@ -5476,7 +5593,7 @@ function MindMapPendientes({ proyecto, tareas, onNodoClick, onAgregar, onElimina
   );
 }
 
-function Pendientes({ data, activeOwnerId, onAdd, onEdit, onRemove, onAddComentario, onRemoveComentario, onAsignar, onCrearContacto, onEnviarInvitacion, onAceptarEnNombre }) {
+function Pendientes({ data, activeOwnerId, onAdd, onEdit, onRemove, onAddComentario, onRemoveComentario, onAsignar, onCrearContacto, onEnviarInvitacion, onAceptarEnNombre, crearAlEntrar, onConsumirCrearAlEntrar }) {
   const [modal, setModal] = useState(null);
   const [comentariosDe, setComentariosDe] = useState(null);
   const [orden, setOrden] = useState("default");
@@ -5485,6 +5602,10 @@ function Pendientes({ data, activeOwnerId, onAdd, onEdit, onRemove, onAddComenta
   const [filtroProyecto, setFiltroProyecto] = useState(""); // "" = todos los proyectos, en la vista de lista
   const [colaboradores, setColaboradores] = useState([]);
   const empty = { proyectoId: "", parentId: "", descripcion: "", fechaLimite: todayISO(), fechaRevision: "", prioridad: "Media", estatus: "Pendiente", colaboradorContactoId: null, contactoId: "", precio: "", fechaPagoAprox: "", tiempoEstimado: "", tiempoReal: "", asignadoA: "" };
+
+  useEffect(() => {
+    if (crearAlEntrar) { setModal({ item: { ...empty, ...(crearAlEntrar.preset || {}) } }); onConsumirCrearAlEntrar(); }
+  }, [crearAlEntrar]);
 
   useEffect(() => {
     if (!activeOwnerId) return;
@@ -5945,7 +6066,7 @@ function FinanzasYFacturas({ data, tabInicial, finanzasProps, facturasProps }) {
     </div>
   );
 }
-function Finanzas({ data, onAdd, onEdit, onRemove }) {
+function Finanzas({ data, onAdd, onEdit, onRemove, crearAlEntrar, onConsumirCrearAlEntrar }) {
   const [modal, setModal] = useState(null);
   const [vista, setVista] = useState("todos");
   const [filtroTipoRecurrente, setFiltroTipoRecurrente] = useState("Todos");
@@ -5955,6 +6076,10 @@ function Finanzas({ data, onAdd, onEdit, onRemove }) {
   const [busqueda, setBusqueda] = useState("");
   const toggleOrden = (key) => { if (orden === key) setOrdenDir((d) => (d === "asc" ? "desc" : "asc")); else { setOrden(key); setOrdenDir("asc"); } };
   const empty = { concepto: "", tipo: "Ingreso", proyectoId: "", contactoId: "", fecha: todayISO(), fechaVencimiento: "", monto: "", categoria: "", forma: "Transferencia", estatus: "Cobrado", pautando: false, esRecurrente: false, frecuencia: "Mensual", fechaFin: "" };
+
+  useEffect(() => {
+    if (crearAlEntrar) { setModal({ item: { ...empty, ...(crearAlEntrar.preset || {}) } }); onConsumirCrearAlEntrar(); }
+  }, [crearAlEntrar]);
   const nombreProyecto = (id) => data.proyectos.find((p) => p.id === id)?.nombre || "—";
   const nombreCliente = (id) => data.contactos.find((c) => c.id === id)?.nombre || "—";
   const hoy = todayISO();
@@ -10003,10 +10128,14 @@ function PendienteExistenteForm({ pendientes, onAsignar }) {
   );
 }
 
-function Citas({ data, onAdd, onEdit, onRemove, onCrearTarea, onCrearContacto }) {
+function Citas({ data, onAdd, onEdit, onRemove, onCrearTarea, onCrearContacto, crearAlEntrar, onConsumirCrearAlEntrar }) {
   const [modal, setModal] = useState(null);
   const [busqueda, setBusqueda] = useState("");
   const empty = { titulo: "", fechaHora: localInputsAFechaHora(todayISO(), "09:00"), lugar: "", contactoIds: [], tags: [], notas: "" };
+
+  useEffect(() => {
+    if (crearAlEntrar) { setModal({ item: { ...empty, ...(crearAlEntrar.preset || {}) } }); onConsumirCrearAlEntrar(); }
+  }, [crearAlEntrar]);
   const nombreContacto = (id) => data.contactos.find((c) => c.id === id)?.nombre || "—";
   const nombresContactos = (c) => (c.contactoIds && c.contactoIds.length ? c.contactoIds : (c.contactoId ? [c.contactoId] : [])).map(nombreContacto);
   const ahora = new Date();
