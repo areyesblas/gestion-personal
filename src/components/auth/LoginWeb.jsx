@@ -25,31 +25,35 @@ export default function LoginWeb({ onCreateAccount, onForgotPassword }) {
   } = useLoginForm();
 
   return (
-    <div className="min-h-screen flex bg-[#F8FAFF]">
-      {/* ---- Panel de marca ---- */}
-      <div className="hidden lg:flex flex-col relative flex-[1.3] min-w-[420px] px-14 py-11 text-white overflow-hidden">
-        <picture className="absolute inset-0 block">
-          <source srcSet={bgWebWebp} type="image/webp" />
-          <img
-            src={bgWebJpg}
-            alt=""
-            className="absolute inset-0 w-full h-full object-cover"
-            style={{ objectPosition: '68% 42%' }}
-          />
-        </picture>
-        {/* Scrim: sombra a la izquierda (legibilidad del texto), abajo (pie de página)
-            y un refuerzo extra detrás del logo — la foto es clara y cambia de brillo
-            según la zona, así que no basta un degradado plano. */}
-        <div
-          className="absolute inset-0"
-          style={{
-            backgroundImage: `
-              radial-gradient(560px 300px at 0% 0%, rgba(4,14,34,.62) 0%, rgba(4,14,34,0) 72%),
-              linear-gradient(100deg, rgba(4,14,34,.78) 0%, rgba(4,14,34,.48) 26%, rgba(4,14,34,.12) 52%, rgba(4,14,34,0) 66%),
-              linear-gradient(180deg, rgba(4,14,34,0) 50%, rgba(4,14,34,.6) 82%, rgba(4,14,34,.82) 100%)
-            `,
-          }}
+    <div className="min-h-screen relative flex overflow-hidden bg-[#0B2341]">
+      {/* Foto de fondo a pantalla completa -- antes solo vivía dentro del panel de marca,
+          ahora se comparte con el panel de login también (ver el cuadro azul pastel abajo). */}
+      <picture className="absolute inset-0 block z-0">
+        <source srcSet={bgWebWebp} type="image/webp" />
+        <img
+          src={bgWebJpg}
+          alt=""
+          className="absolute inset-0 w-full h-full object-cover"
+          style={{ objectPosition: '68% 42%' }}
         />
+      </picture>
+      {/* Scrim: sombra a la izquierda (legibilidad del texto de marca), abajo (pie de página)
+          y un refuerzo extra detrás del logo — la foto es clara y cambia de brillo según la
+          zona, así que no basta un degradado plano. El lado derecho (donde flota el cuadro de
+          login) no necesita scrim propio: el cuadro es opaco y lo cubre por completo. */}
+      <div
+        className="absolute inset-0 z-[1]"
+        style={{
+          backgroundImage: `
+            radial-gradient(560px 300px at 0% 0%, rgba(4,14,34,.62) 0%, rgba(4,14,34,0) 72%),
+            linear-gradient(100deg, rgba(4,14,34,.78) 0%, rgba(4,14,34,.48) 26%, rgba(4,14,34,.12) 52%, rgba(4,14,34,0) 66%),
+            linear-gradient(180deg, rgba(4,14,34,0) 50%, rgba(4,14,34,.6) 82%, rgba(4,14,34,.82) 100%)
+          `,
+        }}
+      />
+
+      {/* ---- Panel de marca ---- */}
+      <div className="hidden lg:flex flex-col relative z-10 flex-[1.3] min-w-[420px] px-14 py-11 text-white">
         <div className="relative z-10 flex flex-col h-full">
           <div className="inline-flex flex-col items-center">
             <ArkeyOneLogo width={190} />
@@ -90,17 +94,11 @@ export default function LoginWeb({ onCreateAccount, onForgotPassword }) {
       </div>
 
       {/* ---- Panel de login ---- */}
-      <div className="flex-1 min-w-[420px] flex flex-col bg-[#EAF1FC]">
-        <div className="flex justify-end items-center gap-6 px-11 pt-6 text-sm font-medium text-[#243b63]">
-          <a href="/about" className="hover:text-[#0A2D6B]">Acerca de</a>
-          <a href="/blog" className="hover:text-[#0A2D6B]">Blog</a>
-          <a href="/soporte" className="hover:text-[#0A2D6B]">Soporte</a>
-        </div>
-
+      <div className="flex-1 min-w-[420px] flex flex-col relative z-10">
         <div className="flex-1 flex items-center justify-center px-11 pb-16">
           <form
             onSubmit={handleSubmit}
-            className="w-full max-w-[400px] bg-white rounded-[18px] shadow-[0_20px_50px_-18px_rgba(10,45,107,.28)] px-8 pt-9 pb-7"
+            className="w-full max-w-[400px] bg-[#EAF1FC] rounded-[18px] shadow-[0_20px_50px_-18px_rgba(10,45,107,.28)] px-8 pt-9 pb-7"
           >
             {bannerType && (
               <div
