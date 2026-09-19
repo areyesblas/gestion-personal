@@ -71,7 +71,7 @@ const Tokens = ({ tema = "oscuro" }) => (
     .gp-badge{ display:inline-block; padding:2px 8px; border-radius:3px; font-size:11px; font-weight:500; }
     .gp-scroll::-webkit-scrollbar{ width:6px; height:6px; }
     .gp-scroll::-webkit-scrollbar-thumb{ background:var(--border); border-radius:3px; }
-    /* El logo y el menú lateral (además de login/splash, que usan esta misma clase) SIEMPRE
+    /* El logo y el menú lateral (además de login, que usa esta misma clase) SIEMPRE
        usan este azul oscuro fijo, sin importar qué tema esté activo en el resto de la app —
        incluidos los 5 temas claros nuevos. Esto es justo lo que evita que el logo pierda
        contraste otra vez, sin tener que renunciar a tener temas claros. */
@@ -1331,32 +1331,6 @@ function NuevaPasswordScreen({ onListo, tema }) {
 }
 
 /* ---------- app (portero de sesión) ---------- */
-// Pantalla de bienvenida (~5 seg) que se ve al abrir la app, antes de mostrar login o el sistema.
-// Es puramente visual — la sesión se carga en paralelo mientras esto se muestra.
-function SplashScreen({ tema, fadingOut }) {
-  return (
-    <div
-      className={`gp-root gp-sidebar-area fixed inset-0 z-[100] flex items-center justify-center ${claseTema(tema)}`}
-      style={{ transition: "opacity .4s ease", opacity: fadingOut ? 0 : 1 }}
-    >
-      <Tokens tema={tema} />
-      <style>{`
-        @keyframes splashLogoIn { from { opacity:0; transform:scale(.9) translateY(6px);} to { opacity:1; transform:scale(1) translateY(0);} }
-        @keyframes splashTaglineIn { from { opacity:0; transform:translateY(4px);} to { opacity:1; transform:translateY(0);} }
-        @keyframes splashBarFill { from { width:0%;} to { width:100%;} }
-        .splash-logo{ animation: splashLogoIn .6s cubic-bezier(.16,1,.3,1) both; }
-        .splash-tagline{ animation: splashTaglineIn .5s ease .5s both; }
-        .splash-bar-track{ width:140px; height:3px; border-radius:999px; background:var(--border); overflow:hidden; margin-top:22px; }
-        .splash-bar-fill{ height:100%; background:var(--gold); animation: splashBarFill 4.2s cubic-bezier(.4,0,.2,1) .5s both; border-radius:999px; }
-      `}</style>
-      <div className="flex flex-col items-center">
-        <img src="/logo-arkeyone.png" alt="ArkeyOne" className="splash-logo" style={{ height: 200 }} />
-        <p className="splash-tagline text-xs gp-text-muted mt-3 tracking-wide">La llave que alinea tu mundo</p>
-        <div className="splash-bar-track"><div className="splash-bar-fill" /></div>
-      </div>
-    </div>
-  );
-}
 
 // Pantalla que pide el código de 6 dígitos cuando el usuario ya tiene activada la verificación en dos pasos.
 function MfaChallengeScreen({ factorId, onVerificado, tema }) {
@@ -1597,18 +1571,6 @@ export default function App() {
   // Qué pantalla mostrar dentro del área sin sesión: login (nuevo diseño), crear cuenta o recuperar contraseña.
   const [vistaAuth, setVistaAuth] = useState("login");
   const [tema, toggleTema, setTema] = useTema();
-  const [showSplash, setShowSplash] = useState(() => {
-    // Después de cerrar sesión forzamos un reload para dejar todo limpio, pero eso no debe
-    // implicar ver la animación de bienvenida otra vez — se salta una sola vez con esta bandera.
-    try {
-      if (sessionStorage.getItem("arkeyone_skip_splash") === "1") {
-        sessionStorage.removeItem("arkeyone_skip_splash");
-        return false;
-      }
-    } catch {}
-    return true;
-  });
-  const [splashFadingOut, setSplashFadingOut] = useState(false);
   // Verificación en dos pasos (MFA): null = todavía sin revisar, { pendiente, factorId }
   const [mfaEstado, setMfaEstado] = useState(null);
 
@@ -1657,17 +1619,6 @@ export default function App() {
       }
     })();
   }, [session]);
-
-  // El splash dura ~5 seg fijos, sin importar qué tan rápido cargue la sesión (que corre en paralelo arriba).
-  useEffect(() => {
-    const fadeTimer = setTimeout(() => setSplashFadingOut(true), 4600);
-    const hideTimer = setTimeout(() => setShowSplash(false), 5000);
-    return () => { clearTimeout(fadeTimer); clearTimeout(hideTimer); };
-  }, []);
-
-  if (showSplash) {
-    return <SplashScreen tema={tema} fadingOut={splashFadingOut} />;
-  }
 
   let pantalla;
   if (session === undefined) {
@@ -2044,9 +1995,6 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
     } catch (err) {
       console.error("Error al cerrar sesión:", err);
     } finally {
-      try {
-        sessionStorage.setItem("arkeyone_skip_splash", "1");
-      } catch {}
       window.location.reload();
     }
   };
@@ -10848,7 +10796,6 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
     // realmente apagado sobre evitar ese re-permiso.
     if (esIOS) {
       try { localStorage.setItem("arkeyone_reload_vista", JSON.stringify(contextoPantalla || null)); } catch {}
-      try { sessionStorage.setItem("arkeyone_skip_splash", "1"); } catch {} // ya viene de la app abierta, no hace falta ver la animación de bienvenida otra vez
       window.location.reload();
       return;
     }
