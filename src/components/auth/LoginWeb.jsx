@@ -54,37 +54,36 @@ export default function LoginWeb({ onCreateAccount, onForgotPassword }) {
 
       {/* ---- Panel de marca ---- */}
       <div className="hidden lg:flex flex-col relative z-10 flex-[1.3] min-w-[420px] px-14 py-11 text-white">
-        <div className="relative z-10 flex flex-col h-full">
+        <div className="relative z-10 flex flex-col justify-center h-full">
           <div className="w-full max-w-[420px] flex flex-col items-center">
             <ArkeyOneLogo width={230} />
             <p className="mt-2.5 text-base font-medium text-white/90 text-center">
               Ordena tu mundo, mejora tu vida.
             </p>
           </div>
-          <div className="w-13 h-[3px] rounded bg-[#007AFF] mt-6 mb-7" style={{ width: 52 }} />
+          <div className="w-13 h-[3px] rounded bg-[#007AFF] mt-8 mb-8" style={{ width: 52 }} />
 
-          <h2 className="text-[34px] leading-tight font-bold max-w-[420px] mb-7 text-white drop-shadow-sm">
+          <h2 className="text-[38px] leading-tight font-bold max-w-[420px] mb-8 text-white drop-shadow-sm">
             Todo en un solo lugar,<br />
             para una vida con más{' '}
             <span style={{ color: '#7cc4ff' }}>claridad.</span>
           </h2>
 
-          <ul className="grid grid-cols-2 gap-x-7 gap-y-3.5 max-w-[420px] mb-9 list-none p-0">
+          <ul className="grid grid-cols-2 gap-x-7 gap-y-4 max-w-[420px] list-none p-0">
             {FEATURES.map((f) => (
-              <li key={f} className="flex items-center gap-2.5 text-[15px] font-medium text-white/95">
-                <Check size={16} strokeWidth={2.2} className="text-[#7cc4ff]" />
+              <li key={f} className="flex items-center gap-2.5 text-[16px] font-medium text-white/95">
+                <Check size={17} strokeWidth={2.2} className="text-[#7cc4ff]" />
                 {f}
               </li>
             ))}
           </ul>
 
-
-          <div className="mt-auto pt-5 text-white">
-            <p className="text-[17px] italic font-medium drop-shadow-sm">"Organiza hoy, vive un mejor mañana."</p>
+          <div className="mt-12 text-white">
+            <p className="text-[18px] italic font-medium drop-shadow-sm">"Organiza hoy, vive un mejor mañana."</p>
             <div className="w-10 h-0.5 rounded bg-[#007AFF] mt-3" />
           </div>
 
-          <div className="flex justify-between items-end mt-6 text-white/90">
+          <div className="flex justify-between items-end mt-8 text-white/90">
             <span className="font-bold text-sm">ARKEY·ONE</span>
             <small className="text-[10.5px] tracking-[.14em] font-semibold text-white/70">
               TECNOLOGÍA PARA UNA VIDA CON SENTIDO
@@ -95,7 +94,7 @@ export default function LoginWeb({ onCreateAccount, onForgotPassword }) {
 
       {/* ---- Panel de login ---- */}
       <div className="flex-1 min-w-[420px] flex flex-col relative z-10">
-        <div className="flex-1 flex items-center justify-center px-11 pb-16">
+        <div className="flex-1 flex items-center justify-center px-11">
           <form
             onSubmit={handleSubmit}
             className="w-full max-w-[400px] bg-[#EAF1FC] rounded-[18px] shadow-[0_20px_50px_-18px_rgba(10,45,107,.28)] px-8 pt-9 pb-7"

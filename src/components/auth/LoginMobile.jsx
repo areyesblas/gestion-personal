@@ -70,13 +70,15 @@ export default function LoginMobile({ platform: platformProp, onCreateAccount, o
             style={{ objectPosition: '62% 40%' }}
           />
         </picture>
-        {/* Scrim: oscurece arriba (logo/tagline/idioma) y abajo (footer);
-            la card queda sobre fondo blanco propio, no necesita scrim. */}
+        {/* Scrim: oscurece arriba (logo/tagline) y abajo (footer); la card queda sobre fondo
+            propio, no necesita scrim. El tramo de arriba se refuerza un poco más que el resto
+            (0% y 26%) para que el "ONE" del logo no se pierda contra cielos claros de la foto,
+            sin tener que tocar el color del logo (quedaría inconsistente con web). */}
         <div
           className="absolute inset-0"
           style={{
             backgroundImage: `
-              linear-gradient(180deg, rgba(4,14,34,.55) 0%, rgba(4,14,34,.18) 26%, rgba(4,14,34,0) 40%),
+              linear-gradient(180deg, rgba(4,14,34,.68) 0%, rgba(4,14,34,.3) 26%, rgba(4,14,34,0) 42%),
               linear-gradient(180deg, rgba(4,14,34,0) 62%, rgba(4,14,34,.6) 100%)
             `,
           }}
