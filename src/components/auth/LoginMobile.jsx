@@ -115,7 +115,7 @@ export default function LoginMobile({ platform: platformProp, onCreateAccount, o
           )}
 
           <h1 className="text-[18px] font-bold text-[#0A2D6B] text-center mb-0.5">Bienvenido de nuevo</h1>
-          <p className="text-xs text-[#6B7280] text-center mb-7">Inicia sesión en tu centro de mando.</p>
+          <p className="text-xs text-[#3E4C63] text-center mb-7">Inicia sesión en tu centro de mando.</p>
 
           {/* ---- Email ---- */}
           {isAndroid ? (
@@ -170,7 +170,7 @@ export default function LoginMobile({ platform: platformProp, onCreateAccount, o
           )}
 
           <div className="flex items-center justify-between mb-5 text-xs mt-1">
-            <label className="flex items-center gap-1.5 text-[#334467] font-medium">
+            <label className="flex items-center gap-1.5 text-[#1E2F52] font-semibold">
               {isAndroid ? (
                 <button
                   type="button"
@@ -195,7 +195,7 @@ export default function LoginMobile({ platform: platformProp, onCreateAccount, o
               )}
               Mantener sesión
             </label>
-            <button type="button" onClick={onForgotPassword} className="text-[#007AFF] font-semibold text-[11.5px]">
+            <button type="button" onClick={onForgotPassword} className="text-[#0A58CE] font-bold text-[11.5px]">
               ¿Olvidaste tu contraseña?
             </button>
           </div>
@@ -217,13 +217,13 @@ export default function LoginMobile({ platform: platformProp, onCreateAccount, o
             )}
           </button>
 
-          <p className="text-center text-xs text-[#6B7280] mb-3 mt-7">
+          <p className="text-center text-xs text-[#3E4C63] mb-3 mt-7">
             ¿No tienes cuenta?{' '}
-            <button type="button" onClick={onCreateAccount} className="text-[#007AFF] font-semibold">
+            <button type="button" onClick={onCreateAccount} className="text-[#0A58CE] font-bold">
               Crear cuenta
             </button>
           </p>
-          <p className="flex items-center justify-center gap-1 text-[10px] text-[#9AA7BE] text-center">
+          <p className="flex items-center justify-center gap-1 text-[10px] text-[#5B6B85] font-medium text-center">
             <ShieldCheck size={11} /> Tus datos están protegidos. Privacidad · Términos
           </p>
         </form>
