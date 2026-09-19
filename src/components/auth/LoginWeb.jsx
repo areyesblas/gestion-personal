@@ -26,6 +26,15 @@ export default function LoginWeb({ onCreateAccount, onForgotPassword }) {
 
   return (
     <div className="min-h-screen relative flex overflow-hidden bg-[#0B2341]">
+      {/* Truco para detectar el autocompletado del navegador (Chrome/Safari rellenan el campo
+          visualmente al recargar la página sin disparar onChange, así que el estado de React
+          -- y por lo tanto el botón "Iniciar sesión" -- se quedaba desactivado). El navegador
+          aplica el pseudo-selector :-webkit-autofill al campo relleno, lo que dispara esta
+          animación; escuchamos onAnimationStart en los inputs para sincronizar el estado. */}
+      <style>{`
+        @keyframes arkeyone-autofill { from {} to {} }
+        input:-webkit-autofill { animation-name: arkeyone-autofill; }
+      `}</style>
       {/* Foto de fondo a pantalla completa -- antes solo vivía dentro del panel de marca,
           ahora se comparte con el panel de login también (ver el cuadro azul pastel abajo). */}
       <picture className="absolute inset-0 block z-0">
@@ -127,6 +136,7 @@ export default function LoginWeb({ onCreateAccount, onForgotPassword }) {
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
+                onAnimationStart={(e) => { if (e.animationName === 'arkeyone-autofill') setEmail(e.target.value); }}
                 onBlur={() => setEmailTouched(true)}
                 placeholder="Correo electrónico"
                 autoComplete="email"
@@ -145,6 +155,7 @@ export default function LoginWeb({ onCreateAccount, onForgotPassword }) {
                 type={showPassword ? 'text' : 'password'}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
+                onAnimationStart={(e) => { if (e.animationName === 'arkeyone-autofill') setPassword(e.target.value); }}
                 placeholder="Contraseña"
                 autoComplete="current-password"
                 className="flex-1 bg-transparent outline-none text-sm text-[#1F2937] placeholder:text-[#9AA7BE]"

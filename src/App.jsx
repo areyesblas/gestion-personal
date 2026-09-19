@@ -1284,7 +1284,7 @@ function RecuperarPasswordScreen({ onVolver }) {
   return (
     <AuthCard>
       <h1 className="text-[22px] font-bold text-[#0A2D6B] text-center mb-1">¿Olvidaste tu contraseña?</h1>
-      <p className="text-[13.5px] text-[#6B7280] text-center mb-6">Te mandamos un enlace para poner una contraseña nueva.</p>
+      <p className="text-[13.5px] text-[#6B7280] text-center mb-6">Te enviaremos un enlace para poner una contraseña nueva.</p>
 
       {error && <AuthBanner type="error">{error}</AuthBanner>}
       {aviso && <AuthBanner type="success">{aviso}</AuthBanner>}
