@@ -54,7 +54,7 @@ export default function LoginWeb({ onCreateAccount, onForgotPassword }) {
 
       {/* ---- Panel de marca ---- */}
       <div className="hidden lg:flex flex-col relative z-10 flex-[1.3] min-w-[420px] px-14 py-11 text-white">
-        <div className="relative z-10 flex flex-col justify-center h-full">
+        <div className="relative z-10 flex flex-col items-center justify-center h-full">
           <div className="w-full max-w-[420px] flex flex-col items-center mb-7">
             <ArkeyOneLogo width={230} />
             <p className="mt-2.5 text-base font-medium text-white/90 text-center">
@@ -62,7 +62,7 @@ export default function LoginWeb({ onCreateAccount, onForgotPassword }) {
             </p>
           </div>
 
-          <h2 className="text-[36px] leading-tight font-bold max-w-[420px] mb-6 text-white drop-shadow-sm">
+          <h2 className="text-[36px] leading-tight font-bold max-w-[420px] mb-6 text-white text-center drop-shadow-sm">
             Todo en un solo lugar,<br />
             para una vida con más{' '}
             <span style={{ color: '#7cc4ff' }}>claridad.</span>
@@ -77,11 +77,11 @@ export default function LoginWeb({ onCreateAccount, onForgotPassword }) {
             ))}
           </ul>
 
-          <p className="text-[17px] italic font-medium text-white drop-shadow-sm mt-7">
+          <p className="text-[17px] italic font-medium text-white text-center drop-shadow-sm mt-7">
             "Organiza hoy, vive un mejor mañana."
           </p>
 
-          <p className="text-[10.5px] tracking-[.14em] font-semibold text-white/70 mt-5">
+          <p className="text-[10.5px] tracking-[.14em] font-semibold text-white/70 text-center mt-5">
             TECNOLOGÍA PARA UNA VIDA CON SENTIDO
           </p>
         </div>

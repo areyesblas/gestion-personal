@@ -1216,6 +1216,9 @@ function CrearCuentaScreen({ onVolver }) {
       return;
     }
     setAviso("Cuenta creada. Revisa tu correo para confirmarla antes de entrar.");
+    setEmail("");
+    setPassword("");
+    setConfirmPassword("");
   };
 
   return (

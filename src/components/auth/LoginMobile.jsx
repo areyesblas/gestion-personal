@@ -86,10 +86,10 @@ export default function LoginMobile({ platform: platformProp, onCreateAccount, o
       </div>
 
       <div
-        className="relative z-10 flex-1 flex flex-col px-6"
-        style={{ paddingTop: 'calc(18px + env(safe-area-inset-top, 0px))' }}
+        className="relative z-10 flex-1 flex flex-col justify-center px-6"
+        style={{ paddingTop: 'calc(18px + env(safe-area-inset-top, 0px))', paddingBottom: 'calc(18px + env(safe-area-inset-bottom, 0px))' }}
       >
-        <div className="flex flex-col items-center text-center mt-10 mb-6">
+        <div className="flex flex-col items-center text-center mb-4">
           <ArkeyOneLogo width={195} />
           <p className="text-sm font-medium text-white/90 mt-2.5 drop-shadow-sm">Ordena tu mundo, mejora tu vida.</p>
         </div>
@@ -230,7 +230,7 @@ export default function LoginMobile({ platform: platformProp, onCreateAccount, o
           </p>
         </form>
 
-        <div className="mt-auto text-center py-4" style={{ paddingBottom: 'calc(16px + env(safe-area-inset-bottom, 0px))' }}>
+        <div className="text-center mt-6">
           <span className="text-[12.5px] font-semibold text-white drop-shadow-sm">Más orden. Más vida.</span>
           <div className="w-[34px] h-[2.5px] rounded mt-2 mx-auto" style={{ background: '#60A5FA' }} />
         </div>
