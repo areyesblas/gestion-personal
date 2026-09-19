@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { supabase } from "./supabaseClient";
+import LoginScreenNuevo from "./components/auth/LoginScreen";
 import * as XLSX from "xlsx";
 import {
   LayoutDashboard, FolderKanban, CheckSquare, Wallet, AlertTriangle,
@@ -1168,38 +1169,24 @@ function DocumentoLegal({ titulo, texto, onVolver, tema }) {
 }
 
 
-function LoginScreen({ tema, toggleTema }) {
-  const [modo, setModo] = useState("entrar"); // "entrar" | "crear" | "recuperar"
+// Crear cuenta y recuperar contraseña vivían como "modos" dentro del Login viejo.
+// Se extraen aquí, sin cambiar su lógica/copys, para que el nuevo LoginScreen
+// (src/components/auth/) los abra vía onCreateAccount/onForgotPassword.
+function CrearCuentaScreen({ tema, onVolver }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const [avisoRegistro, setAvisoRegistro] = useState("");
+  const [aviso, setAviso] = useState("");
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (loading) return; // evita doble envío (doble clic / Enter) que dispara rate limit del backend
     setError("");
-    setAvisoRegistro("");
+    setAviso("");
     setLoading(true);
 
-    if (modo === "entrar") {
-      const { error } = await supabase.auth.signInWithPassword({ email, password });
-      setLoading(false);
-      if (error) setError("Correo o contraseña incorrectos.");
-      return;
-    }
-
-    if (modo === "recuperar") {
-      const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin });
-      setLoading(false);
-      if (error) { setError("No se pudo enviar el correo. Intenta de nuevo."); return; }
-      setAvisoRegistro("Si ese correo tiene una cuenta, te acabamos de mandar un enlace para restablecer tu contraseña. Revisa tu bandeja (y spam).");
-      return;
-    }
-
-    // crear cuenta
     const { cumpleMinimo } = evaluarPassword(password);
     if (!cumpleMinimo) {
       setLoading(false);
@@ -1227,7 +1214,7 @@ function LoginScreen({ tema, toggleTema }) {
       setError("Ese correo ya tiene una cuenta. Intenta iniciar sesión.");
       return;
     }
-    setAvisoRegistro("Cuenta creada. Revisa tu correo para confirmarla antes de entrar.");
+    setAviso("Cuenta creada. Revisa tu correo para confirmarla antes de entrar.");
   };
 
   return (
@@ -1237,37 +1224,57 @@ function LoginScreen({ tema, toggleTema }) {
         <div className="flex flex-col items-center text-center mb-4">
           <img src="/logo-arkeyone.png" alt="ArkeyOne" style={{ height: 108 }} className="mb-2" />
           <p className="text-xs gp-text-gold tracking-wide mb-3">La llave que alinea tu mundo</p>
-          <p className="text-xs gp-text-muted">
-            {modo === "entrar" ? "Inicia sesión para entrar a tu sistema." : modo === "crear" ? "Crea tu cuenta." : "Te mandamos un enlace para poner una contraseña nueva."}
-          </p>
+          <p className="text-xs gp-text-muted">Crea tu cuenta.</p>
         </div>
-
-        {modo !== "recuperar" && (
-          <div className="flex gap-1 mb-4 w-full">
-            <button type="button" onClick={() => { setModo("entrar"); setError(""); setAvisoRegistro(""); }} className={`text-xs px-3 py-1.5 rounded-full border flex-1 ${modo === "entrar" ? "gp-btn" : "gp-text-muted"}`}>Iniciar sesión</button>
-            <button type="button" onClick={() => { setModo("crear"); setError(""); setAvisoRegistro(""); }} className={`text-xs px-3 py-1.5 rounded-full border flex-1 ${modo === "crear" ? "gp-btn" : "gp-text-muted"}`}>Crear cuenta</button>
-          </div>
-        )}
-
         <Field label="Correo"><input type="email" required className="gp-input" value={email} onChange={(e) => setEmail(e.target.value)} /></Field>
-        {modo !== "recuperar" && (
-          <Field label="Contraseña"><CampoPassword required value={password} onChange={(e) => setPassword(e.target.value)} /></Field>
-        )}
-        {modo === "crear" && <MedidorPassword password={password} />}
-        {modo === "crear" && (
-          <Field label="Confirmar contraseña"><CampoPassword required value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} /></Field>
-        )}
-        {modo === "entrar" && (
-          <button type="button" onClick={() => { setModo("recuperar"); setError(""); setAvisoRegistro(""); }} className="text-xs gp-text-gold mb-3 -mt-1">¿Olvidaste tu contraseña?</button>
-        )}
+        <Field label="Contraseña"><CampoPassword required value={password} onChange={(e) => setPassword(e.target.value)} /></Field>
+        <MedidorPassword password={password} />
+        <Field label="Confirmar contraseña"><CampoPassword required value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} /></Field>
         {error && <p className="text-xs gp-text-red mb-3">{error}</p>}
-        {avisoRegistro && <p className="text-xs gp-text-teal mb-3">{avisoRegistro}</p>}
+        {aviso && <p className="text-xs gp-text-teal mb-3">{aviso}</p>}
         <button type="submit" disabled={loading} className="gp-btn w-full py-2 text-sm mt-1">
-          {loading ? "Un momento…" : modo === "entrar" ? "Entrar" : modo === "crear" ? "Crear cuenta" : "Enviar enlace de recuperación"}
+          {loading ? "Un momento…" : "Crear cuenta"}
         </button>
-        {modo === "recuperar" && (
-          <button type="button" onClick={() => { setModo("entrar"); setError(""); setAvisoRegistro(""); }} className="text-xs gp-text-muted w-full text-center mt-3">← Regresar a iniciar sesión</button>
-        )}
+        <button type="button" onClick={onVolver} className="text-xs gp-text-muted w-full text-center mt-3">← Regresar a iniciar sesión</button>
+      </form>
+    </div>
+  );
+}
+
+function RecuperarPasswordScreen({ tema, onVolver }) {
+  const [email, setEmail] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [aviso, setAviso] = useState("");
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (loading) return;
+    setError("");
+    setAviso("");
+    setLoading(true);
+    const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin });
+    setLoading(false);
+    if (error) { setError("No se pudo enviar el correo. Intenta de nuevo."); return; }
+    setAviso("Si ese correo tiene una cuenta, te acabamos de mandar un enlace para restablecer tu contraseña. Revisa tu bandeja (y spam).");
+  };
+
+  return (
+    <div className={`gp-root gp-sidebar-area flex items-center justify-center ${claseTema(tema)}`} style={{ minHeight: "100vh" }}>
+      <Tokens tema={tema} />
+      <form onSubmit={handleSubmit} className="gp-panel p-6 w-full max-w-sm relative">
+        <div className="flex flex-col items-center text-center mb-4">
+          <img src="/logo-arkeyone.png" alt="ArkeyOne" style={{ height: 108 }} className="mb-2" />
+          <p className="text-xs gp-text-gold tracking-wide mb-3">La llave que alinea tu mundo</p>
+          <p className="text-xs gp-text-muted">Te mandamos un enlace para poner una contraseña nueva.</p>
+        </div>
+        <Field label="Correo"><input type="email" required className="gp-input" value={email} onChange={(e) => setEmail(e.target.value)} /></Field>
+        {error && <p className="text-xs gp-text-red mb-3">{error}</p>}
+        {aviso && <p className="text-xs gp-text-teal mb-3">{aviso}</p>}
+        <button type="submit" disabled={loading} className="gp-btn w-full py-2 text-sm mt-1">
+          {loading ? "Un momento…" : "Enviar enlace de recuperación"}
+        </button>
+        <button type="button" onClick={onVolver} className="text-xs gp-text-muted w-full text-center mt-3">← Regresar a iniciar sesión</button>
       </form>
     </div>
   );
@@ -1587,6 +1594,8 @@ function leerVistaGuardadaTrasReload() {
 export default function App() {
   const [session, setSession] = useState(undefined); // undefined = cargando, null = sin sesión
   const [recuperando, setRecuperando] = useState(false);
+  // Qué pantalla mostrar dentro del área sin sesión: login (nuevo diseño), crear cuenta o recuperar contraseña.
+  const [vistaAuth, setVistaAuth] = useState("login");
   const [tema, toggleTema, setTema] = useTema();
   const [showSplash, setShowSplash] = useState(() => {
     // Después de cerrar sesión forzamos un reload para dejar todo limpio, pero eso no debe
@@ -1671,7 +1680,17 @@ export default function App() {
   } else if (recuperando) {
     pantalla = <NuevaPasswordScreen onListo={() => setRecuperando(false)} tema={tema} toggleTema={toggleTema} />;
   } else if (!session) {
-    pantalla = <LoginScreen tema={tema} toggleTema={toggleTema} />;
+    pantalla =
+      vistaAuth === "crear" ? (
+        <CrearCuentaScreen tema={tema} onVolver={() => setVistaAuth("login")} />
+      ) : vistaAuth === "recuperar" ? (
+        <RecuperarPasswordScreen tema={tema} onVolver={() => setVistaAuth("login")} />
+      ) : (
+        <LoginScreenNuevo
+          onCreateAccount={() => setVistaAuth("crear")}
+          onForgotPassword={() => setVistaAuth("recuperar")}
+        />
+      );
   } else if (mfaEstado === null) {
     pantalla = (
       <div className={`gp-root min-h-screen flex items-center justify-center ${claseTema(tema)}`}>
