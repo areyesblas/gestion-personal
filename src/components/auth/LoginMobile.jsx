@@ -94,7 +94,7 @@ export default function LoginMobile({ platform: platformProp, onCreateAccount, o
 
         <form
           onSubmit={handleSubmit}
-          className="bg-white shadow-[0_16px_34px_-14px_rgba(10,45,107,.28)] px-7 pt-7 pb-7"
+          className="bg-white/88 backdrop-blur-xl shadow-[0_16px_34px_-14px_rgba(10,45,107,.28)] px-7 pt-7 pb-7"
           style={{ borderRadius: cardRadius }}
         >
           {bannerType && (
@@ -250,7 +250,7 @@ function IOSField({ icon, placeholder, type, value, onChange, radius, trailing }
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className="flex-1 bg-transparent outline-none text-sm text-[#1F2937] placeholder:text-[#9AA7BE]"
+        className="flex-1 bg-transparent outline-none text-base text-[#1F2937] placeholder:text-[#9AA7BE]"
       />
       {trailing}
     </div>
@@ -276,7 +276,7 @@ function FloatingField({ icon, label, type, value, onChange, radius, trailing })
           onChange={(e) => onChange(e.target.value)}
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
-          className="flex-1 bg-transparent outline-none text-sm text-[#1F2937] w-full"
+          className="flex-1 bg-transparent outline-none text-base text-[#1F2937] w-full"
         />
         {trailing}
       </div>

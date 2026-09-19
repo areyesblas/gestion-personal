@@ -90,7 +90,7 @@ export default function LoginWeb({ onCreateAccount, onForgotPassword }) {
       </div>
 
       {/* ---- Panel de login ---- */}
-      <div className="flex-1 min-w-[420px] flex flex-col">
+      <div className="flex-1 min-w-[420px] flex flex-col bg-[#EAF1FC]">
         <div className="flex justify-end items-center gap-6 px-11 pt-6 text-sm font-medium text-[#243b63]">
           <a href="/about" className="hover:text-[#0A2D6B]">Acerca de</a>
           <a href="/blog" className="hover:text-[#0A2D6B]">Blog</a>
