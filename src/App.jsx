@@ -10625,6 +10625,12 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
   // dentro de cada toque genuino (abrir el panel, cortar el turno), con una utterance silenciosa.
   const desbloquearVoz = () => {
     try {
+      // Solo hace falta en iOS Safari (ver arriba) -- en el resto de plataformas, esta utterance
+      // silenciosa seguida del cancel() de hablar() (a milisegundos de distancia) coincidía con un
+      // bug conocido de Chrome de escritorio: el motor de voz se queda internamente "pausado" tras
+      // el cancel() y cualquier speak() posterior se encola sin sonar nunca, sin lanzar error --
+      // eso hacía que Arkey transcribiera y respondiera en texto bien, pero nunca hablara en Chrome.
+      if (!esIOS) return;
       if (!("speechSynthesis" in window)) return;
       const u = new SpeechSynthesisUtterance(" ");
       u.volume = 0;
@@ -11335,6 +11341,7 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
       u.onend = terminar;
       u.onerror = terminar;
       cambiarMensajeReproduciendoId(id);
+      window.speechSynthesis.resume(); // respaldo contra el bug de Chrome descrito en desbloquearVoz()
       window.speechSynthesis.speak(u);
     } catch {}
   }
@@ -11444,6 +11451,10 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
       const alTerminar = () => { if (usaSTTNativo) volverAEscuchar(); else reanudarMicTrasHablarIOS(); };
       u.onend = alTerminar;
       u.onerror = (e) => { setErrorMsg(`TTS: ${e.error || "error desconocido"}`); alTerminar(); };
+      // Respaldo contra el mismo bug de Chrome descrito en desbloquearVoz(): si el motor quedó
+      // "pausado" por cualquier otra razón, resume() antes de hablar evita que este speak() se
+      // quede en cola sin sonar. No afecta a navegadores donde nunca se pausó (resume() ahí no hace nada).
+      window.speechSynthesis.resume();
       window.speechSynthesis.speak(u);
       // No hace falta hacer nada más aquí: en ninguna plataforma se escucha mientras "hablando"
       // (ver arriba) -- solo queda esperar a que speak() termine (alTerminar) o a que lo
