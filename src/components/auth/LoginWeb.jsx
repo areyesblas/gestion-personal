@@ -53,7 +53,7 @@ export default function LoginWeb({ onCreateAccount, onForgotPassword }) {
       />
 
       {/* ---- Panel de marca ---- */}
-      <div className="hidden lg:flex flex-col relative z-10 flex-[1.3] min-w-[420px] px-14 py-11 text-white">
+      <div className="hidden lg:flex flex-col relative z-10 flex-1 min-w-[420px] px-14 py-11 text-white">
         <div className="relative z-10 flex flex-col items-center justify-center h-full">
           <div className="w-full max-w-[420px] flex flex-col items-center mb-7">
             <ArkeyOneLogo width={230} />
