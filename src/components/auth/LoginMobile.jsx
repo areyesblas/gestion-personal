@@ -94,7 +94,7 @@ export default function LoginMobile({ platform: platformProp, onCreateAccount, o
 
         <form
           onSubmit={handleSubmit}
-          className="bg-white/96 backdrop-blur-xl shadow-[0_16px_34px_-14px_rgba(10,45,107,.28)] px-7 pt-7 pb-7"
+          className="bg-[#EAF1FC]/96 backdrop-blur-xl shadow-[0_16px_34px_-14px_rgba(10,45,107,.28)] px-7 pt-7 pb-7"
           style={{ borderRadius: cardRadius }}
         >
           {bannerType && (
