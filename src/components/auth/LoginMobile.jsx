@@ -88,8 +88,8 @@ export default function LoginMobile({ platform: platformProp, onCreateAccount, o
         style={{ paddingTop: 'calc(18px + env(safe-area-inset-top, 0px))' }}
       >
         <div className="flex flex-col items-center text-center mt-10 mb-6">
-          <ArkeyOneLogo width={150} />
-          <p className="text-xs font-medium text-white/90 mt-2 drop-shadow-sm">Ordena tu mundo, mejora tu vida.</p>
+          <ArkeyOneLogo width={195} />
+          <p className="text-sm font-medium text-white/90 mt-2.5 drop-shadow-sm">Ordena tu mundo, mejora tu vida.</p>
         </div>
 
         <form

@@ -13,7 +13,7 @@ import bgWebWebp from '../../assets/login-bg-web.webp';
 
 const FEATURES = [
   'Agenda', 'Tareas', 'Proyectos', 'Finanzas',
-  'Salud', 'Contactos', 'Hábitos', 'Notas', 'IA Asistente',
+  'Salud', 'Contactos', 'Hábitos', 'Notas', 'IA Asistente', 'Y más...',
 ];
 
 export default function LoginWeb({ onCreateAccount, onForgotPassword }) {
@@ -55,9 +55,9 @@ export default function LoginWeb({ onCreateAccount, onForgotPassword }) {
       {/* ---- Panel de marca ---- */}
       <div className="hidden lg:flex flex-col relative z-10 flex-[1.3] min-w-[420px] px-14 py-11 text-white">
         <div className="relative z-10 flex flex-col h-full">
-          <div className="inline-flex flex-col items-center">
-            <ArkeyOneLogo width={190} />
-            <p className="mt-2 text-sm font-medium text-white/90 text-center">
+          <div className="w-full max-w-[420px] flex flex-col items-center">
+            <ArkeyOneLogo width={230} />
+            <p className="mt-2.5 text-base font-medium text-white/90 text-center">
               Ordena tu mundo, mejora tu vida.
             </p>
           </div>
