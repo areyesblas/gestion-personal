@@ -55,21 +55,20 @@ export default function LoginWeb({ onCreateAccount, onForgotPassword }) {
       {/* ---- Panel de marca ---- */}
       <div className="hidden lg:flex flex-col relative z-10 flex-[1.3] min-w-[420px] px-14 py-11 text-white">
         <div className="relative z-10 flex flex-col justify-center h-full">
-          <div className="w-full max-w-[420px] flex flex-col items-center">
+          <div className="w-full max-w-[420px] flex flex-col items-center mb-7">
             <ArkeyOneLogo width={230} />
             <p className="mt-2.5 text-base font-medium text-white/90 text-center">
               Ordena tu mundo, mejora tu vida.
             </p>
           </div>
-          <div className="w-13 h-[3px] rounded bg-[#007AFF] mt-8 mb-8" style={{ width: 52 }} />
 
-          <h2 className="text-[38px] leading-tight font-bold max-w-[420px] mb-8 text-white drop-shadow-sm">
+          <h2 className="text-[36px] leading-tight font-bold max-w-[420px] mb-6 text-white drop-shadow-sm">
             Todo en un solo lugar,<br />
             para una vida con más{' '}
             <span style={{ color: '#7cc4ff' }}>claridad.</span>
           </h2>
 
-          <ul className="grid grid-cols-2 gap-x-7 gap-y-4 max-w-[420px] list-none p-0">
+          <ul className="grid grid-cols-2 gap-x-7 gap-y-3.5 max-w-[420px] list-none p-0">
             {FEATURES.map((f) => (
               <li key={f} className="flex items-center gap-2.5 text-[16px] font-medium text-white/95">
                 <Check size={17} strokeWidth={2.2} className="text-[#7cc4ff]" />
@@ -78,17 +77,13 @@ export default function LoginWeb({ onCreateAccount, onForgotPassword }) {
             ))}
           </ul>
 
-          <div className="mt-12 text-white">
-            <p className="text-[18px] italic font-medium drop-shadow-sm">"Organiza hoy, vive un mejor mañana."</p>
-            <div className="w-10 h-0.5 rounded bg-[#007AFF] mt-3" />
-          </div>
+          <p className="text-[17px] italic font-medium text-white drop-shadow-sm mt-7">
+            "Organiza hoy, vive un mejor mañana."
+          </p>
 
-          <div className="flex justify-between items-end mt-8 text-white/90">
-            <span className="font-bold text-sm">ARKEY·ONE</span>
-            <small className="text-[10.5px] tracking-[.14em] font-semibold text-white/70">
-              TECNOLOGÍA PARA UNA VIDA CON SENTIDO
-            </small>
-          </div>
+          <p className="text-[10.5px] tracking-[.14em] font-semibold text-white/70 mt-5">
+            TECNOLOGÍA PARA UNA VIDA CON SENTIDO
+          </p>
         </div>
       </div>
 
