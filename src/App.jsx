@@ -279,6 +279,10 @@ const diaMesDeFecha = (fechaNacimiento) => {
   return { dia: String(d.getDate()), mes: String(d.getMonth() + 1) };
 };
 const construirFechaCumple = (dia, mes) => (dia && mes ? `2000-${String(mes).padStart(2, "0")}-${String(dia).padStart(2, "0")}` : "");
+const armarNombreContacto = (nombres, apellidoPaterno, apellidoMaterno) =>
+  [nombres, apellidoPaterno, apellidoMaterno].map((s) => (s || "").toString().trim()).filter(Boolean).join(" ");
+const claveOrdenContacto = (c) =>
+  (c.apellidoPaterno || c.apellidoMaterno) ? `${c.apellidoPaterno || ""} ${c.apellidoMaterno || ""} ${c.nombres || ""}`.trim() : c.nombre;
 function CumpleanosField({ value, onChange }) {
   const inicial = diaMesDeFecha(value);
   const [dia, setDia] = useState(inicial.dia);
@@ -6782,7 +6786,7 @@ function Equipo({ data, onAddContacto, onEditContacto, onAddFinanzas, onAddFactu
   const [modal, setModal] = useState(null); // {item} alta/edición contacto | {colaborador, paso:"pagar"}
   const [orden, setOrden] = useState("alfabetico");
   const [busqueda, setBusqueda] = useState("");
-  const emptyContacto = { nombre: "", tipos: ["Colaborador"], whatsapp: "", correo: "", direccion: "", notas: "", contexto: "", proyectoId: "", parentesco: "", fechaNacimiento: "" };
+  const emptyContacto = { nombre: "", nombres: "", apellidoPaterno: "", apellidoMaterno: "", tipos: ["Colaborador"], whatsapp: "", correo: "", direccion: "", notas: "", contexto: "", proyectoId: "", parentesco: "", fechaNacimiento: "" };
 
   const colaboradores = data.contactos.filter((c) => (c.tipos && c.tipos.length ? c.tipos : [c.tipo || "Otro"]).includes("Colaborador"));
   const tareasDe = (id) => data.pendientes.filter((p) => p.colaboradorContactoId === id);
@@ -7276,11 +7280,11 @@ function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
   const [filtroTipo, setFiltroTipo] = useState("Todos");
   const [orden, setOrden] = useState("default");
   const [busqueda, setBusqueda] = useState("");
-  const empty = { nombre: "", tipos: ["Cliente"], parentesco: "", fechaNacimiento: "", contexto: "", proyectoId: "", whatsapp: "", correo: "", direccion: "", notas: "" };
+  const empty = { nombre: "", nombres: "", apellidoPaterno: "", apellidoMaterno: "", tipos: ["Cliente"], parentesco: "", fechaNacimiento: "", contexto: "", proyectoId: "", whatsapp: "", correo: "", direccion: "", notas: "" };
   const nombreProyecto = (id) => data.proyectos.find((p) => p.id === id)?.nombre || "—";
   const toneTipo = { Cliente: "teal", Proveedor: "gold", Colaborador: "red", Otro: "" };
   const camposOrden = {
-    alfabetico: { get: (c) => c.nombre, tipo: "texto" },
+    alfabetico: { get: (c) => claveOrdenContacto(c), tipo: "texto" },
     registro: { get: (c) => c.createdAt, tipo: "fecha" },
   };
   const opcionesOrden = [
@@ -7289,10 +7293,12 @@ function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
   ];
   const tiposDe = (c) => (c.tipos && c.tipos.length ? c.tipos : [c.tipo || "Otro"]);
   const filtrados = filtroTipo === "Todos" ? data.contactos : data.contactos.filter((c) => tiposDe(c).includes(filtroTipo));
-  const buscados = filtrarPorBusqueda(filtrados, busqueda, [(c) => c.nombre, (c) => c.contexto, (c) => c.whatsapp, (c) => c.correo, (c) => c.parentesco, (c) => c.notas]);
+  const buscados = filtrarPorBusqueda(filtrados, busqueda, [(c) => c.nombre, (c) => c.apellidoPaterno, (c) => c.apellidoMaterno, (c) => c.contexto, (c) => c.whatsapp, (c) => c.correo, (c) => c.parentesco, (c) => c.notas]);
   const visibles = ordenarLista(buscados, orden, camposOrden);
   const columnasExport = [
-    { label: "Nombre", get: (c) => c.nombre }, { label: "Tipo", get: (c) => tiposDe(c).join(", ") },
+    { label: "Nombre completo", get: (c) => c.nombre }, { label: "Nombre(s)", get: (c) => c.nombres || "" },
+    { label: "Apellido paterno", get: (c) => c.apellidoPaterno || "" }, { label: "Apellido materno", get: (c) => c.apellidoMaterno || "" },
+    { label: "Tipo", get: (c) => tiposDe(c).join(", ") },
     { label: "Parentesco", get: (c) => c.parentesco }, { label: "WhatsApp", get: (c) => c.whatsapp },
     { label: "Correo", get: (c) => c.correo }, { label: "Proyecto", get: (c) => nombreProyecto(c.proyectoId) },
     { label: "Notas", get: (c) => c.notas },
@@ -7367,13 +7373,23 @@ function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
 }
 
 function ContactoForm({ item, proyectos, onSave }) {
-  const [v, setV] = useState({ ...item, tipos: item.tipos && item.tipos.length ? item.tipos : (item.tipo ? [item.tipo] : ["Cliente"]) });
+  const [v, setV] = useState({
+    ...item,
+    nombres: item.nombres ?? item.nombre ?? "",
+    apellidoPaterno: item.apellidoPaterno || "",
+    apellidoMaterno: item.apellidoMaterno || "",
+    tipos: item.tipos && item.tipos.length ? item.tipos : (item.tipo ? [item.tipo] : ["Cliente"]),
+  });
   const [error, setError] = useState("");
   const [otroParentesco, setOtroParentesco] = useState(() => !!item.parentesco && !PARENTESCOS.includes(item.parentesco));
   const toggleTipo = (t) => setV((prev) => ({ ...prev, tipos: prev.tipos.includes(t) ? prev.tipos.filter((x) => x !== t) : [...prev.tipos, t] }));
   return (
     <div>
-      <Field label="Nombre"><input className="gp-input" value={v.nombre} onChange={(e) => setV({ ...v, nombre: e.target.value })} /></Field>
+      <Field label="Nombre(s)"><input className="gp-input" autoFocus value={v.nombres} onChange={(e) => setV({ ...v, nombres: e.target.value })} /></Field>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <Field label="Apellido paterno"><input className="gp-input" value={v.apellidoPaterno} onChange={(e) => setV({ ...v, apellidoPaterno: e.target.value })} /></Field>
+        <Field label="Apellido materno"><input className="gp-input" value={v.apellidoMaterno} onChange={(e) => setV({ ...v, apellidoMaterno: e.target.value })} /></Field>
+      </div>
       <Field label="Tipo (puede ser varios a la vez)">
         <div className="flex flex-wrap gap-1.5">
           {["Cliente", "Proveedor", "Colaborador", "Otro"].map((t) => (
@@ -7420,7 +7436,20 @@ function ContactoForm({ item, proyectos, onSave }) {
       <Field label="Notas"><textarea className="gp-input" rows={2} value={v.notas} onChange={(e) => setV({ ...v, notas: e.target.value })} /></Field>
       {error && <p className="text-xs gp-text-red mb-2">{error}</p>}
 
-      <button className="gp-btn w-full py-2 text-sm mt-2" onClick={() => { if (!v.nombre?.toString().trim()) { setError("El nombre del contacto es obligatorio."); return; } if (v.tipos.length === 0) { setError("Elige al menos un tipo."); return; } setError(""); onSave(v); }}>Guardar</button>
+      <button
+        className="gp-btn w-full py-2 text-sm mt-2"
+        onClick={() => {
+          if (!v.nombres?.toString().trim()) { setError("El nombre del contacto es obligatorio."); return; }
+          if (v.tipos.length === 0) { setError("Elige al menos un tipo."); return; }
+          setError("");
+          const nombres = v.nombres.trim();
+          const apellidoPaterno = (v.apellidoPaterno || "").trim();
+          const apellidoMaterno = (v.apellidoMaterno || "").trim();
+          onSave({ ...v, nombres, apellidoPaterno, apellidoMaterno, nombre: armarNombreContacto(nombres, apellidoPaterno, apellidoMaterno) });
+        }}
+      >
+        Guardar
+      </button>
     </div>
   );
 }
@@ -12064,14 +12093,16 @@ function QuickCapture({ data, onAdd, onCrearRecordatorio, irAVista }) {
 }
 
 function ContactoRapidoForm({ onSave }) {
-  const [nombre, setNombre] = useState("");
+  const [nombres, setNombres] = useState("");
+  const [apellidoPaterno, setApellidoPaterno] = useState("");
   const [fechaNacimiento, setFechaNacimiento] = useState("");
   const [whatsapp, setWhatsapp] = useState("");
   const [correo, setCorreo] = useState("");
   const [error, setError] = useState("");
   return (
     <div>
-      <Field label="Nombre"><input className="gp-input" value={nombre} onChange={(e) => setNombre(e.target.value)} /></Field>
+      <Field label="Nombre(s)"><input className="gp-input" autoFocus value={nombres} onChange={(e) => setNombres(e.target.value)} /></Field>
+      <Field label="Apellido paterno (opcional)"><input className="gp-input" value={apellidoPaterno} onChange={(e) => setApellidoPaterno(e.target.value)} /></Field>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Field label="WhatsApp (opcional)"><input className="gp-input" value={whatsapp} onChange={(e) => setWhatsapp(e.target.value)} /></Field>
         <Field label="Correo (opcional)"><input className="gp-input" value={correo} onChange={(e) => setCorreo(e.target.value)} /></Field>
@@ -12079,8 +12110,14 @@ function ContactoRapidoForm({ onSave }) {
       <CumpleanosField value={fechaNacimiento} onChange={setFechaNacimiento} />
       {error && <p className="text-xs gp-text-red mb-2">{error}</p>}
       <button className="gp-btn w-full py-2 text-sm mt-1" onClick={() => {
-        if (!nombre.trim()) { setError("Captura un nombre."); return; }
-        onSave({ nombre: nombre.trim(), whatsapp: whatsapp.trim(), correo: correo.trim(), tipo: "Otro", notas: "", fechaNacimiento });
+        if (!nombres.trim()) { setError("Captura un nombre."); return; }
+        const nombresTrim = nombres.trim();
+        const apellidoPaternoTrim = apellidoPaterno.trim();
+        onSave({
+          nombres: nombresTrim, apellidoPaterno: apellidoPaternoTrim,
+          nombre: armarNombreContacto(nombresTrim, apellidoPaternoTrim, ""),
+          whatsapp: whatsapp.trim(), correo: correo.trim(), tipo: "Otro", notas: "", fechaNacimiento,
+        });
       }}>
         Guardar (puedes agregar más datos después desde Contactos)
       </button>
