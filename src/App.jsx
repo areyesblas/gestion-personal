@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useLayoutEffect, useMemo, useRef } from "react";
+import React, { useState, useEffect, useLayoutEffect, useMemo, useRef, Suspense, lazy } from "react";
 import { supabase } from "./supabaseClient";
 import LoginScreenNuevo from "./components/auth/LoginScreen";
 import AuthCard, { AuthField, AuthPasswordField, AuthButton, AuthBanner, AuthBackLink } from "./components/auth/AuthCard";
@@ -24,6 +24,8 @@ import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
   PieChart, Pie, Cell, LineChart, Line,
 } from "recharts";
+// Perezoso: solo trae @dnd-kit (arrastrar y soltar) cuando el usuario realmente abre "Personalizar panel".
+const PersonalizarPanelModal = lazy(() => import("./components/dashboard/PersonalizarPanelModal"));
 
 /* ---------- estilos y tokens ---------- */
 const Tokens = ({ tema = "oscuro" }) => (
@@ -283,6 +285,40 @@ const armarNombreContacto = (nombres, apellidoPaterno, apellidoMaterno) =>
   [nombres, apellidoPaterno, apellidoMaterno].map((s) => (s || "").toString().trim()).filter(Boolean).join(" ");
 const claveOrdenContacto = (c) =>
   (c.apellidoPaterno || c.apellidoMaterno) ? `${c.apellidoPaterno || ""} ${c.apellidoMaterno || ""} ${c.nombres || ""}`.trim() : c.nombre;
+
+// Catálogo de widgets configurables del Centro de mando (orden aquí = orden por default, el
+// mismo que ya tenía la pantalla, para que nadie note un cambio hasta que entre a personalizar).
+// El header, el saludo, las tarjetas de estadísticas y el banner final quedan fijos — no son
+// "contenido" que tenga sentido ocultar, y la tarjeta de estadísticas es la que abre este modal.
+const DASHBOARD_WIDGETS_CATALOGO = [
+  { id: "tareasHoy", label: "Tareas de hoy" },
+  { id: "agendaHoy", label: "Agenda de hoy" },
+  { id: "proyectosMini", label: "Mis proyectos" },
+  { id: "notasRapidas", label: "Notas rápidas" },
+  { id: "accesosRapidos", label: "Accesos rápidos" },
+  { id: "habitosHoy", label: "Hábitos de hoy" },
+  { id: "accionesHoy", label: "Acciones para hoy" },
+  { id: "proximasAcciones", label: "Próximas acciones" },
+  { id: "proximasCitas", label: "Próximas citas" },
+  { id: "alertas", label: "Alertas importantes" },
+  { id: "proyectosAtencion", label: "Proyectos que requieren atención" },
+  { id: "resumenStats", label: "Tu resumen (tarjetas)" },
+  { id: "saldoActual", label: "Saldo actual" },
+  { id: "githubPendiente", label: "Proyectos sin GitHub" },
+  { id: "avanceGeneral", label: "Avance general" },
+  { id: "avanceProyecto", label: "Avance por proyecto" },
+  { id: "gananciaProyecto", label: "Ganancia neta por proyecto" },
+];
+// Reconcilia el orden guardado del usuario (preferencias.dashboard_widgets) con el catálogo
+// actual: widgets guardados van en su orden; widgets del catálogo que aún no existían cuando
+// el usuario guardó (o que nunca ha personalizado) se agregan al final, visibles por default.
+const resolverOrdenWidgets = (guardado) => {
+  const porId = Object.fromEntries(DASHBOARD_WIDGETS_CATALOGO.map((w) => [w.id, w]));
+  const enOrden = (guardado || []).filter((g) => porId[g.id]).map((g) => ({ ...porId[g.id], visible: g.visible !== false }));
+  const idsGuardados = new Set(enOrden.map((w) => w.id));
+  const faltantes = DASHBOARD_WIDGETS_CATALOGO.filter((w) => !idsGuardados.has(w.id)).map((w) => ({ ...w, visible: true }));
+  return [...enOrden, ...faltantes];
+};
 function CumpleanosField({ value, onChange }) {
   const inicial = diaMesDeFecha(value);
   const [dia, setDia] = useState(inicial.dia);
@@ -2136,7 +2172,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
       const { data: colabs } = await supabase.from("colaboradores").select("*, colaborador_dependientes(contacto_id)").eq("colaborador_user_id", misId).eq("estatus", "Activo");
       setMisColaboraciones((colabs || []).map((c) => ({ propietarioId: c.propietario_id, propietarioEmail: c.propietario_email, modulos: c.modulos, dependientes: (c.colaborador_dependientes || []).map((d) => d.contacto_id) })));
 
-      const { data: pref } = await supabase.from("preferencias").select("tema, alertas_correo_activas, color_personalizado, notif_tipos_desactivados, notif_silencio_activo, notif_silencio_inicio, notif_silencio_fin, notif_anticipacion_citas_min").eq("user_id", misId).maybeSingle();
+      const { data: pref } = await supabase.from("preferencias").select("tema, alertas_correo_activas, color_personalizado, notif_tipos_desactivados, notif_silencio_activo, notif_silencio_inicio, notif_silencio_fin, notif_anticipacion_citas_min, dashboard_widgets").eq("user_id", misId).maybeSingle();
       const temaGuardado = pref?.tema === "claro" || pref?.tema === "oscuro" ? "actual" : pref?.tema;
       if (temaGuardado && temaGuardado !== tema) setTema(temaGuardado);
       if (pref?.color_personalizado) setColorPersonalizado(pref.color_personalizado);
@@ -2146,6 +2182,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
       if (pref?.notif_silencio_inicio) setNotifSilencioInicio(pref.notif_silencio_inicio.slice(0, 5));
       if (pref?.notif_silencio_fin) setNotifSilencioFin(pref.notif_silencio_fin.slice(0, 5));
       if (pref?.notif_anticipacion_citas_min != null) setNotifAnticipacionCitasMin(pref.notif_anticipacion_citas_min);
+      if (pref?.dashboard_widgets) setOrdenWidgetsDashboard(pref.dashboard_widgets);
 
       let result = await loadAllTables(misId);
       result = await migrateFromOldBlobIfNeeded(result, misId);
@@ -2197,6 +2234,14 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
       notif_silencio_inicio: silencioInicio, notif_silencio_fin: silencioFin,
       notif_anticipacion_citas_min: anticipacionCitasMin,
     }, { onConflict: "user_id" });
+  };
+
+  // --- Centro de mando configurable: orden y visibilidad de widgets, por usuario -------------
+  // null = el usuario nunca ha personalizado su panel; se resuelve con DASHBOARD_WIDGETS_CATALOGO.
+  const [ordenWidgetsDashboard, setOrdenWidgetsDashboard] = useState(null);
+  const guardarOrdenWidgetsDashboard = async (lista) => {
+    setOrdenWidgetsDashboard(lista);
+    await supabase.from("preferencias").upsert({ user_id: misId, dashboard_widgets: lista }, { onConflict: "user_id" });
   };
 
   // --- Notificaciones Push -------------------------------------------------
@@ -2847,6 +2892,8 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
               onEditHabito={(id, p) => editItem("habitos", id, p)}
               modulosPermitidos={modulosPermitidos}
               onCrearRapido={irACrear}
+              ordenWidgetsDashboard={ordenWidgetsDashboard}
+              onGuardarOrdenWidgets={guardarOrdenWidgetsDashboard}
             />
           )}
           {view === "papelera" && <Papelera onRestore={restoreItem} onPermanentDelete={permanentDelete} ownerId={activeOwnerId} />}
@@ -3948,7 +3995,7 @@ function Papelera({ onRestore, onPermanentDelete, ownerId }) {
   );
 }
 
-function Dashboard({ data, setView, onAddSaldo, onVerProyecto, onEditPendiente, sensibleDesbloqueadoHasta, onDesbloquear, miEmail, notifNoLeidas, onBuscar, onNotificaciones, onAddNota, onEditHabito, modulosPermitidos, onCrearRapido }) {
+function Dashboard({ data, setView, onAddSaldo, onVerProyecto, onEditPendiente, sensibleDesbloqueadoHasta, onDesbloquear, miEmail, notifNoLeidas, onBuscar, onNotificaciones, onAddNota, onEditHabito, modulosPermitidos, onCrearRapido, ordenWidgetsDashboard, onGuardarOrdenWidgets }) {
   const [saldoModal, setSaldoModal] = useState(false);
   const [personalizarModal, setPersonalizarModal] = useState(false);
   const saldo = calcularSaldo(data);
@@ -3975,11 +4022,6 @@ function Dashboard({ data, setView, onAddSaldo, onVerProyecto, onEditPendiente, 
   const activos = data.proyectos.filter((p) => p.estatus === "Activo").length;
   const ideas = data.proyectos.filter((p) => p.estatus === "Idea").length;
   const sinGithub = data.proyectos.filter((p) => !p.githubSubido);
-
-  const saludo = (() => {
-    const h = new Date().getHours();
-    return h < 12 ? "Buenos días" : h < 19 ? "Buenas tardes" : "Buenas noches";
-  })();
 
   const nombreProyecto = (id) => data.proyectos.find((p) => p.id === id)?.nombre || "";
 
@@ -4120,44 +4162,19 @@ function Dashboard({ data, setView, onAddSaldo, onVerProyecto, onEditPendiente, 
 
   const badgeDia = (dd) => (dd < 0 ? <Badge tone="red">vencido</Badge> : dd === 0 ? <Badge tone="gold">Hoy</Badge> : <Badge tone="muted">{dd === 1 ? "Mañana" : `${dd}d`}</Badge>);
 
-  return (
-    <div>
-      <DashboardHeader primerNombre={primerNombre} onBuscar={onBuscar} onNotificaciones={onNotificaciones} notifNoLeidas={notifNoLeidas} />
-      <DashboardSaludo primerNombre={primerNombre} />
-      <StatCardsRow
-        activos={activos}
-        tareasPendientes={tareasPendientesTotal}
-        ingresos={fmtMoney(ingresos)}
-        egresos={fmtMoney(egresos)}
-        sensibleDesbloqueado={sensibleDesbloqueado}
-        onDesbloquear={onDesbloquear}
-        onPersonalizarClick={() => setPersonalizarModal(true)}
-      />
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-5">
-        <TareasHoyWidget items={accionesHoyView} onToggle={toggleTareaHoy} onVerTodas={() => setView("pendientes")} />
-        <AgendaHoyWidget citas={citasHoy} onVerCalendario={() => setView("citas")} />
-        <div className="flex flex-col gap-4">
-          <ProyectosMiniWidget proyectos={avancePorProyecto} onVerTodos={() => setView("proyectos")} />
-          <NotasRapidasWidget onAddNota={onAddNota} />
-          <AccesosRapidosWidget onCrear={onCrearRapido} modulosPermitidos={modulosPermitidos} />
-        </div>
-      </div>
-      <HabitosHoyWidget habitos={habitosHoyView} onToggle={toggleHabitoHoy} onVerTodos={() => setView("habitos")} />
-      <DashboardBannerFinal />
+  // Contenido de cada widget configurable, en un mapa id → JSX. La lógica/datos de arriba no
+  // cambia — esto solo envuelve el mismo JSX que ya existía para poder elegir cuáles mostrar
+  // y en qué orden (ver DASHBOARD_WIDGETS_CATALOGO / resolverOrdenWidgets).
+  const widgetContenido = {
+    tareasHoy: <TareasHoyWidget items={accionesHoyView} onToggle={toggleTareaHoy} onVerTodas={() => setView("pendientes")} />,
+    agendaHoy: <AgendaHoyWidget citas={citasHoy} onVerCalendario={() => setView("citas")} />,
+    proyectosMini: <ProyectosMiniWidget proyectos={avancePorProyecto} onVerTodos={() => setView("proyectos")} />,
+    notasRapidas: <NotasRapidasWidget onAddNota={onAddNota} />,
+    accesosRapidos: <AccesosRapidosWidget onCrear={onCrearRapido} modulosPermitidos={modulosPermitidos} />,
+    habitosHoy: <HabitosHoyWidget habitos={habitosHoyView} onToggle={toggleHabitoHoy} onVerTodos={() => setView("habitos")} />,
 
-      {personalizarModal && (
-        <Modal title="Personalizar panel" onClose={() => setPersonalizarModal(false)}>
-          <p className="text-sm gp-text-muted mb-4">Muy pronto vas a poder elegir qué widgets ver aquí y en qué orden. Por ahora esta es la vista estándar del Centro de mando.</p>
-          <button onClick={() => setPersonalizarModal(false)} className="gp-btn w-full py-2 text-sm">Entendido</button>
-        </Modal>
-      )}
-
-      <p className="text-xs gp-text-muted uppercase tracking-wide mb-2 mt-2">Más detalle</p>
-      <h2 className="gp-serif text-2xl mb-1">Centro de mando</h2>
-      <p className="text-sm gp-text-muted mb-6">{saludo}. Esto es lo que requiere tu atención.</p>
-
-      {/* 1. ACCIONES PARA HOY — protagonista de la pantalla */}
-      <div className="gp-panel p-4 mb-5" style={{ borderColor: accionesHoy.length ? "var(--gold)" : undefined }}>
+    accionesHoy: (
+      <div className="gp-panel p-4" style={{ borderColor: accionesHoy.length ? "var(--gold)" : undefined }}>
         <div className="flex items-center gap-2 mb-1"><Zap size={15} className="gp-text-gold" /><h3 className="text-base font-medium">Acciones para hoy</h3></div>
         {accionesHoy.length === 0 ? (
           <p className="text-xs gp-text-muted mt-1">No tienes nada urgente hoy — buen momento para revisar lo que viene.</p>
@@ -4196,98 +4213,95 @@ function Dashboard({ data, setView, onAddSaldo, onVerProyecto, onEditPendiente, 
           </>
         )}
       </div>
+    ),
 
-      {/* 2. PRÓXIMAS ACCIONES */}
-      {accionesProximas.length > 0 && (
-        <div className="gp-panel p-4 mb-5">
-          <div className="flex items-center gap-2 mb-2"><CalendarClock size={14} className="gp-text-gold" /><h3 className="text-sm font-medium">Próximas acciones</h3></div>
-          <ul className="space-y-1.5">
-            {accionesProximas.slice(0, 8).map((a) => (
-              <li key={a.id}>
-                <button onClick={a.irA} className="w-full text-left flex items-center justify-between gap-2 text-sm">
-                  <span className="truncate">{a.texto || a.origen}{a.sub ? <span className="gp-text-muted text-xs"> — {a.sub}</span> : ""}</span>
-                  {badgeDia(a.dd)}
-                </button>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
+    proximasAcciones: accionesProximas.length > 0 ? (
+      <div className="gp-panel p-4">
+        <div className="flex items-center gap-2 mb-2"><CalendarClock size={14} className="gp-text-gold" /><h3 className="text-sm font-medium">Próximas acciones</h3></div>
+        <ul className="space-y-1.5">
+          {accionesProximas.slice(0, 8).map((a) => (
+            <li key={a.id}>
+              <button onClick={a.irA} className="w-full text-left flex items-center justify-between gap-2 text-sm">
+                <span className="truncate">{a.texto || a.origen}{a.sub ? <span className="gp-text-muted text-xs"> — {a.sub}</span> : ""}</span>
+                {badgeDia(a.dd)}
+              </button>
+            </li>
+          ))}
+        </ul>
+      </div>
+    ) : null,
 
-      {/* 3. PRÓXIMAS CITAS */}
-      {proximasCitas.length > 0 && (
-        <div className="gp-panel p-4 mb-5">
-          <div className="flex items-center gap-2 mb-2"><CalendarClock size={14} className="gp-text-teal" /><h3 className="text-sm font-medium">Próximas citas</h3></div>
-          <ul className="space-y-1.5">
-            {proximasCitas.slice(0, 6).map((c) => (
-              <li key={c.id} className="flex items-center justify-between gap-2 text-sm">
-                <span className="truncate">{c.titulo}{c.lugar ? <span className="gp-text-muted text-xs"> — {c.lugar}</span> : ""}</span>
-                <span className="text-xs gp-text-muted shrink-0">{fmtFechaHora(c.fechaHora)}</span>
-              </li>
-            ))}
-          </ul>
-          <button onClick={() => setView("citas")} className="text-xs gp-text-gold mt-3">Ver toda tu agenda →</button>
-        </div>
-      )}
+    proximasCitas: proximasCitas.length > 0 ? (
+      <div className="gp-panel p-4">
+        <div className="flex items-center gap-2 mb-2"><CalendarClock size={14} className="gp-text-teal" /><h3 className="text-sm font-medium">Próximas citas</h3></div>
+        <ul className="space-y-1.5">
+          {proximasCitas.slice(0, 6).map((c) => (
+            <li key={c.id} className="flex items-center justify-between gap-2 text-sm">
+              <span className="truncate">{c.titulo}{c.lugar ? <span className="gp-text-muted text-xs"> — {c.lugar}</span> : ""}</span>
+              <span className="text-xs gp-text-muted shrink-0">{fmtFechaHora(c.fechaHora)}</span>
+            </li>
+          ))}
+        </ul>
+        <button onClick={() => setView("citas")} className="text-xs gp-text-gold mt-3">Ver toda tu agenda →</button>
+      </div>
+    ) : null,
 
-      {/* 4. ALERTAS IMPORTANTES */}
-      {totalAlertas > 0 && (
-        <div className="gp-panel p-4 mb-5">
-          <div className="flex items-center gap-2 mb-2"><AlertTriangle size={14} className="gp-text-red" /><h3 className="text-sm font-medium">Alertas importantes</h3></div>
-          <ul className="space-y-1.5 text-sm">
-            {documentosProximos.map((d) => (
-              <li key={d.id}>
-                <button onClick={() => setView("documentos")} className="w-full text-left flex items-center justify-between gap-2">
-                  <span className="truncate">{sensibleDesbloqueado ? `Documento — ${d.nombre}` : "🔒 Documento/contrato próximo a vencer"}</span>{badgeDia(daysUntil(d.fechaVencimiento))}
-                </button>
-              </li>
-            ))}
-            {activosProximos.map((a) => (
-              <li key={a.id}>
-                <button onClick={() => setView("activos")} className="w-full text-left flex items-center justify-between gap-2">
-                  <span className="truncate">{sensibleDesbloqueado ? `Renovación — ${a.nombre}` : "🔒 Renovación de activo digital próxima"}</span>{badgeDia(daysUntil(a.fechaVencimiento))}
-                </button>
-              </li>
-            ))}
-            {facturasPendientes.map((f) => (
-              <li key={f.id}>
-                <button onClick={() => setView("finanzas")} className="w-full text-left flex items-center justify-between gap-2">
-                  <span className="truncate">{sensibleDesbloqueado ? `Factura pendiente — ${f.concepto || f.folio || "sin folio"}` : "🔒 Factura pendiente"}</span>{sensibleDesbloqueado ? <Badge tone="gold">{fmtMoney(f.total)}</Badge> : <Badge tone="muted">Protegida</Badge>}
-                </button>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
+    alertas: totalAlertas > 0 ? (
+      <div className="gp-panel p-4">
+        <div className="flex items-center gap-2 mb-2"><AlertTriangle size={14} className="gp-text-red" /><h3 className="text-sm font-medium">Alertas importantes</h3></div>
+        <ul className="space-y-1.5 text-sm">
+          {documentosProximos.map((d) => (
+            <li key={d.id}>
+              <button onClick={() => setView("documentos")} className="w-full text-left flex items-center justify-between gap-2">
+                <span className="truncate">{sensibleDesbloqueado ? `Documento — ${d.nombre}` : "🔒 Documento/contrato próximo a vencer"}</span>{badgeDia(daysUntil(d.fechaVencimiento))}
+              </button>
+            </li>
+          ))}
+          {activosProximos.map((a) => (
+            <li key={a.id}>
+              <button onClick={() => setView("activos")} className="w-full text-left flex items-center justify-between gap-2">
+                <span className="truncate">{sensibleDesbloqueado ? `Renovación — ${a.nombre}` : "🔒 Renovación de activo digital próxima"}</span>{badgeDia(daysUntil(a.fechaVencimiento))}
+              </button>
+            </li>
+          ))}
+          {facturasPendientes.map((f) => (
+            <li key={f.id}>
+              <button onClick={() => setView("finanzas")} className="w-full text-left flex items-center justify-between gap-2">
+                <span className="truncate">{sensibleDesbloqueado ? `Factura pendiente — ${f.concepto || f.folio || "sin folio"}` : "🔒 Factura pendiente"}</span>{sensibleDesbloqueado ? <Badge tone="gold">{fmtMoney(f.total)}</Badge> : <Badge tone="muted">Protegida</Badge>}
+              </button>
+            </li>
+          ))}
+        </ul>
+      </div>
+    ) : null,
 
-      {/* 5. PROYECTOS QUE REQUIEREN ATENCIÓN */}
-      {proyectosAtencion.length > 0 && (
-        <div className="gp-panel p-4 mb-6">
-          <div className="flex items-center gap-2 mb-2"><FolderKanban size={14} className="gp-text-gold" /><h3 className="text-sm font-medium">Proyectos que requieren atención</h3></div>
-          <ul className="space-y-1.5">
-            {proyectosAtencion.map((p) => (
-              <li key={p.id}>
-                <button onClick={() => onVerProyecto(p.id)} className="w-full text-left flex items-center justify-between gap-2 text-sm">
-                  <span className="truncate">{p.nombre}</span>
-                  <Badge tone={p.motivo.includes("vencid") ? "red" : "gold"}>{p.motivo}</Badge>
-                </button>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
+    proyectosAtencion: proyectosAtencion.length > 0 ? (
+      <div className="gp-panel p-4">
+        <div className="flex items-center gap-2 mb-2"><FolderKanban size={14} className="gp-text-gold" /><h3 className="text-sm font-medium">Proyectos que requieren atención</h3></div>
+        <ul className="space-y-1.5">
+          {proyectosAtencion.map((p) => (
+            <li key={p.id}>
+              <button onClick={() => onVerProyecto(p.id)} className="w-full text-left flex items-center justify-between gap-2 text-sm">
+                <span className="truncate">{p.nombre}</span>
+                <Badge tone={p.motivo.includes("vencid") ? "red" : "gold"}>{p.motivo}</Badge>
+              </button>
+            </li>
+          ))}
+        </ul>
+      </div>
+    ) : null,
 
-      {/* 6. TU RESUMEN — indicadores y gráficas, como contexto al final, no como protagonista */}
-      <p className="text-xs gp-text-muted uppercase tracking-wide mb-2">Tu resumen</p>
-
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+    resumenStats: (
+      <div className="grid grid-cols-2 gap-3">
         <Stat label="Proyectos activos" value={activos} />
         <Stat label="Ideas por validar" value={ideas} />
         <Stat label="Ingresos del mes" value={sensibleDesbloqueado ? fmtMoney(ingresos) : "🔒 •••••"} tone="teal" />
         <Stat label="Egresos del mes" value={sensibleDesbloqueado ? fmtMoney(egresos) : "🔒 •••••"} tone="red" />
       </div>
+    ),
 
-      <div className="gp-panel p-4 mb-6">
+    saldoActual: (
+      <div className="gp-panel p-4">
         <div className="flex items-center justify-between mb-1">
           <div className="flex items-center gap-2"><Wallet size={14} className="gp-text-teal" /><h3 className="text-sm font-medium">Saldo actual</h3></div>
           {sensibleDesbloqueado && (
@@ -4314,56 +4328,54 @@ function Dashboard({ data, setView, onAddSaldo, onVerProyecto, onEditPendiente, 
           <p className="text-xs gp-text-muted mt-2">Define cuánto dinero tienes ahorita (efectivo y en cuenta) para que el sistema empiece a sumar y restar desde ahí, en vez de asumir que parte de cero.</p>
         )}
       </div>
+    ),
 
-      {saldoModal && sensibleDesbloqueado && (
-        <Modal title="Punto de partida de saldo" onClose={() => setSaldoModal(false)}>
-          <SaldoInicialForm ultimo={saldo} onSave={(v) => { onAddSaldo(v); setSaldoModal(false); }} />
-        </Modal>
-      )}
+    githubPendiente: sinGithub.length > 0 ? (
+      <div className="gp-panel p-4">
+        <div className="flex items-center gap-2 mb-3"><Github size={14} className="gp-text-gold" /><h3 className="text-sm font-medium">Tarea: subir proyectos a GitHub</h3></div>
+        <ul className="space-y-1.5 text-xs gp-text-muted">
+          {sinGithub.map((p) => <li key={p.id}>· {p.nombre}</li>)}
+        </ul>
+        <button onClick={() => setView("proyectos")} className="text-xs gp-text-gold mt-3">Ir a proyectos →</button>
+      </div>
+    ) : null,
 
-      {sinGithub.length > 0 && (
-        <div className="gp-panel p-4 mb-6">
-          <div className="flex items-center gap-2 mb-3"><Github size={14} className="gp-text-gold" /><h3 className="text-sm font-medium">Tarea: subir proyectos a GitHub</h3></div>
-          <ul className="space-y-1.5 text-xs gp-text-muted">
-            {sinGithub.map((p) => <li key={p.id}>· {p.nombre}</li>)}
-          </ul>
-          <button onClick={() => setView("proyectos")} className="text-xs gp-text-gold mt-3">Ir a proyectos →</button>
+    avanceGeneral: (
+      <div className="gp-panel p-4">
+        <h3 className="text-sm font-medium mb-3">Avance general</h3>
+        <div className="mb-3">
+          <div className="flex justify-between text-xs mb-1"><span className="gp-text-muted">Tareas completadas</span><span className="gp-mono">{pendientesHechos}/{pendientesTotal} · {pctPendientes}%</span></div>
+          <div className="h-2 rounded" style={{ background: "var(--border)" }}><div className="h-2 rounded" style={{ width: `${pctPendientes}%`, background: "var(--teal)" }} /></div>
         </div>
-      )}
-
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-        <div className="gp-panel p-4">
-          <h3 className="text-sm font-medium mb-3">Avance general</h3>
-          <div className="mb-3">
-            <div className="flex justify-between text-xs mb-1"><span className="gp-text-muted">Tareas completadas</span><span className="gp-mono">{pendientesHechos}/{pendientesTotal} · {pctPendientes}%</span></div>
-            <div className="h-2 rounded" style={{ background: "var(--border)" }}><div className="h-2 rounded" style={{ width: `${pctPendientes}%`, background: "var(--teal)" }} /></div>
-          </div>
-          <div>
-            <div className="flex justify-between text-xs mb-1"><span className="gp-text-muted">Metas cumplidas</span><span className="gp-mono">{metasCumplidas}/{metasTotal} · {pctMetas}%</span></div>
-            <div className="h-2 rounded" style={{ background: "var(--border)" }}><div className="h-2 rounded" style={{ width: `${pctMetas}%`, background: "var(--gold)" }} /></div>
-          </div>
-        </div>
-
-        <div className="gp-panel p-4">
-          <h3 className="text-sm font-medium mb-3">Avance por proyecto</h3>
-          {avancePorProyecto.length === 0 ? (
-            <p className="text-xs gp-text-muted">Agrega pendientes a tus proyectos activos para ver su avance aquí.</p>
-          ) : (
-            <div className="space-y-2">
-              {avancePorProyecto.map((p) => (
-                <div key={p.nombre} className="flex items-center gap-3 text-xs">
-                  <span className="w-28 truncate gp-text-muted">{p.nombre}</span>
-                  <div className="flex-1 h-2 rounded" style={{ background: "var(--border)" }}>
-                    <div className="h-2 rounded" style={{ width: `${p.pct}%`, background: "var(--teal)" }} />
-                  </div>
-                  <span className="gp-mono w-10 text-right">{p.pct}%</span>
-                </div>
-              ))}
-            </div>
-          )}
+        <div>
+          <div className="flex justify-between text-xs mb-1"><span className="gp-text-muted">Metas cumplidas</span><span className="gp-mono">{metasCumplidas}/{metasTotal} · {pctMetas}%</span></div>
+          <div className="h-2 rounded" style={{ background: "var(--border)" }}><div className="h-2 rounded" style={{ width: `${pctMetas}%`, background: "var(--gold)" }} /></div>
         </div>
       </div>
+    ),
 
+    avanceProyecto: (
+      <div className="gp-panel p-4">
+        <h3 className="text-sm font-medium mb-3">Avance por proyecto</h3>
+        {avancePorProyecto.length === 0 ? (
+          <p className="text-xs gp-text-muted">Agrega pendientes a tus proyectos activos para ver su avance aquí.</p>
+        ) : (
+          <div className="space-y-2">
+            {avancePorProyecto.map((p) => (
+              <div key={p.nombre} className="flex items-center gap-3 text-xs">
+                <span className="w-28 truncate gp-text-muted">{p.nombre}</span>
+                <div className="flex-1 h-2 rounded" style={{ background: "var(--border)" }}>
+                  <div className="h-2 rounded" style={{ width: `${p.pct}%`, background: "var(--teal)" }} />
+                </div>
+                <span className="gp-mono w-10 text-right">{p.pct}%</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    ),
+
+    gananciaProyecto: (
       <div className="gp-panel p-4">
         <h3 className="text-sm font-medium mb-3">Ganancia neta por proyecto</h3>
         {!sensibleDesbloqueado ? (
@@ -4386,6 +4398,48 @@ function Dashboard({ data, setView, onAddSaldo, onVerProyecto, onEditPendiente, 
           </div>
         )}
       </div>
+    ),
+  };
+
+  const widgetsVisibles = resolverOrdenWidgets(ordenWidgetsDashboard).filter((w) => w.visible && widgetContenido[w.id]);
+
+  return (
+    <div>
+      <DashboardHeader primerNombre={primerNombre} onBuscar={onBuscar} onNotificaciones={onNotificaciones} notifNoLeidas={notifNoLeidas} />
+      <DashboardSaludo primerNombre={primerNombre} />
+      <StatCardsRow
+        activos={activos}
+        tareasPendientes={tareasPendientesTotal}
+        ingresos={fmtMoney(ingresos)}
+        egresos={fmtMoney(egresos)}
+        sensibleDesbloqueado={sensibleDesbloqueado}
+        onDesbloquear={onDesbloquear}
+        onPersonalizarClick={() => setPersonalizarModal(true)}
+      />
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+        {widgetsVisibles.map((w) => <div key={w.id}>{widgetContenido[w.id]}</div>)}
+      </div>
+
+      <DashboardBannerFinal />
+
+      {personalizarModal && (
+        <Modal title="Personalizar panel" onClose={() => setPersonalizarModal(false)}>
+          <Suspense fallback={<p className="text-sm gp-text-muted">Cargando…</p>}>
+            <PersonalizarPanelModal
+              widgetsIniciales={resolverOrdenWidgets(ordenWidgetsDashboard)}
+              onSave={(lista) => onGuardarOrdenWidgets(lista)}
+              onSaved={() => setPersonalizarModal(false)}
+            />
+          </Suspense>
+        </Modal>
+      )}
+
+      {saldoModal && sensibleDesbloqueado && (
+        <Modal title="Punto de partida de saldo" onClose={() => setSaldoModal(false)}>
+          <SaldoInicialForm ultimo={saldo} onSave={(v) => { onAddSaldo(v); setSaldoModal(false); }} />
+        </Modal>
+      )}
     </div>
   );
 }
