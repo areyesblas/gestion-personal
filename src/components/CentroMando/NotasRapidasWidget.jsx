@@ -1,4 +1,4 @@
-// src/components/dashboard/NotasRapidasWidget.jsx
+// src/components/CentroMando/NotasRapidasWidget.jsx
 //
 // Parte de la columna 3: escribe directo en el módulo Notas real (misma tabla/CRUD que ya
 // existe) vía onAddNota — no es un widget con estado propio efímero, la nota creada aparece

@@ -2,16 +2,18 @@ import React, { useState, useEffect, useLayoutEffect, useMemo, useRef, Suspense,
 import { supabase } from "./supabaseClient";
 import LoginScreenNuevo from "./components/auth/LoginScreen";
 import AuthCard, { AuthField, AuthPasswordField, AuthButton, AuthBanner, AuthBackLink } from "./components/auth/AuthCard";
-import DashboardHeader from "./components/dashboard/DashboardHeader";
-import DashboardSaludo from "./components/dashboard/DashboardSaludo";
-import StatCardsRow from "./components/dashboard/StatCardsRow";
-import TareasHoyWidget from "./components/dashboard/TareasHoyWidget";
-import AgendaHoyWidget from "./components/dashboard/AgendaHoyWidget";
-import ProyectosMiniWidget from "./components/dashboard/ProyectosMiniWidget";
-import NotasRapidasWidget from "./components/dashboard/NotasRapidasWidget";
-import AccesosRapidosWidget from "./components/dashboard/AccesosRapidosWidget";
-import HabitosHoyWidget from "./components/dashboard/HabitosHoyWidget";
-import DashboardBannerFinal from "./components/dashboard/DashboardBannerFinal";
+import DashboardHeader from "./components/CentroMando/DashboardHeader";
+import DashboardSaludo from "./components/CentroMando/DashboardSaludo";
+import ResumenCards from "./components/CentroMando/ResumenCards";
+import MiDia from "./components/CentroMando/MiDia";
+import RequiereAtencion from "./components/CentroMando/RequiereAtencion";
+import CalendarioWidget from "./components/CentroMando/CalendarioWidget";
+import ProgresoWidget from "./components/CentroMando/ProgresoWidget";
+import ProyectosMiniWidget from "./components/CentroMando/ProyectosMiniWidget";
+import NotasRapidasWidget from "./components/CentroMando/NotasRapidasWidget";
+import AccesosRapidosWidget from "./components/CentroMando/AccesosRapidosWidget";
+import HabitosHoyWidget from "./components/CentroMando/HabitosHoyWidget";
+import MotivationalCard from "./components/CentroMando/MotivationalCard";
 import Breadcrumb from "./components/nav/Breadcrumb";
 import * as XLSX from "xlsx";
 import {
@@ -26,7 +28,7 @@ import {
   PieChart, Pie, Cell, LineChart, Line,
 } from "recharts";
 // Perezoso: solo trae @dnd-kit (arrastrar y soltar) cuando el usuario realmente abre "Personalizar panel".
-const PersonalizarPanelModal = lazy(() => import("./components/dashboard/PersonalizarPanelModal"));
+const PersonalizarPanelModal = lazy(() => import("./components/CentroMando/PersonalizarPanelModal"));
 // Perezoso: solo trae la UI de importar (mapeo de columnas/vista previa) cuando el usuario abre
 // "Importar desde Excel" en Contactos o Finanzas — xlsx en sí ya está cargado (se usa para exportar).
 const ImportarExcelModal = lazy(() => import("./components/import/ImportarExcelModal"));
@@ -217,28 +219,23 @@ const armarNombreContacto = (nombres, apellidoPaterno, apellidoMaterno) =>
 const claveOrdenContacto = (c) =>
   (c.apellidoPaterno || c.apellidoMaterno) ? `${c.apellidoPaterno || ""} ${c.apellidoMaterno || ""} ${c.nombres || ""}`.trim() : c.nombre;
 
-// Catálogo de widgets configurables del Centro de mando (orden aquí = orden por default, el
-// mismo que ya tenía la pantalla, para que nadie note un cambio hasta que entre a personalizar).
-// El header, el saludo, las tarjetas de estadísticas y el banner final quedan fijos — no son
-// "contenido" que tenga sentido ocultar, y la tarjeta de estadísticas es la que abre este modal.
+// Catálogo de widgets configurables del Centro de mando — rediseño 21 sept 2026 (brief de
+// Angel): 9 bloques agrupados en vez de los 17 granulares que había antes (orden aquí = orden
+// por default). El header, el saludo y las tarjetas de resumen quedan fijos — no son "contenido"
+// que tenga sentido ocultar, y las tarjetas de resumen son las que abren este modal.
 const DASHBOARD_WIDGETS_CATALOGO = [
-  { id: "tareasHoy", label: "Tareas de hoy" },
-  { id: "agendaHoy", label: "Agenda de hoy" },
-  { id: "proyectosMini", label: "Mis proyectos" },
+  { id: "miDia", label: "Mi día" },
+  { id: "requiereAtencion", label: "Requiere tu atención" },
+  { id: "calendario", label: "Calendario" },
+  { id: "progreso", label: "Tu progreso" },
+  { id: "proyectos", label: "Proyectos" },
+  { id: "tareas", label: "Tareas" },
+  { id: "finanzas", label: "Finanzas" },
+  { id: "habitos", label: "Hábitos" },
+  { id: "salud", label: "Salud" },
+  { id: "imagenMotivacional", label: "Imagen motivacional" },
   { id: "notasRapidas", label: "Notas rápidas" },
   { id: "accesosRapidos", label: "Accesos rápidos" },
-  { id: "habitosHoy", label: "Hábitos de hoy" },
-  { id: "accionesHoy", label: "Acciones para hoy" },
-  { id: "proximasAcciones", label: "Próximas acciones" },
-  { id: "proximasCitas", label: "Próximas citas" },
-  { id: "alertas", label: "Alertas importantes" },
-  { id: "proyectosAtencion", label: "Proyectos que requieren atención" },
-  { id: "resumenStats", label: "Tu resumen (tarjetas)" },
-  { id: "saldoActual", label: "Saldo actual" },
-  { id: "githubPendiente", label: "Proyectos sin GitHub" },
-  { id: "avanceGeneral", label: "Avance general" },
-  { id: "avanceProyecto", label: "Avance por proyecto" },
-  { id: "gananciaProyecto", label: "Ganancia neta por proyecto" },
 ];
 // Reconcilia el orden guardado del usuario (preferencias.dashboard_widgets) con el catálogo
 // actual: widgets guardados van en su orden; widgets del catálogo que aún no existían cuando
@@ -2164,7 +2161,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
       const { data: colabs } = await supabase.from("colaboradores").select("*, colaborador_dependientes(contacto_id)").eq("colaborador_user_id", misId).eq("estatus", "Activo");
       setMisColaboraciones((colabs || []).map((c) => ({ propietarioId: c.propietario_id, propietarioEmail: c.propietario_email, modulos: c.modulos, dependientes: (c.colaborador_dependientes || []).map((d) => d.contacto_id) })));
 
-      const { data: pref } = await supabase.from("preferencias").select("tema, alertas_correo_activas, notif_tipos_desactivados, notif_silencio_activo, notif_silencio_inicio, notif_silencio_fin, notif_anticipacion_citas_min, dashboard_widgets, nombre_mostrar").eq("user_id", misId).maybeSingle();
+      const { data: pref } = await supabase.from("preferencias").select("tema, alertas_correo_activas, notif_tipos_desactivados, notif_silencio_activo, notif_silencio_inicio, notif_silencio_fin, notif_anticipacion_citas_min, dashboard_widgets, nombre_mostrar, avatar_url, presupuesto_mensual").eq("user_id", misId).maybeSingle();
       const temaGuardado = normalizarTema(pref?.tema);
       if (temaGuardado !== tema) setTema(temaGuardado);
       if (pref && pref.alertas_correo_activas === false) setAlertasCorreoActivas(false);
@@ -2175,6 +2172,8 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
       if (pref?.notif_anticipacion_citas_min != null) setNotifAnticipacionCitasMin(pref.notif_anticipacion_citas_min);
       if (pref?.dashboard_widgets) setOrdenWidgetsDashboard(pref.dashboard_widgets);
       if (pref?.nombre_mostrar) setNombreMostrar(pref.nombre_mostrar);
+      if (pref?.avatar_url) setAvatarUrl(pref.avatar_url);
+      if (pref?.presupuesto_mensual != null) setPresupuestoMensual(pref.presupuesto_mensual);
 
       let result = await loadAllTables(misId);
       result = await migrateFromOldBlobIfNeeded(result, misId);
@@ -2233,6 +2232,27 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
   const guardarNombreMostrar = async (v) => {
     setNombreMostrar(v);
     await supabase.from("preferencias").upsert({ user_id: misId, nombre_mostrar: v }, { onConflict: "user_id" });
+  };
+
+  // --- Foto de perfil: mismo bucket "adjuntos" que ya usan otras entidades (App.jsx ~360),
+  // solo con su propia carpeta avatares/{user_id}/ — no se creó bucket ni política nueva.
+  const [avatarUrl, setAvatarUrl] = useState("");
+  const subirAvatar = async (file) => {
+    const path = `avatares/${misId}/${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
+    const { error: upErr } = await supabase.storage.from("adjuntos").upload(path, file);
+    if (upErr) return { error: upErr.message };
+    const { data: pub } = supabase.storage.from("adjuntos").getPublicUrl(path);
+    setAvatarUrl(pub.publicUrl);
+    await supabase.from("preferencias").upsert({ user_id: misId, avatar_url: pub.publicUrl }, { onConflict: "user_id" });
+    return { url: pub.publicUrl };
+  };
+
+  // --- Presupuesto mensual: usado por "Tu progreso" del Centro de mando (gastado del mes /
+  // presupuesto) — un número recurrente por usuario, no un dato histórico por mes.
+  const [presupuestoMensual, setPresupuestoMensual] = useState(null);
+  const guardarPresupuestoMensual = async (monto) => {
+    setPresupuestoMensual(monto);
+    await supabase.from("preferencias").upsert({ user_id: misId, presupuesto_mensual: monto }, { onConflict: "user_id" });
   };
 
   // --- Notificaciones Push -------------------------------------------------
@@ -2896,6 +2916,11 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
               onCrearRapido={irACrear}
               ordenWidgetsDashboard={ordenWidgetsDashboard}
               onGuardarOrdenWidgets={guardarOrdenWidgetsDashboard}
+              avatarUrl={avatarUrl}
+              onAbrirConfiguracion={() => irAVista("configuracion")}
+              onCerrarSesion={cerrarSesion}
+              presupuestoMensual={presupuestoMensual}
+              onGuardarPresupuestoMensual={guardarPresupuestoMensual}
             />
           )}
           {view === "papelera" && <Papelera onRestore={restoreItem} onPermanentDelete={permanentDelete} ownerId={activeOwnerId} />}
@@ -2926,6 +2951,8 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
               guardarPreferenciasNotif={guardarPreferenciasNotif}
               nombreMostrar={nombreMostrar}
               guardarNombreMostrar={guardarNombreMostrar}
+              avatarUrl={avatarUrl}
+              subirAvatar={subirAvatar}
             />
           )}
           {view === "proyectos" && (
@@ -3326,10 +3353,11 @@ function Configuracion({
   esPropia, irAColaboradores, irAPapelera,
   esAdmin, irAAdmin, miEmail,
   notifTiposDesactivados, notifSilencioActivo, notifSilencioInicio, notifSilencioFin, notifAnticipacionCitasMin, guardarPreferenciasNotif,
-  nombreMostrar, guardarNombreMostrar,
+  nombreMostrar, guardarNombreMostrar, avatarUrl, subirAvatar,
 }) {
   const [prefsAbierto, setPrefsAbierto] = useState(false);
   const [nombreModalAbierto, setNombreModalAbierto] = useState(false);
+  const [avatarModalAbierto, setAvatarModalAbierto] = useState(false);
   const [confirmarNotif, setConfirmarNotif] = useState(null); // { tipo: 'correo' | 'push', activar: bool }
   const cantidadActivas = CATEGORIAS_NOTIFICACION.length - notifTiposDesactivados.length;
   return (
@@ -3339,6 +3367,13 @@ function Configuracion({
 
       <p className="text-xs gp-text-muted uppercase tracking-wide mb-2">Perfil</p>
       <div className="space-y-2 mb-5">
+        <FilaConfig
+          icon={Contact}
+          label="Foto de perfil"
+          sublabel={avatarUrl ? "Toca para cambiarla" : "Sin foto — se muestran tus iniciales"}
+          onClick={() => setAvatarModalAbierto(true)}
+          extra={avatarUrl ? <img src={avatarUrl} alt="" className="w-9 h-9 rounded-full object-cover shrink-0" style={{ border: "1px solid var(--border)" }} /> : null}
+        />
         <FilaConfig icon={Contact} label="Nombre para mostrar" sublabel={nombreMostrar ? `Te llamamos "${nombreMostrar}"` : "Usando tu correo — toca para elegir un nombre"} onClick={() => setNombreModalAbierto(true)} />
       </div>
 
@@ -3446,6 +3481,51 @@ function Configuracion({
           />
         </Modal>
       )}
+
+      {avatarModalAbierto && (
+        <Modal title="Foto de perfil" onClose={() => setAvatarModalAbierto(false)}>
+          <AvatarForm avatarUrl={avatarUrl} subirAvatar={subirAvatar} onSaved={() => setAvatarModalAbierto(false)} />
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// Foto que se muestra en el avatar del Centro de mando — sube a Storage (bucket "adjuntos") y
+// guarda la URL pública en preferencias.avatar_url (ver subirAvatar en AppLoggedIn).
+function AvatarForm({ avatarUrl, subirAvatar, onSaved }) {
+  const [previa, setPrevia] = useState(avatarUrl || "");
+  const [estado, setEstado] = useState("idle"); // idle | subiendo | listo
+  const [error, setError] = useState("");
+  const onArchivo = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) { setError("La imagen pesa más de 5 MB — usa una más chica."); return; }
+    setError("");
+    setPrevia(URL.createObjectURL(file));
+    setEstado("subiendo");
+    const res = await subirAvatar(file);
+    if (res.error) { setError(res.error); setEstado("idle"); return; }
+    setEstado("listo");
+    setTimeout(() => onSaved?.(), 900);
+  };
+  return (
+    <div>
+      <p className="text-xs gp-text-muted mb-3">Se muestra en el Centro de mando, junto al buscador. Si no subes una, se muestran tus iniciales.</p>
+      <div className="flex flex-col items-center gap-3">
+        {previa ? (
+          <img src={previa} alt="" className="w-24 h-24 rounded-full object-cover" style={{ border: "1px solid var(--border)" }} />
+        ) : (
+          <div className="w-24 h-24 rounded-full flex items-center justify-center" style={{ background: "var(--panel-hi)" }}>
+            <Contact size={32} className="gp-text-muted" />
+          </div>
+        )}
+        <label className="gp-btn-ghost px-3 py-2 text-sm rounded cursor-pointer">
+          {estado === "subiendo" ? "Subiendo…" : estado === "listo" ? "Guardado ✓" : "Elegir foto…"}
+          <input type="file" accept="image/*" className="hidden" onChange={onArchivo} disabled={estado === "subiendo"} />
+        </label>
+        {error && <p className="text-xs gp-text-red">{error}</p>}
+      </div>
     </div>
   );
 }
@@ -4046,8 +4126,9 @@ function Papelera({ onRestore, onPermanentDelete, ownerId }) {
   );
 }
 
-function Dashboard({ data, setView, onAddSaldo, onVerProyecto, onEditPendiente, sensibleDesbloqueadoHasta, onDesbloquear, miEmail, notifNoLeidas, onBuscar, onNotificaciones, onAddNota, onEditHabito, modulosPermitidos, onCrearRapido, ordenWidgetsDashboard, onGuardarOrdenWidgets }) {
+function Dashboard({ data, setView, onAddSaldo, onVerProyecto, onEditPendiente, sensibleDesbloqueadoHasta, onDesbloquear, miEmail, notifNoLeidas, onBuscar, onNotificaciones, onAddNota, onEditHabito, modulosPermitidos, onCrearRapido, ordenWidgetsDashboard, onGuardarOrdenWidgets, avatarUrl, onAbrirConfiguracion, onCerrarSesion, presupuestoMensual, onGuardarPresupuestoMensual }) {
   const [saldoModal, setSaldoModal] = useState(false);
+  const [presupuestoModal, setPresupuestoModal] = useState(false);
   const [personalizarModal, setPersonalizarModal] = useState(false);
   const saldo = calcularSaldo(data);
   const hoy = todayISO();
@@ -4068,11 +4149,8 @@ function Dashboard({ data, setView, onAddSaldo, onVerProyecto, onEditPendiente, 
   const sensibleDesbloqueado = Date.now() < (sensibleDesbloqueadoHasta || 0);
 
   const ledgerMesActual = useMemo(() => buildMonthlyLedger(data.finanzas, [mesActual]), [data.finanzas, mesActual]);
-  const ingresos = ledgerMesActual.filter((f) => f.tipo === "Ingreso").reduce((s, f) => s + f.monto, 0);
   const egresos = ledgerMesActual.filter((f) => f.tipo === "Egreso").reduce((s, f) => s + f.monto, 0);
   const activos = data.proyectos.filter((p) => p.estatus === "Activo").length;
-  const ideas = data.proyectos.filter((p) => p.estatus === "Idea").length;
-  const sinGithub = data.proyectos.filter((p) => !p.githubSubido);
 
   const nombreProyecto = (id) => data.proyectos.find((p) => p.id === id)?.nombre || "";
 
@@ -4110,23 +4188,6 @@ function Dashboard({ data, setView, onAddSaldo, onVerProyecto, onEditPendiente, 
 
   const accionesHoy = acciones.filter((a) => a.dd <= 0).sort((a, b) => a.dd - b.dd);
   const accionesProximas = acciones.filter((a) => a.dd > 0 && a.dd <= 7).sort((a, b) => a.dd - b.dd);
-  const resumenHoy = (() => {
-    const partes = [];
-    const nPend = accionesHoy.filter((a) => a.tipo === "pendiente").length;
-    const nSegu = accionesHoy.filter((a) => a.tipo === "seguimiento").length;
-    const nFin = accionesHoy.filter((a) => a.tipo === "finanzas").length;
-    const nCita = accionesHoy.filter((a) => a.tipo === "cita").length;
-    if (nPend) partes.push(`${nPend} tarea${nPend === 1 ? "" : "s"}`);
-    if (nSegu) partes.push(`${nSegu} seguimiento${nSegu === 1 ? "" : "s"}`);
-    if (nCita) partes.push(`${nCita} cita${nCita === 1 ? "" : "s"}`);
-    if (nFin) partes.push(`${nFin} pago${nFin === 1 ? "" : "s"} por revisar`);
-    return partes.join(" · ");
-  })();
-
-  // Próximas citas: agenda de los próximos 7 días (incluye hoy, para tener el vistazo completo aquí).
-  const proximasCitas = data.citas
-    .filter((c) => { const dd = Math.round((new Date(c.fechaHora).setHours(0, 0, 0, 0) - new Date(hoy + "T00:00:00").getTime()) / 86400000); return dd >= 0 && dd <= 7; })
-    .sort((a, b) => new Date(a.fechaHora) - new Date(b.fechaHora));
 
   // --- Datos para el nuevo look del Centro de mando (header/saludo/tarjetas/3 columnas):
   // se calculan aquí, a partir de lo mismo que ya usa el resto de la pantalla, y se pasan ya
@@ -4183,6 +4244,24 @@ function Dashboard({ data, setView, onAddSaldo, onVerProyecto, onEditPendiente, 
     })
     .filter((p) => p.motivo);
 
+  // Medicamentos de hoy (widget Salud / Requiere tu atención): activos, con horario programado
+  // para hoy según diasSemana. "Medicamentos" es módulo sensible (VISTAS_SENSIBLES) — el nombre
+  // se enmascara igual que Finanzas cuando el candado de 15 min no está vigente.
+  const diaSemanaHoy = new Date(hoy + "T00:00:00").getDay(); // 0=domingo..6=sábado
+  const medicamentosHoy = (data.medicamentos || []).filter((m) => m.activo !== false && (!m.diasSemana || m.diasSemana.length === 0 || m.diasSemana.includes(diaSemanaHoy)) && (m.horarios || []).length > 0);
+
+  // --- "Requiere tu atención" (rediseño 21 sept 2026): une próximas acciones, alertas de
+  // documentos/activos/facturas, proyectos en atención y medicamentos de hoy en una sola lista
+  // con badge de conteo — mismos datos de arriba, solo se presentan juntos.
+  const itemsRequierenAtencion = [
+    ...accionesProximas.map((a) => ({ id: a.id, texto: a.texto || a.origen, sub: a.sub, irA: a.irA, tono: a.dd === 0 ? "gold" : "muted", etiqueta: a.dd === 1 ? "Mañana" : `${a.dd}d` })),
+    ...documentosProximos.map((d) => ({ id: `doc-${d.id}`, texto: sensibleDesbloqueado ? `Documento — ${d.nombre}` : "🔒 Documento próximo a vencer", irA: () => setView("documentos"), tono: "gold", etiqueta: `${daysUntil(d.fechaVencimiento)}d` })),
+    ...activosProximos.map((a) => ({ id: `act-${a.id}`, texto: sensibleDesbloqueado ? `Renovación — ${a.nombre}` : "🔒 Renovación próxima", irA: () => setView("activos"), tono: "gold", etiqueta: `${daysUntil(a.fechaVencimiento)}d` })),
+    ...facturasPendientes.map((f) => ({ id: `fact-${f.id}`, texto: sensibleDesbloqueado ? `Factura — ${f.concepto || f.folio || "sin folio"}` : "🔒 Factura pendiente", irA: () => setView("finanzas"), tono: "red", etiqueta: "Factura" })),
+    ...proyectosAtencion.map((p) => ({ id: `proy-${p.id}`, texto: p.nombre, sub: p.motivo, irA: () => onVerProyecto(p.id), tono: p.motivo.includes("vencid") ? "red" : "gold", etiqueta: "Proyecto" })),
+    ...(medicamentosHoy.length > 0 ? [{ id: "medicamentos-hoy", texto: sensibleDesbloqueado ? `${medicamentosHoy.length} medicamento${medicamentosHoy.length === 1 ? "" : "s"} hoy` : "🔒 Medicamentos pendientes hoy", irA: () => setView("medicamentos"), tono: "muted", etiqueta: "Salud" }] : []),
+  ];
+
   // --- A partir de aquí: los mismos cálculos de "resumen" que ya existían (avance, ganancia por
   // proyecto, etc.), ahora como contexto al final de la pantalla, no como protagonista.
   const monthKeysAmplios = useMemo(() => lastNMonthKeys(120), []);
@@ -4196,10 +4275,7 @@ function Dashboard({ data, setView, onAddSaldo, onVerProyecto, onEditPendiente, 
 
   const pendientesTotal = data.pendientes.length;
   const pendientesHechos = data.pendientes.filter((p) => p.estatus === "Completada").length;
-  const metasTotal = data.metas.length;
-  const metasCumplidas = data.metas.filter((m) => m.estatus === "Cumplida").length;
   const pctPendientes = pendientesTotal ? Math.round((pendientesHechos / pendientesTotal) * 100) : 0;
-  const pctMetas = metasTotal ? Math.round((metasCumplidas / metasTotal) * 100) : 0;
 
   const avancePorProyecto = data.proyectos
     .filter((p) => p.estatus === "Activo" || p.estatus === "En desarrollo")
@@ -4211,153 +4287,66 @@ function Dashboard({ data, setView, onAddSaldo, onVerProyecto, onEditPendiente, 
     .filter((p) => p.total > 0)
     .sort((a, b) => b.pct - a.pct);
 
-  const badgeDia = (dd) => (dd < 0 ? <Badge tone="red">vencido</Badge> : dd === 0 ? <Badge tone="gold">Hoy</Badge> : <Badge tone="muted">{dd === 1 ? "Mañana" : `${dd}d`}</Badge>);
+  // --- "Tu progreso" (widget nuevo, rediseño 21 sept 2026): 4 anillos a partir de datos que ya
+  // se calculan arriba — ninguno es un cálculo nuevo salvo Finanzas (presupuesto mensual, dato
+  // nuevo que el propio usuario define; sin presupuesto no hay % que mostrar, se pide definirlo).
+  const proyectosAlDia = activos - proyectosAtencion.length;
+  const progresoProyectos = { pct: activos ? Math.round((proyectosAlDia / activos) * 100) : 0, sub: `${proyectosAlDia} de ${activos} al día` };
+  const progresoTareas = { pct: pctPendientes, sub: `${pendientesHechos}/${pendientesTotal}` };
+  const habitosHechosHoy = habitosHoyView.filter((h) => h.hecho).length;
+  const progresoHabitos = { pct: habitosHoyView.length ? Math.round((habitosHechosHoy / habitosHoyView.length) * 100) : 0, sub: `${habitosHechosHoy}/${habitosHoyView.length} hoy` };
+  const progresoFinanzas = presupuestoMensual
+    ? { presupuesto: true, pct: Math.min(100, Math.round((egresos / presupuestoMensual) * 100)), sub: `${fmtMoney(egresos)} de ${fmtMoney(presupuestoMensual)}` }
+    : { presupuesto: false, onDefinirPresupuesto: () => setPresupuestoModal(true) };
 
   // Contenido de cada widget configurable, en un mapa id → JSX. La lógica/datos de arriba no
   // cambia — esto solo envuelve el mismo JSX que ya existía para poder elegir cuáles mostrar
   // y en qué orden (ver DASHBOARD_WIDGETS_CATALOGO / resolverOrdenWidgets).
   const widgetContenido = {
-    tareasHoy: <TareasHoyWidget items={accionesHoyView} onToggle={toggleTareaHoy} onVerTodas={() => setView("pendientes")} />,
-    agendaHoy: <AgendaHoyWidget citas={citasHoy} onVerCalendario={() => setView("citas")} />,
-    proyectosMini: <ProyectosMiniWidget proyectos={avancePorProyecto} onVerTodos={() => setView("proyectos")} />,
-    notasRapidas: <NotasRapidasWidget onAddNota={onAddNota} />,
-    accesosRapidos: <AccesosRapidosWidget onCrear={onCrearRapido} modulosPermitidos={modulosPermitidos} />,
-    habitosHoy: <HabitosHoyWidget habitos={habitosHoyView} onToggle={toggleHabitoHoy} onVerTodos={() => setView("habitos")} />,
+    miDia: (
+      <MiDia
+        citas={citasHoy}
+        tareas={accionesHoyView}
+        onToggleTarea={toggleTareaHoy}
+        onVerAgenda={() => setView("citas")}
+        onAgregarTarea={() => onCrearRapido("pendientes", {})}
+      />
+    ),
 
-    accionesHoy: (
-      <div className="gp-panel p-4" style={{ borderColor: accionesHoy.length ? "var(--gold)" : undefined }}>
-        <div className="flex items-center gap-2 mb-1"><Zap size={15} className="gp-text-gold" /><h3 className="text-base font-medium">Acciones para hoy</h3></div>
-        {accionesHoy.length === 0 ? (
-          <p className="text-xs gp-text-muted mt-1">No tienes nada urgente hoy — buen momento para revisar lo que viene.</p>
-        ) : (
-          <>
-            <p className="text-xs gp-text-muted mb-3">{resumenHoy}</p>
-            <ul className="space-y-1.5">
-              {accionesHoy.map((a) => (
-                <li key={a.id} className="flex items-center gap-2">
-                  {a.pendienteId ? (
-                    <button
-                      onClick={() => {
-                        const yaTachada = tachadas.has(a.pendienteId);
-                        if (yaTachada) {
-                          setTachadas((prev) => { const n = new Set(prev); n.delete(a.pendienteId); return n; });
-                          onEditPendiente(a.pendienteId, { estatus: "Pendiente" });
-                        } else {
-                          setTachadas((prev) => new Set(prev).add(a.pendienteId));
-                          onEditPendiente(a.pendienteId, { estatus: "Completada" });
-                        }
-                      }}
-                      title={tachadas.has(a.pendienteId) ? "Deshacer" : "Marcar como hecho"}
-                      className="w-5 h-5 rounded flex items-center justify-center shrink-0"
-                      style={{ border: "1px solid var(--border)", background: tachadas.has(a.pendienteId) ? "var(--teal)" : "transparent" }}
-                    >
-                      {tachadas.has(a.pendienteId) && <Check size={13} color="#fff" />}
-                    </button>
-                  ) : <span className="w-5 shrink-0" />}
-                  <button onClick={a.irA} className="flex-1 text-left flex items-center justify-between gap-2 min-w-0 py-0.5">
-                    <span className={`text-sm truncate ${tachadas.has(a.pendienteId) ? "line-through gp-text-muted" : ""}`}>{a.texto || a.origen}{a.sub ? <span className="gp-text-muted"> — {a.sub}</span> : ""}</span>
-                    {badgeDia(a.dd)}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </>
-        )}
+    requiereAtencion: <RequiereAtencion items={itemsRequierenAtencion} />,
+
+    calendario: <CalendarioWidget citas={data.citas} onVerDia={() => setView("citas")} />,
+
+    progreso: (
+      <ProgresoWidget
+        proyectosPct={progresoProyectos}
+        tareasPct={progresoTareas}
+        habitosPct={progresoHabitos}
+        finanzas={progresoFinanzas}
+      />
+    ),
+
+    proyectos: <ProyectosMiniWidget proyectos={avancePorProyecto} onVerTodos={() => setView("proyectos")} />,
+
+    tareas: (
+      <div className="gp-panel p-4">
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-sm font-medium">Tareas</h3>
+          <button onClick={() => setView("pendientes")} className="text-xs gp-text-gold">Ver todas →</button>
+        </div>
+        <p className="gp-serif text-2xl">{tareasPendientesTotal}</p>
+        <p className="text-xs gp-text-muted">pendientes en total</p>
+        <button onClick={() => onCrearRapido("pendientes", {})} className="gp-btn-ghost w-full mt-3 py-1.5 text-xs rounded">+ Nueva tarea</button>
       </div>
     ),
 
-    proximasAcciones: accionesProximas.length > 0 ? (
-      <div className="gp-panel p-4">
-        <div className="flex items-center gap-2 mb-2"><CalendarClock size={14} className="gp-text-gold" /><h3 className="text-sm font-medium">Próximas acciones</h3></div>
-        <ul className="space-y-1.5">
-          {accionesProximas.slice(0, 8).map((a) => (
-            <li key={a.id}>
-              <button onClick={a.irA} className="w-full text-left flex items-center justify-between gap-2 text-sm">
-                <span className="truncate">{a.texto || a.origen}{a.sub ? <span className="gp-text-muted text-xs"> — {a.sub}</span> : ""}</span>
-                {badgeDia(a.dd)}
-              </button>
-            </li>
-          ))}
-        </ul>
-      </div>
-    ) : null,
-
-    proximasCitas: proximasCitas.length > 0 ? (
-      <div className="gp-panel p-4">
-        <div className="flex items-center gap-2 mb-2"><CalendarClock size={14} className="gp-text-teal" /><h3 className="text-sm font-medium">Próximas citas</h3></div>
-        <ul className="space-y-1.5">
-          {proximasCitas.slice(0, 6).map((c) => (
-            <li key={c.id} className="flex items-center justify-between gap-2 text-sm">
-              <span className="truncate">{c.titulo}{c.lugar ? <span className="gp-text-muted text-xs"> — {c.lugar}</span> : ""}</span>
-              <span className="text-xs gp-text-muted shrink-0">{fmtFechaHora(c.fechaHora)}</span>
-            </li>
-          ))}
-        </ul>
-        <button onClick={() => setView("citas")} className="text-xs gp-text-gold mt-3">Ver toda tu agenda →</button>
-      </div>
-    ) : null,
-
-    alertas: totalAlertas > 0 ? (
-      <div className="gp-panel p-4">
-        <div className="flex items-center gap-2 mb-2"><AlertTriangle size={14} className="gp-text-red" /><h3 className="text-sm font-medium">Alertas importantes</h3></div>
-        <ul className="space-y-1.5 text-sm">
-          {documentosProximos.map((d) => (
-            <li key={d.id}>
-              <button onClick={() => setView("documentos")} className="w-full text-left flex items-center justify-between gap-2">
-                <span className="truncate">{sensibleDesbloqueado ? `Documento — ${d.nombre}` : "🔒 Documento/contrato próximo a vencer"}</span>{badgeDia(daysUntil(d.fechaVencimiento))}
-              </button>
-            </li>
-          ))}
-          {activosProximos.map((a) => (
-            <li key={a.id}>
-              <button onClick={() => setView("activos")} className="w-full text-left flex items-center justify-between gap-2">
-                <span className="truncate">{sensibleDesbloqueado ? `Renovación — ${a.nombre}` : "🔒 Renovación de activo digital próxima"}</span>{badgeDia(daysUntil(a.fechaVencimiento))}
-              </button>
-            </li>
-          ))}
-          {facturasPendientes.map((f) => (
-            <li key={f.id}>
-              <button onClick={() => setView("finanzas")} className="w-full text-left flex items-center justify-between gap-2">
-                <span className="truncate">{sensibleDesbloqueado ? `Factura pendiente — ${f.concepto || f.folio || "sin folio"}` : "🔒 Factura pendiente"}</span>{sensibleDesbloqueado ? <Badge tone="gold">{fmtMoney(f.total)}</Badge> : <Badge tone="muted">Protegida</Badge>}
-              </button>
-            </li>
-          ))}
-        </ul>
-      </div>
-    ) : null,
-
-    proyectosAtencion: proyectosAtencion.length > 0 ? (
-      <div className="gp-panel p-4">
-        <div className="flex items-center gap-2 mb-2"><FolderKanban size={14} className="gp-text-gold" /><h3 className="text-sm font-medium">Proyectos que requieren atención</h3></div>
-        <ul className="space-y-1.5">
-          {proyectosAtencion.map((p) => (
-            <li key={p.id}>
-              <button onClick={() => onVerProyecto(p.id)} className="w-full text-left flex items-center justify-between gap-2 text-sm">
-                <span className="truncate">{p.nombre}</span>
-                <Badge tone={p.motivo.includes("vencid") ? "red" : "gold"}>{p.motivo}</Badge>
-              </button>
-            </li>
-          ))}
-        </ul>
-      </div>
-    ) : null,
-
-    resumenStats: (
-      <div className="grid grid-cols-2 gap-3">
-        <Stat label="Proyectos activos" value={activos} />
-        <Stat label="Ideas por validar" value={ideas} />
-        <Stat label="Ingresos del mes" value={sensibleDesbloqueado ? fmtMoney(ingresos) : "🔒 •••••"} tone="teal" />
-        <Stat label="Egresos del mes" value={sensibleDesbloqueado ? fmtMoney(egresos) : "🔒 •••••"} tone="red" />
-      </div>
-    ),
-
-    saldoActual: (
+    finanzas: (
       <div className="gp-panel p-4">
         <div className="flex items-center justify-between mb-1">
-          <div className="flex items-center gap-2"><Wallet size={14} className="gp-text-teal" /><h3 className="text-sm font-medium">Saldo actual</h3></div>
+          <div className="flex items-center gap-2"><Wallet size={14} className="gp-text-teal" /><h3 className="text-sm font-medium">Finanzas</h3></div>
           {sensibleDesbloqueado && (
             <button onClick={() => setSaldoModal(true)} className="text-xs gp-text-gold">
-              {saldo ? "Redefinir punto de partida" : "Definir saldo inicial"}
+              {saldo ? "Redefinir saldo" : "Definir saldo inicial"}
             </button>
           )}
         </div>
@@ -4367,112 +4356,96 @@ function Dashboard({ data, setView, onAddSaldo, onVerProyecto, onEditPendiente, 
             <p className="text-xs gp-text-muted mt-1">Finanzas es un módulo protegido — toca aquí para desbloquearlo.</p>
           </button>
         ) : saldo ? (
-          <>
-            <div className="grid grid-cols-3 gap-3 mt-3">
-              <div><p className="text-xs gp-text-muted">Efectivo</p><p className="gp-serif text-lg">{fmtMoney(saldo.efectivo)}</p></div>
-              <div><p className="text-xs gp-text-muted">Cuenta</p><p className="gp-serif text-lg">{fmtMoney(saldo.cuenta)}</p></div>
-              <div><p className="text-xs gp-text-muted">Total</p><p className="gp-serif text-lg gp-text-teal">{fmtMoney(saldo.total)}</p></div>
+          <div className="grid grid-cols-3 gap-3 mt-3">
+            <div><p className="text-xs gp-text-muted">Efectivo</p><p className="gp-serif text-lg">{fmtMoney(saldo.efectivo)}</p></div>
+            <div><p className="text-xs gp-text-muted">Cuenta</p><p className="gp-serif text-lg">{fmtMoney(saldo.cuenta)}</p></div>
+            <div><p className="text-xs gp-text-muted">Total</p><p className="gp-serif text-lg gp-text-teal">{fmtMoney(saldo.total)}</p></div>
+          </div>
+        ) : (
+          <p className="text-xs gp-text-muted mt-2">Define cuánto dinero tienes ahorita para que el sistema empiece a contar desde ahí.</p>
+        )}
+        {sensibleDesbloqueado && gananciaPorProyecto.length > 0 && (
+          <div className="mt-4 pt-3" style={{ borderTop: "1px solid var(--border)" }}>
+            <p className="text-xs gp-text-muted mb-2">Ganancia neta por proyecto</p>
+            <div className="space-y-2">
+              {gananciaPorProyecto.slice(0, 4).map((p) => (
+                <div key={p.nombre} className="flex items-center gap-3 text-xs">
+                  <span className="w-28 truncate gp-text-muted">{p.nombre}</span>
+                  <div className="flex-1 h-2 rounded" style={{ background: "var(--border)" }}>
+                    <div className="h-2 rounded" style={{ width: `${Math.min(100, Math.abs(p.neto) / 50)}%`, background: p.neto >= 0 ? "var(--teal)" : "var(--red)" }} />
+                  </div>
+                  <span className={`gp-mono w-20 text-right ${p.neto >= 0 ? "gp-text-teal" : "gp-text-red"}`}>{fmtMoney(p.neto)}</span>
+                </div>
+              ))}
             </div>
-            <p className="text-xs gp-text-muted mt-2">Calculado desde tu punto de partida del {saldo.fecha} más tus movimientos reales (no incluye cobros pendientes).</p>
-          </>
-        ) : (
-          <p className="text-xs gp-text-muted mt-2">Define cuánto dinero tienes ahorita (efectivo y en cuenta) para que el sistema empiece a sumar y restar desde ahí, en vez de asumir que parte de cero.</p>
-        )}
-      </div>
-    ),
-
-    githubPendiente: sinGithub.length > 0 ? (
-      <div className="gp-panel p-4">
-        <div className="flex items-center gap-2 mb-3"><Github size={14} className="gp-text-gold" /><h3 className="text-sm font-medium">Tarea: subir proyectos a GitHub</h3></div>
-        <ul className="space-y-1.5 text-xs gp-text-muted">
-          {sinGithub.map((p) => <li key={p.id}>· {p.nombre}</li>)}
-        </ul>
-        <button onClick={() => setView("proyectos")} className="text-xs gp-text-gold mt-3">Ir a proyectos →</button>
-      </div>
-    ) : null,
-
-    avanceGeneral: (
-      <div className="gp-panel p-4">
-        <h3 className="text-sm font-medium mb-3">Avance general</h3>
-        <div className="mb-3">
-          <div className="flex justify-between text-xs mb-1"><span className="gp-text-muted">Tareas completadas</span><span className="gp-mono">{pendientesHechos}/{pendientesTotal} · {pctPendientes}%</span></div>
-          <div className="h-2 rounded" style={{ background: "var(--border)" }}><div className="h-2 rounded" style={{ width: `${pctPendientes}%`, background: "var(--teal)" }} /></div>
-        </div>
-        <div>
-          <div className="flex justify-between text-xs mb-1"><span className="gp-text-muted">Metas cumplidas</span><span className="gp-mono">{metasCumplidas}/{metasTotal} · {pctMetas}%</span></div>
-          <div className="h-2 rounded" style={{ background: "var(--border)" }}><div className="h-2 rounded" style={{ width: `${pctMetas}%`, background: "var(--gold)" }} /></div>
-        </div>
-      </div>
-    ),
-
-    avanceProyecto: (
-      <div className="gp-panel p-4">
-        <h3 className="text-sm font-medium mb-3">Avance por proyecto</h3>
-        {avancePorProyecto.length === 0 ? (
-          <p className="text-xs gp-text-muted">Agrega pendientes a tus proyectos activos para ver su avance aquí.</p>
-        ) : (
-          <div className="space-y-2">
-            {avancePorProyecto.map((p) => (
-              <div key={p.nombre} className="flex items-center gap-3 text-xs">
-                <span className="w-28 truncate gp-text-muted">{p.nombre}</span>
-                <div className="flex-1 h-2 rounded" style={{ background: "var(--border)" }}>
-                  <div className="h-2 rounded" style={{ width: `${p.pct}%`, background: "var(--teal)" }} />
-                </div>
-                <span className="gp-mono w-10 text-right">{p.pct}%</span>
-              </div>
-            ))}
           </div>
         )}
       </div>
     ),
 
-    gananciaProyecto: (
+    habitos: <HabitosHoyWidget habitos={habitosHoyView} onToggle={toggleHabitoHoy} onVerTodos={() => setView("habitos")} />,
+
+    salud: (
       <div className="gp-panel p-4">
-        <h3 className="text-sm font-medium mb-3">Ganancia neta por proyecto</h3>
-        {!sensibleDesbloqueado ? (
+        <div className="flex items-center gap-2 mb-2"><HeartPulse size={14} className="gp-text-red" /><h3 className="text-sm font-medium">Salud</h3></div>
+        {medicamentosHoy.length === 0 ? (
+          <p className="text-xs gp-text-muted">No tienes medicamentos programados para hoy.</p>
+        ) : !sensibleDesbloqueado ? (
           <button onClick={onDesbloquear} className="text-left w-full">
-            <p className="text-sm gp-text-gold">🔒 Verifica tu contraseña para ver este reporte</p>
+            <p className="text-sm gp-text-gold">🔒 Verifica tu contraseña para ver el detalle</p>
+            <p className="text-xs gp-text-muted mt-1">{medicamentosHoy.length} medicamento{medicamentosHoy.length === 1 ? "" : "s"} programado{medicamentosHoy.length === 1 ? "" : "s"} hoy.</p>
           </button>
-        ) : gananciaPorProyecto.length === 0 ? (
-          <p className="text-xs gp-text-muted">Registra movimientos en Finanzas para ver este reporte.</p>
         ) : (
-          <div className="space-y-2">
-            {gananciaPorProyecto.map((p) => (
-              <div key={p.nombre} className="flex items-center gap-3 text-xs">
-                <span className="w-40 truncate gp-text-muted">{p.nombre}</span>
-                <div className="flex-1 h-2 rounded" style={{ background: "var(--border)" }}>
-                  <div className="h-2 rounded" style={{ width: `${Math.min(100, Math.abs(p.neto) / 50)}%`, background: p.neto >= 0 ? "var(--teal)" : "var(--red)" }} />
-                </div>
-                <span className={`gp-mono w-24 text-right ${p.neto >= 0 ? "gp-text-teal" : "gp-text-red"}`}>{fmtMoney(p.neto)}</span>
-              </div>
+          <ul className="space-y-1.5 text-sm">
+            {medicamentosHoy.map((m) => (
+              <li key={m.id} className="flex items-center justify-between gap-2">
+                <span className="truncate">{m.nombre}{m.dosis ? ` — ${m.dosis}` : ""}</span>
+                <span className="text-xs gp-text-muted shrink-0">{(m.horarios || []).map((h) => String(h).slice(0, 5)).join(", ")}</span>
+              </li>
             ))}
-          </div>
+          </ul>
         )}
+        <button onClick={() => setView("medicamentos")} className="text-xs gp-text-gold mt-3">Ir a Medicamentos →</button>
       </div>
     ),
+
+    imagenMotivacional: <MotivationalCard />,
+
+    notasRapidas: <NotasRapidasWidget onAddNota={onAddNota} />,
+    accesosRapidos: <AccesosRapidosWidget onCrear={onCrearRapido} modulosPermitidos={modulosPermitidos} />,
   };
 
   const widgetsVisibles = resolverOrdenWidgets(ordenWidgetsDashboard).filter((w) => w.visible && widgetContenido[w.id]);
 
   return (
     <div>
-      <DashboardHeader primerNombre={primerNombre} onBuscar={onBuscar} onNotificaciones={onNotificaciones} notifNoLeidas={notifNoLeidas} onPersonalizarClick={() => setPersonalizarModal(true)} />
+      <DashboardHeader
+        primerNombre={primerNombre}
+        avatarUrl={avatarUrl}
+        onBuscar={onBuscar}
+        onNotificaciones={onNotificaciones}
+        notifNoLeidas={notifNoLeidas}
+        onPersonalizarClick={() => setPersonalizarModal(true)}
+        onAbrirConfiguracion={onAbrirConfiguracion}
+        onCerrarSesion={onCerrarSesion}
+      />
       <DashboardSaludo primerNombre={primerNombre} />
-      <StatCardsRow
+      <ResumenCards
         activos={activos}
         tareasPendientes={tareasPendientesTotal}
-        ingresos={fmtMoney(ingresos)}
+        citasHoy={citasHoy.length}
         egresos={fmtMoney(egresos)}
+        habitosPct={`${progresoHabitos.pct}%`}
         onVerProyectos={() => setView("proyectos")}
         onVerTareas={() => setView("pendientes")}
+        onVerCitas={() => setView("citas")}
         onVerFinanzas={() => setView("finanzas")}
+        onVerHabitos={() => setView("habitos")}
       />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
         {widgetsVisibles.map((w) => <div key={w.id}>{widgetContenido[w.id]}</div>)}
       </div>
-
-      <DashboardBannerFinal />
 
       {personalizarModal && (
         <Modal title="Personalizar panel" onClose={() => setPersonalizarModal(false)}>
@@ -4491,6 +4464,44 @@ function Dashboard({ data, setView, onAddSaldo, onVerProyecto, onEditPendiente, 
           <SaldoInicialForm ultimo={saldo} onSave={(v) => { onAddSaldo(v); setSaldoModal(false); }} />
         </Modal>
       )}
+
+      {presupuestoModal && (
+        <Modal title="Presupuesto mensual" onClose={() => setPresupuestoModal(false)}>
+          <PresupuestoMensualForm
+            presupuestoMensual={presupuestoMensual}
+            onSave={async (v) => { await onGuardarPresupuestoMensual(v); }}
+            onSaved={() => setPresupuestoModal(false)}
+          />
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+function PresupuestoMensualForm({ presupuestoMensual, onSave, onSaved }) {
+  const [v, setV] = useState(presupuestoMensual != null ? String(presupuestoMensual) : "");
+  const [error, setError] = useState("");
+  const [estadoGuardado, setEstadoGuardado] = useState("idle");
+  return (
+    <div>
+      <p className="text-xs gp-text-muted mb-3">Cuánto planeas gastar al mes — el widget "Tu progreso" compara tus gastos reales contra este número. Puedes redefinirlo cuando quieras.</p>
+      <Field label="Presupuesto mensual"><MoneyInput className="gp-input" value={v} onChange={setV} /></Field>
+      {error && <p className="text-xs gp-text-red mb-2">{error}</p>}
+      <button
+        className="gp-btn w-full py-2 text-sm disabled:opacity-70"
+        disabled={estadoGuardado === "guardando"}
+        onClick={async () => {
+          const monto = Number(v);
+          if (!v || isNaN(monto) || monto <= 0) { setError("Captura un monto mayor a cero."); return; }
+          setError("");
+          setEstadoGuardado("guardando");
+          await onSave(monto);
+          setEstadoGuardado("guardado");
+          setTimeout(() => onSaved?.(), 900);
+        }}
+      >
+        {estadoGuardado === "guardando" ? "Guardando…" : estadoGuardado === "guardado" ? "Guardado ✓" : "Guardar"}
+      </button>
     </div>
   );
 }

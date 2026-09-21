@@ -1,4 +1,4 @@
-// src/components/dashboard/PersonalizarPanelModal.jsx
+// src/components/CentroMando/PersonalizarPanelModal.jsx
 //
 // Contenido del modal "Personalizar panel" del Centro de mando: lista de widgets reordenable
 // (arrastrar por el ícono de agarre) con un checkbox por widget para mostrarlo/ocultarlo. El
