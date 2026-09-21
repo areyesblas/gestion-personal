@@ -18,9 +18,9 @@ export default function AccesosRapidosWidget({ onCrear, modulosPermitidos }) {
   if (visibles.length === 0) return null;
 
   return (
-    <div className="gp-panel p-4">
+    <div className="gp-panel p-4 h-full flex flex-col">
       <h3 className="text-sm font-medium mb-3">Accesos rápidos</h3>
-      <div className="grid grid-cols-2 gap-2">
+      <div className="grid grid-cols-2 gap-2 flex-1">
         {visibles.map((a) => (
           <button
             key={a.modulo}

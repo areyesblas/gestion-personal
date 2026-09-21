@@ -33,12 +33,12 @@ function Anillo({ pct, color, label, sub }) {
 
 export default function ProgresoWidget({ proyectosPct, tareasPct, habitosPct, finanzas }) {
   return (
-    <div className="gp-panel p-4">
+    <div className="gp-panel p-4 h-full flex flex-col">
       <div className="flex items-center justify-between mb-3">
         <h3 className="text-sm font-medium">Tu progreso</h3>
         <span className="text-xs gp-text-muted">Este mes</span>
       </div>
-      <div className="grid grid-cols-4 gap-2">
+      <div className="grid grid-cols-4 gap-2 flex-1 items-center">
         <Anillo pct={proyectosPct.pct} color={COLOR_GOLD} label="Proyectos" sub={proyectosPct.sub} />
         <Anillo pct={tareasPct.pct} color={COLOR_BLUE} label="Tareas" sub={tareasPct.sub} />
         <Anillo pct={habitosPct.pct} color={COLOR_VIOLETA} label="Hábitos" sub={habitosPct.sub} />

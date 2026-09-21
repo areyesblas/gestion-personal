@@ -20,7 +20,7 @@ export default function NotasRapidasWidget({ onAddNota }) {
   };
 
   return (
-    <div className="gp-panel p-4">
+    <div className="gp-panel p-4 h-full flex flex-col">
       <div className="flex items-center justify-between mb-2">
         <h3 className="text-sm font-medium">Notas rápidas</h3>
         <button onClick={guardar} disabled={!texto.trim() || guardando} className="p-1 rounded gp-btn-ghost disabled:opacity-40" aria-label="Agregar nota">
@@ -28,7 +28,7 @@ export default function NotasRapidasWidget({ onAddNota }) {
         </button>
       </div>
       <textarea
-        className="gp-input text-sm w-full"
+        className="gp-input text-sm w-full flex-1"
         rows={2}
         placeholder="Escribe una nota..."
         value={texto}

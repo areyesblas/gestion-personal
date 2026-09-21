@@ -18,7 +18,7 @@ function Badge({ tone, children }) {
 
 export default function RequiereAtencion({ items }) {
   return (
-    <div className="gp-panel p-4">
+    <div className="gp-panel p-4 h-full flex flex-col">
       <div className="flex items-center gap-2 mb-3">
         <AlertTriangle size={15} className="gp-text-red" />
         <h3 className="text-sm font-medium flex-1">Requiere tu atención</h3>

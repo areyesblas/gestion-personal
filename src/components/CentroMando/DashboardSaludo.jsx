@@ -1,9 +1,12 @@
 // src/components/CentroMando/DashboardSaludo.jsx
 //
 // Saludo grande del Centro de mando: franja horaria + nombre, frase motivacional del día,
-// fecha completa y mensaje de cierre — todo sobre un banner de foto a todo lo ancho de la
-// sección (rediseño pedido por Angel, 20 sept 2026; antes la foto era un recuadro chico
-// decorativo de 495x145px, ahora es el fondo completo en alta resolución).
+// fecha completa y mensaje de cierre. Rediseño 21 sept 2026 (feedback de Angel sobre el
+// prototipo): el panel vuelve a usar el fondo normal del tema (--panel, claro u oscuro según
+// corresponda) en vez de una foto de fondo a todo lo ancho — la foto de montaña queda como un
+// acento degradado en la esquina superior derecha, que se desvanece hacia el color del panel
+// en vez de cubrirlo con un overlay oscuro. El texto usa los colores normales del tema, no
+// blanco forzado, porque ya no hay foto oscura debajo.
 
 import dashboardSaludoBg from '../../assets/dashboard-saludo-bg.jpg';
 
@@ -36,22 +39,35 @@ export default function DashboardSaludo({ primerNombre }) {
   const emoji = h < 12 ? '☀️' : h < 19 ? '🌤️' : '🌙';
 
   return (
-    <div className="relative rounded-2xl overflow-hidden mb-5" style={{ minHeight: 200 }}>
-      <img src={dashboardSaludoBg} alt="" className="absolute inset-0 w-full h-full object-cover" />
-      <div
-        className="absolute inset-0"
-        style={{ background: 'linear-gradient(120deg, rgba(11,35,72,.85) 0%, rgba(11,35,72,.55) 55%, rgba(11,35,72,.3) 100%)' }}
+    <div className="gp-panel relative overflow-hidden mb-5" style={{ minHeight: 180 }}>
+      {/* Foto degradada, solo esquina superior derecha — no cubre el panel completo. */}
+      <img
+        src={dashboardSaludoBg}
+        alt=""
+        className="hidden sm:block absolute top-0 right-0 h-full object-cover"
+        style={{ width: '48%' }}
       />
-      <div className="relative z-10 flex items-center justify-between gap-4 flex-wrap p-6" style={{ minHeight: 200 }}>
+      <div
+        className="hidden sm:block absolute top-0 right-0 h-full"
+        style={{ width: '48%', background: 'linear-gradient(to left, transparent 35%, var(--panel) 92%)' }}
+      />
+      <div
+        className="hidden sm:block absolute top-0 right-0 h-full"
+        style={{ width: '48%', background: 'linear-gradient(to top, var(--panel) 0%, transparent 65%)' }}
+      />
+
+      <div className="relative z-10 flex items-center justify-between gap-4 flex-wrap p-6" style={{ minHeight: 180 }}>
         <div className="min-w-0">
-          <h1 className="gp-serif text-[26px] sm:text-3xl mb-1 text-white">
+          <h1 className="gp-serif text-[26px] sm:text-3xl mb-1">
             {saludo}{primerNombre ? `, ${primerNombre}` : ''} <span>{emoji}</span>
           </h1>
-          <p className="text-sm text-white italic" style={{ opacity: .85 }}>"{fraseDelDia()}"</p>
+          <p className="text-sm gp-text-muted italic">"{fraseDelDia()}"</p>
         </div>
-        <div className="text-right leading-tight shrink-0 hidden sm:block">
-          <p className="text-sm font-medium capitalize text-white">{fechaCompleta()}</p>
-          <p className="text-[11px] text-white" style={{ opacity: .75 }}>Un día cada vez más cerca de tus metas.</p>
+        {/* padding-right para que el texto no quede encima de la parte visible de la foto (la
+            franja de la derecha, donde el degradado ya no la tapa) */}
+        <div className="text-right leading-tight shrink-0 hidden sm:block" style={{ paddingRight: '18%' }}>
+          <p className="text-sm font-medium capitalize">{fechaCompleta()}</p>
+          <p className="text-[11px] gp-text-muted">Un día cada vez más cerca de tus metas.</p>
         </div>
       </div>
     </div>
