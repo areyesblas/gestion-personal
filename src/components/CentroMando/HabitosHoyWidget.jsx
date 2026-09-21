@@ -1,4 +1,4 @@
-// src/components/dashboard/HabitosHoyWidget.jsx
+// src/components/CentroMando/HabitosHoyWidget.jsx
 //
 // Hábitos de hoy: reutiliza el mismo cálculo que ya usa el módulo Habitos (aplicaHoy,
 // fechas cumplidas), resuelto en Dashboard y pasado ya calculado — evita import cruzado

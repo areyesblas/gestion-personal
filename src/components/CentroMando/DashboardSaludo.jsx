@@ -1,4 +1,4 @@
-// src/components/dashboard/DashboardSaludo.jsx
+// src/components/CentroMando/DashboardSaludo.jsx
 //
 // Saludo grande del Centro de mando: franja horaria + nombre, frase motivacional del día,
 // fecha completa y mensaje de cierre — todo sobre un banner de foto a todo lo ancho de la

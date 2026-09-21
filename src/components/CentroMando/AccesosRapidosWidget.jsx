@@ -1,4 +1,4 @@
-// src/components/dashboard/AccesosRapidosWidget.jsx
+// src/components/CentroMando/AccesosRapidosWidget.jsx
 //
 // Parte de la columna 3: botones que navegan a un módulo y abren su formulario de "Nuevo"
 // solo (ver irACrear en AppLoggedIn). Respeta los mismos permisos que ya filtra el sidebar

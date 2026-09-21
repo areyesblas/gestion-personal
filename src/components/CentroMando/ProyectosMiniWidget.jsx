@@ -1,4 +1,4 @@
-// src/components/dashboard/ProyectosMiniWidget.jsx
+// src/components/CentroMando/ProyectosMiniWidget.jsx
 //
 // Parte de la columna 3: avance de proyectos activos, en formato compacto. Reutiliza
 // literalmente el cálculo de avancePorProyecto que ya existe en el Dashboard.

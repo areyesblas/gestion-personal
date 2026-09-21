@@ -1,4 +1,4 @@
-// src/components/dashboard/DashboardBannerFinal.jsx
+// src/components/CentroMando/MotivationalCard.jsx
 //
 // Banner motivacional al final del Centro de mando: foto de fondo (atardecer costero) +
 // frase + wordmark oficial, reutilizando el componente de logo ya existente (sin duplicarlo).
@@ -9,7 +9,7 @@ import ArkeyOneLogo from '../auth/ArkeyOneLogo';
 import bannerJpg from '../../assets/dashboard-banner-bg.jpg';
 import bannerWebp from '../../assets/dashboard-banner-bg.webp';
 
-export default function DashboardBannerFinal() {
+export default function MotivationalCard() {
   return (
     <div className="relative rounded-2xl overflow-hidden mb-6" style={{ minHeight: 170 }}>
       <picture className="absolute inset-0 block">
