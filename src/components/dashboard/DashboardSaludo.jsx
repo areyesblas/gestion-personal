@@ -1,8 +1,9 @@
 // src/components/dashboard/DashboardSaludo.jsx
 //
 // Saludo grande del Centro de mando: franja horaria + nombre, frase motivacional del día,
-// y fecha completa. La foto de fondo (montañas) es de baja resolución nativa (495x145px),
-// por eso se muestra acotada como elemento decorativo, no a pantalla completa.
+// fecha completa y mensaje de cierre — todo sobre un banner de foto a todo lo ancho de la
+// sección (rediseño pedido por Angel, 20 sept 2026; antes la foto era un recuadro chico
+// decorativo de 495x145px, ahora es el fondo completo en alta resolución).
 
 import dashboardSaludoBg from '../../assets/dashboard-saludo-bg.jpg';
 
@@ -11,9 +12,12 @@ const FRASES = [
   'Un paso a la vez, sin perder el rumbo.',
   'Ordena tu mundo, mejora tu vida.',
   'Lo constante vence a lo intenso.',
-  'Hoy también cuenta.',
+  'Cada nuevo día, es una nueva oportunidad para mejorar.',
   'Pequeños avances, grandes resultados.',
   'Tu enfoque de hoy define tu mañana.',
+  'No se trata de ser perfecto, se trata de ser constante.',
+  'Cada acción de hoy construye el mañana que quieres.',
+  'El progreso, aunque sea pequeño, sigue siendo progreso.',
 ];
 
 function fraseDelDia() {
@@ -32,24 +36,23 @@ export default function DashboardSaludo({ primerNombre }) {
   const emoji = h < 12 ? '☀️' : h < 19 ? '🌤️' : '🌙';
 
   return (
-    <div className="flex items-center justify-between gap-4 mb-5 flex-wrap">
-      <div className="min-w-0">
-        <h1 className="gp-serif text-[26px] sm:text-3xl mb-1">
-          {saludo}{primerNombre ? `, ${primerNombre}` : ''} <span>{emoji}</span>
-        </h1>
-        <p className="text-sm gp-text-muted italic">"{fraseDelDia()}"</p>
-      </div>
-      <div className="flex items-center gap-3 shrink-0">
-        <div className="text-right leading-tight hidden md:block">
-          <p className="text-sm font-medium capitalize">{fechaCompleta()}</p>
-          <p className="text-[11px] gp-text-muted">Un día más cerca de tus metas.</p>
+    <div className="relative rounded-2xl overflow-hidden mb-5" style={{ minHeight: 200 }}>
+      <img src={dashboardSaludoBg} alt="" className="absolute inset-0 w-full h-full object-cover" />
+      <div
+        className="absolute inset-0"
+        style={{ background: 'linear-gradient(120deg, rgba(11,35,72,.85) 0%, rgba(11,35,72,.55) 55%, rgba(11,35,72,.3) 100%)' }}
+      />
+      <div className="relative z-10 flex items-center justify-between gap-4 flex-wrap p-6" style={{ minHeight: 200 }}>
+        <div className="min-w-0">
+          <h1 className="gp-serif text-[26px] sm:text-3xl mb-1 text-white">
+            {saludo}{primerNombre ? `, ${primerNombre}` : ''} <span>{emoji}</span>
+          </h1>
+          <p className="text-sm text-white italic" style={{ opacity: .85 }}>"{fraseDelDia()}"</p>
         </div>
-        <img
-          src={dashboardSaludoBg}
-          alt=""
-          className="hidden sm:block rounded-2xl object-cover shrink-0"
-          style={{ width: 200, height: 96 }}
-        />
+        <div className="text-right leading-tight shrink-0 hidden sm:block">
+          <p className="text-sm font-medium capitalize text-white">{fechaCompleta()}</p>
+          <p className="text-[11px] text-white" style={{ opacity: .75 }}>Un día cada vez más cerca de tus metas.</p>
+        </div>
       </div>
     </div>
   );

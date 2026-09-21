@@ -1,55 +1,46 @@
 // src/components/dashboard/StatCardsRow.jsx
 //
-// Fila de 5 tarjetas resumen del Centro de mando. Las de Ingresos/Gastos del mes respetan el
-// mismo enmascarado que ya usa el resto del Dashboard cuando Finanzas está bloqueado (módulo
-// sensible, candado de 15 min) — nunca se muestra el monto real sin pasar por onDesbloquear.
-// La 5a tarjeta ("Personalizar panel") es solo visual por ahora: abre un aviso de "Próximamente",
-// sin mostrar/ocultar ni reordenar widgets todavía (decisión de producto ya confirmada).
+// Fila de tarjetas resumen del Centro de mando. Ingresos/Gastos del mes muestran el TOTAL
+// agregado del mes siempre, sin candado — decisión de producto de Angel (20 sept 2026): son un
+// total redondeado, no el detalle transaccional. El candado de 15 min de Finanzas se queda
+// intacto para el módulo completo y para el detalle (conceptos/montos individuales) que sigue
+// enmascarado en "Acciones para hoy", "Alertas importantes", "Saldo actual" y "Ganancia neta
+// por proyecto" más abajo en el Dashboard.
+//
+// Cada tarjeta es clicable y navega al módulo correspondiente (pedido de Angel, 20 sept 2026) —
+// ícono grande en círculo de color propio por tarjeta, en vez del cuadro gris uniforme de antes.
 
-import { FolderKanban, CheckSquare, TrendingUp, TrendingDown, Sliders } from 'lucide-react';
+import { FolderKanban, CheckSquare, TrendingUp, TrendingDown } from 'lucide-react';
 
-function Card({ icon, label, value, tone }) {
+function Card({ icon, label, value, color, onClick }) {
   return (
-    <div className="gp-panel p-4 flex items-start gap-3">
-      <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0" style={{ background: 'var(--panel-hi)' }}>
+    <button onClick={onClick} className="gp-panel p-4 flex items-start gap-3 text-left w-full">
+      <div className="w-12 h-12 rounded-xl flex items-center justify-center shrink-0" style={{ background: `${color}26` }}>
         {icon}
       </div>
       <div className="min-w-0">
         <p className="text-xs gp-text-muted truncate">{label}</p>
-        <p className={`gp-serif text-xl mt-0.5 ${tone === 'teal' ? 'gp-text-teal' : tone === 'red' ? 'gp-text-red' : ''}`}>{value}</p>
+        <p className="gp-serif text-xl mt-0.5" style={{ color }}>{value}</p>
       </div>
-    </div>
+    </button>
   );
 }
 
-export default function StatCardsRow({ activos, tareasPendientes, ingresos, egresos, sensibleDesbloqueado, onDesbloquear, onPersonalizarClick }) {
+// Mismos valores que --gold/--teal/--red en Tokens (App.jsx) — esos tres NO cambian entre temas
+// (solo bg/panel/texto se redefinen por tema), así que hardcodearlos aquí es seguro y permite
+// el truco `${color}26` (agrega alpha en hex) para el círculo de fondo de cada tarjeta.
+const COLOR_GOLD = '#F59E0B';
+const COLOR_TEAL = '#5FBF8B';
+const COLOR_RED = '#EF4444';
+const COLOR_BLUE = '#087CF5';
+
+export default function StatCardsRow({ activos, tareasPendientes, ingresos, egresos, onVerProyectos, onVerTareas, onVerFinanzas }) {
   return (
-    <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-5">
-      <Card icon={<FolderKanban size={17} className="gp-text-gold" />} label="Proyectos activos" value={activos} />
-      <Card icon={<CheckSquare size={17} className="gp-text-gold" />} label="Tareas pendientes" value={tareasPendientes} />
-      {sensibleDesbloqueado ? (
-        <Card icon={<TrendingUp size={17} className="gp-text-teal" />} label="Ingresos del mes" value={ingresos} tone="teal" />
-      ) : (
-        <button onClick={onDesbloquear} className="text-left">
-          <Card icon={<TrendingUp size={17} className="gp-text-teal" />} label="Ingresos del mes" value="🔒 •••••" />
-        </button>
-      )}
-      {sensibleDesbloqueado ? (
-        <Card icon={<TrendingDown size={17} className="gp-text-red" />} label="Gastos del mes" value={egresos} tone="red" />
-      ) : (
-        <button onClick={onDesbloquear} className="text-left">
-          <Card icon={<TrendingDown size={17} className="gp-text-red" />} label="Gastos del mes" value="🔒 •••••" />
-        </button>
-      )}
-      <button
-        onClick={onPersonalizarClick}
-        className="rounded-xl p-4 flex flex-col items-start justify-center gap-1.5 text-left text-white"
-        style={{ background: 'linear-gradient(135deg, #087CF5, #102B55)' }}
-      >
-        <Sliders size={18} />
-        <span className="text-sm font-semibold leading-tight">Personalizar panel</span>
-        <span className="text-[11px] opacity-85 leading-tight">Elige qué ver en tu inicio</span>
-      </button>
+    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
+      <Card icon={<FolderKanban size={22} style={{ color: COLOR_GOLD }} />} label="Proyectos activos" value={activos} color={COLOR_GOLD} onClick={onVerProyectos} />
+      <Card icon={<CheckSquare size={22} style={{ color: COLOR_BLUE }} />} label="Tareas pendientes" value={tareasPendientes} color={COLOR_BLUE} onClick={onVerTareas} />
+      <Card icon={<TrendingUp size={22} style={{ color: COLOR_TEAL }} />} label="Ingresos del mes" value={ingresos} color={COLOR_TEAL} onClick={onVerFinanzas} />
+      <Card icon={<TrendingDown size={22} style={{ color: COLOR_RED }} />} label="Gastos del mes" value={egresos} color={COLOR_RED} onClick={onVerFinanzas} />
     </div>
   );
 }

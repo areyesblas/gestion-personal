@@ -1,13 +1,15 @@
 // src/components/dashboard/DashboardHeader.jsx
 //
-// Barra superior del Centro de mando: buscador, notificaciones y saludo corto de perfil.
-// Vive SOLO arriba del Dashboard (no reemplaza nada del sidebar global) — al hacer click
-// llama a los mismos manejadores que ya abren el buscador y el panel de notificaciones en
-// toda la app, así que no hay lógica de búsqueda/notificaciones duplicada aquí.
+// Barra superior del Centro de mando: buscador, personalizar panel, notificaciones y saludo
+// corto de perfil. Vive SOLO arriba del Dashboard (no reemplaza nada del sidebar global) — al
+// hacer click llama a los mismos manejadores que ya abren el buscador y el panel de
+// notificaciones en toda la app, así que no hay lógica de búsqueda/notificaciones duplicada aquí.
+// El botón de "Personalizar panel" vivía antes como tarjeta grande en StatCardsRow — se movió
+// aquí, discreto junto a Notificaciones, a pedido de Angel (20 sept 2026).
 
-import { Search, Bell } from 'lucide-react';
+import { Search, Bell, Sliders } from 'lucide-react';
 
-export default function DashboardHeader({ primerNombre, onBuscar, onNotificaciones, notifNoLeidas }) {
+export default function DashboardHeader({ primerNombre, onBuscar, onNotificaciones, notifNoLeidas, onPersonalizarClick }) {
   return (
     <div className="flex items-center justify-between gap-3 mb-5 flex-wrap">
       <button
@@ -20,6 +22,9 @@ export default function DashboardHeader({ primerNombre, onBuscar, onNotificacion
       </button>
 
       <div className="flex items-center gap-3 shrink-0">
+        <button onClick={onPersonalizarClick} className="p-2.5 rounded-xl gp-btn-ghost" title="Personalizar panel" aria-label="Personalizar panel">
+          <Sliders size={18} />
+        </button>
         <button onClick={onNotificaciones} className="relative p-2.5 rounded-xl gp-btn-ghost" title="Notificaciones" aria-label="Notificaciones">
           <Bell size={18} />
           {notifNoLeidas > 0 && (

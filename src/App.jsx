@@ -2172,7 +2172,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
       const { data: colabs } = await supabase.from("colaboradores").select("*, colaborador_dependientes(contacto_id)").eq("colaborador_user_id", misId).eq("estatus", "Activo");
       setMisColaboraciones((colabs || []).map((c) => ({ propietarioId: c.propietario_id, propietarioEmail: c.propietario_email, modulos: c.modulos, dependientes: (c.colaborador_dependientes || []).map((d) => d.contacto_id) })));
 
-      const { data: pref } = await supabase.from("preferencias").select("tema, alertas_correo_activas, color_personalizado, notif_tipos_desactivados, notif_silencio_activo, notif_silencio_inicio, notif_silencio_fin, notif_anticipacion_citas_min, dashboard_widgets").eq("user_id", misId).maybeSingle();
+      const { data: pref } = await supabase.from("preferencias").select("tema, alertas_correo_activas, color_personalizado, notif_tipos_desactivados, notif_silencio_activo, notif_silencio_inicio, notif_silencio_fin, notif_anticipacion_citas_min, dashboard_widgets, nombre_mostrar").eq("user_id", misId).maybeSingle();
       const temaGuardado = pref?.tema === "claro" || pref?.tema === "oscuro" ? "actual" : pref?.tema;
       if (temaGuardado && temaGuardado !== tema) setTema(temaGuardado);
       if (pref?.color_personalizado) setColorPersonalizado(pref.color_personalizado);
@@ -2183,6 +2183,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
       if (pref?.notif_silencio_fin) setNotifSilencioFin(pref.notif_silencio_fin.slice(0, 5));
       if (pref?.notif_anticipacion_citas_min != null) setNotifAnticipacionCitasMin(pref.notif_anticipacion_citas_min);
       if (pref?.dashboard_widgets) setOrdenWidgetsDashboard(pref.dashboard_widgets);
+      if (pref?.nombre_mostrar) setNombreMostrar(pref.nombre_mostrar);
 
       let result = await loadAllTables(misId);
       result = await migrateFromOldBlobIfNeeded(result, misId);
@@ -2242,6 +2243,15 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
   const guardarOrdenWidgetsDashboard = async (lista) => {
     setOrdenWidgetsDashboard(lista);
     await supabase.from("preferencias").upsert({ user_id: misId, dashboard_widgets: lista }, { onConflict: "user_id" });
+  };
+
+  // --- Nombre para mostrar: así te saluda el Centro de mando y así te llama Arkey (voz), en vez
+  // de derivarlo del correo. Vacío = se sigue derivando del correo (ver los call sites de
+  // <Dashboard> y <VoiceMode> más abajo, que reciben nombreMostrar || miEmail).
+  const [nombreMostrar, setNombreMostrar] = useState("");
+  const guardarNombreMostrar = async (v) => {
+    setNombreMostrar(v);
+    await supabase.from("preferencias").upsert({ user_id: misId, nombre_mostrar: v }, { onConflict: "user_id" });
   };
 
   // --- Notificaciones Push -------------------------------------------------
@@ -2884,7 +2894,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
               onEditPendiente={(id, p) => editItem("pendientes", id, p)}
               sensibleDesbloqueadoHasta={sensibleDesbloqueadoHasta}
               onDesbloquear={desbloquearSensibleAqui}
-              miEmail={miEmail}
+              miEmail={nombreMostrar || miEmail}
               notifNoLeidas={notifNoLeidas}
               onBuscar={() => setBusquedaAbierta(true)}
               onNotificaciones={() => setNotifPanelAbierto(true)}
@@ -2922,6 +2932,8 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
               notifSilencioFin={notifSilencioFin}
               notifAnticipacionCitasMin={notifAnticipacionCitasMin}
               guardarPreferenciasNotif={guardarPreferenciasNotif}
+              nombreMostrar={nombreMostrar}
+              guardarNombreMostrar={guardarNombreMostrar}
             />
           )}
           {view === "proyectos" && (
@@ -3074,7 +3086,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
       <VoiceMode
         contextoPantalla={view === "proyecto-detalle" && proyectoDetalleId ? { modulo: "proyectos", entidad_id: proyectoDetalleId } : (view && view !== "dashboard" ? { modulo: view } : null)}
         onDatosCreados={recargarModulos}
-        nombreUsuario={miEmail}
+        nombreUsuario={nombreMostrar || miEmail}
       />
       {busquedaAbierta && <BusquedaGlobal data={data} onNavigate={buscarNavegarA} onClose={() => setBusquedaAbierta(false)} />}
 
@@ -3317,14 +3329,21 @@ function Configuracion({
   esPropia, irAColaboradores, irAPapelera,
   esAdmin, irAAdmin, miEmail,
   notifTiposDesactivados, notifSilencioActivo, notifSilencioInicio, notifSilencioFin, notifAnticipacionCitasMin, guardarPreferenciasNotif,
+  nombreMostrar, guardarNombreMostrar,
 }) {
   const [prefsAbierto, setPrefsAbierto] = useState(false);
+  const [nombreModalAbierto, setNombreModalAbierto] = useState(false);
   const [confirmarNotif, setConfirmarNotif] = useState(null); // { tipo: 'correo' | 'push', activar: bool }
   const cantidadActivas = CATEGORIAS_NOTIFICACION.length - notifTiposDesactivados.length;
   return (
     <div className="max-w-xl">
       <h1 className="text-2xl font-bold mb-1">Configuración</h1>
       <p className="text-sm gp-text-muted mb-5">{miEmail}</p>
+
+      <p className="text-xs gp-text-muted uppercase tracking-wide mb-2">Perfil</p>
+      <div className="space-y-2 mb-5">
+        <FilaConfig icon={Contact} label="Nombre para mostrar" sublabel={nombreMostrar ? `Te llamamos "${nombreMostrar}"` : "Usando tu correo — toca para elegir un nombre"} onClick={() => setNombreModalAbierto(true)} />
+      </div>
 
       <p className="text-xs gp-text-muted uppercase tracking-wide mb-2">Apariencia</p>
       <div className="space-y-2 mb-5">
@@ -3420,6 +3439,41 @@ function Configuracion({
           />
         </Modal>
       )}
+
+      {nombreModalAbierto && (
+        <Modal title="Nombre para mostrar" onClose={() => setNombreModalAbierto(false)}>
+          <NombreMostrarForm
+            nombreMostrar={nombreMostrar}
+            onSave={async (v) => { await guardarNombreMostrar(v); }}
+            onSaved={() => setNombreModalAbierto(false)}
+          />
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// Nombre con el que el saludo del Centro de mando y Arkey (asistente de voz) te llaman, en vez
+// de derivarlo del correo. Vacío = se sigue usando el correo (ver guardarNombreMostrar).
+function NombreMostrarForm({ nombreMostrar, onSave, onSaved }) {
+  const [v, setV] = useState(nombreMostrar || "");
+  const [estadoGuardado, setEstadoGuardado] = useState("idle"); // idle | guardando | guardado
+  return (
+    <div>
+      <p className="text-xs gp-text-muted mb-3">Así te va a llamar ARKEYONE y Arkey en la conversación. Si lo dejas vacío, se usa tu correo.</p>
+      <Field label="Nombre"><input className="gp-input" autoFocus placeholder="ej. Angel" value={v} onChange={(e) => setV(e.target.value)} /></Field>
+      <button
+        className="gp-btn w-full py-2 text-sm disabled:opacity-70"
+        disabled={estadoGuardado === "guardando"}
+        onClick={async () => {
+          setEstadoGuardado("guardando");
+          await onSave(v.trim());
+          setEstadoGuardado("guardado");
+          setTimeout(() => onSaved?.(), 900);
+        }}
+      >
+        {estadoGuardado === "guardando" ? "Guardando…" : estadoGuardado === "guardado" ? "Guardado ✓" : "Guardar"}
+      </button>
     </div>
   );
 }
@@ -4405,16 +4459,16 @@ function Dashboard({ data, setView, onAddSaldo, onVerProyecto, onEditPendiente, 
 
   return (
     <div>
-      <DashboardHeader primerNombre={primerNombre} onBuscar={onBuscar} onNotificaciones={onNotificaciones} notifNoLeidas={notifNoLeidas} />
+      <DashboardHeader primerNombre={primerNombre} onBuscar={onBuscar} onNotificaciones={onNotificaciones} notifNoLeidas={notifNoLeidas} onPersonalizarClick={() => setPersonalizarModal(true)} />
       <DashboardSaludo primerNombre={primerNombre} />
       <StatCardsRow
         activos={activos}
         tareasPendientes={tareasPendientesTotal}
         ingresos={fmtMoney(ingresos)}
         egresos={fmtMoney(egresos)}
-        sensibleDesbloqueado={sensibleDesbloqueado}
-        onDesbloquear={onDesbloquear}
-        onPersonalizarClick={() => setPersonalizarModal(true)}
+        onVerProyectos={() => setView("proyectos")}
+        onVerTareas={() => setView("pendientes")}
+        onVerFinanzas={() => setView("finanzas")}
       />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
