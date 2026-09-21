@@ -12,6 +12,7 @@ import NotasRapidasWidget from "./components/dashboard/NotasRapidasWidget";
 import AccesosRapidosWidget from "./components/dashboard/AccesosRapidosWidget";
 import HabitosHoyWidget from "./components/dashboard/HabitosHoyWidget";
 import DashboardBannerFinal from "./components/dashboard/DashboardBannerFinal";
+import Breadcrumb from "./components/nav/Breadcrumb";
 import * as XLSX from "xlsx";
 import {
   LayoutDashboard, FolderKanban, CheckSquare, Wallet, AlertTriangle,
@@ -1775,6 +1776,16 @@ MODULO_TO_VIEW["mi-trabajo"] = "mi-trabajo";
 MODULO_TO_VIEW["mi-calendario"] = "mi-calendario";
 MODULO_TO_VIEW["mis-pagos"] = "mis-pagos";
 
+// Etiquetas para el breadcrumb de vistas que no aparecen en navGroups (no son un ítem del
+// menú lateral, se entra a ellas desde otro lado — engrane de Configuración, papelera, etc.).
+const VIEW_LABELS_EXTRA = {
+  "proyecto-detalle": "Proyecto",
+  configuracion: "Configuración",
+  papelera: "Papelera",
+  colaboradores: "Colaboradores",
+  admin: "Administración",
+};
+
 // Convierte la llave pública VAPID (base64url, como la da el navegador/servidor) al formato
 // binario que pide pushManager.subscribe(). Es texto de configuración, siempre igual.
 function urlBase64ToUint8Array(base64String) {
@@ -1885,6 +1896,57 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
   const [regalosFiltroContacto, setRegalosFiltroContacto] = useState("");
   const [proyectoDetalleId, setProyectoDetalleId] = useState(() => vistaRestauradaTrasReload?.entidad_id || null);
   const irADetalleProyecto = (proyectoId) => { setProyectoDetalleId(proyectoId); irAVista("proyecto-detalle"); };
+
+  // --- Breadcrumb / "volver" a una vista anterior --------------------------------------------
+  // El historial se arma pasivamente observando cambios de `view` (cubre tanto irAVista como los
+  // `setView` directos que ya existían sueltos en el archivo, ej. onVerRegalos) en vez de
+  // instrumentar cada punto de navegación uno por uno. volverA()/irAInicioDesdeBreadcrumb() usan
+  // volviendoRef para que ese mismo efecto no vuelva a empujar el paso del que nos venimos yendo.
+  const MAX_HISTORIAL_VISTAS = 8;
+  const [historialVistas, setHistorialVistas] = useState([]); // pasos anteriores, sin incluir el actual
+  const vistaAnteriorRef = useRef(null);
+  const volviendoRef = useRef(false);
+  useEffect(() => {
+    const anterior = vistaAnteriorRef.current;
+    const actual = {
+      view,
+      proyectoDetalleId,
+      proyectoNombre: view === "proyecto-detalle" ? (data?.proyectos?.find((p) => p.id === proyectoDetalleId)?.nombre || "") : "",
+    };
+    if (anterior && anterior.view !== actual.view) {
+      if (volviendoRef.current) {
+        volviendoRef.current = false;
+      } else {
+        setHistorialVistas((prev) => {
+          const next = [...prev, anterior];
+          return next.length > MAX_HISTORIAL_VISTAS ? next.slice(next.length - MAX_HISTORIAL_VISTAS) : next;
+        });
+      }
+    }
+    vistaAnteriorRef.current = actual;
+  }, [view, proyectoDetalleId]);
+  const volverA = (indice) => {
+    const destino = historialVistas[indice];
+    if (!destino) return;
+    volviendoRef.current = true;
+    setHistorialVistas((prev) => prev.slice(0, indice));
+    setProyectoDetalleId(destino.view === "proyecto-detalle" ? destino.proyectoDetalleId : null);
+    setView(destino.view);
+  };
+  const irAInicioDesdeBreadcrumb = () => {
+    volviendoRef.current = true;
+    setHistorialVistas([]);
+    setProyectoDetalleId(null);
+    setView("dashboard");
+  };
+  const labelDeVista = (id) => {
+    for (const g of navGroups) {
+      const it = g.items.find((i) => i.id === id);
+      if (it) return it.label;
+    }
+    return VIEW_LABELS_EXTRA[id] || (id ? id.charAt(0).toUpperCase() + id.slice(1) : "");
+  };
+
   const [busquedaAbierta, setBusquedaAbierta] = useState(false);
   const buscarNavegarA = (key, item) => {
     setBusquedaAbierta(false);
@@ -2699,6 +2761,15 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
           || (esCuidadorSinModuloCompleto && (it.id === "salud" || it.id === "medicamentos"))) }))
         .filter((g) => g.items.length > 0);
 
+  // Breadcrumb: "dashboard" nunca aparece como paso intermedio (para eso ya está "Inicio" fijo
+  // al principio) — ver historialVistas/volverA más arriba.
+  const breadcrumbPasos = historialVistas
+    .map((h, i) => ({ indice: i, view: h.view, label: h.view === "proyecto-detalle" ? (h.proyectoNombre || "Proyecto") : labelDeVista(h.view) }))
+    .filter((p) => p.view !== "dashboard");
+  const breadcrumbActual = view === "proyecto-detalle"
+    ? (data?.proyectos?.find((p) => p.id === proyectoDetalleId)?.nombre || "Proyecto")
+    : labelDeVista(view);
+
   return (
     <div className={`gp-root overflow-hidden ${claseTema(tema)}`} style={{ minHeight: "100vh", ...(tema === "personalizado" ? generarPaletaPersonalizada(colorPersonalizado || "#F59E0B") : null) }}>
       <Tokens tema={tema} />
@@ -2874,6 +2945,9 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
             >
               {refrescando ? "Actualizando…" : pullDist > 60 ? "Suelta para actualizar ↓" : "Desliza hacia abajo para actualizar…"}
             </div>
+          )}
+          {view !== "dashboard" && (
+            <Breadcrumb pasos={breadcrumbPasos} actual={breadcrumbActual} onInicio={irAInicioDesdeBreadcrumb} onIrA={volverA} />
           )}
           {view === "dashboard" && (
             <Dashboard
