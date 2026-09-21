@@ -26,6 +26,9 @@ import {
 } from "recharts";
 // Perezoso: solo trae @dnd-kit (arrastrar y soltar) cuando el usuario realmente abre "Personalizar panel".
 const PersonalizarPanelModal = lazy(() => import("./components/dashboard/PersonalizarPanelModal"));
+// Perezoso: solo trae la UI de importar (mapeo de columnas/vista previa) cuando el usuario abre
+// "Importar desde Excel" en Contactos o Finanzas — xlsx en sí ya está cargado (se usa para exportar).
+const ImportarExcelModal = lazy(() => import("./components/import/ImportarExcelModal"));
 
 /* ---------- estilos y tokens ---------- */
 const Tokens = ({ tema = "oscuro" }) => (
@@ -6126,6 +6129,7 @@ function FinanzasYFacturas({ data, tabInicial, finanzasProps, facturasProps }) {
 }
 function Finanzas({ data, onAdd, onEdit, onRemove, crearAlEntrar, onConsumirCrearAlEntrar }) {
   const [modal, setModal] = useState(null);
+  const [importarAbierto, setImportarAbierto] = useState(false);
   const [vista, setVista] = useState("todos");
   const [filtroTipoRecurrente, setFiltroTipoRecurrente] = useState("Todos");
   const [filtroVigencia, setFiltroVigencia] = useState("Vigentes");
@@ -6205,7 +6209,10 @@ function Finanzas({ data, onAdd, onEdit, onRemove, crearAlEntrar, onConsumirCrea
     <div>
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-1">
         <h2 className="gp-serif text-2xl">Movimientos</h2>
-        <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm w-full sm:w-auto"><Plus size={14} /> Nuevo</button>
+        <div className="flex gap-2 w-full sm:w-auto">
+          <button onClick={() => setImportarAbierto(true)} className="gp-btn-ghost flex items-center justify-center gap-1 px-3 py-1.5 text-sm flex-1 sm:flex-initial"><Upload size={14} /> Importar</button>
+          <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm flex-1 sm:flex-initial"><Plus size={14} /> Nuevo</button>
+        </div>
       </div>
       <p className="text-sm gp-text-muted mb-4">Incluye pagos recurrentes (luz, agua, compras a meses) con fecha de inicio y fin, o indefinidos.</p>
 
@@ -6359,6 +6366,14 @@ function Finanzas({ data, onAdd, onEdit, onRemove, crearAlEntrar, onConsumirCrea
       {modal && (
         <Modal title={modal.item.id ? "Editar movimiento" : "Nuevo movimiento"} onClose={() => setModal(null)}>
           <FinanzaForm item={modal.item} proyectos={data.proyectos} contactos={data.contactos} onSave={(v) => { modal.item.id ? onEdit(modal.item.id, v) : onAdd(v); setModal(null); }} />
+        </Modal>
+      )}
+
+      {importarAbierto && (
+        <Modal title="Importar movimientos desde Excel" onClose={() => setImportarAbierto(false)}>
+          <Suspense fallback={<p className="text-sm gp-text-muted">Cargando…</p>}>
+            <ImportarExcelModal tipo="finanzas" proyectos={data.proyectos} XLSX={XLSX} onImportarFila={(item) => onAdd(item)} onCerrar={() => setImportarAbierto(false)} />
+          </Suspense>
         </Modal>
       )}
     </div>
@@ -7330,6 +7345,7 @@ function MetaForm({ item, proyectos, onSave }) {
 /* ---------- Contactos / networking ---------- */
 function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveComentario, onVerRegalos }) {
   const [modal, setModal] = useState(null);
+  const [importarAbierto, setImportarAbierto] = useState(false);
   const [comentariosDe, setComentariosDe] = useState(null);
   const [filtroTipo, setFiltroTipo] = useState("Todos");
   const [orden, setOrden] = useState("default");
@@ -7362,7 +7378,10 @@ function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
     <div>
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-1">
         <h2 className="gp-serif text-2xl">Contactos</h2>
-        <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm w-full sm:w-auto"><Plus size={14} /> Nuevo</button>
+        <div className="flex gap-2 w-full sm:w-auto">
+          <button onClick={() => setImportarAbierto(true)} className="gp-btn-ghost flex items-center justify-center gap-1 px-3 py-1.5 text-sm flex-1 sm:flex-initial"><Upload size={14} /> Importar</button>
+          <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm flex-1 sm:flex-initial"><Plus size={14} /> Nuevo</button>
+        </div>
       </div>
       <p className="text-sm gp-text-muted mb-4">Clientes, proveedores, colaboradores y gente que conoces en eventos — para que no se pierdan. Un contacto puede ser varias cosas a la vez.</p>
 
@@ -7420,6 +7439,14 @@ function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
       {modal && (
         <Modal title={modal.item.id ? "Editar contacto" : "Nuevo contacto"} onClose={() => setModal(null)}>
           <ContactoForm item={modal.item} proyectos={data.proyectos} onSave={(v) => { modal.item.id ? onEdit(modal.item.id, v) : onAdd(v); setModal(null); }} />
+        </Modal>
+      )}
+
+      {importarAbierto && (
+        <Modal title="Importar contactos desde Excel" onClose={() => setImportarAbierto(false)}>
+          <Suspense fallback={<p className="text-sm gp-text-muted">Cargando…</p>}>
+            <ImportarExcelModal tipo="contactos" XLSX={XLSX} onImportarFila={(item) => onAdd(item)} onCerrar={() => setImportarAbierto(false)} />
+          </Suspense>
         </Modal>
       )}
     </div>
