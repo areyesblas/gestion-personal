@@ -38,20 +38,12 @@ const Tokens = ({ tema = "oscuro" }) => (
     .gp-root{ --bg:#0B2341; --panel:#12304F; --panel-hi:#1A3D63; --border:#234A70;
       --text:#EAF1FA; --muted:#93A7C4; --gold:#F59E0B; --teal:#5FBF8B; --teal-tint:#DCF5E6; --teal-text:#1D6B42; --panel-2:rgba(255,255,255,.12); --red:#EF4444;
       background:var(--bg); color:var(--text); font-family:'IBM Plex Sans',sans-serif; }
-    /* Temas oscuros. */
-    .gp-root.tema-negro{ --bg:#0A0A0A; --panel:#1A1A1A; --panel-hi:#262626; --border:#333333; --text:#F2F2F2; --muted:#9A9A9A; }
-    .gp-root.tema-oliva{ --bg:#232A1C; --panel:#333D28; --panel-hi:#414D34; --border:#4A5639; --text:#F0F3EA; --muted:#A8B49B; }
-    .gp-root.tema-rojo{ --bg:#2A0F0F; --panel:#3D1717; --panel-hi:#4D1F1F; --border:#5C2828; --text:#F5E9E9; --muted:#C79B9B; }
-    .gp-root.tema-naranja{ --bg:#2A1607; --panel:#3D200D; --panel-hi:#4D2A14; --border:#5C3A1E; --text:#F5EBDF; --muted:#C2A183; }
-    /* Temas claros: versión pálida de cada uno de los 5 de arriba. --panel-2 se redefine con un
-       tinte OSCURO (no blanco) en estos, porque el de arriba (blanco a 12%) es invisible sobre
-       fondo claro. El logo y el menú lateral NUNCA usan estos colores — ver .gp-sidebar-area
-       más abajo, así el logo queda a salvo pase lo que pase. */
+    /* Tema Claro — el único claro que queda (ARKEYONE es solo Oscuro/Claro, sin color
+       personalizado ni temas adicionales). --panel-2 se redefine con un tinte OSCURO (no blanco)
+       porque el de arriba (blanco a 12%) es invisible sobre fondo claro. El logo y el menú
+       lateral NUNCA usan estos colores — ver .gp-sidebar-area más abajo, así el logo queda a
+       salvo pase lo que pase. */
     .gp-root.tema-azul-claro{ --bg:#E8F1FB; --panel:#F7FBFF; --panel-hi:#DCEAFA; --border:#C3D9EE; --text:#0B2341; --muted:#5B7A9E; --panel-2:rgba(11,35,65,.06); }
-    .gp-root.tema-gris-claro{ --bg:#F2F2F2; --panel:#FAFAFA; --panel-hi:#E8E8E8; --border:#D6D6D6; --text:#1A1A1A; --muted:#6B6B6B; --panel-2:rgba(0,0,0,.06); }
-    .gp-root.tema-verde-claro{ --bg:#EEF3E7; --panel:#F7FAF2; --panel-hi:#E3ECD8; --border:#CDDBBC; --text:#2B3620; --muted:#6B7C57; --panel-2:rgba(43,54,32,.06); }
-    .gp-root.tema-rojo-claro{ --bg:#FBEAEA; --panel:#FFF5F5; --panel-hi:#F7DCDC; --border:#EFC2C2; --text:#4A1414; --muted:#9C6B6B; --panel-2:rgba(74,20,20,.06); }
-    .gp-root.tema-naranja-claro{ --bg:#FBEEE1; --panel:#FFF7EF; --panel-hi:#F7E2CB; --border:#EFCBA3; --text:#4A2A0F; --muted:#9C7A55; --panel-2:rgba(74,42,15,.06); }
     .gp-serif{ font-family:'Poppins',sans-serif; font-weight:600; }
     .gp-mono{ font-family:'IBM Plex Mono',monospace; }
     .gp-panel{ background:var(--panel); border:1px solid var(--border); border-radius:14px; }
@@ -102,15 +94,18 @@ const Tokens = ({ tema = "oscuro" }) => (
   `}</style>
 );
 
-// Recuerda tu tema entre visitas, guardado en este navegador y, una vez que inicias sesión,
-// también en tu cuenta (para que te siga en otros dispositivos, vía cambiarTema/preferencias).
-const TEMAS_VALIDOS = ["actual", "negro", "oliva", "rojo", "naranja", "azul-claro", "gris-claro", "verde-claro", "rojo-claro", "naranja-claro", "personalizado"];
+// ARKEYONE solo tiene dos temas: Oscuro y Claro (sin color personalizado ni temas adicionales
+// — decisión de producto de Angel, 21 sept 2026). Los ids internos se quedan como estaban
+// ("actual" = Oscuro, "azul-claro" = Claro) para no requerir ninguna migración de datos en
+// Supabase; normalizarTema() absorbe cualquier valor viejo guardado (de cuando existían 11
+// temas + color personalizado) y lo resuelve a uno de estos dos, sin dejar a nadie en un
+// estado roto.
+const TEMAS_VALIDOS = ["actual", "azul-claro"];
+const TEMAS_CLAROS_LEGADO = ["azul-claro", "gris-claro", "verde-claro", "rojo-claro", "naranja-claro", "claro"];
+const normalizarTema = (valor) => (TEMAS_CLAROS_LEGADO.includes(valor) ? "azul-claro" : "actual");
 function useTema() {
   const [tema, setTemaState] = useState(() => {
-    try {
-      const guardado = localStorage.getItem("arkeyone_tema");
-      return TEMAS_VALIDOS.includes(guardado) ? guardado : "actual";
-    } catch { return "actual"; }
+    try { return normalizarTema(localStorage.getItem("arkeyone_tema")); } catch { return "actual"; }
   });
   const setTema = (nuevo) => {
     if (!TEMAS_VALIDOS.includes(nuevo)) return;
@@ -120,77 +115,9 @@ function useTema() {
   const toggleTema = () => {}; // ya no aplica con varios temas — se deja por compatibilidad de firma
   return [tema, toggleTema, setTema];
 }
-// "actual" es el tema base (mismos valores que .gp-root, sin clase extra); "personalizado" tampoco
-// usa clase (sus colores se calculan al vuelo con generarPaletaPersonalizada, ver abajo); los
-// demás agregan su propia clase .tema-XXX que sobreescribe las variables de color.
-const claseTema = (tema) => (tema && tema !== "actual" && tema !== "personalizado" ? `tema-${tema}` : "");
-
-// --- Tema personalizado: a partir de UN solo color elegido por el usuario, genera una paleta
-// completa (fondo, panel, panel resaltado, borde, texto y "muted") que siempre es legible —
-// nunca deja que el usuario termine con texto ilegible sobre su propio fondo, porque el color
-// del texto se decide automáticamente según qué tan clara u oscura sea su elección. ---
-function hexARgb(hex) {
-  const limpio = hex.replace("#", "");
-  const partes = limpio.match(/.{1,2}/g);
-  return partes.map((x) => parseInt(x, 16));
-}
-function rgbAHsl(r, g, b) {
-  r /= 255; g /= 255; b /= 255;
-  const max = Math.max(r, g, b), min = Math.min(r, g, b);
-  let h, s;
-  const l = (max + min) / 2;
-  if (max === min) { h = s = 0; }
-  else {
-    const d = max - min;
-    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
-    switch (max) {
-      case r: h = (g - b) / d + (g < b ? 6 : 0); break;
-      case g: h = (b - r) / d + 2; break;
-      default: h = (r - g) / d + 4; break;
-    }
-    h /= 6;
-  }
-  return { h: h * 360, s: s * 100, l: l * 100 };
-}
-function hslAHex(h, s, l) {
-  s /= 100; l /= 100;
-  const k = (n) => (n + h / 30) % 12;
-  const a = s * Math.min(l, 1 - l);
-  const f = (n) => l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
-  const aHex = (x) => Math.round(255 * x).toString(16).padStart(2, "0");
-  return `#${aHex(f(0))}${aHex(f(8))}${aHex(f(4))}`;
-}
-function generarPaletaPersonalizada(hexBase, forzarOscuro = false) {
-  let h, s, l;
-  try {
-    const [r, g, b] = hexARgb(hexBase);
-    if ([r, g, b].some((v) => Number.isNaN(v))) return null;
-    ({ h, s, l } = rgbAHsl(r, g, b));
-  } catch { return null; }
-  // Si el color elegido ya es claro, genera una familia clara (fondo pálido, texto oscuro);
-  // si es oscuro, genera una familia oscura (fondo oscuro, texto claro) — igual que los 10
-  // temas fijos, solo que aquí el matiz (hue) sale del color que eligió el usuario.
-  // forzarOscuro se usa para el menú lateral: el logo es claro, así que ahí SIEMPRE se genera
-  // la variante oscura (con el mismo matiz elegido) sin importar qué tan claro sea el color base.
-  const esClaro = forzarOscuro ? false : l >= 55;
-  return esClaro ? {
-    "--bg": hslAHex(h, Math.min(s, 35), 93),
-    "--panel": hslAHex(h, Math.min(s, 28), 98),
-    "--panel-hi": hslAHex(h, Math.min(s, 32), 89),
-    "--border": hslAHex(h, Math.min(s, 30), 78),
-    "--text": hslAHex(h, Math.min(s, 35), 15),
-    "--muted": hslAHex(h, Math.min(s, 25), 38),
-    "--panel-2": `hsla(${Math.round(h)}, ${Math.min(Math.round(s), 40)}%, 15%, .06)`,
-  } : {
-    "--bg": hslAHex(h, Math.min(s, 55), 13),
-    "--panel": hslAHex(h, Math.min(s, 50), 19),
-    "--panel-hi": hslAHex(h, Math.min(s, 45), 25),
-    "--border": hslAHex(h, Math.min(s, 40), 33),
-    "--text": hslAHex(h, Math.min(s, 12), 94),
-    "--muted": hslAHex(h, Math.min(s, 20), 66),
-    "--panel-2": "hsla(0, 0%, 100%, .12)",
-  };
-}
+// "actual" es el tema base (mismos valores que .gp-root, sin clase extra); "azul-claro" agrega
+// su propia clase .tema-azul-claro que sobreescribe las variables de color.
+const claseTema = (tema) => (tema && tema !== "actual" ? `tema-${tema}` : "");
 
 
 /* ---------- datos base ---------- */
@@ -2237,10 +2164,9 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
       const { data: colabs } = await supabase.from("colaboradores").select("*, colaborador_dependientes(contacto_id)").eq("colaborador_user_id", misId).eq("estatus", "Activo");
       setMisColaboraciones((colabs || []).map((c) => ({ propietarioId: c.propietario_id, propietarioEmail: c.propietario_email, modulos: c.modulos, dependientes: (c.colaborador_dependientes || []).map((d) => d.contacto_id) })));
 
-      const { data: pref } = await supabase.from("preferencias").select("tema, alertas_correo_activas, color_personalizado, notif_tipos_desactivados, notif_silencio_activo, notif_silencio_inicio, notif_silencio_fin, notif_anticipacion_citas_min, dashboard_widgets, nombre_mostrar").eq("user_id", misId).maybeSingle();
-      const temaGuardado = pref?.tema === "claro" || pref?.tema === "oscuro" ? "actual" : pref?.tema;
-      if (temaGuardado && temaGuardado !== tema) setTema(temaGuardado);
-      if (pref?.color_personalizado) setColorPersonalizado(pref.color_personalizado);
+      const { data: pref } = await supabase.from("preferencias").select("tema, alertas_correo_activas, notif_tipos_desactivados, notif_silencio_activo, notif_silencio_inicio, notif_silencio_fin, notif_anticipacion_citas_min, dashboard_widgets, nombre_mostrar").eq("user_id", misId).maybeSingle();
+      const temaGuardado = normalizarTema(pref?.tema);
+      if (temaGuardado !== tema) setTema(temaGuardado);
       if (pref && pref.alertas_correo_activas === false) setAlertasCorreoActivas(false);
       if (pref?.notif_tipos_desactivados) setNotifTiposDesactivados(pref.notif_tipos_desactivados);
       if (pref?.notif_silencio_activo) setNotifSilencioActivo(true);
@@ -2261,20 +2187,10 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
     })();
   }, []);
 
-  const [colorPersonalizado, setColorPersonalizado] = useState("#F59E0B");
   const cambiarTema = async (nuevoValor) => {
     setTema(nuevoValor);
     await supabase.from("preferencias").upsert({ user_id: misId, tema: nuevoValor }, { onConflict: "user_id" });
   };
-  const cambiarColorPersonalizado = async (nuevoColor) => {
-    setColorPersonalizado(nuevoColor);
-    setTema("personalizado");
-    await supabase.from("preferencias").upsert({ user_id: misId, tema: "personalizado", color_personalizado: nuevoColor }, { onConflict: "user_id" });
-  };
-  // El logo necesita fondo oscuro para verse bien, así que el menú lateral y la barra superior
-  // usan esta variante SIEMPRE oscura del mismo color elegido (no un azul fijo genérico) —
-  // el matiz sí es el que el usuario escogió, solo la claridad se fuerza oscura ahí.
-  const paletaSidebarPersonalizada = tema === "personalizado" ? generarPaletaPersonalizada(colorPersonalizado || "#12304F", true) : null;
 
   const [alertasCorreoActivas, setAlertasCorreoActivas] = useState(true);
   const cambiarAlertasCorreo = async (nuevoValor) => {
@@ -2784,7 +2700,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
     : labelDeVista(view);
 
   return (
-    <div className={`gp-root overflow-hidden ${claseTema(tema)}`} style={{ minHeight: "100vh", ...(tema === "personalizado" ? generarPaletaPersonalizada(colorPersonalizado || "#F59E0B") : null) }}>
+    <div className={`gp-root overflow-hidden ${claseTema(tema)}`} style={{ minHeight: "100vh" }}>
       <Tokens tema={tema} />
       <div className="flex relative" style={{ minHeight: "100vh" }}>
         {/* barra superior solo en móvil — padding extra arriba/lados para no quedar tapada
@@ -2797,7 +2713,6 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
             paddingTop: "calc(env(safe-area-inset-top) + 12px)",
             paddingLeft: "calc(env(safe-area-inset-left) + 16px)",
             paddingRight: "calc(env(safe-area-inset-right) + 16px)",
-            ...paletaSidebarPersonalizada,
           }}
         >
           <button onClick={() => setMobileNavOpen(true)} className="p-2 -ml-2 gp-btn-ghost rounded justify-self-start" aria-label="Abrir menú">
@@ -2821,7 +2736,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
         {/* rail lateral / cajón */}
         <div
           className={`gp-sidebar-area w-64 ${sidebarColapsado ? "md:w-20" : "md:w-56"} shrink-0 border-r gp-border p-4 flex flex-col gap-4 overflow-y-auto gp-scroll fixed md:static inset-y-0 left-0 z-50 md:z-auto transition-all duration-200 ${mobileNavOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"}`}
-          style={{ maxHeight: "100vh", background: "var(--bg)", ...paletaSidebarPersonalizada }}
+          style={{ maxHeight: "100vh", background: "var(--bg)" }}
         >
           <div className="px-2 flex flex-col items-center text-center gap-1 relative" style={{ paddingTop: "calc(env(safe-area-inset-top) + 4px)" }}>
             <button onClick={() => setMobileNavOpen(false)} className="md:hidden absolute right-0 p-1 gp-btn-ghost rounded" style={{ top: "calc(env(safe-area-inset-top) + 4px)" }} aria-label="Cerrar menú"><X size={16} /></button>
@@ -3268,22 +3183,27 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
       {temaModalAbierto && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,.6)" }} onClick={() => setTemaModalAbierto(false)}>
           <div className="gp-panel p-4 max-w-sm w-full" onClick={(e) => e.stopPropagation()}>
-            <h3 className="font-semibold mb-3">Elige tu color</h3>
-            <label
-              className="flex items-center gap-3 p-3 rounded text-sm cursor-pointer"
-              style={{ border: "2px solid var(--gold)", background: "var(--panel-2)" }}
-            >
-              <input
-                type="color"
-                value={colorPersonalizado}
-                onChange={(e) => cambiarColorPersonalizado(e.target.value)}
-                className="shrink-0"
-                style={{ width: 32, height: 32, padding: 0, border: "1px solid var(--border)", borderRadius: 6, background: "none", cursor: "pointer" }}
-              />
-              <span>Toca para elegir cualquier color</span>
-              {tema === "personalizado" && <Check size={14} className="ml-auto gp-text-gold shrink-0" />}
-            </label>
-            <p className="text-xs gp-text-muted mt-2">El resto (fondo, paneles, menú lateral, texto) se genera solo a partir de ese color, para que siempre se vea bien.</p>
+            <h3 className="font-semibold mb-3">Tema</h3>
+            <div className="space-y-2">
+              {[
+                { id: "actual", label: "Oscuro", bg: "#0B2341", panel: "#12304F" },
+                { id: "azul-claro", label: "Claro", bg: "#E8F1FB", panel: "#F7FBFF" },
+              ].map((opcion) => (
+                <button
+                  key={opcion.id}
+                  onClick={() => cambiarTema(opcion.id)}
+                  className="w-full flex items-center gap-3 p-3 rounded text-sm text-left"
+                  style={{ border: tema === opcion.id ? "2px solid var(--gold)" : "1px solid var(--border)", background: tema === opcion.id ? "var(--panel-2)" : "transparent" }}
+                >
+                  <span
+                    className="shrink-0 rounded-md"
+                    style={{ width: 32, height: 32, background: opcion.bg, border: "1px solid var(--border)", boxShadow: `inset 0 0 0 6px ${opcion.panel}` }}
+                  />
+                  <span>{opcion.label}</span>
+                  {tema === opcion.id && <Check size={14} className="ml-auto gp-text-gold shrink-0" />}
+                </button>
+              ))}
+            </div>
             <button className="gp-btn-ghost w-full px-3 py-2 text-sm rounded mt-3" onClick={() => setTemaModalAbierto(false)}>Cerrar</button>
           </div>
         </div>
@@ -3424,7 +3344,7 @@ function Configuracion({
 
       <p className="text-xs gp-text-muted uppercase tracking-wide mb-2">Apariencia</p>
       <div className="space-y-2 mb-5">
-        <FilaConfig icon={Palette} label={tema === "personalizado" ? "Tema: Personalizado" : "Personalizar color"} sublabel="Elige un color y el resto de la app se adapta solo" onClick={onAbrirTema} />
+        <FilaConfig icon={Palette} label="Tema" sublabel={tema === "azul-claro" ? "Claro" : "Oscuro"} onClick={onAbrirTema} />
       </div>
 
       <p className="text-xs gp-text-muted uppercase tracking-wide mb-2">Notificaciones</p>
