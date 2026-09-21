@@ -68,13 +68,14 @@ function FilaTarea({ item, onToggle }) {
 
 export default function MiDia({ citas, tareas, onToggleTarea, onVerAgenda, onAgregarTarea }) {
   return (
-    <div className="gp-panel p-4">
+    <div className="gp-panel p-4 h-full flex flex-col">
       <div className="flex items-center justify-between mb-1">
         <h3 className="text-sm font-medium">Mi día</h3>
         <button onClick={onVerAgenda} className="text-xs gp-text-gold">Ver agenda →</button>
       </div>
       <p className="text-xs gp-text-muted mb-3">Hoy es un gran día para avanzar.</p>
 
+      <div className="flex-1">
       {citas.length > 0 && (
         <ul className="space-y-3 mb-3">
           {citas.map((c) => (
@@ -100,6 +101,7 @@ export default function MiDia({ citas, tareas, onToggleTarea, onVerAgenda, onAgr
           {tareas.map((item) => <FilaTarea key={item.id} item={item} onToggle={onToggleTarea} />)}
         </ul>
       ) : null}
+      </div>
 
       {onAgregarTarea && (
         <button onClick={onAgregarTarea} className="gp-btn w-full py-2 text-sm mt-3">+ Agregar tarea</button>

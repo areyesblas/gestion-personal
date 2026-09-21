@@ -11,7 +11,7 @@ import bannerWebp from '../../assets/dashboard-banner-bg.webp';
 
 export default function MotivationalCard() {
   return (
-    <div className="relative rounded-2xl overflow-hidden mb-6" style={{ minHeight: 170 }}>
+    <div className="relative rounded-2xl overflow-hidden h-full" style={{ minHeight: 170 }}>
       <picture className="absolute inset-0 block">
         <source srcSet={bannerWebp} type="image/webp" />
         <img src={bannerJpg} alt="" className="absolute inset-0 w-full h-full object-cover" />

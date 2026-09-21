@@ -5,7 +5,7 @@
 
 export default function ProyectosMiniWidget({ proyectos, onVerTodos }) {
   return (
-    <div className="gp-panel p-4">
+    <div className="gp-panel p-4 h-full flex flex-col">
       <div className="flex items-center justify-between mb-3">
         <h3 className="text-sm font-medium">Proyectos</h3>
         <button onClick={onVerTodos} className="text-xs gp-text-gold">Ver todos</button>

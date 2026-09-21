@@ -4329,19 +4329,21 @@ function Dashboard({ data, setView, onAddSaldo, onVerProyecto, onEditPendiente, 
     proyectos: <ProyectosMiniWidget proyectos={avancePorProyecto} onVerTodos={() => setView("proyectos")} />,
 
     tareas: (
-      <div className="gp-panel p-4">
+      <div className="gp-panel p-4 h-full flex flex-col">
         <div className="flex items-center justify-between mb-2">
           <h3 className="text-sm font-medium">Tareas</h3>
           <button onClick={() => setView("pendientes")} className="text-xs gp-text-gold">Ver todas →</button>
         </div>
-        <p className="gp-serif text-2xl">{tareasPendientesTotal}</p>
-        <p className="text-xs gp-text-muted">pendientes en total</p>
+        <div className="flex-1">
+          <p className="gp-serif text-2xl">{tareasPendientesTotal}</p>
+          <p className="text-xs gp-text-muted">pendientes en total</p>
+        </div>
         <button onClick={() => onCrearRapido("pendientes", {})} className="gp-btn-ghost w-full mt-3 py-1.5 text-xs rounded">+ Nueva tarea</button>
       </div>
     ),
 
     finanzas: (
-      <div className="gp-panel p-4">
+      <div className="gp-panel p-4 h-full flex flex-col">
         <div className="flex items-center justify-between mb-1">
           <div className="flex items-center gap-2"><Wallet size={14} className="gp-text-teal" /><h3 className="text-sm font-medium">Finanzas</h3></div>
           {sensibleDesbloqueado && (
@@ -4386,25 +4388,27 @@ function Dashboard({ data, setView, onAddSaldo, onVerProyecto, onEditPendiente, 
     habitos: <HabitosHoyWidget habitos={habitosHoyView} onToggle={toggleHabitoHoy} onVerTodos={() => setView("habitos")} />,
 
     salud: (
-      <div className="gp-panel p-4">
+      <div className="gp-panel p-4 h-full flex flex-col">
         <div className="flex items-center gap-2 mb-2"><HeartPulse size={14} className="gp-text-red" /><h3 className="text-sm font-medium">Salud</h3></div>
-        {medicamentosHoy.length === 0 ? (
-          <p className="text-xs gp-text-muted">No tienes medicamentos programados para hoy.</p>
-        ) : !sensibleDesbloqueado ? (
-          <button onClick={onDesbloquear} className="text-left w-full">
-            <p className="text-sm gp-text-gold">🔒 Verifica tu contraseña para ver el detalle</p>
-            <p className="text-xs gp-text-muted mt-1">{medicamentosHoy.length} medicamento{medicamentosHoy.length === 1 ? "" : "s"} programado{medicamentosHoy.length === 1 ? "" : "s"} hoy.</p>
-          </button>
-        ) : (
-          <ul className="space-y-1.5 text-sm">
-            {medicamentosHoy.map((m) => (
-              <li key={m.id} className="flex items-center justify-between gap-2">
-                <span className="truncate">{m.nombre}{m.dosis ? ` — ${m.dosis}` : ""}</span>
-                <span className="text-xs gp-text-muted shrink-0">{(m.horarios || []).map((h) => String(h).slice(0, 5)).join(", ")}</span>
-              </li>
-            ))}
-          </ul>
-        )}
+        <div className="flex-1">
+          {medicamentosHoy.length === 0 ? (
+            <p className="text-xs gp-text-muted">No tienes medicamentos programados para hoy.</p>
+          ) : !sensibleDesbloqueado ? (
+            <button onClick={onDesbloquear} className="text-left w-full">
+              <p className="text-sm gp-text-gold">🔒 Verifica tu contraseña para ver el detalle</p>
+              <p className="text-xs gp-text-muted mt-1">{medicamentosHoy.length} medicamento{medicamentosHoy.length === 1 ? "" : "s"} programado{medicamentosHoy.length === 1 ? "" : "s"} hoy.</p>
+            </button>
+          ) : (
+            <ul className="space-y-1.5 text-sm">
+              {medicamentosHoy.map((m) => (
+                <li key={m.id} className="flex items-center justify-between gap-2">
+                  <span className="truncate">{m.nombre}{m.dosis ? ` — ${m.dosis}` : ""}</span>
+                  <span className="text-xs gp-text-muted shrink-0">{(m.horarios || []).map((h) => String(h).slice(0, 5)).join(", ")}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
         <button onClick={() => setView("medicamentos")} className="text-xs gp-text-gold mt-3">Ir a Medicamentos →</button>
       </div>
     ),
@@ -4443,8 +4447,8 @@ function Dashboard({ data, setView, onAddSaldo, onVerProyecto, onEditPendiente, 
         onVerHabitos={() => setView("habitos")}
       />
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
-        {widgetsVisibles.map((w) => <div key={w.id}>{widgetContenido[w.id]}</div>)}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-6 items-stretch">
+        {widgetsVisibles.map((w) => <div key={w.id} className="h-full">{widgetContenido[w.id]}</div>)}
       </div>
 
       {personalizarModal && (

@@ -42,7 +42,7 @@ export default function CalendarioWidget({ citas, onVerDia }) {
   };
 
   return (
-    <div className="gp-panel p-4">
+    <div className="gp-panel p-4 h-full flex flex-col">
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2"><CalendarClock size={14} className="gp-text-teal" /><h3 className="text-sm font-medium">Calendario</h3></div>
         <button onClick={onVerDia} className="text-xs gp-text-gold">Ver agenda →</button>
