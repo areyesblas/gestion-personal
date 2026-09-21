@@ -42,9 +42,9 @@ const Tokens = ({ tema = "oscuro" }) => (
       background:var(--bg); color:var(--text); font-family:'IBM Plex Sans',sans-serif; }
     /* Tema Claro — el único claro que queda (ARKEYONE es solo Oscuro/Claro, sin color
        personalizado ni temas adicionales). --panel-2 se redefine con un tinte OSCURO (no blanco)
-       porque el de arriba (blanco a 12%) es invisible sobre fondo claro. El logo y el menú
-       lateral NUNCA usan estos colores — ver .gp-sidebar-area más abajo, así el logo queda a
-       salvo pase lo que pase. */
+       porque el de arriba (blanco a 12%) es invisible sobre fondo claro. El menú lateral SÍ seguía
+       este tema desde acá (ver .gp-sidebar-area más abajo — esa clase se quedó solo para las
+       pantallas de login/verificación, que sí se quedan siempre oscuras a propósito). */
     .gp-root.tema-azul-claro{ --bg:#E8F1FB; --panel:#F7FBFF; --panel-hi:#DCEAFA; --border:#C3D9EE; --text:#0B2341; --muted:#5B7A9E; --panel-2:rgba(11,35,65,.06); }
     .gp-serif{ font-family:'Poppins',sans-serif; font-weight:600; }
     .gp-mono{ font-family:'IBM Plex Mono',monospace; }
@@ -2726,7 +2726,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
         {/* barra superior solo en móvil — padding extra arriba/lados para no quedar tapada
             por el notch/isla dinámica ni el reloj cuando la app corre "standalone" (instalada) */}
         <div
-          className="gp-sidebar-area md:hidden fixed top-0 left-0 right-0 z-30 grid items-center px-4 pb-3 border-b gp-border"
+          className="md:hidden fixed top-0 left-0 right-0 z-30 grid items-center px-4 pb-3 border-b gp-border"
           style={{
             background: "var(--bg)",
             gridTemplateColumns: "1fr auto 1fr",
@@ -2755,7 +2755,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
 
         {/* rail lateral / cajón */}
         <div
-          className={`gp-sidebar-area w-64 ${sidebarColapsado ? "md:w-20" : "md:w-56"} shrink-0 border-r gp-border p-4 flex flex-col gap-4 overflow-y-auto gp-scroll fixed md:static inset-y-0 left-0 z-50 md:z-auto transition-all duration-200 ${mobileNavOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"}`}
+          className={`w-64 ${sidebarColapsado ? "md:w-20" : "md:w-56"} shrink-0 border-r gp-border p-4 flex flex-col gap-4 overflow-y-auto gp-scroll fixed md:static inset-y-0 left-0 z-50 md:z-auto transition-all duration-200 ${mobileNavOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"}`}
           style={{ maxHeight: "100vh", background: "var(--bg)" }}
         >
           <div className="px-2 flex flex-col items-center text-center gap-1 relative" style={{ paddingTop: "calc(env(safe-area-inset-top) + 4px)" }}>
