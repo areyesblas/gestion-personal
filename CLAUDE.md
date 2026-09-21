@@ -4,7 +4,7 @@ Este archivo se lee automáticamente al inicio de cada sesión de Claude Code. C
 
 ## Qué es ARKEYONE
 
-SaaS multi-tenant "sistema operativo personal" en arkeyone.com. Slogan: "La llave que alinea tu mundo". Sustituye el concepto anterior "Centro de Mando". Angel Reyes es el dueño de producto, diseñador y quien toma todas las decisiones (angelrey.mx@gmail.com, GitHub: areyesblas).
+SaaS multi-tenant "sistema operativo personal" en arkeyone.com. Slogan: "Ordena tu mundo, mejora tu vida." (actualizado 21 sept 2026; antes "La llave que alinea tu mundo"). Sustituye el concepto anterior "Centro de Mando". Angel Reyes es el dueño de producto, diseñador y quien toma todas las decisiones (angelrey.mx@gmail.com, GitHub: areyesblas).
 
 Módulos: Proyectos/tareas, Finanzas/Deudas/Apartados/Patrimonio/Activos digitales, Contactos, Salud/Medicamentos, Hábitos, Eventos/Legal/Marketing, Colaboradores, Personas relacionadas/cuidadores, Notificaciones/Push, Diario, Agenda/Calendario.
 
