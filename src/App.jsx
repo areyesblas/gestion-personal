@@ -236,7 +236,6 @@ const DASHBOARD_WIDGETS_CATALOGO = [
   { id: "resumenFinanciero", label: "Resumen financiero" },
   { id: "habitos", label: "Hábitos" },
   { id: "salud", label: "Salud" },
-  { id: "imagenMotivacional", label: "Imagen motivacional" },
   { id: "notasRapidas", label: "Notas rápidas" },
   { id: "accesosRapidos", label: "Acciones rápidas" },
   { id: "arki", label: "ARKI" },
@@ -4754,8 +4753,6 @@ function Dashboard({ data, setView, onAddSaldo, onVerProyecto, onEditPendiente, 
       </div>
     ),
 
-    imagenMotivacional: <MotivationalCard />,
-
     notasRapidas: <NotasRapidasWidget onAddNota={onAddNota} />,
     accesosRapidos: <AccesosRapidosWidget onCrear={onCrearRapido} modulosPermitidos={modulosPermitidos} />,
   };
@@ -4796,6 +4793,8 @@ function Dashboard({ data, setView, onAddSaldo, onVerProyecto, onEditPendiente, 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-6 items-stretch">
         {widgetsVisibles.map((w) => <div key={w.id} className="h-full">{widgetContenido[w.id]}</div>)}
       </div>
+
+      <MotivationalCard />
 
       {personalizarModal && (
         <Modal title="Personalizar panel" onClose={() => setPersonalizarModal(false)}>
