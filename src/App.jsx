@@ -9563,22 +9563,58 @@ function sugerenciasEjercicio(data, personaId) {
 
 // Fila para agregar un ejercicio nuevo (a una rutina o a una sesión libre), con autocompletar
 // de los ya usados. `listId` debe ser único por instancia para no chocar datalist en el DOM.
-function NuevoEjercicioForm({ sugerencias, listId, onAdd }) {
-  const [v, setV] = useState({ ejercicio: "", peso: "", series: "", repeticiones: "" });
+const EJERCICIO_VACIO = { ejercicio: "", peso: "", series: "", repeticiones: "", duracionSegundos: "60", descansoSegundos: "30" };
+
+// Resumen corto de un ejercicio (de rutina o de sesión) según su tipo, para chips/listas.
+function resumenEjercicio(it) {
+  if (it.tipo === "tiempo") return `${it.duracionSegundos || "—"}s trabajo / ${it.descansoSegundos || "—"}s descanso`;
+  return `${it.peso || "—"}kg · ${it.series || "—"}x${it.repeticiones || "—"}`;
+}
+
+// Selector chico "Series" / "Tiempo" — decide si el ejercicio se mide por peso/series/reps
+// (como siempre) o por un cronómetro de trabajo/descanso (circuitos tipo Planet Fitness).
+function SelectorTipoEjercicio({ tipo, onChange }) {
   return (
-    <div className="flex flex-wrap items-center gap-2">
-      <input list={listId} className="gp-input text-sm flex-1 min-w-[140px]" placeholder="Ejercicio" value={v.ejercicio} onChange={(e) => setV({ ...v, ejercicio: e.target.value })} />
-      <input type="number" className="gp-input text-sm" style={{ width: 70 }} placeholder="kg" value={v.peso} onChange={(e) => setV({ ...v, peso: e.target.value })} />
-      <input type="number" className="gp-input text-sm" style={{ width: 60 }} placeholder="series" value={v.series} onChange={(e) => setV({ ...v, series: e.target.value })} />
-      <span className="text-xs gp-text-muted">x</span>
-      <input type="number" className="gp-input text-sm" style={{ width: 60 }} placeholder="reps" value={v.repeticiones} onChange={(e) => setV({ ...v, repeticiones: e.target.value })} />
-      <button
-        className="gp-btn-ghost px-3 py-1.5 text-sm rounded flex items-center gap-1 disabled:opacity-50"
-        disabled={!v.ejercicio.trim()}
-        onClick={() => { onAdd(v); setV({ ejercicio: "", peso: "", series: "", repeticiones: "" }); }}
-      >
-        <Plus size={13} /> Agregar
-      </button>
+    <div className="flex gap-1 shrink-0">
+      <button type="button" onClick={() => onChange("series")} className={`text-xs px-2.5 py-1 rounded-full border ${tipo !== "tiempo" ? "gp-btn" : "gp-text-muted"}`}>Series</button>
+      <button type="button" onClick={() => onChange("tiempo")} className={`text-xs px-2.5 py-1 rounded-full border ${tipo === "tiempo" ? "gp-btn" : "gp-text-muted"}`}>Tiempo</button>
+    </div>
+  );
+}
+
+function NuevoEjercicioForm({ sugerencias, listId, onAdd }) {
+  const [tipo, setTipo] = useState("series");
+  const [v, setV] = useState(EJERCICIO_VACIO);
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <input list={listId} className="gp-input text-sm flex-1 min-w-[140px]" placeholder="Ejercicio" value={v.ejercicio} onChange={(e) => setV({ ...v, ejercicio: e.target.value })} />
+        <SelectorTipoEjercicio tipo={tipo} onChange={setTipo} />
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        {tipo === "tiempo" ? (
+          <>
+            <input type="number" className="gp-input text-sm" style={{ width: 70 }} placeholder="60" value={v.duracionSegundos} onChange={(e) => setV({ ...v, duracionSegundos: e.target.value })} />
+            <span className="text-xs gp-text-muted">seg trabajo</span>
+            <input type="number" className="gp-input text-sm" style={{ width: 70 }} placeholder="30" value={v.descansoSegundos} onChange={(e) => setV({ ...v, descansoSegundos: e.target.value })} />
+            <span className="text-xs gp-text-muted">seg descanso</span>
+          </>
+        ) : (
+          <>
+            <input type="number" className="gp-input text-sm" style={{ width: 70 }} placeholder="kg" value={v.peso} onChange={(e) => setV({ ...v, peso: e.target.value })} />
+            <input type="number" className="gp-input text-sm" style={{ width: 60 }} placeholder="series" value={v.series} onChange={(e) => setV({ ...v, series: e.target.value })} />
+            <span className="text-xs gp-text-muted">x</span>
+            <input type="number" className="gp-input text-sm" style={{ width: 60 }} placeholder="reps" value={v.repeticiones} onChange={(e) => setV({ ...v, repeticiones: e.target.value })} />
+          </>
+        )}
+        <button
+          className="gp-btn-ghost px-3 py-1.5 text-sm rounded flex items-center gap-1 disabled:opacity-50"
+          disabled={!v.ejercicio.trim()}
+          onClick={() => { onAdd({ ...v, tipo }); setV(EJERCICIO_VACIO); }}
+        >
+          <Plus size={13} /> Agregar
+        </button>
+      </div>
       <datalist id={listId}>{sugerencias.map((s) => <option key={s} value={s} />)}</datalist>
     </div>
   );
@@ -9629,7 +9665,7 @@ function RutinasEjercicio({ data, personaId, onAdd, onEdit, onRemove }) {
             <p className="text-xs gp-text-muted mb-2">Del {r.fechaInicio} {r.fechaFin ? `al ${r.fechaFin}` : "· sin fecha de fin"}</p>
             <div className="flex flex-wrap gap-1">
               {itemsDe(r.id).map((it) => (
-                <span key={it.id} className="text-xs gp-panel-hi rounded px-2 py-1">{it.ejercicio} · {it.peso || "—"}kg · {it.series || "—"}x{it.repeticiones || "—"}</span>
+                <span key={it.id} className="text-xs gp-panel-hi rounded px-2 py-1">{it.ejercicio} · {resumenEjercicio(it)}</span>
               ))}
               {itemsDe(r.id).length === 0 && <span className="text-xs gp-text-muted">Sin ejercicios — edítala para agregarlos.</span>}
             </div>
@@ -9703,18 +9739,40 @@ function RutinaModal({ data, rutina, personaId, sugerencias, onAdd, onEdit, onRe
 function RutinaItemRow({ item, onEdit, onRemove }) {
   const [v, setV] = useState(item);
   useEffect(() => setV(item), [item.id]);
+  const esTiempo = v.tipo === "tiempo";
+  const cambiarTipo = (tipo) => {
+    const patch = tipo === "tiempo" && !v.duracionSegundos ? { tipo, duracionSegundos: 60, descansoSegundos: 30 } : { tipo };
+    setV({ ...v, ...patch });
+    onEdit(patch);
+  };
   return (
-    <div className="gp-panel-hi rounded p-2 flex flex-wrap items-center gap-2">
-      <input list="sugerencias-ejercicio-rutina" className="gp-input text-sm flex-1 min-w-[140px]" value={v.ejercicio}
-        onChange={(e) => setV({ ...v, ejercicio: e.target.value })} onBlur={() => onEdit({ ejercicio: v.ejercicio })} />
-      <input type="number" className="gp-input text-sm" style={{ width: 70 }} placeholder="kg" value={v.peso ?? ""}
-        onChange={(e) => setV({ ...v, peso: e.target.value })} onBlur={() => onEdit({ peso: v.peso })} />
-      <input type="number" className="gp-input text-sm" style={{ width: 60 }} placeholder="series" value={v.series ?? ""}
-        onChange={(e) => setV({ ...v, series: e.target.value })} onBlur={() => onEdit({ series: v.series })} />
-      <span className="text-xs gp-text-muted">x</span>
-      <input type="number" className="gp-input text-sm" style={{ width: 60 }} placeholder="reps" value={v.repeticiones ?? ""}
-        onChange={(e) => setV({ ...v, repeticiones: e.target.value })} onBlur={() => onEdit({ repeticiones: v.repeticiones })} />
-      <IconBtn onClick={onRemove}><Trash2 size={13} /></IconBtn>
+    <div className="gp-panel-hi rounded p-2 flex flex-col gap-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <input list="sugerencias-ejercicio-rutina" className="gp-input text-sm flex-1 min-w-[140px]" value={v.ejercicio}
+          onChange={(e) => setV({ ...v, ejercicio: e.target.value })} onBlur={() => onEdit({ ejercicio: v.ejercicio })} />
+        <SelectorTipoEjercicio tipo={v.tipo} onChange={cambiarTipo} />
+        <IconBtn onClick={onRemove}><Trash2 size={13} /></IconBtn>
+      </div>
+      {esTiempo ? (
+        <div className="flex items-center gap-2">
+          <input type="number" className="gp-input text-sm" style={{ width: 70 }} placeholder="60" value={v.duracionSegundos ?? ""}
+            onChange={(e) => setV({ ...v, duracionSegundos: e.target.value })} onBlur={() => onEdit({ duracionSegundos: v.duracionSegundos })} />
+          <span className="text-xs gp-text-muted">seg trabajo</span>
+          <input type="number" className="gp-input text-sm" style={{ width: 70 }} placeholder="30" value={v.descansoSegundos ?? ""}
+            onChange={(e) => setV({ ...v, descansoSegundos: e.target.value })} onBlur={() => onEdit({ descansoSegundos: v.descansoSegundos })} />
+          <span className="text-xs gp-text-muted">seg descanso</span>
+        </div>
+      ) : (
+        <div className="flex items-center gap-2">
+          <input type="number" className="gp-input text-sm" style={{ width: 70 }} placeholder="kg" value={v.peso ?? ""}
+            onChange={(e) => setV({ ...v, peso: e.target.value })} onBlur={() => onEdit({ peso: v.peso })} />
+          <input type="number" className="gp-input text-sm" style={{ width: 60 }} placeholder="series" value={v.series ?? ""}
+            onChange={(e) => setV({ ...v, series: e.target.value })} onBlur={() => onEdit({ series: v.series })} />
+          <span className="text-xs gp-text-muted">x</span>
+          <input type="number" className="gp-input text-sm" style={{ width: 60 }} placeholder="reps" value={v.repeticiones ?? ""}
+            onChange={(e) => setV({ ...v, repeticiones: e.target.value })} onBlur={() => onEdit({ repeticiones: v.repeticiones })} />
+        </div>
+      )}
     </div>
   );
 }
@@ -9738,7 +9796,7 @@ function SesionEjercicio({ data, personaId, onAdd, onEdit, onRemove }) {
       const itemsRutina = itemsDeRutina(rutinaId);
       for (let i = 0; i < itemsRutina.length; i++) {
         const it = itemsRutina[i];
-        await onAdd("sesionEjercicioItems", { id: uid(), sesionId, rutinaItemId: it.id, ejercicio: it.ejercicio, peso: it.peso, series: it.series, repeticiones: it.repeticiones, hecho: false, orden: i });
+        await onAdd("sesionEjercicioItems", { id: uid(), sesionId, rutinaItemId: it.id, ejercicio: it.ejercicio, tipo: it.tipo || "series", peso: it.peso, series: it.series, repeticiones: it.repeticiones, duracionSegundos: it.duracionSegundos, descansoSegundos: it.descansoSegundos, hecho: false, orden: i });
       }
     }
     setSesionActivaId(sesionId);
@@ -9807,22 +9865,114 @@ function SesionItemRow({ item, onEdit, onRemove }) {
   const [v, setV] = useState(item);
   useEffect(() => setV(item), [item.id]);
   const toggleHecho = () => { const hecho = !v.hecho; setV({ ...v, hecho }); onEdit({ hecho }); };
+  const esTiempo = v.tipo === "tiempo";
   return (
-    <div className={`gp-panel-hi rounded p-2 flex flex-wrap items-center gap-2 ${v.hecho ? "opacity-70" : ""}`}>
-      <button onClick={toggleHecho} className="shrink-0" title={v.hecho ? "Marcar como pendiente" : "Marcar como hecho"}>
-        <div className="w-5 h-5 rounded flex items-center justify-center border" style={{ borderColor: v.hecho ? "var(--teal)" : "var(--border)", background: v.hecho ? "var(--teal)" : "transparent" }}>
-          {v.hecho && <Check size={13} color="#fff" />}
+    <div className={`gp-panel-hi rounded p-2 flex flex-col gap-2 ${v.hecho ? "opacity-70" : ""}`}>
+      <div className="flex flex-wrap items-center gap-2">
+        <button onClick={toggleHecho} className="shrink-0" title={v.hecho ? "Marcar como pendiente" : "Marcar como hecho"}>
+          <div className="w-5 h-5 rounded flex items-center justify-center border" style={{ borderColor: v.hecho ? "var(--teal)" : "var(--border)", background: v.hecho ? "var(--teal)" : "transparent" }}>
+            {v.hecho && <Check size={13} color="#fff" />}
+          </div>
+        </button>
+        <span className={`text-sm flex-1 min-w-[100px] ${v.hecho ? "line-through gp-text-muted" : ""}`}>{v.ejercicio}</span>
+        {!esTiempo && (
+          <>
+            <input type="number" className="gp-input text-sm" style={{ width: 70 }} placeholder="kg" value={v.peso ?? ""}
+              onChange={(e) => setV({ ...v, peso: e.target.value })} onBlur={() => onEdit({ peso: v.peso })} />
+            <input type="number" className="gp-input text-sm" style={{ width: 60 }} placeholder="series" value={v.series ?? ""}
+              onChange={(e) => setV({ ...v, series: e.target.value })} onBlur={() => onEdit({ series: v.series })} />
+            <span className="text-xs gp-text-muted">x</span>
+            <input type="number" className="gp-input text-sm" style={{ width: 60 }} placeholder="reps" value={v.repeticiones ?? ""}
+              onChange={(e) => setV({ ...v, repeticiones: e.target.value })} onBlur={() => onEdit({ repeticiones: v.repeticiones })} />
+          </>
+        )}
+        <IconBtn onClick={onRemove}><Trash2 size={13} /></IconBtn>
+      </div>
+      {esTiempo && (
+        <div className="flex flex-wrap items-center justify-between gap-3 pl-7">
+          <TimerEjercicio duracion={Number(v.duracionSegundos) || 60} descanso={Number(v.descansoSegundos) || 30} />
+          <div className="flex items-center gap-1">
+            <input type="number" className="gp-input text-xs" style={{ width: 48 }} title="Segundos de trabajo" value={v.duracionSegundos ?? ""}
+              onChange={(e) => setV({ ...v, duracionSegundos: e.target.value })} onBlur={() => onEdit({ duracionSegundos: v.duracionSegundos })} />
+            <span className="text-[10px] gp-text-muted">/</span>
+            <input type="number" className="gp-input text-xs" style={{ width: 48 }} title="Segundos de descanso" value={v.descansoSegundos ?? ""}
+              onChange={(e) => setV({ ...v, descansoSegundos: e.target.value })} onBlur={() => onEdit({ descansoSegundos: v.descansoSegundos })} />
+            <span className="text-[10px] gp-text-muted">seg</span>
+          </div>
         </div>
-      </button>
-      <span className={`text-sm flex-1 min-w-[120px] ${v.hecho ? "line-through gp-text-muted" : ""}`}>{v.ejercicio}</span>
-      <input type="number" className="gp-input text-sm" style={{ width: 70 }} placeholder="kg" value={v.peso ?? ""}
-        onChange={(e) => setV({ ...v, peso: e.target.value })} onBlur={() => onEdit({ peso: v.peso })} />
-      <input type="number" className="gp-input text-sm" style={{ width: 60 }} placeholder="series" value={v.series ?? ""}
-        onChange={(e) => setV({ ...v, series: e.target.value })} onBlur={() => onEdit({ series: v.series })} />
-      <span className="text-xs gp-text-muted">x</span>
-      <input type="number" className="gp-input text-sm" style={{ width: 60 }} placeholder="reps" value={v.repeticiones ?? ""}
-        onChange={(e) => setV({ ...v, repeticiones: e.target.value })} onBlur={() => onEdit({ repeticiones: v.repeticiones })} />
-      <IconBtn onClick={onRemove}><Trash2 size={13} /></IconBtn>
+      )}
+    </div>
+  );
+}
+
+function fmtMMSS(totalSegundos) {
+  const s = Math.max(0, totalSegundos);
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  return `${m}:${String(r).padStart(2, "0")}`;
+}
+
+// Aviso corto (beep vía Web Audio, sin archivo que cargar) + vibración al terminar una fase
+// del cronómetro — para notar el cambio sin tener que ver la pantalla todo el tiempo.
+function avisarFinFase() {
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    const ctx = new Ctx();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.frequency.value = 880;
+    gain.gain.setValueAtTime(0.15, ctx.currentTime);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.25);
+    osc.onended = () => ctx.close();
+  } catch {}
+  try { navigator.vibrate?.([200, 100, 200]); } catch {}
+}
+
+// Cronómetro manual de trabajo/descanso para ejercicios "por tiempo" (circuitos tipo Planet
+// Fitness: 1 min de fuerza, 30 seg de descanso, siguiente ejercicio...). Cada fase se arranca
+// con un clic — nunca encadena sola a la siguiente, para que cada quien controle su propio
+// ritmo (pedido explícito de Angel, no auto-avanzar). El check de "hecho" sigue siendo aparte,
+// manual, ya en SesionItemRow — el cronómetro es solo una ayuda, no reemplaza ese registro.
+function TimerEjercicio({ duracion, descanso }) {
+  const [fase, setFase] = useState("trabajo"); // "trabajo" | "descanso"
+  const [restante, setRestante] = useState(duracion);
+  const [corriendo, setCorriendo] = useState(false);
+
+  useEffect(() => { setFase("trabajo"); setRestante(duracion); setCorriendo(false); }, [duracion, descanso]);
+
+  useEffect(() => {
+    if (!corriendo) return;
+    if (restante <= 0) { setCorriendo(false); avisarFinFase(); return; }
+    const t = setTimeout(() => setRestante((r) => r - 1), 1000);
+    return () => clearTimeout(t);
+  }, [corriendo, restante]);
+
+  const iniciar = () => {
+    if (restante <= 0) {
+      const siguiente = fase === "trabajo" ? "descanso" : "trabajo";
+      setFase(siguiente);
+      setRestante(siguiente === "trabajo" ? duracion : descanso);
+    }
+    setCorriendo(true);
+  };
+  const reiniciar = () => { setFase("trabajo"); setRestante(duracion); setCorriendo(false); };
+  const etiquetaBoton = restante > 0 ? "Iniciar" : fase === "trabajo" ? "Iniciar descanso" : "Repetir";
+
+  return (
+    <div className="flex items-center gap-3">
+      <span className={`text-[10px] px-2 py-0.5 rounded-full border shrink-0 ${fase === "trabajo" ? "gp-text-teal" : "gp-text-gold"}`}>
+        {fase === "trabajo" ? "Trabajo" : "Descanso"}
+      </span>
+      <span className="gp-mono text-2xl font-semibold" style={{ minWidth: 56 }}>{fmtMMSS(restante)}</span>
+      {corriendo ? (
+        <button onClick={() => setCorriendo(false)} className="gp-btn-ghost px-3 py-1.5 text-xs rounded">Pausar</button>
+      ) : (
+        <button onClick={iniciar} className="gp-btn px-3 py-1.5 text-xs rounded flex items-center gap-1"><Play size={12} /> {etiquetaBoton}</button>
+      )}
+      <button onClick={reiniciar} className="text-xs gp-text-muted underline decoration-dotted">Reiniciar</button>
     </div>
   );
 }
@@ -9909,7 +10059,8 @@ function ProgresoEjercicio({ data, personaId }) {
   const sesionesPorId = Object.fromEntries(sesionesPersona.map((s) => [s.id, s]));
   const itemsHechos = (data.sesionEjercicioItems || []).filter((it) => it.hecho && sesionesPorId[it.sesionId] && (!desde || sesionesPorId[it.sesionId].fecha >= desde));
 
-  const ejerciciosDisponibles = [...new Set(itemsHechos.map((it) => it.ejercicio))].sort((a, b) => a.localeCompare(b, "es"));
+  // Los ejercicios "por tiempo" no cargan peso — no tiene sentido ofrecerlos en esta gráfica.
+  const ejerciciosDisponibles = [...new Set(itemsHechos.filter((it) => it.tipo !== "tiempo").map((it) => it.ejercicio))].sort((a, b) => a.localeCompare(b, "es"));
   const [ejercicioSel, setEjercicioSel] = useState("");
   useEffect(() => { if (!ejerciciosDisponibles.includes(ejercicioSel)) setEjercicioSel(ejerciciosDisponibles[0] || ""); }, [ejerciciosDisponibles.join("|")]);
 
