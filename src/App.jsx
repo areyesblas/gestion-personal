@@ -25,7 +25,7 @@ import {
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
-  PieChart, Pie, Cell, LineChart, Line,
+  PieChart, Pie, Cell, LineChart, Line, ReferenceLine,
 } from "recharts";
 // Perezoso: solo trae @dnd-kit (arrastrar y soltar) cuando el usuario realmente abre "Personalizar panel".
 const PersonalizarPanelModal = lazy(() => import("./components/CentroMando/PersonalizarPanelModal"));
@@ -751,7 +751,7 @@ async function loadAllTables(ownerId) {
   const entries = await Promise.all(TABLES.map(async (key) => [key, await fetchTable(key, ownerId)]));
   const result = Object.fromEntries(entries);
   const { data: perfilRows } = await supabase.from("perfil_salud").select("*").eq("user_id", ownerId);
-  result.perfilSalud = Object.fromEntries((perfilRows || []).map((r) => [r.contacto_id || "yo", { alturaCm: r.altura_cm ?? "" }]));
+  result.perfilSalud = Object.fromEntries((perfilRows || []).map((r) => [r.contacto_id || "yo", { alturaCm: r.altura_cm ?? "", metasSalud: r.metas_salud || {} }]));
   return result;
 }
 
@@ -2635,10 +2635,15 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
   // opts puede traer { extraIds: [...ids de subtareas que también se van a borrar], mensaje: "texto de advertencia" }
   const askDelete = (key, id, opts = {}) => setConfirmDelete({ key, id, ...opts });
   const updatePerfilSalud = async (contactoId, patch) => {
-    const row = { user_id: activeOwnerId, contacto_id: contactoId || null, altura_cm: patch.alturaCm || null };
+    // Se fusiona con lo ya guardado (no solo con `patch`) porque esta fila también lleva
+    // metasSalud — sin el merge, guardar solo la estatura borraría las metas ya configuradas
+    // y viceversa.
+    const actual = data.perfilSalud?.[contactoId || "yo"] || {};
+    const nuevo = { ...actual, ...patch };
+    const row = { user_id: activeOwnerId, contacto_id: contactoId || null, altura_cm: nuevo.alturaCm || null, metas_salud: nuevo.metasSalud || {} };
     const { error } = await supabase.from("perfil_salud").upsert(row, { onConflict: contactoId ? "user_id,contacto_id" : "user_id" });
-    if (error) { console.error("Error al guardar la estatura:", error); return; }
-    setData((prev) => ({ ...prev, perfilSalud: { ...(prev.perfilSalud || {}), [contactoId || "yo"]: { ...(prev.perfilSalud?.[contactoId || "yo"] || {}), ...patch } } }));
+    if (error) { console.error("Error al guardar el perfil de salud:", error); return; }
+    setData((prev) => ({ ...prev, perfilSalud: { ...(prev.perfilSalud || {}), [contactoId || "yo"]: nuevo } }));
   };
   // Apartar dinero: registra el aporte en el historial de movimientos del apartado y actualiza
   // el caché de "ahorrado" — nunca se captura el monto ahorrado directamente. No toca Finanzas:
@@ -3548,21 +3553,34 @@ function Configuracion({
 // Foto que se muestra en el avatar del Centro de mando — sube a Storage (bucket "adjuntos") y
 // guarda la URL pública en preferencias.avatar_url (ver subirAvatar en AppLoggedIn).
 function AvatarForm({ avatarUrl, subirAvatar, onSaved }) {
+  const [archivoElegido, setArchivoElegido] = useState(null); // File recién elegido, pendiente de recortar
   const [previa, setPrevia] = useState(avatarUrl || "");
   const [estado, setEstado] = useState("idle"); // idle | subiendo | listo
   const [error, setError] = useState("");
-  const onArchivo = async (e) => {
+
+  const onArchivo = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
     if (file.size > 5 * 1024 * 1024) { setError("La imagen pesa más de 5 MB — usa una más chica."); return; }
     setError("");
-    setPrevia(URL.createObjectURL(file));
+    setArchivoElegido(file);
+    e.target.value = ""; // para poder elegir el mismo archivo otra vez si cancela y reintenta
+  };
+
+  const onRecortada = async (blob) => {
+    setArchivoElegido(null);
+    setPrevia(URL.createObjectURL(blob));
     setEstado("subiendo");
-    const res = await subirAvatar(file);
+    const res = await subirAvatar(new File([blob], "avatar.jpg", { type: "image/jpeg" }));
     if (res.error) { setError(res.error); setEstado("idle"); return; }
     setEstado("listo");
     setTimeout(() => onSaved?.(), 900);
   };
+
+  if (archivoElegido) {
+    return <AvatarCropper file={archivoElegido} onCancel={() => setArchivoElegido(null)} onConfirm={onRecortada} />;
+  }
+
   return (
     <div>
       <p className="text-xs gp-text-muted mb-3">Se muestra en el Centro de mando, junto al buscador. Si no subes una, se muestran tus iniciales.</p>
@@ -3579,6 +3597,105 @@ function AvatarForm({ avatarUrl, subirAvatar, onSaved }) {
           <input type="file" accept="image/*" className="hidden" onChange={onArchivo} disabled={estado === "subiendo"} />
         </label>
         {error && <p className="text-xs gp-text-red">{error}</p>}
+      </div>
+    </div>
+  );
+}
+
+const AVATAR_CROPPER_VP = 260; // tamaño del visor circular en pantalla (px)
+const AVATAR_CROPPER_OUT = 480; // resolución del archivo exportado (px, cuadrado)
+
+// Mantiene el offset de arrastre siempre dentro de los límites de la imagen (que nunca deje
+// huecos en blanco dentro del visor circular), dado el tamaño mostrado (w × h) de la imagen.
+function clampOffsetAvatar(o, w, h) {
+  const minX = Math.min(0, AVATAR_CROPPER_VP - w);
+  const minY = Math.min(0, AVATAR_CROPPER_VP - h);
+  return { x: Math.max(minX, Math.min(0, o.x)), y: Math.max(minY, Math.min(0, o.y)) };
+}
+
+// Deja acomodar la foto (arrastrar para mover, deslizador para acercar) antes de fijarla como
+// avatar, en vez de subirla tal cual — pedido de Angel (21 sept 2026). Se exporta a un canvas
+// del mismo recorte que se ve en el visor, así "lo que ves es lo que se guarda".
+function AvatarCropper({ file, onCancel, onConfirm }) {
+  const [img, setImg] = useState(null); // HTMLImageElement ya cargado
+  const [zoom, setZoom] = useState(1);
+  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const arrastreRef = useRef(null); // { startX, startY, offsetX, offsetY } mientras se arrastra
+  const [guardando, setGuardando] = useState(false);
+
+  useEffect(() => {
+    const url = URL.createObjectURL(file);
+    const el = new Image();
+    el.onload = () => setImg(el);
+    el.src = url;
+    return () => URL.revokeObjectURL(url);
+  }, [file]);
+
+  const baseScale = img ? Math.max(AVATAR_CROPPER_VP / img.width, AVATAR_CROPPER_VP / img.height) : 1;
+  const scale = baseScale * zoom;
+  const dispW = img ? img.width * scale : 0;
+  const dispH = img ? img.height * scale : 0;
+
+  useEffect(() => {
+    if (!img) return;
+    setOffset((prev) => clampOffsetAvatar(prev, dispW, dispH));
+    // Solo debe re-centrar/acotar cuando cambia la imagen o el zoom, no en cada pixel de arrastre.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [img, zoom]);
+
+  const iniciarArrastre = (clientX, clientY) => { arrastreRef.current = { startX: clientX, startY: clientY, offsetX: offset.x, offsetY: offset.y }; };
+  const moverArrastre = (clientX, clientY) => {
+    if (!arrastreRef.current) return;
+    const dx = clientX - arrastreRef.current.startX;
+    const dy = clientY - arrastreRef.current.startY;
+    setOffset(clampOffsetAvatar({ x: arrastreRef.current.offsetX + dx, y: arrastreRef.current.offsetY + dy }, dispW, dispH));
+  };
+  const terminarArrastre = () => { arrastreRef.current = null; };
+
+  const confirmar = () => {
+    if (!img) return;
+    setGuardando(true);
+    const k = AVATAR_CROPPER_OUT / AVATAR_CROPPER_VP;
+    const canvas = document.createElement("canvas");
+    canvas.width = AVATAR_CROPPER_OUT;
+    canvas.height = AVATAR_CROPPER_OUT;
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(img, offset.x * k, offset.y * k, dispW * k, dispH * k);
+    canvas.toBlob((blob) => { setGuardando(false); if (blob) onConfirm(blob); }, "image/jpeg", 0.92);
+  };
+
+  return (
+    <div>
+      <p className="text-xs gp-text-muted mb-3">Arrastra la foto para acomodarla y usa el deslizador para acercar, antes de fijarla.</p>
+      <div className="flex flex-col items-center gap-3">
+        <div
+          className="rounded-full overflow-hidden relative"
+          style={{ width: AVATAR_CROPPER_VP, height: AVATAR_CROPPER_VP, background: "var(--panel-hi)", border: "1px solid var(--border)", cursor: img ? "grab" : "default", touchAction: "none" }}
+          onMouseDown={(e) => iniciarArrastre(e.clientX, e.clientY)}
+          onMouseMove={(e) => { if (arrastreRef.current) moverArrastre(e.clientX, e.clientY); }}
+          onMouseUp={terminarArrastre}
+          onMouseLeave={terminarArrastre}
+          onTouchStart={(e) => iniciarArrastre(e.touches[0].clientX, e.touches[0].clientY)}
+          onTouchMove={(e) => moverArrastre(e.touches[0].clientX, e.touches[0].clientY)}
+          onTouchEnd={terminarArrastre}
+        >
+          {img && (
+            <img
+              src={img.src}
+              alt=""
+              draggable={false}
+              style={{ position: "absolute", left: offset.x, top: offset.y, width: dispW, height: dispH, maxWidth: "none", userSelect: "none" }}
+            />
+          )}
+        </div>
+        <div className="flex items-center gap-2 w-full max-w-[260px]">
+          <span className="text-xs gp-text-muted shrink-0">Zoom</span>
+          <input type="range" min="1" max="3" step="0.05" value={zoom} onChange={(e) => setZoom(Number(e.target.value))} className="flex-1" />
+        </div>
+        <div className="flex gap-2 w-full max-w-[260px]">
+          <button onClick={onCancel} className="gp-btn-ghost flex-1 py-2 text-sm rounded">Cancelar</button>
+          <button onClick={confirmar} disabled={!img || guardando} className="gp-btn flex-1 py-2 text-sm rounded disabled:opacity-70">{guardando ? "…" : "Usar esta foto"}</button>
+        </div>
       </div>
     </div>
   );
@@ -9034,6 +9151,9 @@ function Salud({ data, onAdd, onEdit, onRemove, onUpdatePerfil, soloCuidado, onA
   const alturaCm = data.perfilSalud?.[personaId || "yo"]?.alturaCm;
   const [altura, setAltura] = useState(alturaCm || "");
   useEffect(() => { setAltura(alturaCm || ""); }, [personaId, alturaCm]);
+  const metasSalud = data.perfilSalud?.[personaId || "yo"]?.metasSalud || {};
+  const mostrar = (key) => metasSalud?.[key]?.mostrar !== false;
+  const [metasModal, setMetasModal] = useState(false);
 
   const toneCategoria = (cat) => (cat === "Normal" ? "teal" : cat === "Bajo peso" ? "gold" : cat === "Sobrepeso" ? "gold" : cat === "Obesidad" ? "red" : "muted");
 
@@ -9042,7 +9162,10 @@ function Salud({ data, onAdd, onEdit, onRemove, onUpdatePerfil, soloCuidado, onA
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-1">
         <h2 className="gp-serif text-2xl">Salud</h2>
         {(tab === "historial" || tab === "tendencias") && (
-          <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm w-full sm:w-auto"><Plus size={14} /> Registrar</button>
+          <div className="flex gap-2 w-full sm:w-auto">
+            <button onClick={() => setMetasModal(true)} className="gp-btn-ghost flex items-center justify-center gap-1 px-3 py-1.5 text-sm flex-1 sm:flex-none"><Settings size={14} /> Metas</button>
+            <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm flex-1 sm:flex-none"><Plus size={14} /> Registrar</button>
+          </div>
         )}
       </div>
       <p className="text-sm gp-text-muted mb-4">Peso, glucosa, presión arterial, colesterol, triglicéridos, ejercicio y nutrición, todo en un mismo lugar.</p>
@@ -9084,22 +9207,34 @@ function Salud({ data, onAdd, onEdit, onRemove, onUpdatePerfil, soloCuidado, onA
       ) : tab === "nutricion" ? (
         <Nutricion data={data} personaId={personaId} onAdd={onAddGenerico} onEdit={onEditGenerico} onRemove={onRemoveGenerico} />
       ) : tab === "tendencias" ? (
-        <SaludTendencias salud={saludPersona} />
+        <SaludTendencias salud={saludPersona} metasSalud={metasSalud} />
       ) : (
       <>
-      <div className="gp-panel p-3 mb-4 flex flex-wrap items-center gap-3">
-        <span className="text-xs gp-text-muted">Tu estatura (para calcular IMC):</span>
-        <input type="number" className="gp-input" style={{ maxWidth: 100 }} value={altura}
-          onChange={(e) => setAltura(e.target.value)}
-          onBlur={() => onUpdatePerfil(personaId, { alturaCm: altura })} />
-        <span className="text-xs gp-text-muted">cm</span>
-        {!alturaCm && <span className="text-xs gp-text-gold">Captúrala para ver tu categoría de peso.</span>}
-      </div>
+      {mostrar("peso") && (
+        <div className="gp-panel p-3 mb-4 flex flex-wrap items-center gap-3">
+          <span className="text-xs gp-text-muted">Tu estatura (para calcular IMC):</span>
+          <input type="number" className="gp-input" style={{ maxWidth: 100 }} value={altura}
+            onChange={(e) => setAltura(e.target.value)}
+            onBlur={() => onUpdatePerfil(personaId, { alturaCm: altura })} />
+          <span className="text-xs gp-text-muted">cm</span>
+          {!alturaCm && <span className="text-xs gp-text-gold">Captúrala para ver tu categoría de peso.</span>}
+        </div>
+      )}
       <div className="mb-5"><OrdenSelector opciones={opcionesOrden} value={orden} onChange={setOrden} /></div>
 
       <div className="gp-panel overflow-x-auto">
         <table className="gp-table">
-          <thead><tr><Th label="Fecha" sortKey="fecha" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} /><Th label="Peso (kg)" sortKey="peso" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} /><th>IMC</th><th>Categoría</th><th>Glucosa</th><th>Presión</th><th>Colesterol</th><th>Triglicéridos</th><th>Estudio</th><th>Notas</th><th></th></tr></thead>
+          <thead>
+            <tr>
+              <Th label="Fecha" sortKey="fecha" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} />
+              {mostrar("peso") && <><Th label="Peso (kg)" sortKey="peso" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} /><th>IMC</th><th>Categoría</th></>}
+              {mostrar("glucosa") && <th>Glucosa</th>}
+              {mostrar("presion") && <th>Presión</th>}
+              {mostrar("colesterol") && <th>Colesterol</th>}
+              {mostrar("trigliceridos") && <th>Triglicéridos</th>}
+              <th>Estudio</th><th>Notas</th><th></th>
+            </tr>
+          </thead>
           <tbody>
             {ordenados.map((s) => {
               const imc = calcIMC(s.peso, alturaCm);
@@ -9107,13 +9242,17 @@ function Salud({ data, onAdd, onEdit, onRemove, onUpdatePerfil, soloCuidado, onA
               return (
                 <tr key={s.id}>
                   <td className="gp-mono">{s.fecha}{s.hora ? <span className="gp-text-muted"> {s.hora.slice(0, 5)}</span> : ""}</td>
-                  <td className="gp-mono">{s.peso || "—"}</td>
-                  <td className="gp-mono">{imc ? imc.toFixed(1) : "—"}</td>
-                  <td>{cat ? <Badge tone={toneCategoria(cat)}>{cat}</Badge> : "—"}</td>
-                  <td className="gp-mono">{s.glucosa || "—"}</td>
-                  <td className="gp-mono">{s.sistolica && s.diastolica ? `${s.sistolica}/${s.diastolica}` : "—"}</td>
-                  <td className="gp-mono">{s.colesterol || "—"}</td>
-                  <td className="gp-mono">{s.trigliceridos || "—"}</td>
+                  {mostrar("peso") && (
+                    <>
+                      <td className="gp-mono">{s.peso || "—"}</td>
+                      <td className="gp-mono">{imc ? imc.toFixed(1) : "—"}</td>
+                      <td>{cat ? <Badge tone={toneCategoria(cat)}>{cat}</Badge> : "—"}</td>
+                    </>
+                  )}
+                  {mostrar("glucosa") && <td className="gp-mono">{s.glucosa || "—"}</td>}
+                  {mostrar("presion") && <td className="gp-mono">{s.sistolica && s.diastolica ? `${s.sistolica}/${s.diastolica}` : "—"}</td>}
+                  {mostrar("colesterol") && <td className="gp-mono">{s.colesterol || "—"}</td>}
+                  {mostrar("trigliceridos") && <td className="gp-mono">{s.trigliceridos || "—"}</td>}
                   <td>
                     {s.estudio ? (
                       <a href={s.estudio.url} target="_blank" rel="noopener noreferrer" className="gp-text-gold text-xs flex items-center gap-1">
@@ -9126,7 +9265,9 @@ function Salud({ data, onAdd, onEdit, onRemove, onUpdatePerfil, soloCuidado, onA
                 </tr>
               );
             })}
-            {ordenados.length === 0 && <tr><td colSpan={11} className="text-center gp-text-muted py-6">Sin registros de salud.</td></tr>}
+            {ordenados.length === 0 && (
+              <tr><td colSpan={1 + (mostrar("peso") ? 3 : 0) + (mostrar("glucosa") ? 1 : 0) + (mostrar("presion") ? 1 : 0) + (mostrar("colesterol") ? 1 : 0) + (mostrar("trigliceridos") ? 1 : 0) + 3} className="text-center gp-text-muted py-6">Sin registros de salud.</td></tr>
+            )}
           </tbody>
         </table>
       </div>
@@ -9135,9 +9276,67 @@ function Salud({ data, onAdd, onEdit, onRemove, onUpdatePerfil, soloCuidado, onA
 
       {modal && (
         <Modal title={modal.item.id ? "Editar registro" : "Nuevo registro"} onClose={() => setModal(null)}>
-          <SaludForm item={modal.item} onSave={(v) => { modal.item.id ? onEdit(modal.item.id, v) : onAdd(v); setModal(null); }} />
+          <SaludForm item={modal.item} metasSalud={metasSalud} onSave={(v) => { modal.item.id ? onEdit(modal.item.id, v) : onAdd(v); setModal(null); }} />
         </Modal>
       )}
+
+      {metasModal && (
+        <Modal title="Metas e indicadores de Salud" onClose={() => setMetasModal(false)}>
+          <MetasSaludForm metasSalud={metasSalud} onSave={async (v) => { await onUpdatePerfil(personaId, { metasSalud: v }); setMetasModal(false); }} />
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// Fila de configuración de un indicador de Salud dentro de "Metas e indicadores": mostrar/
+// ocultar + meta(s) + fecha objetivo. `campos` es 1 o 2 campos numéricos (presión usa 2).
+function IndicadorMetaRow({ titulo, unidad, valor, campos, onChange }) {
+  return (
+    <div className="gp-panel-hi rounded p-3">
+      <div className="flex items-center justify-between mb-2 gap-2">
+        <p className="text-sm font-medium">{titulo}{unidad ? <span className="gp-text-muted font-normal"> ({unidad})</span> : ""}</p>
+        <label className="flex items-center gap-2 text-xs shrink-0">
+          <input type="checkbox" checked={valor.mostrar !== false} onChange={(e) => onChange({ mostrar: e.target.checked })} /> Mostrar
+        </label>
+      </div>
+      {valor.mostrar !== false && (
+        <div className={campos.length === 2 ? "grid grid-cols-3 gap-2" : "grid grid-cols-2 gap-2"}>
+          {campos.map((c) => (
+            <Field key={c.key} label={c.label}><input type="number" className="gp-input" value={valor[c.key] ?? ""} onChange={(e) => onChange({ [c.key]: e.target.value })} /></Field>
+          ))}
+          <Field label="Fecha objetivo"><input type="date" className="gp-input" value={valor.fecha ?? ""} onChange={(e) => onChange({ fecha: e.target.value })} /></Field>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MetasSaludForm({ metasSalud, onSave }) {
+  const [v, setV] = useState(() => ({
+    peso: { mostrar: true, ...metasSalud?.peso },
+    glucosa: { mostrar: true, ...metasSalud?.glucosa },
+    presion: { mostrar: true, ...metasSalud?.presion },
+    colesterol: { mostrar: true, ...metasSalud?.colesterol },
+    trigliceridos: { mostrar: true, ...metasSalud?.trigliceridos },
+  }));
+  const [guardando, setGuardando] = useState(false);
+  const set = (key, patch) => setV((prev) => ({ ...prev, [key]: { ...prev[key], ...patch } }));
+  const guardar = async () => { setGuardando(true); await onSave(v); setGuardando(false); };
+
+  return (
+    <div>
+      <p className="text-xs gp-text-muted mb-3">Elige qué indicadores usar y, si quieres, una meta con fecha objetivo. Los que desactives dejan de pedirse al registrar y de mostrarse en el historial y las gráficas. Peso es el principal — el único con una tarjeta de avance en Tendencias.</p>
+      <div className="flex flex-col gap-3">
+        <IndicadorMetaRow titulo="Peso" unidad="kg" valor={v.peso} campos={[{ key: "meta", label: "Meta" }]} onChange={(patch) => set("peso", patch)} />
+        <IndicadorMetaRow titulo="Glucosa" unidad="mg/dL" valor={v.glucosa} campos={[{ key: "meta", label: "Meta" }]} onChange={(patch) => set("glucosa", patch)} />
+        <IndicadorMetaRow titulo="Presión arterial" unidad="mmHg" valor={v.presion}
+          campos={[{ key: "metaSistolica", label: "Meta sistólica" }, { key: "metaDiastolica", label: "Meta diastólica" }]}
+          onChange={(patch) => set("presion", patch)} />
+        <IndicadorMetaRow titulo="Colesterol" unidad="mg/dL" valor={v.colesterol} campos={[{ key: "meta", label: "Meta" }]} onChange={(patch) => set("colesterol", patch)} />
+        <IndicadorMetaRow titulo="Triglicéridos" unidad="mg/dL" valor={v.trigliceridos} campos={[{ key: "meta", label: "Meta" }]} onChange={(patch) => set("trigliceridos", patch)} />
+      </div>
+      <button className="gp-btn w-full py-2 text-sm mt-4 disabled:opacity-70" disabled={guardando} onClick={guardar}>{guardando ? "Guardando…" : "Guardar"}</button>
     </div>
   );
 }
@@ -9153,7 +9352,9 @@ const PERIODOS_TENDENCIA = [
 
 // Una gráfica de línea para un indicador de Salud. Solo usa registros que SÍ tienen ese valor
 // capturado (nunca interpola ni inventa puntos para rellenar huecos, tal como pide la secc. 27).
-function GraficaSalud({ titulo, unidad, puntos, series }) {
+// `metaLines` (opcional) dibuja una línea punteada horizontal por meta configurada en "Metas e
+// indicadores" — [{ value, label, color }], se ignora si no hay meta capturada para ese campo.
+function GraficaSalud({ titulo, unidad, puntos, series, metaLines }) {
   if (puntos.length === 0) {
     return (
       <div className="gp-panel p-4">
@@ -9176,6 +9377,10 @@ function GraficaSalud({ titulo, unidad, puntos, series }) {
               labelFormatter={(label, payload) => payload?.[0]?.payload?.tooltipLabel || label}
             />
             {series.length > 1 && <Legend wrapperStyle={{ fontSize: 11 }} />}
+            {(metaLines || []).map((m, i) => m.value !== null && m.value !== undefined && !isNaN(m.value) && (
+              <ReferenceLine key={i} y={m.value} stroke={m.color || "var(--red)"} strokeDasharray="4 4"
+                label={{ value: m.label || "Meta", fontSize: 10, fill: m.color || "var(--red)", position: "insideTopRight" }} />
+            ))}
             {series.map((s) => (
               <Line key={s.key} type="monotone" dataKey={s.key} name={s.label} stroke={s.color} strokeWidth={2} dot={{ r: 3 }} connectNulls={false} />
             ))}
@@ -9186,7 +9391,39 @@ function GraficaSalud({ titulo, unidad, puntos, series }) {
   );
 }
 
-function SaludTendencias({ salud }) {
+// Tarjeta de avance hacia la meta de peso (el único indicador con resumen dedicado, por ser
+// "el principal") — cuánto falta desde el último peso registrado y días restantes a la fecha
+// objetivo. `salud` va SIN filtrar por periodo: el avance debe verse contra el dato más
+// reciente que exista, no solo contra lo que cae dentro del periodo elegido en Tendencias.
+function ResumenMetaPeso({ salud, metaPeso }) {
+  const metaNum = Number(metaPeso?.meta);
+  if (!metaPeso?.meta || isNaN(metaNum)) return null;
+  const ultimo = [...salud].filter((s) => s.peso !== null && s.peso !== undefined && s.peso !== "")
+    .sort((a, b) => (b.fecha + (b.hora || "")).localeCompare(a.fecha + (a.hora || "")))[0];
+  if (!ultimo) return null;
+  const faltante = Number(ultimo.peso) - metaNum;
+  const diasRestantes = metaPeso.fecha ? Math.ceil((new Date(metaPeso.fecha + "T00:00:00") - new Date()) / 86400000) : null;
+  return (
+    <div className="gp-panel p-4 mb-4 flex flex-wrap items-center gap-5">
+      <div>
+        <p className="text-xs gp-text-muted">Meta de peso</p>
+        <p className="gp-serif text-xl">
+          {Math.abs(faltante) < 0.05 ? "¡Meta alcanzada!" : `${Math.abs(faltante).toFixed(1)} kg por ${faltante > 0 ? "bajar" : "subir"}`}
+        </p>
+        <p className="text-xs gp-text-muted">Último registro: {ultimo.peso} kg del {ultimo.fecha} · meta {metaNum} kg</p>
+      </div>
+      {metaPeso.fecha && (
+        <div>
+          <p className="text-xs gp-text-muted">Fecha objetivo</p>
+          <p className="text-sm">{metaPeso.fecha}</p>
+          <p className="text-xs gp-text-muted">{diasRestantes >= 0 ? `${diasRestantes} día${diasRestantes === 1 ? "" : "s"} restantes` : "Fecha vencida"}</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SaludTendencias({ salud, metasSalud }) {
   const [periodo, setPeriodo] = useState("3m");
   const diasPeriodo = PERIODOS_TENDENCIA.find((p) => p.key === periodo)?.dias;
   const desde = diasPeriodo ? new Date(Date.now() - diasPeriodo * 86400000).toISOString().slice(0, 10) : null;
@@ -9204,27 +9441,43 @@ function SaludTendencias({ salud }) {
   const puntosPresion = enRango.filter((s) => s.sistolica != null && s.sistolica !== "" && s.diastolica != null && s.diastolica !== "")
     .map((s) => ({ etiqueta: etiqueta(s), tooltipLabel: tooltipLabel(s), sistolica: Number(s.sistolica), diastolica: Number(s.diastolica) }));
 
+  const mostrar = (key) => metasSalud?.[key]?.mostrar !== false;
+  const metaPeso = metasSalud?.peso;
+  const metaGlucosa = metasSalud?.glucosa;
+  const metaPresion = metasSalud?.presion;
+  const metaColesterol = metasSalud?.colesterol;
+  const metaTrigliceridos = metasSalud?.trigliceridos;
+  const lineaMeta = (valor) => { const n = Number(valor?.meta); return valor?.meta && !isNaN(n) ? [{ value: n, label: "Meta", color: "var(--red)" }] : []; };
+
   return (
     <div>
+      {mostrar("peso") && <ResumenMetaPeso salud={salud || []} metaPeso={metaPeso} />}
       <div className="flex flex-wrap gap-1 mb-4">
         {PERIODOS_TENDENCIA.map((p) => (
           <button key={p.key} onClick={() => setPeriodo(p.key)} className={`text-xs px-2.5 py-1 rounded-full border ${periodo === p.key ? "gp-btn" : "gp-text-muted"}`}>{p.label}</button>
         ))}
       </div>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <GraficaSalud titulo="Peso" unidad="kg" puntos={puntosDe("peso")} series={[{ key: "peso", label: "Peso", color: "var(--teal)" }]} />
-        <GraficaSalud titulo="Glucosa" unidad="mg/dL" puntos={puntosDe("glucosa")} series={[{ key: "glucosa", label: "Glucosa", color: "var(--gold)" }]} />
-        <GraficaSalud titulo="Presión arterial" unidad="mmHg" puntos={puntosPresion}
-          series={[{ key: "sistolica", label: "Sistólica", color: "var(--red)" }, { key: "diastolica", label: "Diastólica", color: "var(--teal)" }]} />
-        <GraficaSalud titulo="Colesterol" unidad="mg/dL" puntos={puntosDe("colesterol")} series={[{ key: "colesterol", label: "Colesterol", color: "var(--gold)" }]} />
-        <GraficaSalud titulo="Triglicéridos" unidad="mg/dL" puntos={puntosDe("trigliceridos")} series={[{ key: "trigliceridos", label: "Triglicéridos", color: "var(--red)" }]} />
+        {mostrar("peso") && <GraficaSalud titulo="Peso" unidad="kg" puntos={puntosDe("peso")} series={[{ key: "peso", label: "Peso", color: "var(--teal)" }]} metaLines={lineaMeta(metaPeso)} />}
+        {mostrar("glucosa") && <GraficaSalud titulo="Glucosa" unidad="mg/dL" puntos={puntosDe("glucosa")} series={[{ key: "glucosa", label: "Glucosa", color: "var(--gold)" }]} metaLines={lineaMeta(metaGlucosa)} />}
+        {mostrar("presion") && (
+          <GraficaSalud titulo="Presión arterial" unidad="mmHg" puntos={puntosPresion}
+            series={[{ key: "sistolica", label: "Sistólica", color: "var(--red)" }, { key: "diastolica", label: "Diastólica", color: "var(--teal)" }]}
+            metaLines={[
+              ...(metaPresion?.metaSistolica && !isNaN(Number(metaPresion.metaSistolica)) ? [{ value: Number(metaPresion.metaSistolica), label: "Meta sist.", color: "var(--red)" }] : []),
+              ...(metaPresion?.metaDiastolica && !isNaN(Number(metaPresion.metaDiastolica)) ? [{ value: Number(metaPresion.metaDiastolica), label: "Meta diast.", color: "var(--teal)" }] : []),
+            ]}
+          />
+        )}
+        {mostrar("colesterol") && <GraficaSalud titulo="Colesterol" unidad="mg/dL" puntos={puntosDe("colesterol")} series={[{ key: "colesterol", label: "Colesterol", color: "var(--gold)" }]} metaLines={lineaMeta(metaColesterol)} />}
+        {mostrar("trigliceridos") && <GraficaSalud titulo="Triglicéridos" unidad="mg/dL" puntos={puntosDe("trigliceridos")} series={[{ key: "trigliceridos", label: "Triglicéridos", color: "var(--red)" }]} metaLines={lineaMeta(metaTrigliceridos)} />}
       </div>
       <p className="text-xs gp-text-muted mt-3">Solo se muestran las mediciones que realmente capturaste — no se inventan ni interpolan valores para rellenar huecos.</p>
     </div>
   );
 }
 
-function SaludForm({ item, onSave }) {
+function SaludForm({ item, metasSalud, onSave }) {
   const [v, setV] = useState(item);
   const [error, setError] = useState("");
   const [subiendo, setSubiendo] = useState(false);
@@ -9248,28 +9501,36 @@ function SaludForm({ item, onSave }) {
     setSubiendo(false);
   };
 
+  const mostrar = (key) => metasSalud?.[key]?.mostrar !== false;
+
   return (
     <div>
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <Field label="Fecha"><input type="date" className="gp-input" value={v.fecha} onChange={(e) => setV({ ...v, fecha: e.target.value })} /></Field>
         <Field label="Hora"><input type="time" className="gp-input" value={v.hora || ""} onChange={(e) => setV({ ...v, hora: e.target.value })} /></Field>
-        <Field label="Peso (kg)"><input type="number" className="gp-input" value={v.peso} onChange={(e) => setV({ ...v, peso: e.target.value })} /></Field>
+        {mostrar("peso") && <Field label="Peso (kg)"><input type="number" className="gp-input" value={v.peso} onChange={(e) => setV({ ...v, peso: e.target.value })} /></Field>}
       </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <Field label="Glucosa (mg/dL)"><input type="number" className="gp-input" value={v.glucosa} onChange={(e) => setV({ ...v, glucosa: e.target.value })} /></Field>
-        <Field label="Presión arterial (sistólica/diastólica)">
-          <div className="flex items-center gap-2">
-            <input type="number" placeholder="120" className="gp-input" value={v.sistolica || ""} onChange={(e) => setV({ ...v, sistolica: e.target.value })} />
-            <span className="gp-text-muted">/</span>
-            <input type="number" placeholder="80" className="gp-input" value={v.diastolica || ""} onChange={(e) => setV({ ...v, diastolica: e.target.value })} />
-            <span className="text-xs gp-text-muted">mmHg</span>
-          </div>
-        </Field>
-      </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <Field label="Colesterol (mg/dL)"><input type="number" className="gp-input" value={v.colesterol} onChange={(e) => setV({ ...v, colesterol: e.target.value })} /></Field>
-        <Field label="Triglicéridos (mg/dL)"><input type="number" className="gp-input" value={v.trigliceridos} onChange={(e) => setV({ ...v, trigliceridos: e.target.value })} /></Field>
-      </div>
+      {(mostrar("glucosa") || mostrar("presion")) && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {mostrar("glucosa") && <Field label="Glucosa (mg/dL)"><input type="number" className="gp-input" value={v.glucosa} onChange={(e) => setV({ ...v, glucosa: e.target.value })} /></Field>}
+          {mostrar("presion") && (
+            <Field label="Presión arterial (sistólica/diastólica)">
+              <div className="flex items-center gap-2">
+                <input type="number" placeholder="120" className="gp-input" value={v.sistolica || ""} onChange={(e) => setV({ ...v, sistolica: e.target.value })} />
+                <span className="gp-text-muted">/</span>
+                <input type="number" placeholder="80" className="gp-input" value={v.diastolica || ""} onChange={(e) => setV({ ...v, diastolica: e.target.value })} />
+                <span className="text-xs gp-text-muted">mmHg</span>
+              </div>
+            </Field>
+          )}
+        </div>
+      )}
+      {(mostrar("colesterol") || mostrar("trigliceridos")) && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {mostrar("colesterol") && <Field label="Colesterol (mg/dL)"><input type="number" className="gp-input" value={v.colesterol} onChange={(e) => setV({ ...v, colesterol: e.target.value })} /></Field>}
+          {mostrar("trigliceridos") && <Field label="Triglicéridos (mg/dL)"><input type="number" className="gp-input" value={v.trigliceridos} onChange={(e) => setV({ ...v, trigliceridos: e.target.value })} /></Field>}
+        </div>
+      )}
       <Field label="Notas"><textarea className="gp-input" rows={2} value={v.notas} onChange={(e) => setV({ ...v, notas: e.target.value })} /></Field>
       <Field label="Adjuntar estudio (PDF)">
         <input type="file" accept="application/pdf" onChange={handleFile} className="text-xs gp-text-muted" disabled={subiendo} />
