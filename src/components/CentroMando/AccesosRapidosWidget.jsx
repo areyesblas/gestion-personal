@@ -4,13 +4,16 @@
 // solo (ver irACrear en AppLoggedIn). Respeta los mismos permisos que ya filtra el sidebar
 // (navGroupsFiltrados): un colaborador sin acceso a un módulo no ve su acceso rápido.
 
-import { CheckSquare, CalendarClock, FolderKanban, Receipt } from 'lucide-react';
+import { CheckSquare, CalendarClock, FolderKanban, Receipt, Dumbbell } from 'lucide-react';
 
 const ACCESOS = [
   { modulo: 'pendientes', label: 'Nueva tarea', icon: CheckSquare, preset: {} },
   { modulo: 'citas', label: 'Nueva cita', icon: CalendarClock, preset: {} },
   { modulo: 'proyectos', label: 'Nuevo proyecto', icon: FolderKanban, preset: {} },
   { modulo: 'finanzas', label: 'Nuevo gasto', icon: Receipt, preset: { tipo: 'Egreso' } },
+  // Entrenamiento no abre un formulario de "Nuevo" — lleva directo a Salud > Ejercicio > Sesión
+  // (ver Salud/Ejercicio en App.jsx, que interpretan preset.tab/preset.subtab en vez de un item).
+  { modulo: 'salud', label: 'Entrenamiento', icon: Dumbbell, preset: { tab: 'ejercicio', subtab: 'sesion' } },
 ];
 
 export default function AccesosRapidosWidget({ onCrear, modulosPermitidos }) {

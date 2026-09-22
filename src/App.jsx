@@ -3096,7 +3096,8 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
             <Habitos data={data} onAdd={(i) => addItem("habitos", i)} onEdit={(id, p) => editItem("habitos", id, p)} onRemove={(id) => askDelete("habitos", id)} />
           )}
           {view === "salud" && (
-            <Salud data={data} onAdd={(i) => addItem("salud", i)} onEdit={(id, p) => editItem("salud", id, p)} onRemove={(id) => askDelete("salud", id)} onUpdatePerfil={updatePerfilSalud} soloCuidado={esCuidadorSinModuloCompleto} onAddGenerico={addItem} onEditGenerico={editItem} onRemoveGenerico={askDelete} />
+            <Salud data={data} onAdd={(i) => addItem("salud", i)} onEdit={(id, p) => editItem("salud", id, p)} onRemove={(id) => askDelete("salud", id)} onUpdatePerfil={updatePerfilSalud} soloCuidado={esCuidadorSinModuloCompleto} onAddGenerico={addItem} onEditGenerico={editItem} onRemoveGenerico={askDelete}
+              crearAlEntrar={accionRapidaCrear?.modulo === "salud" ? accionRapidaCrear : null} onConsumirCrearAlEntrar={consumirAccionRapidaCrear} />
           )}
           {view === "mi-trabajo" && <MiTrabajo misId={misId} />}
           {view === "mi-calendario" && <MiCalendario misId={misId} />}
@@ -9111,9 +9112,20 @@ function Medicamentos({ data, onAdd, onEdit, onRemove, soloCuidado }) {
 }
 
 /* ---------- Salud ---------- */
-function Salud({ data, onAdd, onEdit, onRemove, onUpdatePerfil, soloCuidado, onAddGenerico, onEditGenerico, onRemoveGenerico }) {
+function Salud({ data, onAdd, onEdit, onRemove, onUpdatePerfil, soloCuidado, onAddGenerico, onEditGenerico, onRemoveGenerico, crearAlEntrar, onConsumirCrearAlEntrar }) {
   const [modal, setModal] = useState(null);
   const [tab, setTab] = useState("historial"); // "historial" | "tendencias" | "ejercicio" | "nutricion"
+  // Acceso rápido "Entrenamiento" del Centro de mando: llega con preset.tab (y preset.subtab
+  // para Ejercicio) en vez de abrir un formulario de "Nuevo" — se guarda aparte en estado local
+  // porque `crearAlEntrar` se limpia (vuelve null) apenas se consume, y Ejercicio lo necesita
+  // ya montado para elegir su pestaña inicial.
+  const [ejercicioAccionInicial, setEjercicioAccionInicial] = useState(null);
+  useEffect(() => {
+    if (!crearAlEntrar?.preset) return;
+    if (crearAlEntrar.preset.tab) setTab(crearAlEntrar.preset.tab);
+    setEjercicioAccionInicial(crearAlEntrar.preset);
+    onConsumirCrearAlEntrar();
+  }, [crearAlEntrar]);
   // Personas con seguimiento de Salud: "Yo" + cualquier Contacto que ya tenga al menos un
   // registro de Salud o un medicamento — nunca una ficha duplicada, siempre viene de Contactos.
   const idsConSeguimiento = [...new Set([
@@ -9203,7 +9215,7 @@ function Salud({ data, onAdd, onEdit, onRemove, onUpdatePerfil, soloCuidado, onA
       </div>
 
       {tab === "ejercicio" ? (
-        <Ejercicio data={data} personaId={personaId} onAdd={onAddGenerico} onEdit={onEditGenerico} onRemove={onRemoveGenerico} />
+        <Ejercicio data={data} personaId={personaId} onAdd={onAddGenerico} onEdit={onEditGenerico} onRemove={onRemoveGenerico} accionInicial={ejercicioAccionInicial} />
       ) : tab === "nutricion" ? (
         <Nutricion data={data} personaId={personaId} onAdd={onAddGenerico} onEdit={onEditGenerico} onRemove={onRemoveGenerico} />
       ) : tab === "tendencias" ? (
@@ -9567,7 +9579,8 @@ const EJERCICIO_VACIO = { ejercicio: "", peso: "", series: "", repeticiones: "",
 
 // Resumen corto de un ejercicio (de rutina o de sesión) según su tipo, para chips/listas.
 function resumenEjercicio(it) {
-  if (it.tipo === "tiempo") return `${it.duracionSegundos || "—"}s trabajo / ${it.descansoSegundos || "—"}s descanso`;
+  const pesoTxt = it.peso ? `${it.peso}kg · ` : "";
+  if (it.tipo === "tiempo") return `${pesoTxt}${it.duracionSegundos || "—"}s trabajo / ${it.descansoSegundos || "—"}s descanso`;
   return `${it.peso || "—"}kg · ${it.series || "—"}x${it.repeticiones || "—"}`;
 }
 
@@ -9592,6 +9605,7 @@ function NuevoEjercicioForm({ sugerencias, listId, onAdd }) {
         <SelectorTipoEjercicio tipo={tipo} onChange={setTipo} />
       </div>
       <div className="flex flex-wrap items-center gap-2">
+        <input type="number" className="gp-input text-sm" style={{ width: 70 }} placeholder="kg" value={v.peso} onChange={(e) => setV({ ...v, peso: e.target.value })} />
         {tipo === "tiempo" ? (
           <>
             <input type="number" className="gp-input text-sm" style={{ width: 70 }} placeholder="60" value={v.duracionSegundos} onChange={(e) => setV({ ...v, duracionSegundos: e.target.value })} />
@@ -9601,7 +9615,6 @@ function NuevoEjercicioForm({ sugerencias, listId, onAdd }) {
           </>
         ) : (
           <>
-            <input type="number" className="gp-input text-sm" style={{ width: 70 }} placeholder="kg" value={v.peso} onChange={(e) => setV({ ...v, peso: e.target.value })} />
             <input type="number" className="gp-input text-sm" style={{ width: 60 }} placeholder="series" value={v.series} onChange={(e) => setV({ ...v, series: e.target.value })} />
             <span className="text-xs gp-text-muted">x</span>
             <input type="number" className="gp-input text-sm" style={{ width: 60 }} placeholder="reps" value={v.repeticiones} onChange={(e) => setV({ ...v, repeticiones: e.target.value })} />
@@ -9620,8 +9633,8 @@ function NuevoEjercicioForm({ sugerencias, listId, onAdd }) {
   );
 }
 
-function Ejercicio({ data, personaId, onAdd, onEdit, onRemove }) {
-  const [tab, setTab] = useState("rutinas"); // rutinas | sesion | medidas | progreso
+function Ejercicio({ data, personaId, onAdd, onEdit, onRemove, accionInicial }) {
+  const [tab, setTab] = useState(() => accionInicial?.subtab || "rutinas"); // rutinas | sesion | medidas | progreso
   return (
     <div>
       <div className="flex gap-1 mb-4 flex-wrap">
@@ -9753,26 +9766,28 @@ function RutinaItemRow({ item, onEdit, onRemove }) {
         <SelectorTipoEjercicio tipo={v.tipo} onChange={cambiarTipo} />
         <IconBtn onClick={onRemove}><Trash2 size={13} /></IconBtn>
       </div>
-      {esTiempo ? (
-        <div className="flex items-center gap-2">
-          <input type="number" className="gp-input text-sm" style={{ width: 70 }} placeholder="60" value={v.duracionSegundos ?? ""}
-            onChange={(e) => setV({ ...v, duracionSegundos: e.target.value })} onBlur={() => onEdit({ duracionSegundos: v.duracionSegundos })} />
-          <span className="text-xs gp-text-muted">seg trabajo</span>
-          <input type="number" className="gp-input text-sm" style={{ width: 70 }} placeholder="30" value={v.descansoSegundos ?? ""}
-            onChange={(e) => setV({ ...v, descansoSegundos: e.target.value })} onBlur={() => onEdit({ descansoSegundos: v.descansoSegundos })} />
-          <span className="text-xs gp-text-muted">seg descanso</span>
-        </div>
-      ) : (
-        <div className="flex items-center gap-2">
-          <input type="number" className="gp-input text-sm" style={{ width: 70 }} placeholder="kg" value={v.peso ?? ""}
-            onChange={(e) => setV({ ...v, peso: e.target.value })} onBlur={() => onEdit({ peso: v.peso })} />
-          <input type="number" className="gp-input text-sm" style={{ width: 60 }} placeholder="series" value={v.series ?? ""}
-            onChange={(e) => setV({ ...v, series: e.target.value })} onBlur={() => onEdit({ series: v.series })} />
-          <span className="text-xs gp-text-muted">x</span>
-          <input type="number" className="gp-input text-sm" style={{ width: 60 }} placeholder="reps" value={v.repeticiones ?? ""}
-            onChange={(e) => setV({ ...v, repeticiones: e.target.value })} onBlur={() => onEdit({ repeticiones: v.repeticiones })} />
-        </div>
-      )}
+      <div className="flex flex-wrap items-center gap-2">
+        <input type="number" className="gp-input text-sm" style={{ width: 70 }} placeholder="kg" value={v.peso ?? ""}
+          onChange={(e) => setV({ ...v, peso: e.target.value })} onBlur={() => onEdit({ peso: v.peso })} />
+        {esTiempo ? (
+          <>
+            <input type="number" className="gp-input text-sm" style={{ width: 70 }} placeholder="60" value={v.duracionSegundos ?? ""}
+              onChange={(e) => setV({ ...v, duracionSegundos: e.target.value })} onBlur={() => onEdit({ duracionSegundos: v.duracionSegundos })} />
+            <span className="text-xs gp-text-muted">seg trabajo</span>
+            <input type="number" className="gp-input text-sm" style={{ width: 70 }} placeholder="30" value={v.descansoSegundos ?? ""}
+              onChange={(e) => setV({ ...v, descansoSegundos: e.target.value })} onBlur={() => onEdit({ descansoSegundos: v.descansoSegundos })} />
+            <span className="text-xs gp-text-muted">seg descanso</span>
+          </>
+        ) : (
+          <>
+            <input type="number" className="gp-input text-sm" style={{ width: 60 }} placeholder="series" value={v.series ?? ""}
+              onChange={(e) => setV({ ...v, series: e.target.value })} onBlur={() => onEdit({ series: v.series })} />
+            <span className="text-xs gp-text-muted">x</span>
+            <input type="number" className="gp-input text-sm" style={{ width: 60 }} placeholder="reps" value={v.repeticiones ?? ""}
+              onChange={(e) => setV({ ...v, repeticiones: e.target.value })} onBlur={() => onEdit({ repeticiones: v.repeticiones })} />
+          </>
+        )}
+      </div>
     </div>
   );
 }
@@ -9781,6 +9796,15 @@ function SesionEjercicio({ data, personaId, onAdd, onEdit, onRemove }) {
   const [sesionActivaId, setSesionActivaId] = useState(null);
   const [modalIniciar, setModalIniciar] = useState(false);
   const hoy = todayISO();
+
+  // Al entrar (o cambiar de persona), retoma sola la sesión de hoy si ya existe — así el
+  // acceso rápido "Entrenamiento" del Centro de mando lleva directo al entrenamiento en curso
+  // en vez de a una lista vacía que hay que volver a abrir con otro clic.
+  useEffect(() => {
+    const deHoy = (data.sesionesEjercicio || []).find((s) => (s.contactoId || null) === personaId && s.fecha === hoy);
+    setSesionActivaId(deHoy ? deHoy.id : null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [personaId]);
 
   const rutinasVigentes = (data.rutinasEjercicio || []).filter((r) => (r.contactoId || null) === personaId && r.fechaInicio <= hoy && (!r.fechaFin || r.fechaFin >= hoy));
   const itemsDeRutina = (rutinaId) => (data.rutinaEjercicioItems || []).filter((it) => it.rutinaId === rutinaId).sort((a, b) => (a.orden || 0) - (b.orden || 0));
@@ -9875,10 +9899,10 @@ function SesionItemRow({ item, onEdit, onRemove }) {
           </div>
         </button>
         <span className={`text-sm flex-1 min-w-[100px] ${v.hecho ? "line-through gp-text-muted" : ""}`}>{v.ejercicio}</span>
+        <input type="number" className="gp-input text-sm" style={{ width: 70 }} placeholder="kg" value={v.peso ?? ""}
+          onChange={(e) => setV({ ...v, peso: e.target.value })} onBlur={() => onEdit({ peso: v.peso })} />
         {!esTiempo && (
           <>
-            <input type="number" className="gp-input text-sm" style={{ width: 70 }} placeholder="kg" value={v.peso ?? ""}
-              onChange={(e) => setV({ ...v, peso: e.target.value })} onBlur={() => onEdit({ peso: v.peso })} />
             <input type="number" className="gp-input text-sm" style={{ width: 60 }} placeholder="series" value={v.series ?? ""}
               onChange={(e) => setV({ ...v, series: e.target.value })} onBlur={() => onEdit({ series: v.series })} />
             <span className="text-xs gp-text-muted">x</span>
