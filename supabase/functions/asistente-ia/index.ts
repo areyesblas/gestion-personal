@@ -87,6 +87,7 @@ const MODULOS_DISPONIBLES = [
   "proyectos", "pendientes", "notas", "finanzas", "citas", "contactos",
   "salud", "medicamentos", "habitos", "actividades", "documentos", "patrimonio",
   "activos", "apartados", "eventos", "campanas", "regalos", "metas", "facturas",
+  "rutinas_ejercicio", "recetas",
 ];
 
 const TOOLS = [
@@ -436,6 +437,151 @@ const TOOLS = [
       required: ["id"],
     },
   },
+  {
+    name: "obtener_entrenamiento_hoy",
+    description: "Trae de un vistazo el dia de hoy en Ejercicio y Nutricion: la rutina vigente (si hay una configurada para hoy, con su lista de ejercicios), la sesion de entrenamiento de hoy si ya se inicio (con cada ejercicio, su id, y si ya esta marcado como hecho -- esos ids se usan despues con marcar_ejercicio_hecho), y las comidas que ya se registraron para hoy. USA ESTA HERRAMIENTA para preguntas como 'que rutina tengo hoy', 'ya empece a entrenar', 'que ejercicios me faltan', 'que tengo de comer hoy'. No requiere parametros.",
+    input_schema: { type: "object", properties: {} },
+  },
+  {
+    name: "progreso_ejercicio",
+    description: "Trae el historial de peso cargado de un ejercicio especifico (solo de sesiones donde ya quedo marcado como hecho), ordenado por fecha -- para responder 'como voy en press banca', 'cuanto le subi a la sentadilla', etc. Si el nombre no coincide exacto, intenta con el mas parecido de los que existan.",
+    input_schema: {
+      type: "object",
+      properties: { nombre_ejercicio: { type: "string" } },
+      required: ["nombre_ejercicio"],
+    },
+  },
+  {
+    name: "iniciar_sesion_ejercicio",
+    description: "Inicia (o retoma si ya existe) la sesion de entrenamiento de HOY. Si se da nombre_rutina, busca esa rutina vigente del usuario (usa buscar_datos con modulo=rutinas_ejercicio primero si no estas seguro del nombre exacto) y precarga sus ejercicios; si no se da, es entrenamiento libre y empieza vacia. Si ya existe una sesion de hoy, la reutiliza en vez de crear otra -- nunca duplica. Devuelve los ejercicios de la sesion con sus ids.",
+    input_schema: {
+      type: "object",
+      properties: { nombre_rutina: { type: "string", description: "Opcional -- nombre de una rutina vigente ya configurada. Si se omite, es entrenamiento libre." } },
+    },
+  },
+  {
+    name: "agregar_ejercicio_a_sesion_hoy",
+    description: "Agrega un ejercicio a la sesion de entrenamiento de HOY (la crea si todavia no existe, como entrenamiento libre). Usa tipo='series' para peso/series/repeticiones (lo normal) o tipo='tiempo' para circuitos de trabajo/descanso en segundos (ej. 'un minuto de burpees, 30 segundos de descanso', tipico de circuitos estilo Planet Fitness). No requiere confirmacion.",
+    input_schema: {
+      type: "object",
+      properties: {
+        ejercicio: { type: "string" },
+        tipo: { type: "string", enum: ["series", "tiempo"], description: "Por defecto 'series'." },
+        peso: { type: "number", description: "Kg, aplica a ambos tipos." },
+        series: { type: "number" },
+        repeticiones: { type: "number" },
+        duracion_segundos: { type: "number", description: "Solo si tipo='tiempo': segundos de trabajo." },
+        descanso_segundos: { type: "number", description: "Solo si tipo='tiempo': segundos de descanso." },
+      },
+      required: ["ejercicio"],
+    },
+  },
+  {
+    name: "marcar_ejercicio_hecho",
+    description: "Marca (o desmarca) como hecho un ejercicio de la sesion de hoy, y de paso puede actualizar lo realmente cargado ese dia (peso/series/repeticiones), por si fue distinto al plan. Usa obtener_entrenamiento_hoy o iniciar_sesion_ejercicio primero para obtener el id exacto del ejercicio dentro de la sesion -- nunca inventes un id. No requiere confirmacion.",
+    input_schema: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "Id del ejercicio DENTRO de la sesion de hoy (no el id de la rutina ni del ejercicio en general)." },
+        hecho: { type: "boolean", description: "true para marcar hecho (default), false para desmarcar." },
+        peso: { type: "number" },
+        series: { type: "number" },
+        repeticiones: { type: "number" },
+      },
+      required: ["id"],
+    },
+  },
+  {
+    name: "crear_rutina_ejercicio",
+    description: "Crea una rutina de ejercicio completa con su lista de ejercicios (cada uno 'series' o 'tiempo', igual que en agregar_ejercicio_a_sesion_hoy). Si ya existe una rutina con nombre muy parecido, NO la crea: devuelve posible_duplicado=true. Solo si el usuario confirma, vuelve a llamarla con confirmado=true.",
+    input_schema: {
+      type: "object",
+      properties: {
+        nombre: { type: "string" },
+        fecha_inicio: { type: "string", description: "YYYY-MM-DD, si no se da se usa hoy." },
+        fecha_fin: { type: "string", description: "YYYY-MM-DD, opcional -- sin fecha de fin si se omite." },
+        notas: { type: "string" },
+        ejercicios: {
+          type: "array",
+          description: "Lista de ejercicios de la rutina, en el orden en que se hacen.",
+          items: {
+            type: "object",
+            properties: {
+              ejercicio: { type: "string" },
+              tipo: { type: "string", enum: ["series", "tiempo"] },
+              peso: { type: "number" },
+              series: { type: "number" },
+              repeticiones: { type: "number" },
+              duracion_segundos: { type: "number" },
+              descanso_segundos: { type: "number" },
+            },
+            required: ["ejercicio"],
+          },
+        },
+        confirmado: { type: "boolean" },
+      },
+      required: ["nombre"],
+    },
+  },
+  {
+    name: "registrar_medida_corporal",
+    description: "Registra medidas corporales (cintura, cadera, pecho, biceps, muslo, pantorrilla, cuello, en cm) para el usuario o una persona vinculada. Distinto de crear_medicion_salud, que es peso/glucosa/presion/colesterol/trigliceridos. Usa buscar_datos con modulo=contactos primero si es de un tercero. No requiere confirmacion.",
+    input_schema: {
+      type: "object",
+      properties: {
+        cintura_cm: { type: "number" },
+        cadera_cm: { type: "number" },
+        pecho_cm: { type: "number" },
+        biceps_cm: { type: "number" },
+        muslo_cm: { type: "number" },
+        pantorrilla_cm: { type: "number" },
+        cuello_cm: { type: "number" },
+        notas: { type: "string" },
+        fecha: { type: "string", description: "YYYY-MM-DD, si no se da se usa hoy." },
+        contacto_id: { type: "string", description: "Opcional, solo si es una persona vinculada (no el propio usuario)." },
+      },
+    },
+  },
+  {
+    name: "crear_receta",
+    description: "Crea una receta en el recetario (compartido para toda la cuenta, no por persona): nombre, categoria (Desayuno/Comida/Cena/Snack), porciones, ingredientes e instrucciones de preparacion. Si ya existe una receta con nombre muy parecido, NO la crea: devuelve posible_duplicado=true. Solo si el usuario confirma, vuelve a llamarla con confirmado=true.",
+    input_schema: {
+      type: "object",
+      properties: {
+        nombre: { type: "string" },
+        categoria: { type: "string", enum: ["Desayuno", "Comida", "Cena", "Snack"] },
+        porciones: { type: "number" },
+        ingredientes: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: { nombre: { type: "string" }, cantidad: { type: "string" }, unidad: { type: "string" } },
+            required: ["nombre"],
+          },
+        },
+        instrucciones: { type: "string", description: "Pasos de preparacion." },
+        notas: { type: "string" },
+        confirmado: { type: "boolean" },
+      },
+      required: ["nombre"],
+    },
+  },
+  {
+    name: "registrar_comida",
+    description: "Anota una comida del dia (Desayuno/Comida/Cena/Snack) para el usuario o una persona vinculada. Si nombre_receta coincide con una receta ya guardada, la vincula; si no, se guarda como texto libre en descripcion (ej. 'ensalada de atun' sin receta formal). No requiere confirmacion.",
+    input_schema: {
+      type: "object",
+      properties: {
+        tipo_comida: { type: "string", enum: ["Desayuno", "Comida", "Cena", "Snack"] },
+        nombre_receta: { type: "string", description: "Opcional -- nombre de una receta ya guardada en el recetario." },
+        descripcion: { type: "string", description: "Que se comio, si no viene de una receta guardada." },
+        notas: { type: "string" },
+        fecha: { type: "string", description: "YYYY-MM-DD, si no se da se usa hoy." },
+        contacto_id: { type: "string", description: "Opcional, solo si es para una persona vinculada." },
+      },
+      required: ["tipo_comida"],
+    },
+  },
 ];
 
 const SELECT_POR_MODULO: Record<string, string> = {
@@ -458,12 +604,15 @@ const SELECT_POR_MODULO: Record<string, string> = {
   regalos: "id, descripcion, ocasion, fecha, estatus",
   metas: "id, descripcion, estatus, fecha_objetivo",
   facturas: "id, concepto, total, fecha, estatus",
+  rutinas_ejercicio: "id, nombre, fecha_inicio, fecha_fin, notas",
+  recetas: "id, nombre, categoria, porciones, instrucciones",
 };
 const CAMPO_BUSQUEDA: Record<string, string> = {
   proyectos: "nombre", pendientes: "descripcion", notas: "titulo", finanzas: "concepto", citas: "titulo", contactos: "nombre",
   salud: "notas", medicamentos: "nombre", habitos: "nombre", actividades: "nombre", documentos: "nombre",
   patrimonio: "nombre", activos: "nombre", apartados: "nombre", eventos: "nombre", campanas: "nombre",
   regalos: "descripcion", metas: "descripcion", facturas: "concepto",
+  rutinas_ejercicio: "nombre", recetas: "nombre",
 };
 
 async function ejecutarHerramienta(nombre: string, input: any, userId: string) {
@@ -800,18 +949,185 @@ async function ejecutarHerramienta(nombre: string, input: any, userId: string) {
       const { error } = await admin.from("citas").update({ deleted_at: new Date().toISOString() }).eq("id", input.id).eq("user_id", userId);
       return error ? { error: error.message } : { ok: true };
     }
+    case "obtener_entrenamiento_hoy": {
+      const hoy = fechaHoraActualMexico().iso;
+      const [rutinasResp, sesionResp, comidasResp, recetasResp] = await Promise.all([
+        admin.from("rutinas_ejercicio").select("id, nombre, fecha_inicio, fecha_fin").eq("user_id", userId).is("deleted_at", null).is("contacto_id", null).lte("fecha_inicio", hoy),
+        admin.from("sesiones_ejercicio").select("id, hora").eq("user_id", userId).is("deleted_at", null).is("contacto_id", null).eq("fecha", hoy).limit(1),
+        admin.from("dieta_dias").select("tipo_comida, receta_id, descripcion").eq("user_id", userId).is("deleted_at", null).is("contacto_id", null).eq("fecha", hoy),
+        admin.from("recetas").select("id, nombre").eq("user_id", userId).is("deleted_at", null),
+      ]);
+      const rutinaVigente = (rutinasResp.data || []).find((r: any) => !r.fecha_fin || r.fecha_fin >= hoy) || null;
+      let ejerciciosRutina: any[] = [];
+      if (rutinaVigente) {
+        const { data } = await admin.from("rutina_ejercicio_items").select("ejercicio, tipo, peso, series, repeticiones, duracion_segundos, descanso_segundos").eq("rutina_id", rutinaVigente.id).is("deleted_at", null).order("orden");
+        ejerciciosRutina = data || [];
+      }
+      const sesionHoy = (sesionResp.data || [])[0] || null;
+      let ejerciciosSesion: any[] = [];
+      if (sesionHoy) {
+        const { data } = await admin.from("sesion_ejercicio_items").select("id, ejercicio, tipo, peso, series, repeticiones, duracion_segundos, descanso_segundos, hecho").eq("sesion_id", sesionHoy.id).is("deleted_at", null).order("orden");
+        ejerciciosSesion = data || [];
+      }
+      const recetasPorId = Object.fromEntries((recetasResp.data || []).map((r: any) => [r.id, r.nombre]));
+      const comidasHoy = (comidasResp.data || []).map((c: any) => ({
+        tipo_comida: c.tipo_comida,
+        que: c.receta_id ? (recetasPorId[c.receta_id] || "(receta)") : c.descripcion || null,
+      }));
+      return {
+        rutina_vigente: rutinaVigente ? { nombre: rutinaVigente.nombre, ejercicios: ejerciciosRutina } : null,
+        sesion_hoy: sesionHoy ? { hora: sesionHoy.hora, ejercicios: ejerciciosSesion } : null,
+        comidas_hoy: comidasHoy,
+      };
+    }
+    case "progreso_ejercicio": {
+      const nombreBuscado = normalizarTexto(input.nombre_ejercicio);
+      const { data: sesiones } = await admin.from("sesiones_ejercicio").select("id, fecha").eq("user_id", userId).is("deleted_at", null).is("contacto_id", null);
+      const sesionesPorId = Object.fromEntries((sesiones || []).map((s: any) => [s.id, s.fecha]));
+      const { data: items } = await admin.from("sesion_ejercicio_items").select("sesion_id, ejercicio, peso, hecho").eq("user_id", userId).is("deleted_at", null).eq("hecho", true);
+      const coincidencias = (items || []).filter((it: any) => sesionesPorId[it.sesion_id] && normalizarTexto(it.ejercicio).includes(nombreBuscado));
+      if (coincidencias.length === 0) return { historial: [], mensaje: "No hay ejercicios marcados como hechos con ese nombre." };
+      const historial = coincidencias
+        .map((it: any) => ({ fecha: sesionesPorId[it.sesion_id], ejercicio: it.ejercicio, peso: it.peso }))
+        .sort((a: any, b: any) => String(a.fecha).localeCompare(String(b.fecha)));
+      return { historial };
+    }
+    case "iniciar_sesion_ejercicio": {
+      const hoy = fechaHoraActualMexico().iso;
+      let rutina: any = null;
+      if (input.nombre_rutina) {
+        const nombreBuscado = normalizarTexto(input.nombre_rutina);
+        const { data: rutinas } = await admin.from("rutinas_ejercicio").select("id, nombre, fecha_inicio, fecha_fin").eq("user_id", userId).is("deleted_at", null).is("contacto_id", null).lte("fecha_inicio", hoy);
+        rutina = (rutinas || []).find((r: any) => (!r.fecha_fin || r.fecha_fin >= hoy) && normalizarTexto(r.nombre).includes(nombreBuscado)) || null;
+        if (!rutina) return { error: `No se encontro una rutina vigente parecida a "${input.nombre_rutina}". Usa buscar_datos con modulo=rutinas_ejercicio para revisar los nombres exactos.` };
+      }
+      const { data: existentes } = await admin.from("sesiones_ejercicio").select("id").eq("user_id", userId).is("deleted_at", null).is("contacto_id", null).eq("fecha", hoy).limit(1);
+      let sesionId = existentes?.[0]?.id;
+      if (!sesionId) {
+        sesionId = uid();
+        const { error } = await admin.from("sesiones_ejercicio").insert({ id: sesionId, user_id: userId, contacto_id: null, rutina_id: rutina?.id || null, fecha: hoy, hora: fechaHoraActualMexico().hora });
+        if (error) return { error: error.message };
+        if (rutina) {
+          const { data: itemsRutina } = await admin.from("rutina_ejercicio_items").select("*").eq("rutina_id", rutina.id).is("deleted_at", null).order("orden");
+          for (const it of itemsRutina || []) {
+            await admin.from("sesion_ejercicio_items").insert({
+              id: uid(), user_id: userId, sesion_id: sesionId, rutina_item_id: it.id, ejercicio: it.ejercicio,
+              tipo: it.tipo || "series", peso: it.peso, series: it.series, repeticiones: it.repeticiones,
+              duracion_segundos: it.duracion_segundos, descanso_segundos: it.descanso_segundos, hecho: false, orden: it.orden,
+            });
+          }
+        }
+      }
+      const { data: itemsSesion } = await admin.from("sesion_ejercicio_items").select("id, ejercicio, tipo, peso, series, repeticiones, duracion_segundos, descanso_segundos, hecho").eq("sesion_id", sesionId).is("deleted_at", null).order("orden");
+      return { ok: true, sesion_id: sesionId, rutina: rutina?.nombre || null, ejercicios: itemsSesion || [] };
+    }
+    case "agregar_ejercicio_a_sesion_hoy": {
+      const hoy = fechaHoraActualMexico().iso;
+      const { data: existentes } = await admin.from("sesiones_ejercicio").select("id").eq("user_id", userId).is("deleted_at", null).is("contacto_id", null).eq("fecha", hoy).limit(1);
+      let sesionId = existentes?.[0]?.id;
+      if (!sesionId) {
+        sesionId = uid();
+        const { error } = await admin.from("sesiones_ejercicio").insert({ id: sesionId, user_id: userId, contacto_id: null, rutina_id: null, fecha: hoy, hora: fechaHoraActualMexico().hora });
+        if (error) return { error: error.message };
+      }
+      const { count } = await admin.from("sesion_ejercicio_items").select("id", { count: "exact", head: true }).eq("sesion_id", sesionId).is("deleted_at", null);
+      const row = {
+        id: uid(), user_id: userId, sesion_id: sesionId, rutina_item_id: null, ejercicio: input.ejercicio,
+        tipo: input.tipo || "series", peso: input.peso ?? null, series: input.series ?? null, repeticiones: input.repeticiones ?? null,
+        duracion_segundos: input.duracion_segundos ?? null, descanso_segundos: input.descanso_segundos ?? null,
+        hecho: false, orden: count || 0,
+      };
+      const { error } = await admin.from("sesion_ejercicio_items").insert(row);
+      return error ? { error: error.message } : { ok: true, id: row.id, sesion_id: sesionId };
+    }
+    case "marcar_ejercicio_hecho": {
+      const { data: existente } = await admin.from("sesion_ejercicio_items").select("id, ejercicio, sesion_id").eq("id", input.id).eq("user_id", userId).maybeSingle();
+      if (!existente) return { error: "No se encontro ese ejercicio en ninguna sesion (o no te pertenece). Usa obtener_entrenamiento_hoy primero para conseguir el id correcto." };
+      const cambios: any = { hecho: input.hecho !== false };
+      for (const campo of ["peso", "series", "repeticiones"]) {
+        if (input[campo] !== undefined) cambios[campo] = input[campo];
+      }
+      const { error } = await admin.from("sesion_ejercicio_items").update(cambios).eq("id", input.id).eq("user_id", userId);
+      return error ? { error: error.message } : { ok: true };
+    }
+    case "crear_rutina_ejercicio": {
+      if (input.confirmado !== true) {
+        const dup = await buscarPosibleDuplicado("rutinas_ejercicio", "nombre", input.nombre, userId, { contacto_id: null });
+        if (dup) return { posible_duplicado: true, existente: dup, mensaje_para_usuario: `Ya tienes una rutina parecida: "${dup.nombre}". ¿Creo una nueva de todas formas o te refieres a esa?` };
+      }
+      const rutinaId = uid();
+      const row = {
+        id: rutinaId, user_id: userId, contacto_id: null, nombre: input.nombre,
+        fecha_inicio: input.fecha_inicio || fechaHoraActualMexico().iso, fecha_fin: input.fecha_fin || null, notas: input.notas || null,
+      };
+      const { error } = await admin.from("rutinas_ejercicio").insert(row);
+      if (error) return { error: error.message };
+      const ejercicios = Array.isArray(input.ejercicios) ? input.ejercicios : [];
+      for (let i = 0; i < ejercicios.length; i++) {
+        const ej = ejercicios[i];
+        await admin.from("rutina_ejercicio_items").insert({
+          id: uid(), user_id: userId, rutina_id: rutinaId, ejercicio: ej.ejercicio, tipo: ej.tipo || "series",
+          peso: ej.peso ?? null, series: ej.series ?? null, repeticiones: ej.repeticiones ?? null,
+          duracion_segundos: ej.duracion_segundos ?? null, descanso_segundos: ej.descanso_segundos ?? null, orden: i,
+        });
+      }
+      return { ok: true, id: rutinaId, ejercicios_agregados: ejercicios.length };
+    }
+    case "registrar_medida_corporal": {
+      const row: any = {
+        id: uid(), user_id: userId, fecha: input.fecha || fechaHoraActualMexico().iso, contacto_id: input.contacto_id || null,
+        cintura_cm: input.cintura_cm ?? null, cadera_cm: input.cadera_cm ?? null, pecho_cm: input.pecho_cm ?? null,
+        biceps_cm: input.biceps_cm ?? null, muslo_cm: input.muslo_cm ?? null, pantorrilla_cm: input.pantorrilla_cm ?? null,
+        cuello_cm: input.cuello_cm ?? null, notas: input.notas || null,
+      };
+      const { error } = await admin.from("medidas_corporales").insert(row);
+      return error ? { error: error.message } : { ok: true, id: row.id };
+    }
+    case "crear_receta": {
+      if (input.confirmado !== true) {
+        const dup = await buscarPosibleDuplicado("recetas", "nombre", input.nombre, userId);
+        if (dup) return { posible_duplicado: true, existente: dup, mensaje_para_usuario: `Ya tienes una receta parecida: "${dup.nombre}". ¿Creo una nueva de todas formas o te refieres a esa?` };
+      }
+      const row = {
+        id: uid(), user_id: userId, nombre: input.nombre, categoria: input.categoria || null,
+        porciones: input.porciones ?? null, ingredientes: Array.isArray(input.ingredientes) ? input.ingredientes : [],
+        instrucciones: input.instrucciones || null, notas: input.notas || null,
+      };
+      const { error } = await admin.from("recetas").insert(row);
+      return error ? { error: error.message } : { ok: true, id: row.id };
+    }
+    case "registrar_comida": {
+      let recetaId: string | null = null;
+      if (input.nombre_receta) {
+        const nombreBuscado = normalizarTexto(input.nombre_receta);
+        const { data: recetas } = await admin.from("recetas").select("id, nombre").eq("user_id", userId).is("deleted_at", null);
+        const match = (recetas || []).find((r: any) => normalizarTexto(r.nombre) === nombreBuscado)
+          || (recetas || []).find((r: any) => normalizarTexto(r.nombre).includes(nombreBuscado) || nombreBuscado.includes(normalizarTexto(r.nombre)));
+        recetaId = match?.id || null;
+      }
+      const row = {
+        id: uid(), user_id: userId, contacto_id: input.contacto_id || null,
+        fecha: input.fecha || fechaHoraActualMexico().iso, tipo_comida: input.tipo_comida,
+        receta_id: recetaId, descripcion: recetaId ? null : (input.descripcion || input.nombre_receta || null),
+        notas: input.notas || null,
+      };
+      const { error } = await admin.from("dieta_dias").insert(row);
+      return error ? { error: error.message } : { ok: true, id: row.id, receta_vinculada: !!recetaId };
+    }
     default:
       return { error: "Herramienta desconocida." };
   }
 }
 
-const SYSTEM_PROMPT = `Eres Arkey, el asistente dentro de ARKEYONE, un sistema operativo personal para proyectos, finanzas, salud, habitos, contactos, diario y mas. Hablas espanol de Mexico, tono cercano, natural y directo -- como platicar con alguien de confianza que ademas conoce a detalle toda tu informacion, no como un menu de comandos.
+const SYSTEM_PROMPT = `Eres Arkey, el asistente dentro de ARKEYONE, un sistema operativo personal para proyectos, finanzas, salud, ejercicio, nutricion, habitos, contactos, diario y mas. Hablas espanol de Mexico, tono cercano, natural y directo -- como platicar con alguien de confianza que ademas conoce a detalle toda tu informacion, no como un menu de comandos.
 
 No eres solo un buscador de datos: eres un acompañante conversacional. Si el usuario te cuenta algo de su dia, te pregunta tu opinion sobre un tema que no tiene nada que ver con ARKEYONE, o simplemente quiere platicar, respondele como lo haria un amigo con criterio propio -- con interes genuino, opiniones cuando las pidan, humor cuando venga al caso -- sin forzar la conversacion de regreso a "tus datos" ni actuar como si solo pudieras hablar de la app. Usa tus herramientas SOLO cuando la conversacion realmente lo pida.
 
 Tienes memoria de la conversacion: los mensajes anteriores de esta misma charla ya vienen incluidos, asi que puedes referirte a lo que se dijo antes sin pedir que te lo repitan.
 
-Puedes leer CUALQUIER modulo real del usuario con buscar_datos (proyectos, tareas, finanzas, salud, habitos, diario, contactos, citas, documentos, patrimonio, activos digitales, apartados, eventos, campanas, regalos, metas, facturas) y tambien crear informacion en varios de ellos. Antes de crear algo ligado a un proyecto existente o registrar un avance, usa buscar_datos para encontrar el id correcto -- nunca inventes un id.
+Puedes leer CUALQUIER modulo real del usuario con buscar_datos (proyectos, tareas, finanzas, salud, habitos, diario, contactos, citas, documentos, patrimonio, activos digitales, apartados, eventos, campanas, regalos, metas, facturas, rutinas de ejercicio, recetas) y tambien crear informacion en varios de ellos. Antes de crear algo ligado a un proyecto existente o registrar un avance, usa buscar_datos para encontrar el id correcto -- nunca inventes un id.
+
+EJERCICIO Y NUTRICION: para el dia de hoy (que rutina toca, si ya empezo a entrenar, que ejercicios lleva marcados como hechos, que tiene de comer), usa obtener_entrenamiento_hoy -- es mas directo que buscar_datos porque ya junta rutina+sesion+comidas de hoy en un solo lugar, incluyendo los ids de cada ejercicio de la sesion que necesitas para marcar_ejercicio_hecho. Para preguntas de progreso ("como voy en press banca", "cuanto le subi a la sentadilla") usa progreso_ejercicio. Para registrar un entrenamiento: iniciar_sesion_ejercicio arranca (o retoma) la sesion de hoy, opcionalmente desde una rutina existente; agregar_ejercicio_a_sesion_hoy suma un ejercicio suelto a la sesion de hoy (crea la sesion si hace falta); marcar_ejercicio_hecho marca un ejercicio de la sesion de hoy como hecho (y de paso puede ajustar el peso/series/repeticiones realmente hechas ese dia, por si fue distinto al plan). Los ejercicios "por tiempo" (tipo='tiempo', circuitos de trabajo/descanso en segundos, tipo Planet Fitness) y "por series" (tipo='series', peso/series/repeticiones) se manejan igual en todas estas herramientas -- el usuario decide cual aplica segun como describa el ejercicio. Para nutricion: registrar_comida anota una comida del dia (vinculada a una receta guardada si el nombre coincide, o como texto libre si no); crear_receta guarda una receta nueva con sus ingredientes e instrucciones.
 
 SI PUEDES CONSULTAR los datos reales del usuario -- no es cierto que solo puedas crear cosas. Cuando el usuario pregunte por el estado de algo ("por que no veo mi cita", "ya se guardo eso", "que tengo pendiente", "como va mi diario", "cuanto he gastado"), SIEMPRE usa buscar_datos primero para revisar la informacion real antes de responder. Nunca respondas "no tengo herramientas para consultar eso" sin haber intentado buscar_datos primero -- casi siempre si puedes.
 
@@ -821,7 +1137,7 @@ Cuando el usuario pida un consejo, un resumen general, o haga una pregunta abier
 
 Si el usuario pide algo ambiguo (por ejemplo, no queda claro a cual proyecto se refiere porque hay varias coincidencias, o no encuentras ninguna), pregunta antes de actuar en vez de adivinar. Para el resto de las acciones -- crear, actualizar montos que no cambian el monto ni cancelan nada, agendar, etc. -- ejecutalas directo sin pedir confirmacion de mas, el usuario ya te lo pidio.
 
-PREVENCION DE DUPLICADOS: crear_nota, crear_idea_proyecto, crear_pendiente, crear_contacto, crear_habito, crear_patrimonio, crear_apartado, crear_meta, crear_evento y crear_medicamento revisan primero si ya existe algo muy parecido antes de crear. Si la herramienta te devuelve { posible_duplicado: true, existente: {...}, mensaje_para_usuario: "..." }, NO la vuelvas a llamar en ese mismo turno: responde solo con ese mensaje de confirmacion (puedes ajustar el tono) y espera la respuesta del usuario en su siguiente mensaje. Si el usuario confirma que quiere crear uno nuevo de todas formas, llama la misma herramienta otra vez con los mismos datos mas confirmado=true. Si dice que se refiere al que ya existe, usa ese registro (buscar_datos si necesitas mas detalle) en vez de crear uno nuevo. Esto NO aplica a registrar movimientos de finanzas, mediciones de salud o citas -- ahi repetir es normal y esperado, no se revisa duplicado.
+PREVENCION DE DUPLICADOS: crear_nota, crear_idea_proyecto, crear_pendiente, crear_contacto, crear_habito, crear_patrimonio, crear_apartado, crear_meta, crear_evento, crear_medicamento, crear_rutina_ejercicio y crear_receta revisan primero si ya existe algo muy parecido antes de crear. Si la herramienta te devuelve { posible_duplicado: true, existente: {...}, mensaje_para_usuario: "..." }, NO la vuelvas a llamar en ese mismo turno: responde solo con ese mensaje de confirmacion (puedes ajustar el tono) y espera la respuesta del usuario en su siguiente mensaje. Si el usuario confirma que quiere crear uno nuevo de todas formas, llama la misma herramienta otra vez con los mismos datos mas confirmado=true. Si dice que se refiere al que ya existe, usa ese registro (buscar_datos si necesitas mas detalle) en vez de crear uno nuevo. Esto NO aplica a registrar movimientos de finanzas, mediciones de salud/medidas corporales, comidas, avances de ejercicio (marcar_ejercicio_hecho, agregar_ejercicio_a_sesion_hoy) o citas -- ahi repetir es normal y esperado, no se revisa duplicado.
 
 CONFIRMACION PARA ACCIONES SENSIBLES: eliminar_pendiente, eliminar_movimiento, cancelar_cita, y actualizar_movimiento cuando cambia el monto o cancela, tienen un candado real en el servidor: si las llamas sin confirmado=true, NO se ejecutan y te regresan { requiere_confirmacion: true, mensaje_para_usuario: "..." }. Cuando eso pase, responde en ese mismo turno SOLO con ese mensaje de confirmacion en texto (puedes ajustar el tono pero conserva la pregunta) y NO vuelvas a llamar la herramienta todavia. Espera el siguiente mensaje del usuario: si dice que si / confirma / adelante, entonces llama la misma herramienta otra vez con los mismos datos mas confirmado=true. Si dice que no o cambia de opinion, no la llames y confirma que no se hizo nada.
 
