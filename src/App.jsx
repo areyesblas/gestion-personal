@@ -153,10 +153,10 @@ const TIPOS_ATENCION = ["Regalo", "Felicitación", "Condolencia", "Agradecimient
 // Categorías de notificación configurables por el usuario (Configuración > Notificaciones).
 // Cada "tipo" concreto de notificación (medicamento, cita, deuda, etc.) pertenece a una de estas
 // categorías; el usuario activa/desactiva por categoría, no por tipo individual (serían demasiados).
-const CATEGORIAS_NOTIFICACION = ["Recordatorios", "Finanzas", "Salud", "Agenda", "Proyectos", "Colaboradores", "Activos digitales", "Legal"];
+const CATEGORIAS_NOTIFICACION = ["Recordatorios", "Finanzas", "Salud", "Agenda", "Proyectos", "Colaboradores", "Activos digitales", "Documentos"];
 const CATEGORIA_POR_TIPO_NOTIF = {
   medicamento: "Salud", cita: "Agenda", deuda: "Finanzas", cobro_pendiente: "Finanzas",
-  pago_recurrente: "Finanzas", pendiente: "Recordatorios", documento: "Legal",
+  pago_recurrente: "Finanzas", pendiente: "Recordatorios", documento: "Documentos",
   activo_digital: "Activos digitales", apartado: "Finanzas", revision_proyecto: "Proyectos",
   cumpleanos: "Recordatorios", regalo: "Recordatorios", evento: "Agenda", factura: "Finanzas",
   campana: "Proyectos", asignacion: "Colaboradores",
@@ -1729,6 +1729,13 @@ const VIEW_LABELS_EXTRA = {
   papelera: "Papelera",
   colaboradores: "Colaboradores",
   admin: "Administración",
+  // mi-trabajo/mi-calendario/mis-pagos ya no viven en navGroups (solo se agregan ahí cuando se
+  // está viendo la cuenta de alguien más, ver GRUPO_TRABAJO_COLABORADOR) — labelDeVista necesita
+  // esta entrada de respaldo para el breadcrumb cuando el dueño de la cuenta entra a esas vistas
+  // directo (deep-link de notificación, por ejemplo).
+  "mi-trabajo": "Mi trabajo",
+  "mi-calendario": "Mi calendario",
+  "mis-pagos": "Mis pagos",
 };
 
 // Convierte la llave pública VAPID (base64url, como la da el navegador/servidor) al formato
@@ -2708,16 +2715,6 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
       { id: "agenda", label: "Agenda", icon: CalendarRange },
       { id: "notas", label: "Notas", icon: StickyNote },
     ]},
-    // mi-trabajo/mi-calendario/mis-pagos: vista filtrada para cuando alguien ve la cuenta de
-    // otra persona como colaborador. Comportamiento preexistente sin cambios en este rediseño:
-    // como Angel es dueño (modulosPermitidos === null), navGroupsFiltrados no filtra nada y
-    // también los ve — igual que antes de este rediseño, solo que ahora agrupados aparte en
-    // vez de mezclados con Proyectos/Tareas/Equipo.
-    { label: "Trabajo", items: [
-      { id: "mi-trabajo", label: "Mi trabajo", icon: CheckSquare },
-      { id: "mi-calendario", label: "Mi calendario", icon: CalendarClock },
-      { id: "mis-pagos", label: "Mis pagos", icon: Wallet },
-    ]},
     { label: "Principal", items: [
       { id: "pendientes", label: "Tareas", icon: CheckSquare },
       { id: "proyectos", label: "Proyectos e ideas", icon: FolderKanban },
@@ -2739,11 +2736,11 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
       { id: "documentos", label: "Documentos", icon: FileText },
     ]},
     { label: "Personal", items: [
-      { id: "regalos", label: "Atenciones", icon: Gift },
       { id: "actividades", label: "Diario", icon: Activity },
       { id: "eventos", label: "Eventos", icon: Camera },
       { id: "habitos", label: "Hábitos", icon: Flame },
       { id: "salud", label: "Salud", icon: HeartPulse },
+      { id: "regalos", label: "Atenciones", icon: Gift },
     ]},
   ];
 
@@ -2753,13 +2750,27 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
   // Un Cuidador ve Salud/Medicamentos aunque no tenga el módulo completo, si le
   // asignaron al menos una persona a su cargo (dependientesCuidado).
   const esCuidadorSinModuloCompleto = dependientesCuidado.length > 0;
+  // "Trabajo" (mi-trabajo/mi-calendario/mis-pagos) es la vista filtrada que ve un colaborador
+  // dentro de la cuenta de OTRA persona — nunca aparece para el dueño de la cuenta
+  // (modulosPermitidos === null), así que no vive en navGroups: solo se agrega aquí cuando
+  // modulosPermitidos !== null, es decir, cuando de verdad se está viendo la cuenta de alguien más.
+  const GRUPO_TRABAJO_COLABORADOR = { label: "Trabajo", items: [
+    { id: "mi-trabajo", label: "Mi trabajo", icon: CheckSquare },
+    { id: "mi-calendario", label: "Mi calendario", icon: CalendarClock },
+    { id: "mis-pagos", label: "Mis pagos", icon: Wallet },
+  ]};
   const navGroupsFiltrados = modulosPermitidos === null
     ? navGroups
-    : navGroups
-        .map((g) => ({ ...g, items: g.items.filter((it) => it.id === "mi-trabajo" || it.id === "mi-calendario" || it.id === "mis-pagos"
-          || (VIEW_TO_MODULO[it.id] && modulosPermitidos.includes(VIEW_TO_MODULO[it.id]))
-          || (esCuidadorSinModuloCompleto && (it.id === "salud" || it.id === "medicamentos"))) }))
-        .filter((g) => g.items.length > 0);
+    : [
+        GRUPO_TRABAJO_COLABORADOR,
+        ...navGroups
+          .map((g) => ({ ...g, items: g.items.filter((it) =>
+            (VIEW_TO_MODULO[it.id] && modulosPermitidos.includes(VIEW_TO_MODULO[it.id]))
+            // "medicamentos" ya no es un id de navGroups (es tab de Salud) — un cuidador sin
+            // módulo completo solo necesita ver "salud" para llegar a esa pestaña.
+            || (esCuidadorSinModuloCompleto && it.id === "salud")) }))
+          .filter((g) => g.items.length > 0),
+      ];
 
   // Breadcrumb: "dashboard" nunca aparece como paso intermedio (para eso ya está "Inicio" fijo
   // al principio) — ver historialVistas/volverA más arriba.
@@ -5223,7 +5234,7 @@ function ProyectoDetalle({ data, proyectoId, onVolver, onAddTarea, onEditTarea, 
     { key: "resumen", label: "Resumen" },
     { key: "finanzas", label: `Finanzas${finanzasProyecto.length + facturasProyecto.length ? ` (${finanzasProyecto.length + facturasProyecto.length})` : ""}` },
     { key: "marketing", label: `Marketing${campanasProyecto.length ? ` (${campanasProyecto.length})` : ""}` },
-    { key: "legal", label: `Documentos y legal${documentosProyecto.length ? ` (${documentosProyecto.length})` : ""}` },
+    { key: "legal", label: `Documentos${documentosProyecto.length ? ` (${documentosProyecto.length})` : ""}` },
     { key: "contactos", label: `Contactos${contactosProyecto.length ? ` (${contactosProyecto.length})` : ""}` },
   ];
 
@@ -5515,13 +5526,13 @@ function ProyectoDetalle({ data, proyectoId, onVolver, onAddTarea, onEditTarea, 
         <div>
           {!sensibleDesbloqueado ? (
             <button onClick={onDesbloquear} className="text-left">
-              <p className="text-sm gp-text-gold">🔒 Verifica tu contraseña para ver Documentos y legal de este proyecto</p>
+              <p className="text-sm gp-text-gold">🔒 Verifica tu contraseña para ver los documentos de este proyecto</p>
             </button>
           ) : (
             <>
               <div className="flex items-center justify-between mb-2">
                 <p className="text-sm font-medium">Documentos y contratos de este proyecto</p>
-                <button onClick={() => onIrAVista("documentos")} className="text-xs gp-text-gold">Ver en Legal y contratos →</button>
+                <button onClick={() => onIrAVista("documentos")} className="text-xs gp-text-gold">Ver en Documentos →</button>
               </div>
               {documentosProyecto.length === 0 ? (
                 <p className="text-xs gp-text-muted">Sin documentos o contratos ligados a este proyecto.</p>
@@ -8686,7 +8697,7 @@ function ValuacionForm({ onSave }) {
   );
 }
 
-/* ---------- Legal y contratos ---------- */
+/* ---------- Documentos (antes "Legal y contratos", renombrado 22 sept 2026 secc. 9) ---------- */
 function Documentos({ data, onAdd, onEdit, onRemove, onCrearTarea }) {
   const [modal, setModal] = useState(null);
   const [orden, setOrden] = useState("default");
@@ -8717,14 +8728,14 @@ function Documentos({ data, onAdd, onEdit, onRemove, onCrearTarea }) {
   return (
     <div>
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-1">
-        <h2 className="gp-serif text-2xl">Legal y contratos</h2>
+        <h2 className="gp-serif text-2xl">Documentos</h2>
         <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm w-full sm:w-auto"><Plus size={14} /> Nuevo</button>
       </div>
       <p className="text-sm gp-text-muted mb-3">Contratos, registros de marca ante IMPI y demás documentos, por proyecto.</p>
       <div className="mb-2"><OrdenSelector opciones={opcionesOrden} value={orden} onChange={setOrden} /></div>
       <BarraListaEstandar busqueda={busqueda} onBusqueda={setBusqueda} placeholder="Buscar por nombre, tipo, proyecto o notas…"
-        onExportExcel={() => exportarFilasExcel(ordenados, columnasExport, "legal_y_contratos")}
-        onExportPDF={() => exportarFilasPDF(ordenados, columnasExport, "legal_y_contratos", "Legal y contratos", busqueda ? `búsqueda: "${busqueda}"` : "")} />
+        onExportExcel={() => exportarFilasExcel(ordenados, columnasExport, "documentos")}
+        onExportPDF={() => exportarFilasPDF(ordenados, columnasExport, "documentos", "Documentos", busqueda ? `búsqueda: "${busqueda}"` : "")} />
 
       <div className="gp-panel overflow-x-auto">
         <table className="gp-table">
