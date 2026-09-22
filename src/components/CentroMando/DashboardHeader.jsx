@@ -10,8 +10,9 @@
 
 import { useState } from 'react';
 import { Search, Bell, Sliders, Settings, LogOut } from 'lucide-react';
+import WeatherWidget from './WeatherWidget';
 
-export default function DashboardHeader({ primerNombre, avatarUrl, onBuscar, onNotificaciones, notifNoLeidas, onPersonalizarClick, onAbrirConfiguracion, onCerrarSesion }) {
+export default function DashboardHeader({ primerNombre, avatarUrl, onBuscar, onNotificaciones, notifNoLeidas, onPersonalizarClick, onAbrirConfiguracion, onCerrarSesion, ciudad, climaLat, climaLon }) {
   const [menuAbierto, setMenuAbierto] = useState(false);
   const iniciales = (primerNombre || '').slice(0, 2).toUpperCase();
   return (
@@ -26,6 +27,7 @@ export default function DashboardHeader({ primerNombre, avatarUrl, onBuscar, onN
       </button>
 
       <div className="flex items-center gap-3 shrink-0">
+        <WeatherWidget ciudad={ciudad} lat={climaLat} lon={climaLon} onConfigurarCiudad={onAbrirConfiguracion} />
         <button onClick={onPersonalizarClick} className="p-2.5 rounded-xl gp-btn-ghost" title="Personalizar panel" aria-label="Personalizar panel">
           <Sliders size={18} />
         </button>

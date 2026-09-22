@@ -1,21 +1,19 @@
 // src/components/CentroMando/MotivationalCard.jsx
 //
-// Banner motivacional al final del Centro de mando: foto de fondo (atardecer costero) +
+// Banner motivacional al final del Centro de mando: foto de fondo (montañas al amanecer) +
 // frase + wordmark oficial, reutilizando el componente de logo ya existente (sin duplicarlo).
 // El ícono chico arriba a la derecha es un sello adicional (pedido por Angel, 20 sept 2026) —
 // no reemplaza el lockup grande de junto al texto, que sigue siendo la firma principal.
+// La foto de playa que vivía aquí se movió al banner de arriba (DashboardSaludo) — pedido de
+// Angel del 21 sept 2026 de intercambiar cuál imagen va arriba y cuál abajo.
 
 import ArkeyOneLogo from '../auth/ArkeyOneLogo';
-import bannerJpg from '../../assets/dashboard-banner-bg.jpg';
-import bannerWebp from '../../assets/dashboard-banner-bg.webp';
+import bannerJpg from '../../assets/dashboard-banner-montanas.jpg';
 
 export default function MotivationalCard() {
   return (
     <div className="relative rounded-2xl overflow-hidden h-full" style={{ minHeight: 170 }}>
-      <picture className="absolute inset-0 block">
-        <source srcSet={bannerWebp} type="image/webp" />
-        <img src={bannerJpg} alt="" className="absolute inset-0 w-full h-full object-cover" />
-      </picture>
+      <img src={bannerJpg} alt="" className="absolute inset-0 w-full h-full object-cover" />
       <div className="absolute inset-0" style={{ background: 'linear-gradient(120deg, rgba(11,35,72,.82) 0%, rgba(11,35,72,.45) 55%, rgba(11,35,72,.2) 100%)' }} />
       <ArkeyOneLogo variant="icon" width={34} className="absolute top-4 right-4 z-10" />
       <div className="relative z-10 h-full flex flex-col justify-center gap-3 p-6" style={{ minHeight: 170 }}>

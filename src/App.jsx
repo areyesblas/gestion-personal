@@ -432,7 +432,7 @@ const categoriaIMC = (imc) => {
 };
 
 /* ---------- persistencia relacional ---------- */
-const TABLES = ["proyectos", "pendientes", "equipo", "finanzas", "actividades", "activos", "metas", "contactos", "redesMetricas", "documentos", "habitos", "salud", "apartados", "apartadosMovimientos", "eventos", "comentarios", "saldoInicial", "regalos", "facturas", "campanas", "campanaActividades", "patrimonio", "patrimonioValuaciones", "medicamentos", "citas", "notas", "pagosFinanzas"];
+const TABLES = ["proyectos", "pendientes", "equipo", "finanzas", "actividades", "activos", "metas", "contactos", "redesMetricas", "documentos", "habitos", "salud", "apartados", "apartadosMovimientos", "eventos", "comentarios", "saldoInicial", "regalos", "facturas", "campanas", "campanaActividades", "patrimonio", "patrimonioValuaciones", "medicamentos", "citas", "notas", "pagosFinanzas", "rutinasEjercicio", "rutinaEjercicioItems", "sesionesEjercicio", "sesionEjercicioItems", "medidasCorporales", "recetas", "dietaDias"];
 // Deudas ya NO es una tabla propia (Documento Maestro v1.2, secc. 23.11/40): es una vista
 // calculada sobre Finanzas (egresos no recurrentes con saldo pendiente). Esta función se usa
 // en cualquier lugar que antes leía `data.deudas`.
@@ -639,6 +639,16 @@ function labelFor(key, item) {
       return `${item.tipo === "retiro" ? "Retiro" : "Aporte"} del ${item.fecha || "—"}`;
     case "pagosFinanzas":
       return `Pago del ${item.fecha || "—"} · ${fmtMoney(item.monto)}`;
+    case "rutinasEjercicio": case "recetas":
+      return item.nombre || "(sin nombre)";
+    case "rutinaEjercicioItems": case "sesionEjercicioItems":
+      return item.ejercicio || "(sin nombre)";
+    case "sesionesEjercicio":
+      return `Sesión del ${item.fecha || "—"}`;
+    case "medidasCorporales":
+      return `Medidas del ${item.fecha || "—"}`;
+    case "dietaDias":
+      return `${item.tipoComida || "Comida"} del ${item.fecha || "—"}`;
     default:
       return item.id;
   }
@@ -2161,7 +2171,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
       const { data: colabs } = await supabase.from("colaboradores").select("*, colaborador_dependientes(contacto_id)").eq("colaborador_user_id", misId).eq("estatus", "Activo");
       setMisColaboraciones((colabs || []).map((c) => ({ propietarioId: c.propietario_id, propietarioEmail: c.propietario_email, modulos: c.modulos, dependientes: (c.colaborador_dependientes || []).map((d) => d.contacto_id) })));
 
-      const { data: pref } = await supabase.from("preferencias").select("tema, alertas_correo_activas, notif_tipos_desactivados, notif_silencio_activo, notif_silencio_inicio, notif_silencio_fin, notif_anticipacion_citas_min, dashboard_widgets, nombre_mostrar, avatar_url, presupuesto_mensual").eq("user_id", misId).maybeSingle();
+      const { data: pref } = await supabase.from("preferencias").select("tema, alertas_correo_activas, notif_tipos_desactivados, notif_silencio_activo, notif_silencio_inicio, notif_silencio_fin, notif_anticipacion_citas_min, dashboard_widgets, nombre_mostrar, avatar_url, presupuesto_mensual, ciudad, clima_lat, clima_lon").eq("user_id", misId).maybeSingle();
       const temaGuardado = normalizarTema(pref?.tema);
       if (temaGuardado !== tema) setTema(temaGuardado);
       if (pref && pref.alertas_correo_activas === false) setAlertasCorreoActivas(false);
@@ -2174,6 +2184,9 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
       if (pref?.nombre_mostrar) setNombreMostrar(pref.nombre_mostrar);
       if (pref?.avatar_url) setAvatarUrl(pref.avatar_url);
       if (pref?.presupuesto_mensual != null) setPresupuestoMensual(pref.presupuesto_mensual);
+      if (pref?.ciudad) setCiudad(pref.ciudad);
+      if (pref?.clima_lat != null) setClimaLat(pref.clima_lat);
+      if (pref?.clima_lon != null) setClimaLon(pref.clima_lon);
 
       let result = await loadAllTables(misId);
       result = await migrateFromOldBlobIfNeeded(result, misId);
@@ -2245,6 +2258,19 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
     setAvatarUrl(pub.publicUrl);
     await supabase.from("preferencias").upsert({ user_id: misId, avatar_url: pub.publicUrl }, { onConflict: "user_id" });
     return { url: pub.publicUrl };
+  };
+
+  // --- Ciudad para el clima del Centro de mando: se guarda ya geocodificada (lat/lon elegidos
+  // por el usuario entre los resultados de la búsqueda) para no tener que geocodificar de nuevo
+  // en cada carga (ver WeatherWidget). Sin ciudad = el widget de clima no se muestra.
+  const [ciudad, setCiudad] = useState("");
+  const [climaLat, setClimaLat] = useState(null);
+  const [climaLon, setClimaLon] = useState(null);
+  const guardarCiudad = async ({ ciudad: nombre, lat, lon }) => {
+    setCiudad(nombre);
+    setClimaLat(lat);
+    setClimaLon(lon);
+    await supabase.from("preferencias").upsert({ user_id: misId, ciudad: nombre, clima_lat: lat, clima_lon: lon }, { onConflict: "user_id" });
   };
 
   // --- Presupuesto mensual: usado por "Tu progreso" del Centro de mando (gastado del mes /
@@ -2921,6 +2947,9 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
               onCerrarSesion={cerrarSesion}
               presupuestoMensual={presupuestoMensual}
               onGuardarPresupuestoMensual={guardarPresupuestoMensual}
+              ciudad={ciudad}
+              climaLat={climaLat}
+              climaLon={climaLon}
             />
           )}
           {view === "papelera" && <Papelera onRestore={restoreItem} onPermanentDelete={permanentDelete} ownerId={activeOwnerId} />}
@@ -2953,6 +2982,8 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
               guardarNombreMostrar={guardarNombreMostrar}
               avatarUrl={avatarUrl}
               subirAvatar={subirAvatar}
+              ciudad={ciudad}
+              guardarCiudad={guardarCiudad}
             />
           )}
           {view === "proyectos" && (
@@ -3060,7 +3091,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
             <Habitos data={data} onAdd={(i) => addItem("habitos", i)} onEdit={(id, p) => editItem("habitos", id, p)} onRemove={(id) => askDelete("habitos", id)} />
           )}
           {view === "salud" && (
-            <Salud data={data} onAdd={(i) => addItem("salud", i)} onEdit={(id, p) => editItem("salud", id, p)} onRemove={(id) => askDelete("salud", id)} onUpdatePerfil={updatePerfilSalud} soloCuidado={esCuidadorSinModuloCompleto} />
+            <Salud data={data} onAdd={(i) => addItem("salud", i)} onEdit={(id, p) => editItem("salud", id, p)} onRemove={(id) => askDelete("salud", id)} onUpdatePerfil={updatePerfilSalud} soloCuidado={esCuidadorSinModuloCompleto} onAddGenerico={addItem} onEditGenerico={editItem} onRemoveGenerico={askDelete} />
           )}
           {view === "mi-trabajo" && <MiTrabajo misId={misId} />}
           {view === "mi-calendario" && <MiCalendario misId={misId} />}
@@ -3128,6 +3159,16 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
                   if (confirmDelete.key === "activos") {
                     const espejo = data.finanzas.find((f) => f.activoId === confirmDelete.id);
                     if (espejo) removeItem("finanzas", espejo.id);
+                  }
+                  // Borrado suave (deleted_at) — el "on delete cascade" de la base de datos solo
+                  // aplica a borrados definitivos, así que los hijos se borran aparte aquí.
+                  if (confirmDelete.key === "rutinasEjercicio") {
+                    const hijos = data.rutinaEjercicioItems.filter((it) => it.rutinaId === confirmDelete.id).map((it) => it.id);
+                    if (hijos.length) removeItem("rutinaEjercicioItems", hijos[0], hijos.slice(1));
+                  }
+                  if (confirmDelete.key === "sesionesEjercicio") {
+                    const hijos = data.sesionEjercicioItems.filter((it) => it.sesionId === confirmDelete.id).map((it) => it.id);
+                    if (hijos.length) removeItem("sesionEjercicioItems", hijos[0], hijos.slice(1));
                   }
                   removeItem(confirmDelete.key, confirmDelete.id, confirmDelete.extraIds || []);
                   setConfirmDelete(null);
@@ -3354,10 +3395,12 @@ function Configuracion({
   esAdmin, irAAdmin, miEmail,
   notifTiposDesactivados, notifSilencioActivo, notifSilencioInicio, notifSilencioFin, notifAnticipacionCitasMin, guardarPreferenciasNotif,
   nombreMostrar, guardarNombreMostrar, avatarUrl, subirAvatar,
+  ciudad, guardarCiudad,
 }) {
   const [prefsAbierto, setPrefsAbierto] = useState(false);
   const [nombreModalAbierto, setNombreModalAbierto] = useState(false);
   const [avatarModalAbierto, setAvatarModalAbierto] = useState(false);
+  const [ciudadModalAbierto, setCiudadModalAbierto] = useState(false);
   const [confirmarNotif, setConfirmarNotif] = useState(null); // { tipo: 'correo' | 'push', activar: bool }
   const cantidadActivas = CATEGORIAS_NOTIFICACION.length - notifTiposDesactivados.length;
   return (
@@ -3375,6 +3418,7 @@ function Configuracion({
           extra={avatarUrl ? <img src={avatarUrl} alt="" className="w-9 h-9 rounded-full object-cover shrink-0" style={{ border: "1px solid var(--border)" }} /> : null}
         />
         <FilaConfig icon={Contact} label="Nombre para mostrar" sublabel={nombreMostrar ? `Te llamamos "${nombreMostrar}"` : "Usando tu correo — toca para elegir un nombre"} onClick={() => setNombreModalAbierto(true)} />
+        <FilaConfig icon={MapPin} label="Ciudad" sublabel={ciudad ? `${ciudad} — para el clima del Centro de mando` : "Sin configurar — toca para elegir tu ciudad"} onClick={() => setCiudadModalAbierto(true)} />
       </div>
 
       <p className="text-xs gp-text-muted uppercase tracking-wide mb-2">Apariencia</p>
@@ -3487,6 +3531,16 @@ function Configuracion({
           <AvatarForm avatarUrl={avatarUrl} subirAvatar={subirAvatar} onSaved={() => setAvatarModalAbierto(false)} />
         </Modal>
       )}
+
+      {ciudadModalAbierto && (
+        <Modal title="Ciudad" onClose={() => setCiudadModalAbierto(false)}>
+          <CiudadForm
+            ciudad={ciudad}
+            onSave={async (v) => { await guardarCiudad(v); }}
+            onSaved={() => setCiudadModalAbierto(false)}
+          />
+        </Modal>
+      )}
     </div>
   );
 }
@@ -3551,6 +3605,76 @@ function NombreMostrarForm({ nombreMostrar, onSave, onSaved }) {
       >
         {estadoGuardado === "guardando" ? "Guardando…" : estadoGuardado === "guardado" ? "Guardado ✓" : "Guardar"}
       </button>
+    </div>
+  );
+}
+
+// Ciudad para el clima del Centro de mando (WeatherWidget). Busca con la API de geocodificación
+// de Open-Meteo (gratis, sin API key) y deja elegir entre los resultados para evitar ambigüedad
+// (ej. "Guadalajara" existe en México y en España) — se guarda ya con lat/lon resueltos.
+function CiudadForm({ ciudad, onSave, onSaved }) {
+  const [texto, setTexto] = useState(ciudad || "");
+  const [buscando, setBuscando] = useState(false);
+  const [resultados, setResultados] = useState([]);
+  const [error, setError] = useState("");
+  const [guardando, setGuardando] = useState(false);
+
+  const buscar = async () => {
+    if (!texto.trim()) return;
+    setBuscando(true);
+    setError("");
+    setResultados([]);
+    try {
+      const res = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(texto.trim())}&count=5&language=es&format=json`);
+      const json = await res.json();
+      if (!json.results?.length) { setError("No se encontró esa ciudad. Intenta con otro nombre."); return; }
+      setResultados(json.results);
+    } catch {
+      setError("No se pudo buscar — revisa tu conexión.");
+    } finally {
+      setBuscando(false);
+    }
+  };
+
+  const elegir = async (r) => {
+    const nombre = [r.name, r.admin1, r.country].filter(Boolean).join(", ");
+    setGuardando(true);
+    await onSave({ ciudad: nombre, lat: r.latitude, lon: r.longitude });
+    setTimeout(() => onSaved?.(), 700);
+  };
+
+  return (
+    <div>
+      <p className="text-xs gp-text-muted mb-3">Se usa para mostrar el clima junto al buscador del Centro de mando.</p>
+      <div className="flex gap-2 mb-3">
+        <input
+          className="gp-input flex-1"
+          autoFocus
+          placeholder="ej. Ciudad de México"
+          value={texto}
+          onChange={(e) => setTexto(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") buscar(); }}
+        />
+        <button className="gp-btn px-3 py-2 text-sm disabled:opacity-70" disabled={buscando || !texto.trim()} onClick={buscar}>
+          {buscando ? "Buscando…" : "Buscar"}
+        </button>
+      </div>
+      {error && <p className="text-xs gp-text-red mb-2">{error}</p>}
+      {resultados.length > 0 && (
+        <div className="flex flex-col gap-1">
+          {resultados.map((r, i) => (
+            <button
+              key={i}
+              disabled={guardando}
+              onClick={() => elegir(r)}
+              className="gp-btn-ghost text-left px-3 py-2 rounded text-sm disabled:opacity-70"
+            >
+              {[r.name, r.admin1, r.country].filter(Boolean).join(", ")}
+            </button>
+          ))}
+        </div>
+      )}
+      {guardando && <p className="text-xs gp-text-gold mt-2">Guardado ✓</p>}
     </div>
   );
 }
@@ -4126,7 +4250,7 @@ function Papelera({ onRestore, onPermanentDelete, ownerId }) {
   );
 }
 
-function Dashboard({ data, setView, onAddSaldo, onVerProyecto, onEditPendiente, sensibleDesbloqueadoHasta, onDesbloquear, miEmail, notifNoLeidas, onBuscar, onNotificaciones, onAddNota, onEditHabito, modulosPermitidos, onCrearRapido, ordenWidgetsDashboard, onGuardarOrdenWidgets, avatarUrl, onAbrirConfiguracion, onCerrarSesion, presupuestoMensual, onGuardarPresupuestoMensual }) {
+function Dashboard({ data, setView, onAddSaldo, onVerProyecto, onEditPendiente, sensibleDesbloqueadoHasta, onDesbloquear, miEmail, notifNoLeidas, onBuscar, onNotificaciones, onAddNota, onEditHabito, modulosPermitidos, onCrearRapido, ordenWidgetsDashboard, onGuardarOrdenWidgets, avatarUrl, onAbrirConfiguracion, onCerrarSesion, presupuestoMensual, onGuardarPresupuestoMensual, ciudad, climaLat, climaLon }) {
   const [saldoModal, setSaldoModal] = useState(false);
   const [presupuestoModal, setPresupuestoModal] = useState(false);
   const [personalizarModal, setPersonalizarModal] = useState(false);
@@ -4432,6 +4556,9 @@ function Dashboard({ data, setView, onAddSaldo, onVerProyecto, onEditPendiente, 
         onPersonalizarClick={() => setPersonalizarModal(true)}
         onAbrirConfiguracion={onAbrirConfiguracion}
         onCerrarSesion={onCerrarSesion}
+        ciudad={ciudad}
+        climaLat={climaLat}
+        climaLon={climaLon}
       />
       <DashboardSaludo primerNombre={primerNombre} />
       <ResumenCards
@@ -8867,9 +8994,9 @@ function Medicamentos({ data, onAdd, onEdit, onRemove, soloCuidado }) {
 }
 
 /* ---------- Salud ---------- */
-function Salud({ data, onAdd, onEdit, onRemove, onUpdatePerfil, soloCuidado }) {
+function Salud({ data, onAdd, onEdit, onRemove, onUpdatePerfil, soloCuidado, onAddGenerico, onEditGenerico, onRemoveGenerico }) {
   const [modal, setModal] = useState(null);
-  const [tab, setTab] = useState("historial"); // "historial" | "tendencias"
+  const [tab, setTab] = useState("historial"); // "historial" | "tendencias" | "ejercicio" | "nutricion"
   // Personas con seguimiento de Salud: "Yo" + cualquier Contacto que ya tenga al menos un
   // registro de Salud o un medicamento — nunca una ficha duplicada, siempre viene de Contactos.
   const idsConSeguimiento = [...new Set([
@@ -8914,9 +9041,11 @@ function Salud({ data, onAdd, onEdit, onRemove, onUpdatePerfil, soloCuidado }) {
     <div>
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-1">
         <h2 className="gp-serif text-2xl">Salud</h2>
-        <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm w-full sm:w-auto"><Plus size={14} /> Registrar</button>
+        {(tab === "historial" || tab === "tendencias") && (
+          <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm w-full sm:w-auto"><Plus size={14} /> Registrar</button>
+        )}
       </div>
-      <p className="text-sm gp-text-muted mb-4">Peso, glucosa, presión arterial, colesterol, triglicéridos y tus estudios en PDF, todo en un mismo historial.</p>
+      <p className="text-sm gp-text-muted mb-4">Peso, glucosa, presión arterial, colesterol, triglicéridos, ejercicio y nutrición, todo en un mismo lugar.</p>
 
       <div className="flex flex-wrap items-center gap-1 mb-4">
         {personas.map((p) => (
@@ -8944,13 +9073,17 @@ function Salud({ data, onAdd, onEdit, onRemove, onUpdatePerfil, soloCuidado }) {
         </Modal>
       )}
 
-      <div className="flex gap-1 mb-4">
-        {[{ key: "historial", label: "Historial" }, { key: "tendencias", label: "Tendencias" }].map((t) => (
+      <div className="flex gap-1 mb-4 flex-wrap">
+        {[{ key: "historial", label: "Historial" }, { key: "tendencias", label: "Tendencias" }, { key: "ejercicio", label: "Ejercicio" }, { key: "nutricion", label: "Nutrición" }].map((t) => (
           <button key={t.key} onClick={() => setTab(t.key)} className={`text-xs px-3 py-1.5 rounded-full border ${tab === t.key ? "gp-btn" : "gp-text-muted"}`}>{t.label}</button>
         ))}
       </div>
 
-      {tab === "tendencias" ? (
+      {tab === "ejercicio" ? (
+        <Ejercicio data={data} personaId={personaId} onAdd={onAddGenerico} onEdit={onEditGenerico} onRemove={onRemoveGenerico} />
+      ) : tab === "nutricion" ? (
+        <Nutricion data={data} personaId={personaId} onAdd={onAddGenerico} onEdit={onEditGenerico} onRemove={onRemoveGenerico} />
+      ) : tab === "tendencias" ? (
         <SaludTendencias salud={saludPersona} />
       ) : (
       <>
@@ -9145,6 +9278,670 @@ function SaludForm({ item, onSave }) {
         {error && <p className="text-xs gp-text-red mt-1">{error}</p>}
       </Field>
       <button className="gp-btn w-full py-2 text-sm mt-2" disabled={subiendo} onClick={() => onSave(v)}>Guardar</button>
+    </div>
+  );
+}
+
+/* ---------- Ejercicio (sub-sección de Salud) ---------- */
+
+// Nombres de ejercicios ya usados por esta persona (rutinas + sesiones), más frecuentes primero
+// — sugerencias para el campo de texto libre, sin necesitar un catálogo aparte que mantener.
+function sugerenciasEjercicio(data, personaId) {
+  const conteo = {};
+  const contar = (nombre) => { if (!nombre) return; conteo[nombre] = (conteo[nombre] || 0) + 1; };
+  (data.rutinaEjercicioItems || []).forEach((it) => {
+    const rutina = data.rutinasEjercicio.find((r) => r.id === it.rutinaId);
+    if (rutina && (rutina.contactoId || null) === personaId) contar(it.ejercicio);
+  });
+  (data.sesionEjercicioItems || []).forEach((it) => {
+    const sesion = data.sesionesEjercicio.find((s) => s.id === it.sesionId);
+    if (sesion && (sesion.contactoId || null) === personaId) contar(it.ejercicio);
+  });
+  return Object.keys(conteo).sort((a, b) => conteo[b] - conteo[a]);
+}
+
+// Fila para agregar un ejercicio nuevo (a una rutina o a una sesión libre), con autocompletar
+// de los ya usados. `listId` debe ser único por instancia para no chocar datalist en el DOM.
+function NuevoEjercicioForm({ sugerencias, listId, onAdd }) {
+  const [v, setV] = useState({ ejercicio: "", peso: "", series: "", repeticiones: "" });
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <input list={listId} className="gp-input text-sm flex-1 min-w-[140px]" placeholder="Ejercicio" value={v.ejercicio} onChange={(e) => setV({ ...v, ejercicio: e.target.value })} />
+      <input type="number" className="gp-input text-sm" style={{ width: 70 }} placeholder="kg" value={v.peso} onChange={(e) => setV({ ...v, peso: e.target.value })} />
+      <input type="number" className="gp-input text-sm" style={{ width: 60 }} placeholder="series" value={v.series} onChange={(e) => setV({ ...v, series: e.target.value })} />
+      <span className="text-xs gp-text-muted">x</span>
+      <input type="number" className="gp-input text-sm" style={{ width: 60 }} placeholder="reps" value={v.repeticiones} onChange={(e) => setV({ ...v, repeticiones: e.target.value })} />
+      <button
+        className="gp-btn-ghost px-3 py-1.5 text-sm rounded flex items-center gap-1 disabled:opacity-50"
+        disabled={!v.ejercicio.trim()}
+        onClick={() => { onAdd(v); setV({ ejercicio: "", peso: "", series: "", repeticiones: "" }); }}
+      >
+        <Plus size={13} /> Agregar
+      </button>
+      <datalist id={listId}>{sugerencias.map((s) => <option key={s} value={s} />)}</datalist>
+    </div>
+  );
+}
+
+function Ejercicio({ data, personaId, onAdd, onEdit, onRemove }) {
+  const [tab, setTab] = useState("rutinas"); // rutinas | sesion | medidas | progreso
+  return (
+    <div>
+      <div className="flex gap-1 mb-4 flex-wrap">
+        {[{ key: "rutinas", label: "Rutinas" }, { key: "sesion", label: "Sesión" }, { key: "medidas", label: "Medidas" }, { key: "progreso", label: "Progreso" }].map((t) => (
+          <button key={t.key} onClick={() => setTab(t.key)} className={`text-xs px-3 py-1.5 rounded-full border ${tab === t.key ? "gp-btn" : "gp-text-muted"}`}>{t.label}</button>
+        ))}
+      </div>
+      {tab === "rutinas" && <RutinasEjercicio data={data} personaId={personaId} onAdd={onAdd} onEdit={onEdit} onRemove={onRemove} />}
+      {tab === "sesion" && <SesionEjercicio data={data} personaId={personaId} onAdd={onAdd} onEdit={onEdit} onRemove={onRemove} />}
+      {tab === "medidas" && <MedidasCorporales data={data} personaId={personaId} onAdd={onAdd} onEdit={onEdit} onRemove={onRemove} />}
+      {tab === "progreso" && <ProgresoEjercicio data={data} personaId={personaId} />}
+    </div>
+  );
+}
+
+function RutinasEjercicio({ data, personaId, onAdd, onEdit, onRemove }) {
+  const [modalRutina, setModalRutina] = useState(null); // null | rutina base { id?, nombre, fechaInicio, fechaFin, notas }
+  const rutinas = (data.rutinasEjercicio || []).filter((r) => (r.contactoId || null) === personaId)
+    .sort((a, b) => (b.fechaInicio || "").localeCompare(a.fechaInicio || ""));
+  const hoy = todayISO();
+  const vigente = (r) => r.fechaInicio <= hoy && (!r.fechaFin || r.fechaFin >= hoy);
+  const itemsDe = (rutinaId) => (data.rutinaEjercicioItems || []).filter((it) => it.rutinaId === rutinaId).sort((a, b) => (a.orden || 0) - (b.orden || 0));
+  const sugerencias = sugerenciasEjercicio(data, personaId);
+
+  return (
+    <div>
+      <div className="flex justify-end mb-3">
+        <button onClick={() => setModalRutina({ nombre: "", fechaInicio: todayISO(), fechaFin: "", notas: "" })} className="gp-btn flex items-center gap-1 px-3 py-1.5 text-sm"><Plus size={14} /> Nueva rutina</button>
+      </div>
+      <div className="flex flex-col gap-2">
+        {rutinas.map((r) => (
+          <div key={r.id} className="gp-panel p-3">
+            <div className="flex items-center justify-between gap-2 mb-1">
+              <p className="text-sm font-medium">{r.nombre}</p>
+              <div className="flex items-center gap-2">
+                {vigente(r) ? <Badge tone="teal">Vigente</Badge> : <Badge tone="muted">Vencida</Badge>}
+                <IconBtn onClick={() => setModalRutina(r)}><Pencil size={13} /></IconBtn>
+                <IconBtn onClick={() => onRemove("rutinasEjercicio", r.id, { mensaje: "Se borrará la rutina y sus ejercicios configurados." })}><Trash2 size={13} /></IconBtn>
+              </div>
+            </div>
+            <p className="text-xs gp-text-muted mb-2">Del {r.fechaInicio} {r.fechaFin ? `al ${r.fechaFin}` : "· sin fecha de fin"}</p>
+            <div className="flex flex-wrap gap-1">
+              {itemsDe(r.id).map((it) => (
+                <span key={it.id} className="text-xs gp-panel-hi rounded px-2 py-1">{it.ejercicio} · {it.peso || "—"}kg · {it.series || "—"}x{it.repeticiones || "—"}</span>
+              ))}
+              {itemsDe(r.id).length === 0 && <span className="text-xs gp-text-muted">Sin ejercicios — edítala para agregarlos.</span>}
+            </div>
+          </div>
+        ))}
+        {rutinas.length === 0 && <p className="text-sm gp-text-muted py-6 text-center">Sin rutinas todavía.</p>}
+      </div>
+
+      {modalRutina && (
+        <RutinaModal
+          data={data}
+          rutina={modalRutina}
+          personaId={personaId}
+          sugerencias={sugerencias}
+          onAdd={onAdd} onEdit={onEdit} onRemove={onRemove}
+          onClose={() => setModalRutina(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+// Primero se capturan los datos base de la rutina (se guardan de inmediato) y solo después se
+// habilita agregar ejercicios — cada uno se guarda al momento (mismo patrón de autoguardado que
+// el resto de la app), no hay un botón único de "Guardar todo" al final.
+function RutinaModal({ data, rutina, personaId, sugerencias, onAdd, onEdit, onRemove, onClose }) {
+  const [base, setBase] = useState(rutina);
+  const [guardadaBase, setGuardadaBase] = useState(!!rutina.id);
+  const items = (data.rutinaEjercicioItems || []).filter((it) => it.rutinaId === base.id).sort((a, b) => (a.orden || 0) - (b.orden || 0));
+
+  const guardarBase = async () => {
+    if (base.id) {
+      await onEdit("rutinasEjercicio", base.id, { nombre: base.nombre, fechaInicio: base.fechaInicio, fechaFin: base.fechaFin, notas: base.notas });
+    } else {
+      const id = uid();
+      await onAdd("rutinasEjercicio", { nombre: base.nombre, fechaInicio: base.fechaInicio, fechaFin: base.fechaFin, notas: base.notas, id, contactoId: personaId });
+      setBase((b) => ({ ...b, id }));
+    }
+    setGuardadaBase(true);
+  };
+
+  return (
+    <Modal title={rutina.id ? "Editar rutina" : "Nueva rutina"} onClose={onClose}>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <Field label="Nombre"><input className="gp-input" value={base.nombre} onChange={(e) => setBase({ ...base, nombre: e.target.value })} /></Field>
+        <Field label="Notas"><input className="gp-input" value={base.notas || ""} onChange={(e) => setBase({ ...base, notas: e.target.value })} /></Field>
+        <Field label="Vigente desde"><input type="date" className="gp-input" value={base.fechaInicio} onChange={(e) => setBase({ ...base, fechaInicio: e.target.value })} /></Field>
+        <Field label="Vigente hasta (opcional)"><input type="date" className="gp-input" value={base.fechaFin || ""} onChange={(e) => setBase({ ...base, fechaFin: e.target.value })} /></Field>
+      </div>
+      <button className="gp-btn w-full py-2 text-sm mt-1 mb-4 disabled:opacity-50" onClick={guardarBase} disabled={!base.nombre?.trim() || !base.fechaInicio}>
+        {guardadaBase ? "Guardar cambios" : "Crear rutina y agregar ejercicios"}
+      </button>
+
+      {guardadaBase && (
+        <>
+          <p className="text-xs gp-text-muted uppercase tracking-wide mb-2">Ejercicios</p>
+          <div className="flex flex-col gap-2 mb-3">
+            {items.map((it) => (
+              <RutinaItemRow key={it.id} item={it} onEdit={(patch) => onEdit("rutinaEjercicioItems", it.id, patch)} onRemove={() => onRemove("rutinaEjercicioItems", it.id)} />
+            ))}
+            {items.length === 0 && <p className="text-xs gp-text-muted">Sin ejercicios todavía.</p>}
+          </div>
+          <NuevoEjercicioForm sugerencias={sugerencias} listId="sugerencias-ejercicio-rutina"
+            onAdd={(v) => onAdd("rutinaEjercicioItems", { ...v, id: uid(), rutinaId: base.id, orden: items.length })} />
+        </>
+      )}
+    </Modal>
+  );
+}
+
+function RutinaItemRow({ item, onEdit, onRemove }) {
+  const [v, setV] = useState(item);
+  useEffect(() => setV(item), [item.id]);
+  return (
+    <div className="gp-panel-hi rounded p-2 flex flex-wrap items-center gap-2">
+      <input list="sugerencias-ejercicio-rutina" className="gp-input text-sm flex-1 min-w-[140px]" value={v.ejercicio}
+        onChange={(e) => setV({ ...v, ejercicio: e.target.value })} onBlur={() => onEdit({ ejercicio: v.ejercicio })} />
+      <input type="number" className="gp-input text-sm" style={{ width: 70 }} placeholder="kg" value={v.peso ?? ""}
+        onChange={(e) => setV({ ...v, peso: e.target.value })} onBlur={() => onEdit({ peso: v.peso })} />
+      <input type="number" className="gp-input text-sm" style={{ width: 60 }} placeholder="series" value={v.series ?? ""}
+        onChange={(e) => setV({ ...v, series: e.target.value })} onBlur={() => onEdit({ series: v.series })} />
+      <span className="text-xs gp-text-muted">x</span>
+      <input type="number" className="gp-input text-sm" style={{ width: 60 }} placeholder="reps" value={v.repeticiones ?? ""}
+        onChange={(e) => setV({ ...v, repeticiones: e.target.value })} onBlur={() => onEdit({ repeticiones: v.repeticiones })} />
+      <IconBtn onClick={onRemove}><Trash2 size={13} /></IconBtn>
+    </div>
+  );
+}
+
+function SesionEjercicio({ data, personaId, onAdd, onEdit, onRemove }) {
+  const [sesionActivaId, setSesionActivaId] = useState(null);
+  const [modalIniciar, setModalIniciar] = useState(false);
+  const hoy = todayISO();
+
+  const rutinasVigentes = (data.rutinasEjercicio || []).filter((r) => (r.contactoId || null) === personaId && r.fechaInicio <= hoy && (!r.fechaFin || r.fechaFin >= hoy));
+  const itemsDeRutina = (rutinaId) => (data.rutinaEjercicioItems || []).filter((it) => it.rutinaId === rutinaId).sort((a, b) => (a.orden || 0) - (b.orden || 0));
+  const sesiones = (data.sesionesEjercicio || []).filter((s) => (s.contactoId || null) === personaId).sort((a, b) => (b.fecha || "").localeCompare(a.fecha || ""));
+  const itemsDeSesion = (sesionId) => (data.sesionEjercicioItems || []).filter((it) => it.sesionId === sesionId).sort((a, b) => (a.orden || 0) - (b.orden || 0));
+  const sugerencias = sugerenciasEjercicio(data, personaId);
+  const nombreRutina = (id) => data.rutinasEjercicio.find((r) => r.id === id)?.nombre;
+
+  const iniciarSesion = async (rutinaId) => {
+    const sesionId = uid();
+    await onAdd("sesionesEjercicio", { id: sesionId, contactoId: personaId, rutinaId: rutinaId || null, fecha: hoy, hora: horaActualHHMM(), notas: "" });
+    if (rutinaId) {
+      const itemsRutina = itemsDeRutina(rutinaId);
+      for (let i = 0; i < itemsRutina.length; i++) {
+        const it = itemsRutina[i];
+        await onAdd("sesionEjercicioItems", { id: uid(), sesionId, rutinaItemId: it.id, ejercicio: it.ejercicio, peso: it.peso, series: it.series, repeticiones: it.repeticiones, hecho: false, orden: i });
+      }
+    }
+    setSesionActivaId(sesionId);
+    setModalIniciar(false);
+  };
+
+  const sesionActiva = sesiones.find((s) => s.id === sesionActivaId);
+
+  return (
+    <div>
+      {!sesionActiva ? (
+        <div className="flex justify-end mb-3">
+          <button onClick={() => setModalIniciar(true)} className="gp-btn flex items-center gap-1 px-3 py-1.5 text-sm"><Plus size={14} /> Iniciar sesión</button>
+        </div>
+      ) : (
+        <div className="gp-panel p-4 mb-5">
+          <div className="flex items-center justify-between mb-1">
+            <p className="text-sm font-medium">Sesión del {sesionActiva.fecha}{sesionActiva.rutinaId ? ` · ${nombreRutina(sesionActiva.rutinaId) || "Rutina"}` : " · Entrenamiento libre"}</p>
+            <button onClick={() => setSesionActivaId(null)} className="text-xs gp-text-gold shrink-0">Cerrar</button>
+          </div>
+          <div className="flex flex-col gap-2 my-3">
+            {itemsDeSesion(sesionActiva.id).map((it) => (
+              <SesionItemRow key={it.id} item={it} onEdit={(patch) => onEdit("sesionEjercicioItems", it.id, patch)} onRemove={() => onRemove("sesionEjercicioItems", it.id)} />
+            ))}
+            {itemsDeSesion(sesionActiva.id).length === 0 && <p className="text-xs gp-text-muted">Sin ejercicios — agrega el primero abajo.</p>}
+          </div>
+          <NuevoEjercicioForm sugerencias={sugerencias} listId="sugerencias-ejercicio-sesion"
+            onAdd={(v) => onAdd("sesionEjercicioItems", { ...v, id: uid(), sesionId: sesionActiva.id, rutinaItemId: null, hecho: false, orden: itemsDeSesion(sesionActiva.id).length })} />
+        </div>
+      )}
+
+      <p className="text-xs gp-text-muted uppercase tracking-wide mb-2">Sesiones anteriores</p>
+      <div className="flex flex-col gap-1">
+        {sesiones.map((s) => {
+          const its = itemsDeSesion(s.id);
+          const hechos = its.filter((it) => it.hecho).length;
+          return (
+            <div key={s.id} className="gp-panel p-3 flex items-center justify-between gap-2">
+              <button onClick={() => setSesionActivaId(s.id)} className="text-left flex-1 min-w-0">
+                <p className="text-sm">{s.fecha} {s.hora ? <span className="gp-text-muted">{s.hora.slice(0, 5)}</span> : ""} {s.rutinaId ? `· ${nombreRutina(s.rutinaId) || "Rutina"}` : "· Entrenamiento libre"}</p>
+                <p className="text-xs gp-text-muted">{hechos}/{its.length} ejercicios hechos</p>
+              </button>
+              <IconBtn onClick={() => onRemove("sesionesEjercicio", s.id, { mensaje: "Se borrará la sesión y sus ejercicios registrados." })}><Trash2 size={13} /></IconBtn>
+            </div>
+          );
+        })}
+        {sesiones.length === 0 && <p className="text-sm gp-text-muted py-6 text-center">Sin sesiones todavía.</p>}
+      </div>
+
+      {modalIniciar && (
+        <Modal title="Iniciar sesión" onClose={() => setModalIniciar(false)}>
+          <p className="text-xs gp-text-muted mb-3">Elige una rutina vigente para precargar sus ejercicios, o empieza un entrenamiento libre.</p>
+          <div className="flex flex-col gap-1">
+            {rutinasVigentes.map((r) => (
+              <button key={r.id} onClick={() => iniciarSesion(r.id)} className="gp-btn-ghost text-left px-3 py-2 rounded text-sm">{r.nombre}</button>
+            ))}
+            <button onClick={() => iniciarSesion(null)} className="gp-btn-ghost text-left px-3 py-2 rounded text-sm gp-text-gold">Entrenamiento libre</button>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+function SesionItemRow({ item, onEdit, onRemove }) {
+  const [v, setV] = useState(item);
+  useEffect(() => setV(item), [item.id]);
+  const toggleHecho = () => { const hecho = !v.hecho; setV({ ...v, hecho }); onEdit({ hecho }); };
+  return (
+    <div className={`gp-panel-hi rounded p-2 flex flex-wrap items-center gap-2 ${v.hecho ? "opacity-70" : ""}`}>
+      <button onClick={toggleHecho} className="shrink-0" title={v.hecho ? "Marcar como pendiente" : "Marcar como hecho"}>
+        <div className="w-5 h-5 rounded flex items-center justify-center border" style={{ borderColor: v.hecho ? "var(--teal)" : "var(--border)", background: v.hecho ? "var(--teal)" : "transparent" }}>
+          {v.hecho && <Check size={13} color="#fff" />}
+        </div>
+      </button>
+      <span className={`text-sm flex-1 min-w-[120px] ${v.hecho ? "line-through gp-text-muted" : ""}`}>{v.ejercicio}</span>
+      <input type="number" className="gp-input text-sm" style={{ width: 70 }} placeholder="kg" value={v.peso ?? ""}
+        onChange={(e) => setV({ ...v, peso: e.target.value })} onBlur={() => onEdit({ peso: v.peso })} />
+      <input type="number" className="gp-input text-sm" style={{ width: 60 }} placeholder="series" value={v.series ?? ""}
+        onChange={(e) => setV({ ...v, series: e.target.value })} onBlur={() => onEdit({ series: v.series })} />
+      <span className="text-xs gp-text-muted">x</span>
+      <input type="number" className="gp-input text-sm" style={{ width: 60 }} placeholder="reps" value={v.repeticiones ?? ""}
+        onChange={(e) => setV({ ...v, repeticiones: e.target.value })} onBlur={() => onEdit({ repeticiones: v.repeticiones })} />
+      <IconBtn onClick={onRemove}><Trash2 size={13} /></IconBtn>
+    </div>
+  );
+}
+
+const CAMPOS_MEDIDAS = [
+  { key: "cinturaCm", label: "Cintura", unidad: "cm", color: "var(--teal)" },
+  { key: "caderaCm", label: "Cadera", unidad: "cm", color: "var(--gold)" },
+  { key: "pechoCm", label: "Pecho", unidad: "cm", color: "var(--red)" },
+  { key: "bicepsCm", label: "Bíceps", unidad: "cm", color: "var(--teal)" },
+  { key: "musloCm", label: "Muslo", unidad: "cm", color: "var(--gold)" },
+  { key: "pantorrillaCm", label: "Pantorrilla", unidad: "cm", color: "var(--red)" },
+  { key: "cuelloCm", label: "Cuello", unidad: "cm", color: "var(--teal)" },
+];
+
+function MedidasCorporales({ data, personaId, onAdd, onEdit, onRemove }) {
+  const [modal, setModal] = useState(null);
+  const [orden, setOrden] = useState("default");
+  const [ordenDir, setOrdenDir] = useState("asc");
+  const toggleOrden = (key) => { if (orden === key) setOrdenDir((d) => (d === "asc" ? "desc" : "asc")); else { setOrden(key); setOrdenDir("asc"); } };
+  const medidas = (data.medidasCorporales || []).filter((m) => (m.contactoId || null) === personaId);
+  const camposOrden = { fecha: { get: (m) => m.fecha, tipo: "fecha" } };
+  const base = orden === "default" ? [...medidas].sort((a, b) => (b.fecha || "").localeCompare(a.fecha || "")) : medidas;
+  const ordenados = ordenarLista(base, orden, camposOrden, ordenDir);
+  const empty = { fecha: todayISO(), cinturaCm: "", caderaCm: "", pechoCm: "", bicepsCm: "", musloCm: "", pantorrillaCm: "", cuelloCm: "", notas: "", contactoId: personaId };
+  const columnasExport = [{ label: "Fecha", get: (m) => m.fecha }, ...CAMPOS_MEDIDAS.map((c) => ({ label: c.label, get: (m) => m[c.key] })), { label: "Notas", get: (m) => m.notas }];
+
+  return (
+    <div>
+      <div className="flex justify-between items-center mb-3 gap-2 flex-wrap">
+        <OrdenSelector opciones={[{ key: "fecha", label: "fecha" }]} value={orden} onChange={setOrden} />
+        <div className="flex gap-2">
+          <button onClick={() => exportarFilasExcel(ordenados, columnasExport, "medidas-corporales")} className="gp-btn-ghost px-3 py-1.5 text-xs rounded flex items-center gap-1"><Download size={12} /> Excel</button>
+          <button onClick={() => exportarFilasPDF(ordenados, columnasExport, "medidas-corporales", "Medidas corporales")} className="gp-btn-ghost px-3 py-1.5 text-xs rounded flex items-center gap-1"><Download size={12} /> PDF</button>
+          <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center gap-1 px-3 py-1.5 text-sm"><Plus size={14} /> Registrar</button>
+        </div>
+      </div>
+      <div className="gp-panel overflow-x-auto">
+        <table className="gp-table">
+          <thead><tr><Th label="Fecha" sortKey="fecha" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} />{CAMPOS_MEDIDAS.map((c) => <th key={c.key}>{c.label}</th>)}<th>Notas</th><th></th></tr></thead>
+          <tbody>
+            {ordenados.map((m) => (
+              <tr key={m.id}>
+                <td className="gp-mono">{m.fecha}</td>
+                {CAMPOS_MEDIDAS.map((c) => <td key={c.key} className="gp-mono">{m[c.key] || "—"}</td>)}
+                <td className="gp-text-muted">{m.notas}</td>
+                <td><div className="flex gap-1"><IconBtn onClick={() => setModal({ item: m })}><Pencil size={13} /></IconBtn><IconBtn onClick={() => onRemove("medidasCorporales", m.id)}><Trash2 size={13} /></IconBtn></div></td>
+              </tr>
+            ))}
+            {ordenados.length === 0 && <tr><td colSpan={CAMPOS_MEDIDAS.length + 3} className="text-center gp-text-muted py-6">Sin medidas registradas.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+      {modal && (
+        <Modal title={modal.item.id ? "Editar medidas" : "Nuevas medidas"} onClose={() => setModal(null)}>
+          <MedidasForm item={modal.item} onSave={(v) => { modal.item.id ? onEdit("medidasCorporales", modal.item.id, v) : onAdd("medidasCorporales", v); setModal(null); }} />
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+function MedidasForm({ item, onSave }) {
+  const [v, setV] = useState(item);
+  return (
+    <div>
+      <Field label="Fecha"><input type="date" className="gp-input" value={v.fecha} onChange={(e) => setV({ ...v, fecha: e.target.value })} /></Field>
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+        {CAMPOS_MEDIDAS.map((c) => (
+          <Field key={c.key} label={`${c.label} (cm)`}><input type="number" className="gp-input" value={v[c.key]} onChange={(e) => setV({ ...v, [c.key]: e.target.value })} /></Field>
+        ))}
+      </div>
+      <Field label="Notas"><textarea className="gp-input" rows={2} value={v.notas} onChange={(e) => setV({ ...v, notas: e.target.value })} /></Field>
+      <button className="gp-btn w-full py-2 text-sm mt-2" onClick={() => onSave(v)}>Guardar</button>
+    </div>
+  );
+}
+
+function ProgresoEjercicio({ data, personaId }) {
+  const [periodo, setPeriodo] = useState("3m");
+  const diasPeriodo = PERIODOS_TENDENCIA.find((p) => p.key === periodo)?.dias;
+  const desde = diasPeriodo ? new Date(Date.now() - diasPeriodo * 86400000).toISOString().slice(0, 10) : null;
+
+  const sesionesPersona = (data.sesionesEjercicio || []).filter((s) => (s.contactoId || null) === personaId);
+  const sesionesPorId = Object.fromEntries(sesionesPersona.map((s) => [s.id, s]));
+  const itemsHechos = (data.sesionEjercicioItems || []).filter((it) => it.hecho && sesionesPorId[it.sesionId] && (!desde || sesionesPorId[it.sesionId].fecha >= desde));
+
+  const ejerciciosDisponibles = [...new Set(itemsHechos.map((it) => it.ejercicio))].sort((a, b) => a.localeCompare(b, "es"));
+  const [ejercicioSel, setEjercicioSel] = useState("");
+  useEffect(() => { if (!ejerciciosDisponibles.includes(ejercicioSel)) setEjercicioSel(ejerciciosDisponibles[0] || ""); }, [ejerciciosDisponibles.join("|")]);
+
+  const puntosPeso = itemsHechos.filter((it) => it.ejercicio === ejercicioSel && it.peso !== null && it.peso !== undefined && it.peso !== "")
+    .map((it) => {
+      const s = sesionesPorId[it.sesionId];
+      return { etiqueta: s.fecha.slice(5), tooltipLabel: s.fecha, peso: Number(it.peso) };
+    })
+    .sort((a, b) => a.tooltipLabel.localeCompare(b.tooltipLabel));
+
+  const medidas = (data.medidasCorporales || []).filter((m) => (m.contactoId || null) === personaId && m.fecha && (!desde || m.fecha >= desde))
+    .sort((a, b) => a.fecha.localeCompare(b.fecha));
+  const puntosMedida = (campo) => medidas.filter((m) => m[campo] !== null && m[campo] !== undefined && m[campo] !== "")
+    .map((m) => ({ etiqueta: m.fecha.slice(5), tooltipLabel: m.fecha, [campo]: Number(m[campo]) }));
+
+  return (
+    <div>
+      <div className="flex flex-wrap gap-1 mb-4">
+        {PERIODOS_TENDENCIA.map((p) => (
+          <button key={p.key} onClick={() => setPeriodo(p.key)} className={`text-xs px-2.5 py-1 rounded-full border ${periodo === p.key ? "gp-btn" : "gp-text-muted"}`}>{p.label}</button>
+        ))}
+      </div>
+
+      <p className="text-xs gp-text-muted uppercase tracking-wide mb-2">Peso cargado</p>
+      {ejerciciosDisponibles.length === 0 ? (
+        <p className="text-sm gp-text-muted py-4">Aún no hay ejercicios marcados como hechos en este periodo.</p>
+      ) : (
+        <>
+          <select className="gp-input text-sm mb-3" style={{ maxWidth: 260 }} value={ejercicioSel} onChange={(e) => setEjercicioSel(e.target.value)}>
+            {ejerciciosDisponibles.map((e) => <option key={e} value={e}>{e}</option>)}
+          </select>
+          <div className="mb-5">
+            <GraficaSalud titulo={ejercicioSel} unidad="kg" puntos={puntosPeso} series={[{ key: "peso", label: "Peso", color: "var(--teal)" }]} />
+          </div>
+        </>
+      )}
+
+      <p className="text-xs gp-text-muted uppercase tracking-wide mb-2">Medidas corporales</p>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {CAMPOS_MEDIDAS.map((c) => (
+          <GraficaSalud key={c.key} titulo={c.label} unidad={c.unidad} puntos={puntosMedida(c.key)} series={[{ key: c.key, label: c.label, color: c.color }]} />
+        ))}
+      </div>
+      <p className="text-xs gp-text-muted mt-3">Solo se muestran los valores que realmente capturaste.</p>
+    </div>
+  );
+}
+
+/* ---------- Nutrición (sub-sección de Salud) ---------- */
+
+const TIPOS_COMIDA = ["Desayuno", "Comida", "Cena", "Snack"];
+
+function Nutricion({ data, personaId, onAdd, onEdit, onRemove }) {
+  const [tab, setTab] = useState("comidas"); // comidas | recetas | lista
+  return (
+    <div>
+      <div className="flex gap-1 mb-4 flex-wrap">
+        {[{ key: "comidas", label: "Comidas del día" }, { key: "recetas", label: "Recetas" }, { key: "lista", label: "Lista de compras" }].map((t) => (
+          <button key={t.key} onClick={() => setTab(t.key)} className={`text-xs px-3 py-1.5 rounded-full border ${tab === t.key ? "gp-btn" : "gp-text-muted"}`}>{t.label}</button>
+        ))}
+      </div>
+      {tab === "comidas" && <ComidasDelDia data={data} personaId={personaId} onAdd={onAdd} onEdit={onEdit} onRemove={onRemove} />}
+      {tab === "recetas" && <Recetas data={data} onAdd={onAdd} onEdit={onEdit} onRemove={onRemove} />}
+      {tab === "lista" && <ListaCompras data={data} personaId={personaId} />}
+    </div>
+  );
+}
+
+function ComidasDelDia({ data, personaId, onAdd, onEdit, onRemove }) {
+  const [fecha, setFecha] = useState(todayISO());
+  const [copiarModal, setCopiarModal] = useState(false);
+  const comidasDia = (data.dietaDias || []).filter((d) => (d.contactoId || null) === personaId && d.fecha === fecha);
+  const recetas = data.recetas || [];
+  const nombreReceta = (id) => recetas.find((r) => r.id === id)?.nombre;
+
+  const cambiarDia = (delta) => { const d = new Date(fecha + "T00:00:00"); d.setDate(d.getDate() + delta); setFecha(d.toISOString().slice(0, 10)); };
+  const agregar = (tipoComida) => onAdd("dietaDias", { id: uid(), contactoId: personaId, fecha, tipoComida, recetaId: null, descripcion: "", notas: "" });
+
+  const copiarA = async (fechaDestino) => {
+    for (const c of comidasDia) {
+      await onAdd("dietaDias", { id: uid(), contactoId: personaId, fecha: fechaDestino, tipoComida: c.tipoComida, recetaId: c.recetaId, descripcion: c.descripcion, notas: c.notas });
+    }
+    setCopiarModal(false);
+  };
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-4 gap-2 flex-wrap">
+        <div className="flex items-center gap-2">
+          <IconBtn onClick={() => cambiarDia(-1)}><ChevronLeft size={14} /></IconBtn>
+          <input type="date" className="gp-input text-sm" value={fecha} onChange={(e) => setFecha(e.target.value)} />
+          <IconBtn onClick={() => cambiarDia(1)}><ChevronRight size={14} /></IconBtn>
+        </div>
+        <button onClick={() => setCopiarModal(true)} disabled={comidasDia.length === 0} className="gp-btn-ghost px-3 py-1.5 text-xs rounded flex items-center gap-1 disabled:opacity-50"><Copy size={12} /> Copiar día</button>
+      </div>
+
+      <div className="flex flex-col gap-3">
+        {TIPOS_COMIDA.map((tipo) => {
+          const items = comidasDia.filter((c) => c.tipoComida === tipo);
+          return (
+            <div key={tipo} className="gp-panel p-3">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-sm font-medium">{tipo}</p>
+                <button onClick={() => agregar(tipo)} className="text-xs gp-text-gold flex items-center gap-1"><Plus size={12} /> Agregar</button>
+              </div>
+              <div className="flex flex-col gap-2">
+                {items.map((c) => (
+                  <ComidaRow key={c.id} item={c} recetas={recetas} nombreReceta={nombreReceta}
+                    onEdit={(patch) => onEdit("dietaDias", c.id, patch)}
+                    onRemove={() => onRemove("dietaDias", c.id)} />
+                ))}
+                {items.length === 0 && <p className="text-xs gp-text-muted">Nada capturado.</p>}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {copiarModal && (
+        <Modal title="Copiar día" onClose={() => setCopiarModal(false)}>
+          <p className="text-xs gp-text-muted mb-3">Copia las comidas del {fecha} a otro día.</p>
+          <CopiarDiaForm onCopiar={copiarA} />
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+function CopiarDiaForm({ onCopiar }) {
+  const [destino, setDestino] = useState(todayISO());
+  const [copiando, setCopiando] = useState(false);
+  return (
+    <div>
+      <Field label="Copiar a"><input type="date" className="gp-input" value={destino} onChange={(e) => setDestino(e.target.value)} /></Field>
+      <button className="gp-btn w-full py-2 text-sm mt-2 disabled:opacity-70" disabled={copiando} onClick={async () => { setCopiando(true); await onCopiar(destino); }}>
+        {copiando ? "Copiando…" : "Copiar"}
+      </button>
+    </div>
+  );
+}
+
+function ComidaRow({ item, recetas, nombreReceta, onEdit, onRemove }) {
+  const [v, setV] = useState(item);
+  useEffect(() => setV(item), [item.id]);
+  return (
+    <div className="gp-panel-hi rounded p-2 flex flex-wrap items-center gap-2">
+      <select className="gp-input text-sm" style={{ minWidth: 160 }} value={v.recetaId || ""}
+        onChange={(e) => { const recetaId = e.target.value || null; setV({ ...v, recetaId }); onEdit({ recetaId }); }}>
+        <option value="">Sin receta (libre)</option>
+        {recetas.map((r) => <option key={r.id} value={r.id}>{r.nombre}</option>)}
+      </select>
+      {!v.recetaId && (
+        <input className="gp-input text-sm flex-1 min-w-[140px]" placeholder="Qué comiste…" value={v.descripcion || ""}
+          onChange={(e) => setV({ ...v, descripcion: e.target.value })} onBlur={() => onEdit({ descripcion: v.descripcion })} />
+      )}
+      <IconBtn onClick={onRemove}><Trash2 size={13} /></IconBtn>
+    </div>
+  );
+}
+
+function Recetas({ data, onAdd, onEdit, onRemove }) {
+  const [modal, setModal] = useState(null);
+  const [busqueda, setBusqueda] = useState("");
+  const recetas = (data.recetas || []).filter((r) => !busqueda || (r.nombre || "").toLowerCase().includes(busqueda.toLowerCase()))
+    .sort((a, b) => (a.nombre || "").localeCompare(b.nombre || "", "es"));
+
+  return (
+    <div>
+      <div className="flex justify-between items-center mb-3 gap-2 flex-wrap">
+        <input className="gp-input text-sm flex-1 min-w-[180px] max-w-xs" placeholder="Buscar receta…" value={busqueda} onChange={(e) => setBusqueda(e.target.value)} />
+        <button onClick={() => setModal({ item: { nombre: "", categoria: "Comida", porciones: "", ingredientes: [], instrucciones: "", notas: "" } })} className="gp-btn flex items-center gap-1 px-3 py-1.5 text-sm"><Plus size={14} /> Nueva receta</button>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        {recetas.map((r) => (
+          <div key={r.id} className="gp-panel p-3">
+            <div className="flex items-center justify-between gap-2 mb-1">
+              <p className="text-sm font-medium">{r.nombre}</p>
+              <div className="flex items-center gap-1">
+                <IconBtn onClick={() => setModal({ item: r })}><Pencil size={13} /></IconBtn>
+                <IconBtn onClick={() => onRemove("recetas", r.id)}><Trash2 size={13} /></IconBtn>
+              </div>
+            </div>
+            <p className="text-xs gp-text-muted mb-1">{r.categoria}{r.porciones ? ` · ${r.porciones} porciones` : ""}</p>
+            <p className="text-xs gp-text-muted">{(r.ingredientes || []).length} ingredientes</p>
+          </div>
+        ))}
+        {recetas.length === 0 && <p className="text-sm gp-text-muted py-6 text-center col-span-2">Sin recetas todavía.</p>}
+      </div>
+      {modal && (
+        <Modal title={modal.item.id ? "Editar receta" : "Nueva receta"} onClose={() => setModal(null)}>
+          <RecetaForm item={modal.item} onSave={(v) => { modal.item.id ? onEdit("recetas", modal.item.id, v) : onAdd("recetas", { ...v, id: uid() }); setModal(null); }} />
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+function RecetaForm({ item, onSave }) {
+  const [v, setV] = useState({ ...item, ingredientes: item.ingredientes || [] });
+  const agregarIngrediente = () => setV({ ...v, ingredientes: [...v.ingredientes, { nombre: "", cantidad: "", unidad: "" }] });
+  const editarIngrediente = (i, patch) => setV({ ...v, ingredientes: v.ingredientes.map((ing, idx) => (idx === i ? { ...ing, ...patch } : ing)) });
+  const quitarIngrediente = (i) => setV({ ...v, ingredientes: v.ingredientes.filter((_, idx) => idx !== i) });
+
+  return (
+    <div>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <Field label="Nombre"><input className="gp-input" value={v.nombre} onChange={(e) => setV({ ...v, nombre: e.target.value })} /></Field>
+        <Field label="Categoría">
+          <select className="gp-input" value={v.categoria || ""} onChange={(e) => setV({ ...v, categoria: e.target.value })}>
+            {TIPOS_COMIDA.map((t) => <option key={t} value={t}>{t}</option>)}
+          </select>
+        </Field>
+        <Field label="Porciones"><input type="number" className="gp-input" value={v.porciones} onChange={(e) => setV({ ...v, porciones: e.target.value })} /></Field>
+      </div>
+
+      <p className="text-xs gp-text-muted uppercase tracking-wide mb-2 mt-2">Ingredientes</p>
+      <div className="flex flex-col gap-2 mb-2">
+        {v.ingredientes.map((ing, i) => (
+          <div key={i} className="flex items-center gap-2">
+            <input className="gp-input text-sm flex-1" placeholder="Ingrediente" value={ing.nombre} onChange={(e) => editarIngrediente(i, { nombre: e.target.value })} />
+            <input className="gp-input text-sm" style={{ width: 70 }} placeholder="cant." value={ing.cantidad} onChange={(e) => editarIngrediente(i, { cantidad: e.target.value })} />
+            <input className="gp-input text-sm" style={{ width: 70 }} placeholder="unidad" value={ing.unidad} onChange={(e) => editarIngrediente(i, { unidad: e.target.value })} />
+            <IconBtn onClick={() => quitarIngrediente(i)}><Trash2 size={13} /></IconBtn>
+          </div>
+        ))}
+      </div>
+      <button onClick={agregarIngrediente} className="text-xs gp-text-gold flex items-center gap-1 mb-3"><Plus size={12} /> Agregar ingrediente</button>
+
+      <Field label="Instrucciones de preparación"><textarea className="gp-input" rows={4} value={v.instrucciones || ""} onChange={(e) => setV({ ...v, instrucciones: e.target.value })} /></Field>
+      <Field label="Notas"><textarea className="gp-input" rows={2} value={v.notas || ""} onChange={(e) => setV({ ...v, notas: e.target.value })} /></Field>
+      <button className="gp-btn w-full py-2 text-sm mt-2" onClick={() => onSave(v)}>Guardar</button>
+    </div>
+  );
+}
+
+// Se calcula al momento sumando los ingredientes de las recetas asignadas en el rango de
+// fechas — no se guarda como entidad aparte (mismo principio que Reportes: capa analítica
+// dinámica). El check "ya lo compré" es de un viaje al súper, no vale la pena sincronizarlo
+// entre dispositivos ni guardarlo en la base de datos — vive solo en este navegador.
+function ListaCompras({ data, personaId }) {
+  const hoy = todayISO();
+  const [desde, setDesde] = useState(hoy);
+  const [hasta, setHasta] = useState(() => { const d = new Date(hoy + "T00:00:00"); d.setDate(d.getDate() + 6); return d.toISOString().slice(0, 10); });
+  const [marcados, setMarcados] = useState({});
+
+  useEffect(() => {
+    try { setMarcados(JSON.parse(localStorage.getItem(`arkeyone_lista_compras_${desde}_${hasta}`) || "{}")); } catch { setMarcados({}); }
+  }, [desde, hasta]);
+
+  const toggleMarcado = (nombre) => {
+    setMarcados((prev) => {
+      const next = { ...prev, [nombre]: !prev[nombre] };
+      try { localStorage.setItem(`arkeyone_lista_compras_${desde}_${hasta}`, JSON.stringify(next)); } catch {}
+      return next;
+    });
+  };
+
+  const comidasRango = (data.dietaDias || []).filter((d) => (d.contactoId || null) === personaId && d.fecha >= desde && d.fecha <= hasta && d.recetaId);
+  const recetasPorId = Object.fromEntries((data.recetas || []).map((r) => [r.id, r]));
+
+  const agregados = {};
+  comidasRango.forEach((c) => {
+    const receta = recetasPorId[c.recetaId];
+    (receta?.ingredientes || []).forEach((ing) => {
+      if (!ing.nombre) return;
+      const key = ing.nombre.trim().toLowerCase();
+      if (!agregados[key]) agregados[key] = { nombre: ing.nombre.trim(), cantidades: [] };
+      if (ing.cantidad || ing.unidad) agregados[key].cantidades.push(`${ing.cantidad || ""} ${ing.unidad || ""}`.trim());
+    });
+  });
+  const lista = Object.values(agregados).sort((a, b) => a.nombre.localeCompare(b.nombre, "es"));
+  const columnasExport = [{ label: "Ingrediente", get: (i) => i.nombre }, { label: "Cantidad", get: (i) => i.cantidades.join(" + ") }];
+
+  return (
+    <div>
+      <div className="flex flex-wrap items-end gap-2 mb-4">
+        <Field label="Desde"><input type="date" className="gp-input" value={desde} onChange={(e) => setDesde(e.target.value)} /></Field>
+        <Field label="Hasta"><input type="date" className="gp-input" value={hasta} onChange={(e) => setHasta(e.target.value)} /></Field>
+        <div className="flex gap-2 mb-3">
+          <button onClick={() => exportarFilasExcel(lista, columnasExport, "lista-compras")} className="gp-btn-ghost px-3 py-1.5 text-xs rounded flex items-center gap-1"><Download size={12} /> Excel</button>
+          <button onClick={() => exportarFilasPDF(lista, columnasExport, "lista-compras", "Lista de compras")} className="gp-btn-ghost px-3 py-1.5 text-xs rounded flex items-center gap-1"><Download size={12} /> PDF</button>
+        </div>
+      </div>
+      <div className="gp-panel">
+        {lista.map((i, idx) => (
+          <label key={i.nombre} className={`flex items-center gap-3 p-3 cursor-pointer ${idx < lista.length - 1 ? "border-b" : ""}`} style={{ borderColor: "var(--border)" }}>
+            <input type="checkbox" checked={!!marcados[i.nombre]} onChange={() => toggleMarcado(i.nombre)} />
+            <span className={`text-sm flex-1 ${marcados[i.nombre] ? "line-through gp-text-muted" : ""}`}>{i.nombre}</span>
+            {i.cantidades.length > 0 && <span className="text-xs gp-text-muted">{i.cantidades.join(" + ")}</span>}
+          </label>
+        ))}
+        {lista.length === 0 && <p className="text-sm gp-text-muted py-6 text-center">No hay recetas asignadas en este rango de fechas.</p>}
+      </div>
     </div>
   );
 }

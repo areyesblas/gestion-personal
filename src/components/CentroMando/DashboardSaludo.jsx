@@ -1,14 +1,15 @@
 // src/components/CentroMando/DashboardSaludo.jsx
 //
 // Saludo grande del Centro de mando: franja horaria + nombre, frase motivacional del día,
-// fecha completa y mensaje de cierre. Rediseño 21 sept 2026 (feedback de Angel sobre el
-// prototipo): el panel vuelve a usar el fondo normal del tema (--panel, claro u oscuro según
-// corresponda) en vez de una foto de fondo a todo lo ancho — la foto de montaña queda como un
-// acento degradado en la esquina superior derecha, que se desvanece hacia el color del panel
-// en vez de cubrirlo con un overlay oscuro. El texto usa los colores normales del tema, no
-// blanco forzado, porque ya no hay foto oscura debajo.
+// fecha completa y mensaje de cierre. Segundo rediseño del 21 sept 2026 (nuevo pedido de
+// Angel sobre el mismo día): vuelve a llevar foto de fondo a todo lo ancho y en todos los
+// tamaños de pantalla (antes solo un acento en la esquina, solo desktop) — ahora es la foto
+// de playa (antes vivía en MotivationalCard, se intercambiaron). El overlay es un degradado
+// tenue en el navy de marca, solo lo necesario para que el texto blanco sea legible, no un
+// velo oscuro que tape la foto. También baja a la mitad de alto que antes.
 
-import dashboardSaludoBg from '../../assets/dashboard-saludo-bg.jpg';
+import bannerJpg from '../../assets/dashboard-banner-playa.jpg';
+import bannerWebp from '../../assets/dashboard-banner-playa.webp';
 
 const FRASES = [
   'Disciplina hoy, resultados mañana.',
@@ -39,35 +40,23 @@ export default function DashboardSaludo({ primerNombre }) {
   const emoji = h < 12 ? '☀️' : h < 19 ? '🌤️' : '🌙';
 
   return (
-    <div className="gp-panel relative overflow-hidden mb-5" style={{ minHeight: 180 }}>
-      {/* Foto degradada, solo esquina superior derecha — no cubre el panel completo. */}
-      <img
-        src={dashboardSaludoBg}
-        alt=""
-        className="hidden sm:block absolute top-0 right-0 h-full object-cover"
-        style={{ width: '48%' }}
-      />
-      <div
-        className="hidden sm:block absolute top-0 right-0 h-full"
-        style={{ width: '48%', background: 'linear-gradient(to left, transparent 35%, var(--panel) 92%)' }}
-      />
-      <div
-        className="hidden sm:block absolute top-0 right-0 h-full"
-        style={{ width: '48%', background: 'linear-gradient(to top, var(--panel) 0%, transparent 65%)' }}
-      />
+    <div className="relative rounded-2xl overflow-hidden mb-5" style={{ minHeight: 90 }}>
+      <picture className="absolute inset-0 block">
+        <source srcSet={bannerWebp} type="image/webp" />
+        <img src={bannerJpg} alt="" className="absolute inset-0 w-full h-full object-cover" />
+      </picture>
+      <div className="absolute inset-0" style={{ background: 'linear-gradient(100deg, rgba(11,35,72,.72) 0%, rgba(11,35,72,.4) 55%, rgba(11,35,72,.22) 100%)' }} />
 
-      <div className="relative z-10 flex items-center justify-between gap-4 flex-wrap p-6" style={{ minHeight: 180 }}>
+      <div className="relative z-10 flex items-center justify-between gap-4 flex-wrap p-4" style={{ minHeight: 90 }}>
         <div className="min-w-0">
-          <h1 className="gp-serif text-[26px] sm:text-3xl mb-1">
+          <h1 className="gp-serif text-xl sm:text-2xl mb-1 text-white">
             {saludo}{primerNombre ? `, ${primerNombre}` : ''} <span>{emoji}</span>
           </h1>
-          <p className="text-sm gp-text-muted italic">"{fraseDelDia()}"</p>
+          <p className="text-sm italic" style={{ color: 'rgba(255,255,255,.75)' }}>"{fraseDelDia()}"</p>
         </div>
-        {/* padding-right para que el texto no quede encima de la parte visible de la foto (la
-            franja de la derecha, donde el degradado ya no la tapa) */}
-        <div className="text-right leading-tight shrink-0 hidden sm:block" style={{ paddingRight: '18%' }}>
-          <p className="text-sm font-medium capitalize">{fechaCompleta()}</p>
-          <p className="text-[11px] gp-text-muted">Un día cada vez más cerca de tus metas.</p>
+        <div className="text-right leading-tight shrink-0 hidden sm:block">
+          <p className="text-sm font-medium capitalize text-white">{fechaCompleta()}</p>
+          <p className="text-[11px]" style={{ color: 'rgba(255,255,255,.75)' }}>Un día cada vez más cerca de tus metas.</p>
         </div>
       </div>
     </div>
