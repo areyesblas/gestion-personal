@@ -23,7 +23,6 @@ export default function DashboardHeader({ primerNombre, avatarUrl, onBuscar, onN
       >
         <Search size={16} className="gp-text-muted shrink-0" />
         <span className="gp-text-muted flex-1 truncate">Buscar en ARKEYONE... (tareas, proyectos, contactos, etc.)</span>
-        <span className="text-[10px] gp-text-muted border gp-border rounded px-1.5 py-0.5 shrink-0">⌘K</span>
       </button>
 
       <div className="flex items-center gap-3 shrink-0">

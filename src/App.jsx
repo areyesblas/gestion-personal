@@ -16,7 +16,7 @@ import HabitosHoyWidget from "./components/CentroMando/HabitosHoyWidget";
 import MotivationalCard from "./components/CentroMando/MotivationalCard";
 import ArkiWidget from "./components/CentroMando/ArkiWidget";
 import BottomNav from "./components/nav/BottomNav";
-import Breadcrumb from "./components/nav/Breadcrumb";
+import BotonRegresar from "./components/nav/BotonRegresar";
 import * as XLSX from "xlsx";
 import {
   FolderKanban, CheckSquare, Wallet, AlertTriangle,
@@ -1724,26 +1724,6 @@ MODULO_TO_VIEW["mis-pagos"] = "mis-pagos";
 // vista que ya no existe.
 MODULO_TO_VIEW["citas"] = "agenda";
 
-// Etiquetas para el breadcrumb de vistas que no aparecen en navGroups (no son un ítem del
-// menú lateral, se entra a ellas desde otro lado — engrane de Configuración, papelera, etc.).
-const VIEW_LABELS_EXTRA = {
-  "proyecto-detalle": "Proyecto",
-  configuracion: "Configuración",
-  papelera: "Papelera",
-  colaboradores: "Colaboradores",
-  admin: "Administración",
-  // mi-trabajo/mi-calendario/mis-pagos ya no viven en navGroups (solo se agregan ahí cuando se
-  // está viendo la cuenta de alguien más, ver GRUPO_TRABAJO_COLABORADOR) — labelDeVista necesita
-  // esta entrada de respaldo para el breadcrumb cuando el dueño de la cuenta entra a esas vistas
-  // directo (deep-link de notificación, por ejemplo).
-  "mi-trabajo": "Mi trabajo",
-  "mi-calendario": "Mi calendario",
-  "mis-pagos": "Mis pagos",
-  // "dashboard" tampoco vive ya en navGroups (botón fijo aparte, ver render del sidebar) —
-  // mismo respaldo, aunque el breadcrumb nunca lo usa (view==="dashboard" no muestra breadcrumb).
-  dashboard: "Centro de mando",
-};
-
 // Convierte la llave pública VAPID (base64url, como la da el navegador/servidor) al formato
 // binario que pide pushManager.subscribe(). Es texto de configuración, siempre igual.
 function urlBase64ToUint8Array(base64String) {
@@ -1866,11 +1846,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
   const volviendoRef = useRef(false);
   useEffect(() => {
     const anterior = vistaAnteriorRef.current;
-    const actual = {
-      view,
-      proyectoDetalleId,
-      proyectoNombre: view === "proyecto-detalle" ? (data?.proyectos?.find((p) => p.id === proyectoDetalleId)?.nombre || "") : "",
-    };
+    const actual = { view, proyectoDetalleId };
     if (anterior && anterior.view !== actual.view) {
       if (volviendoRef.current) {
         volviendoRef.current = false;
@@ -1896,13 +1872,6 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
     setHistorialVistas([]);
     setProyectoDetalleId(null);
     setView("dashboard");
-  };
-  const labelDeVista = (id) => {
-    for (const g of navGroups) {
-      const it = g.items.find((i) => i.id === id);
-      if (it) return it.label;
-    }
-    return VIEW_LABELS_EXTRA[id] || (id ? id.charAt(0).toUpperCase() + id.slice(1) : "");
   };
 
   const [busquedaAbierta, setBusquedaAbierta] = useState(false);
@@ -2799,15 +2768,6 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
           .filter((g) => g.items.length > 0),
       ];
 
-  // Breadcrumb: "dashboard" nunca aparece como paso intermedio (para eso ya está "Inicio" fijo
-  // al principio) — ver historialVistas/volverA más arriba.
-  const breadcrumbPasos = historialVistas
-    .map((h, i) => ({ indice: i, view: h.view, label: h.view === "proyecto-detalle" ? (h.proyectoNombre || "Proyecto") : labelDeVista(h.view) }))
-    .filter((p) => p.view !== "dashboard");
-  const breadcrumbActual = view === "proyecto-detalle"
-    ? (data?.proyectos?.find((p) => p.id === proyectoDetalleId)?.nombre || "Proyecto")
-    : labelDeVista(view);
-
   return (
     <div className={`gp-root overflow-hidden ${claseTema(tema)}`} style={{ minHeight: "100vh" }}>
       <Tokens tema={tema} />
@@ -2999,7 +2959,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
             </div>
           )}
           {view !== "dashboard" && (
-            <Breadcrumb pasos={breadcrumbPasos} actual={breadcrumbActual} onInicio={irAInicioDesdeBreadcrumb} onIrA={volverA} />
+            <BotonRegresar onRegresar={() => (historialVistas.length > 0 ? volverA(historialVistas.length - 1) : irAInicioDesdeBreadcrumb())} />
           )}
           {view === "dashboard" && (
             <Dashboard
