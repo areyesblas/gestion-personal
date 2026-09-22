@@ -70,10 +70,14 @@ export default function WeatherWidget({ ciudad, lat, lon, onConfigurarCiudad }) 
   if (!datos) return null;
 
   const { Icon, label } = condicion(datos.code, datos.esDia);
+  // ciudad viene como "Nombre, Estado, País" (ver geocoding en Configuración) — en el header
+  // solo mostramos el nombre corto; el resto queda en el tooltip para no saturar el espacio.
+  const ciudadCorta = ciudad ? ciudad.split(",")[0].trim() : "";
   return (
     <div className="hidden sm:flex items-center gap-1.5 text-sm gp-text-muted" title={`${label}${ciudad ? ` · ${ciudad}` : ''}`}>
       <Icon size={17} />
       <span className="gp-mono">{datos.temp}°C</span>
+      {ciudadCorta && <span className="truncate max-w-[9rem]">{ciudadCorta}</span>}
     </div>
   );
 }

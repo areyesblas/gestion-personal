@@ -14,6 +14,8 @@ import NotasRapidasWidget from "./components/CentroMando/NotasRapidasWidget";
 import AccesosRapidosWidget from "./components/CentroMando/AccesosRapidosWidget";
 import HabitosHoyWidget from "./components/CentroMando/HabitosHoyWidget";
 import MotivationalCard from "./components/CentroMando/MotivationalCard";
+import ArkiWidget from "./components/CentroMando/ArkiWidget";
+import BottomNav from "./components/nav/BottomNav";
 import Breadcrumb from "./components/nav/Breadcrumb";
 import * as XLSX from "xlsx";
 import {
@@ -231,11 +233,13 @@ const DASHBOARD_WIDGETS_CATALOGO = [
   { id: "proyectos", label: "Proyectos" },
   { id: "tareas", label: "Tareas" },
   { id: "finanzas", label: "Finanzas" },
+  { id: "resumenFinanciero", label: "Resumen financiero" },
   { id: "habitos", label: "Hábitos" },
   { id: "salud", label: "Salud" },
   { id: "imagenMotivacional", label: "Imagen motivacional" },
   { id: "notasRapidas", label: "Notas rápidas" },
   { id: "accesosRapidos", label: "Accesos rápidos" },
+  { id: "arki", label: "ARKI" },
 ];
 // Reconcilia el orden guardado del usuario (preferencias.dashboard_widgets) con el catálogo
 // actual: widgets guardados van en su orden; widgets del catálogo que aún no existían cuando
@@ -1703,7 +1707,7 @@ const VIEW_TO_MODULO = {
   equipo: "equipo", contactos: "contactos", regalos: "regalos",
   redes: "redes_metricas", marketing: "campanas",
   actividades: "actividades", eventos: "eventos", habitos: "habitos", salud: "salud",
-  medicamentos: "medicamentos", citas: "citas", notas: "notas",
+  medicamentos: "medicamentos", notas: "notas",
 };
 // Mapeo inverso: de nombre de tabla/módulo a id de vista, para los deep links de Push
 // (una notificación de una deuda trae recurso_tabla="deudas" y con esto sabemos a qué
@@ -1712,6 +1716,10 @@ const MODULO_TO_VIEW = Object.fromEntries(Object.entries(VIEW_TO_MODULO).map(([v
 MODULO_TO_VIEW["mi-trabajo"] = "mi-trabajo";
 MODULO_TO_VIEW["mi-calendario"] = "mi-calendario";
 MODULO_TO_VIEW["mis-pagos"] = "mis-pagos";
+// Citas ya no es pantalla aparte (rediseño de navegación, 22 sept 2026) — un recordatorio push
+// de una cita debe seguir llevando a algún lado real, así que se manda a Agenda en vez de a una
+// vista que ya no existe.
+MODULO_TO_VIEW["citas"] = "agenda";
 
 // Etiquetas para el breadcrumb de vistas que no aparecen en navGroups (no son un ítem del
 // menú lateral, se entra a ellas desde otro lado — engrane de Configuración, papelera, etc.).
@@ -2688,42 +2696,54 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
     );
   }
 
+  // Reorganización de navegación (22 sept 2026, documento consolidado secc. 12/22): Citas ya no
+  // es pantalla aparte (Agenda ya crea/edita citas directo, ver view==="agenda"), Medicamentos
+  // pasa a ser pestaña dentro de Salud (mismo patrón que Ejercicio/Nutrición), "Equipo" se quita
+  // (tabla ya desactivada desde el 10-sep, colaboradores es un rol de Contactos, no un módulo),
+  // y ya no hay contenedores genéricos "Trabajo"/"Negocio" — Patrimonio y Módulos propios quedan
+  // aparte de Dinero, como en la estructura revisada del documento.
   const navGroups = [
     { label: "Inicio", items: [
       { id: "dashboard", label: "Centro de mando", icon: LayoutDashboard },
       { id: "agenda", label: "Agenda", icon: CalendarRange },
-      { id: "citas", label: "Citas", icon: CalendarClock },
       { id: "notas", label: "Notas", icon: StickyNote },
     ]},
+    // mi-trabajo/mi-calendario/mis-pagos: vista filtrada para cuando alguien ve la cuenta de
+    // otra persona como colaborador. Comportamiento preexistente sin cambios en este rediseño:
+    // como Angel es dueño (modulosPermitidos === null), navGroupsFiltrados no filtra nada y
+    // también los ve — igual que antes de este rediseño, solo que ahora agrupados aparte en
+    // vez de mezclados con Proyectos/Tareas/Equipo.
     { label: "Trabajo", items: [
-      { id: "proyectos", label: "Proyectos e ideas", icon: FolderKanban },
-      { id: "pendientes", label: "Tareas", icon: CheckSquare },
       { id: "mi-trabajo", label: "Mi trabajo", icon: CheckSquare },
       { id: "mi-calendario", label: "Mi calendario", icon: CalendarClock },
       { id: "mis-pagos", label: "Mis pagos", icon: Wallet },
-      { id: "equipo", label: "Colaboradores", icon: Users },
+    ]},
+    { label: "Principal", items: [
+      { id: "pendientes", label: "Tareas", icon: CheckSquare },
+      { id: "proyectos", label: "Proyectos e ideas", icon: FolderKanban },
+      { id: "contactos", label: "Contactos", icon: Contact },
     ]},
     { label: "Dinero", items: [
       { id: "finanzas", label: "Finanzas", icon: Wallet },
       { id: "deudas", label: "Deudas", icon: AlertTriangle },
       { id: "apartados", label: "Apartados", icon: PiggyBank },
-      { id: "patrimonio", label: "Patrimonio", icon: Gem },
-      { id: "activos", label: "Activos digitales", icon: Globe },
       { id: "reportes", label: "Reportes", icon: PieChartIcon },
       { id: "estimaciones", label: "Estimaciones", icon: Sparkles },
     ]},
-    { label: "Negocio", items: [
+    { label: "Patrimonio", items: [
+      { id: "patrimonio", label: "Patrimonio", icon: Gem },
+      { id: "activos", label: "Activos digitales", icon: Globe },
+    ]},
+    { label: "Módulos", items: [
       { id: "marketing", label: "Marketing", icon: Megaphone },
-      { id: "documentos", label: "Legal y contratos", icon: FileText },
+      { id: "documentos", label: "Documentos", icon: FileText },
     ]},
     { label: "Personal", items: [
-      { id: "contactos", label: "Contactos", icon: Contact },
       { id: "regalos", label: "Atenciones", icon: Gift },
       { id: "actividades", label: "Diario", icon: Activity },
       { id: "eventos", label: "Eventos", icon: Camera },
       { id: "habitos", label: "Hábitos", icon: Flame },
       { id: "salud", label: "Salud", icon: HeartPulse },
-      { id: "medicamentos", label: "Medicamentos", icon: Pill },
     ]},
   ];
 
@@ -2914,7 +2934,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
           onTouchStart={onTouchStartContenido}
           onTouchMove={onTouchMoveContenido}
           onTouchEnd={onTouchEndContenido}
-          className="flex-1 p-4 pt-[calc(env(safe-area-inset-top)+4.75rem)] md:p-6 md:pt-6 overflow-y-auto gp-scroll w-full"
+          className="flex-1 p-4 pt-[calc(env(safe-area-inset-top)+4.75rem)] pb-[calc(env(safe-area-inset-bottom)+4.5rem)] md:p-6 md:pt-6 md:pb-6 overflow-y-auto gp-scroll w-full"
           style={{ maxHeight: "100vh" }}
         >
           {(pullDist > 0 || refrescando) && (
@@ -3126,17 +3146,13 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
               }}
             />
           )}
-          {view === "citas" && (
-            <Citas data={data} onAdd={(i) => addItem("citas", i)} onEdit={(id, p) => editItem("citas", id, p)} onRemove={(id) => askDelete("citas", id)} onCrearTarea={(t) => addItem("pendientes", t)}
-              onCrearContacto={(nombre) => { const nid = uid(); addItem("contactos", { id: nid, nombre, tipos: ["Otro"] }); return nid; }}
-              crearAlEntrar={accionRapidaCrear?.modulo === "citas" ? accionRapidaCrear : null}
-              onConsumirCrearAlEntrar={consumirAccionRapidaCrear} />
-          )}
           {view === "notas" && (
             <Notas data={data} ownerId={activeOwnerId} onAdd={(i) => addItem("notas", i)} onEdit={(id, p) => editItem("notas", id, p)} onRemove={(id) => askDelete("notas", id)} />
           )}
         </div>
       </div>
+
+      <BottomNav view={view} setView={irAVista} onAbrirMas={() => setMobileNavOpen(true)} />
 
       <QuickCapture data={data} onAdd={addItem} onCrearRecordatorio={onCrearRecordatorio} irAVista={irAVista} />
       <VoiceMode
@@ -4414,7 +4430,7 @@ function Dashboard({ data, setView, onAddSaldo, onVerProyecto, onEditPendiente, 
   });
   data.citas.forEach((c) => {
     const dd = Math.round((new Date(c.fechaHora).setHours(0, 0, 0, 0) - new Date(hoy + "T00:00:00").getTime()) / 86400000);
-    if (dd === 0) acciones.push({ id: `cita-${c.id}`, origen: "Cita", tipo: "cita", texto: c.titulo, sub: fmtFechaHora(c.fechaHora), dd, irA: () => setView("citas") });
+    if (dd === 0) acciones.push({ id: `cita-${c.id}`, origen: "Cita", tipo: "cita", texto: c.titulo, sub: fmtFechaHora(c.fechaHora), dd, irA: () => setView("agenda") });
   });
   data.finanzas.forEach((f) => {
     if (f.tipo === "Ingreso" && f.estatus === "Pendiente" && f.fechaVencimiento) {
@@ -4473,6 +4489,9 @@ function Dashboard({ data, setView, onAddSaldo, onVerProyecto, onEditPendiente, 
   const documentosProximos = (data.documentos || []).filter((d) => d.fechaVencimiento && daysUntil(d.fechaVencimiento) <= 14);
   const activosProximos = (data.activos || []).filter((a) => a.fechaVencimiento && daysUntil(a.fechaVencimiento) <= 14);
   const facturasPendientes = (data.facturas || []).filter((f) => f.estatus === "Pendiente");
+  // Atenciones marcadas "Por comprar" con fecha próxima (mismo umbral de 14 días que Documentos/
+  // Activos) — regalo/ocasión que se acerca y aún no se compra.
+  const regalosProximos = (data.regalos || []).filter((r) => r.estatus === "Por comprar" && r.fecha && daysUntil(r.fecha) <= 14);
   const totalAlertas = documentosProximos.length + activosProximos.length + facturasPendientes.length;
 
   // Proyectos que requieren atención: revisión vencida/próxima, o con pendientes vencidos.
@@ -4502,12 +4521,23 @@ function Dashboard({ data, setView, onAddSaldo, onVerProyecto, onEditPendiente, 
     ...facturasPendientes.map((f) => ({ id: `fact-${f.id}`, texto: sensibleDesbloqueado ? `Factura — ${f.concepto || f.folio || "sin folio"}` : "🔒 Factura pendiente", irA: () => setView("finanzas"), tono: "red", etiqueta: "Factura" })),
     ...proyectosAtencion.map((p) => ({ id: `proy-${p.id}`, texto: p.nombre, sub: p.motivo, irA: () => onVerProyecto(p.id), tono: p.motivo.includes("vencid") ? "red" : "gold", etiqueta: "Proyecto" })),
     ...(medicamentosHoy.length > 0 ? [{ id: "medicamentos-hoy", texto: sensibleDesbloqueado ? `${medicamentosHoy.length} medicamento${medicamentosHoy.length === 1 ? "" : "s"} hoy` : "🔒 Medicamentos pendientes hoy", irA: () => setView("medicamentos"), tono: "muted", etiqueta: "Salud" }] : []),
+    ...regalosProximos.map((r) => ({ id: `regalo-${r.id}`, texto: `${r.ocasion || "Atención"} — ${r.descripcion || "por comprar"}`, irA: () => setView("regalos"), tono: "gold", etiqueta: `${daysUntil(r.fecha)}d` })),
   ];
 
   // --- A partir de aquí: los mismos cálculos de "resumen" que ya existían (avance, ganancia por
   // proyecto, etc.), ahora como contexto al final de la pantalla, no como protagonista.
   const monthKeysAmplios = useMemo(() => lastNMonthKeys(120), []);
   const ledgerAmplio = useMemo(() => buildMonthlyLedger(data.finanzas, monthKeysAmplios), [data.finanzas, monthKeysAmplios]);
+  // Widget "Resumen financiero": mismo patrón de Reportes (buildMonthlyLedger + BarChart), pero
+  // acotado a los últimos 6 meses — es un vistazo del dashboard, no el análisis completo.
+  const monthKeys6 = useMemo(() => lastNMonthKeys(6), []);
+  const ledger6 = useMemo(() => buildMonthlyLedger(data.finanzas, monthKeys6), [data.finanzas, monthKeys6]);
+  const serieMensualDashboard = useMemo(() => monthKeys6.map((m) => {
+    const delMes = ledger6.filter((e) => e.mes === m);
+    const ingresos = delMes.filter((e) => e.tipo === "Ingreso").reduce((s, e) => s + e.monto, 0);
+    const egresos = delMes.filter((e) => e.tipo === "Egreso").reduce((s, e) => s + e.monto, 0);
+    return { mes: monthLabel(m), ingresos, egresos };
+  }), [ledger6, monthKeys6]);
   const gananciaPorProyecto = data.proyectos.map((p) => {
     const propios = ledgerAmplio.filter((f) => f.proyectoId === p.id);
     const ing = propios.filter((f) => f.tipo === "Ingreso").reduce((s, f) => s + f.monto, 0);
@@ -4541,6 +4571,23 @@ function Dashboard({ data, setView, onAddSaldo, onVerProyecto, onEditPendiente, 
     ? { presupuesto: true, pct: Math.min(100, Math.round((egresos / presupuestoMensual) * 100)), sub: `${fmtMoney(egresos)} de ${fmtMoney(presupuestoMensual)}` }
     : { presupuesto: false, onDefinirPresupuesto: () => setPresupuestoModal(true) };
 
+  // Widget ARKI: mismo fetch a asistente-ia que ya usa el asistente de voz (ver interpretar/
+  // enviarTurno más abajo en el archivo), pero de un solo turno — sin historial ni contexto de
+  // pantalla, la pregunta ya trae todo lo que necesita.
+  const preguntarArki = async (mensaje) => {
+    try {
+      const { data: sesion } = await supabase.auth.getSession();
+      const resp = await fetch(`${supabase.supabaseUrl}/functions/v1/asistente-ia`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${sesion.session.access_token}` },
+        body: JSON.stringify({ mensaje, modo: "texto" }),
+      });
+      const json = await resp.json().catch(() => ({}));
+      if (!resp.ok || json.error) return json.error || "No pude responder, intenta de nuevo.";
+      return json.respuesta || "No pude responder, intenta de nuevo.";
+    } catch { return "No pude conectarme. Revisa tu conexión."; }
+  };
+
   // Contenido de cada widget configurable, en un mapa id → JSX. La lógica/datos de arriba no
   // cambia — esto solo envuelve el mismo JSX que ya existía para poder elegir cuáles mostrar
   // y en qué orden (ver DASHBOARD_WIDGETS_CATALOGO / resolverOrdenWidgets).
@@ -4550,14 +4597,14 @@ function Dashboard({ data, setView, onAddSaldo, onVerProyecto, onEditPendiente, 
         citas={citasHoy}
         tareas={accionesHoyView}
         onToggleTarea={toggleTareaHoy}
-        onVerAgenda={() => setView("citas")}
+        onVerAgenda={() => setView("agenda")}
         onAgregarTarea={() => onCrearRapido("pendientes", {})}
       />
     ),
 
     requiereAtencion: <RequiereAtencion items={itemsRequierenAtencion} />,
 
-    calendario: <CalendarioWidget citas={data.citas} onVerDia={() => setView("citas")} />,
+    calendario: <CalendarioWidget citas={data.citas} onVerDia={() => setView("agenda")} />,
 
     progreso: (
       <ProgresoWidget
@@ -4627,6 +4674,34 @@ function Dashboard({ data, setView, onAddSaldo, onVerProyecto, onEditPendiente, 
       </div>
     ),
 
+    resumenFinanciero: (
+      <div className="gp-panel p-4 h-full flex flex-col">
+        <div className="flex items-center justify-between mb-1">
+          <div className="flex items-center gap-2"><PieChartIcon size={14} className="gp-text-teal" /><h3 className="text-sm font-medium">Resumen financiero</h3></div>
+          <button onClick={() => setView("reportes")} className="text-xs gp-text-gold">Ver reportes →</button>
+        </div>
+        {!sensibleDesbloqueado ? (
+          <button onClick={onDesbloquear} className="text-left w-full mt-2">
+            <p className="text-sm gp-text-gold">🔒 Verifica tu contraseña para ver este resumen</p>
+            <p className="text-xs gp-text-muted mt-1">Finanzas es un módulo protegido — toca aquí para desbloquearlo.</p>
+          </button>
+        ) : (
+          <ResponsiveContainer width="100%" height={200}>
+            <BarChart data={serieMensualDashboard} margin={{ left: -20 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+              <XAxis dataKey="mes" tick={{ fill: "var(--muted)", fontSize: 11 }} />
+              <YAxis tick={{ fill: "var(--muted)", fontSize: 11 }} />
+              <Tooltip contentStyle={{ background: "var(--panel)", border: "1px solid var(--border)", fontSize: 12 }} formatter={(v) => fmtMoney(v)} />
+              <Bar dataKey="ingresos" name="Ingresos" fill="var(--teal)" radius={[3, 3, 0, 0]} />
+              <Bar dataKey="egresos" name="Egresos" fill="var(--red)" radius={[3, 3, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        )}
+      </div>
+    ),
+
+    arki: <ArkiWidget onPreguntar={preguntarArki} />,
+
     habitos: <HabitosHoyWidget habitos={habitosHoyView} onToggle={toggleHabitoHoy} onVerTodos={() => setView("habitos")} />,
 
     salud: (
@@ -4682,14 +4757,16 @@ function Dashboard({ data, setView, onAddSaldo, onVerProyecto, onEditPendiente, 
       <ResumenCards
         activos={activos}
         tareasPendientes={tareasPendientesTotal}
-        citasHoy={citasHoy.length}
+        agendaHoy={citasHoy.length}
         egresos={fmtMoney(egresos)}
         habitosPct={`${progresoHabitos.pct}%`}
+        saludHoy={medicamentosHoy.length}
         onVerProyectos={() => setView("proyectos")}
         onVerTareas={() => setView("pendientes")}
-        onVerCitas={() => setView("citas")}
+        onVerAgenda={() => setView("agenda")}
         onVerFinanzas={() => setView("finanzas")}
         onVerHabitos={() => setView("habitos")}
+        onVerSalud={() => setView("salud")}
       />
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-6 items-stretch">
@@ -9180,7 +9257,7 @@ function Salud({ data, onAdd, onEdit, onRemove, onUpdatePerfil, soloCuidado, onA
           </div>
         )}
       </div>
-      <p className="text-sm gp-text-muted mb-4">Peso, glucosa, presión arterial, colesterol, triglicéridos, ejercicio y nutrición, todo en un mismo lugar.</p>
+      <p className="text-sm gp-text-muted mb-4">Peso, glucosa, presión arterial, colesterol, triglicéridos, medicamentos, ejercicio y nutrición, todo en un mismo lugar.</p>
 
       <div className="flex flex-wrap items-center gap-1 mb-4">
         {personas.map((p) => (
@@ -9209,12 +9286,14 @@ function Salud({ data, onAdd, onEdit, onRemove, onUpdatePerfil, soloCuidado, onA
       )}
 
       <div className="flex gap-1 mb-4 flex-wrap">
-        {[{ key: "historial", label: "Historial" }, { key: "tendencias", label: "Tendencias" }, { key: "ejercicio", label: "Ejercicio" }, { key: "nutricion", label: "Nutrición" }].map((t) => (
+        {[{ key: "historial", label: "Historial" }, { key: "tendencias", label: "Tendencias" }, { key: "medicamentos", label: "Medicamentos" }, { key: "ejercicio", label: "Ejercicio" }, { key: "nutricion", label: "Nutrición" }].map((t) => (
           <button key={t.key} onClick={() => setTab(t.key)} className={`text-xs px-3 py-1.5 rounded-full border ${tab === t.key ? "gp-btn" : "gp-text-muted"}`}>{t.label}</button>
         ))}
       </div>
 
-      {tab === "ejercicio" ? (
+      {tab === "medicamentos" ? (
+        <Medicamentos data={data} onAdd={(i) => onAddGenerico("medicamentos", i)} onEdit={(id, p) => onEditGenerico("medicamentos", id, p)} onRemove={(id) => onRemoveGenerico("medicamentos", id)} soloCuidado={soloCuidado} />
+      ) : tab === "ejercicio" ? (
         <Ejercicio data={data} personaId={personaId} onAdd={onAddGenerico} onEdit={onEditGenerico} onRemove={onRemoveGenerico} accionInicial={ejercicioAccionInicial} />
       ) : tab === "nutricion" ? (
         <Nutricion data={data} personaId={personaId} onAdd={onAddGenerico} onEdit={onEditGenerico} onRemove={onRemoveGenerico} />
@@ -11534,152 +11613,6 @@ function PendienteExistenteForm({ pendientes, onAsignar }) {
   );
 }
 
-function Citas({ data, onAdd, onEdit, onRemove, onCrearTarea, onCrearContacto, crearAlEntrar, onConsumirCrearAlEntrar }) {
-  const [modal, setModal] = useState(null);
-  const [busqueda, setBusqueda] = useState("");
-  const empty = { titulo: "", fechaHora: localInputsAFechaHora(todayISO(), "09:00"), lugar: "", contactoIds: [], tags: [], notas: "" };
-
-  useEffect(() => {
-    if (crearAlEntrar) { setModal({ item: { ...empty, ...(crearAlEntrar.preset || {}) } }); onConsumirCrearAlEntrar(); }
-  }, [crearAlEntrar]);
-  const nombreContacto = (id) => data.contactos.find((c) => c.id === id)?.nombre || "—";
-  const nombresContactos = (c) => (c.contactoIds && c.contactoIds.length ? c.contactoIds : (c.contactoId ? [c.contactoId] : [])).map(nombreContacto);
-  const ahora = new Date();
-  const citasBuscadas = filtrarPorBusqueda(data.citas, busqueda, [(c) => c.titulo, (c) => c.lugar, (c) => c.notas, (c) => nombresContactos(c).join(" "), (c) => (c.tags || []).join(" ")]);
-  const ordenadas = [...citasBuscadas].sort((a, b) => (a.fechaHora || "").localeCompare(b.fechaHora || ""));
-  const proximas = ordenadas.filter((c) => new Date(c.fechaHora) >= ahora);
-  const pasadas = ordenadas.filter((c) => new Date(c.fechaHora) < ahora).reverse();
-  const [mostrarPasadas, setMostrarPasadas] = useState(false);
-  const columnasExport = [
-    { label: "Título", get: (c) => c.titulo }, { label: "Fecha y hora", get: (c) => fmtFechaHora(c.fechaHora) },
-    { label: "Lugar", get: (c) => c.lugar }, { label: "Contactos", get: (c) => nombresContactos(c).join(", ") },
-    { label: "Tags", get: (c) => (c.tags || []).join(", ") }, { label: "Notas", get: (c) => c.notas },
-  ];
-
-  // Rango de fechas específico para exportar Citas (Grupo B, punto 7): con miles de registros,
-  // exportar "todo" puede trabar el navegador (sobre todo el PDF, que renderiza vía html2canvas).
-  // Este filtro solo aplica al exportar — la lista en pantalla no se toca.
-  const RANGOS_EXPORT_CITAS = [
-    { key: "todo", label: "Todo" },
-    { key: "hoy", label: "Hoy" },
-    { key: "semana", label: "Esta semana" },
-    { key: "mes", label: "Este mes" },
-    { key: "3meses", label: "Próximos 3 meses" },
-    { key: "personalizado", label: "Rango personalizado" },
-  ];
-  const filtrarCitasPorRango = (rangoKey, desde, hasta) => {
-    if (rangoKey === "personalizado") return ordenadas.filter((c) => { const f = c.fechaHora?.slice(0, 10); return f && f >= desde && f <= hasta; });
-    if (rangoKey === "todo" || !rangoKey) return ordenadas;
-    const hoyBase = new Date(); hoyBase.setHours(0, 0, 0, 0);
-    const fin = new Date(hoyBase);
-    if (rangoKey === "hoy") fin.setDate(fin.getDate() + 1);
-    else if (rangoKey === "semana") fin.setDate(fin.getDate() + 7);
-    else if (rangoKey === "mes") fin.setMonth(fin.getMonth() + 1);
-    else if (rangoKey === "3meses") fin.setMonth(fin.getMonth() + 3);
-    return ordenadas.filter((c) => { const f = new Date(c.fechaHora); return f >= hoyBase && f < fin; });
-  };
-
-  const Fila = (c) => {
-    const esHoy = new Date(c.fechaHora).toDateString() === ahora.toDateString();
-    const tareasRelacionadas = data.pendientes.filter((p) => p.origenTabla === "citas" && p.origenId === c.id);
-    const nombres = nombresContactos(c);
-    return (
-      <div key={c.id} className="gp-panel p-3 flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-sm font-medium truncate">{c.titulo}</span>
-            {esHoy && <Badge tone="gold">Hoy</Badge>}
-          </div>
-          <div className="flex items-center gap-3 flex-wrap mt-1 text-xs gp-text-muted">
-            <span className="flex items-center gap-1"><Clock size={11} /> {fmtFechaHora(c.fechaHora)}</span>
-            {c.lugar && <span className="flex items-center gap-1"><MapPin size={11} /> {c.lugar}</span>}
-          </div>
-          {nombres.length > 0 && (
-            <div className="flex flex-wrap gap-1 mt-1.5">
-              {nombres.map((n, i) => (
-                <span key={i} className="text-xs px-2 py-0.5 rounded-full" style={{ background: "var(--panel-2)" }}>{n}</span>
-              ))}
-            </div>
-          )}
-          {c.tags && c.tags.length > 0 && (
-            <div className="flex flex-wrap gap-1 mt-1">
-              {c.tags.map((t) => <Badge key={t} tone="muted">{t}</Badge>)}
-            </div>
-          )}
-          {c.notas && <p className="text-xs gp-text-muted mt-1">{c.notas}</p>}
-          {tareasRelacionadas.length > 0 && (
-            <div className="mt-2 pt-2" style={{ borderTop: "1px solid var(--border)" }}>
-              <p className="text-xs gp-text-muted mb-1">Qué preparar:</p>
-              <ul className="space-y-0.5">
-                {tareasRelacionadas.map((t) => (
-                  <li key={t.id} className={`text-xs flex items-center gap-1.5 ${t.estatus === "Completada" ? "line-through gp-text-muted" : ""}`}>
-                    <CheckSquare size={11} className={t.estatus === "Completada" ? "gp-text-teal shrink-0" : "gp-text-muted shrink-0"} /> <span className="truncate">{t.descripcion}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-        </div>
-        <div className="flex gap-1 shrink-0">
-          <IconBtn onClick={() => setModal({ item: c, paso: "tarea", origenId: c.id })} title="Agregar tarea relacionada"><CheckSquare size={13} /></IconBtn>
-          <IconBtn onClick={() => setModal({ item: c })}><Pencil size={13} /></IconBtn>
-          <IconBtn onClick={() => onRemove(c.id)}><Trash2 size={13} /></IconBtn>
-        </div>
-      </div>
-    );
-  };
-
-  return (
-    <div>
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-1">
-        <h2 className="gp-serif text-2xl">Citas</h2>
-        <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm w-full sm:w-auto"><Plus size={14} /> Nueva</button>
-      </div>
-      <p className="text-sm gp-text-muted mb-4">Agenda con hora y recordatorio push antes de la hora. Para shows de tu negocio usa Eventos; para bitácora personal, Actividades.</p>
-
-      <BarraListaEstandar busqueda={busqueda} onBusqueda={setBusqueda} placeholder="Buscar por título, lugar, contacto o tag…"
-        rangoExport={{ opciones: RANGOS_EXPORT_CITAS, contar: (rangoKey, desde, hasta) => filtrarCitasPorRango(rangoKey, desde, hasta).length }}
-        onExportExcel={(opts) => exportarFilasExcel(filtrarCitasPorRango(opts?.rango, opts?.desde, opts?.hasta), columnasExport, "citas")}
-        onExportPDF={(opts) => exportarFilasPDF(filtrarCitasPorRango(opts?.rango, opts?.desde, opts?.hasta), columnasExport, "citas", "Citas",
-          [busqueda ? `búsqueda: "${busqueda}"` : "", opts?.rango ? `rango: ${RANGOS_EXPORT_CITAS.find((r) => r.key === opts.rango)?.label}` : ""].filter(Boolean).join(" · "))} />
-
-      {proximas.length === 0 && <p className="text-sm gp-text-muted mb-4">No tienes citas próximas.</p>}
-      <div className="space-y-2 mb-4">{proximas.map(Fila)}</div>
-
-      {pasadas.length > 0 && (
-        <div>
-          <button onClick={() => setMostrarPasadas((v) => !v)} className="text-xs gp-text-muted flex items-center gap-1 mb-2">
-            {mostrarPasadas ? <ChevronDown size={13} /> : <ChevronRight size={13} />} Citas pasadas ({pasadas.length})
-          </button>
-          {mostrarPasadas && <div className="space-y-2 opacity-60">{pasadas.map(Fila)}</div>}
-        </div>
-      )}
-
-      {modal && !modal.paso && (
-        <Modal title={modal.item.id ? "Editar cita" : "Nueva cita"} onClose={() => setModal(null)}>
-          <CitaForm item={modal.item} contactos={data.contactos} tagsExistentes={tagsUnicos(data.citas)} onCrearContacto={onCrearContacto} onSave={(v) => {
-            if (modal.item.id) { onEdit(modal.item.id, v); setModal(null); return; }
-            const nuevoId = uid();
-            onAdd({ ...v, id: nuevoId });
-            setModal({ item: v, paso: "tarea", origenId: nuevoId });
-          }} />
-        </Modal>
-      )}
-      {modal && modal.paso === "tarea" && (
-        <Modal title="Tarea relacionada" onClose={() => setModal(null)}>
-          <PromptTareaRelacionada
-            origenTabla="citas" origenId={modal.origenId} proyectoId=""
-            descripcionSugerida={`Preparar para: ${modal.item.titulo}`}
-            fechaSugerida={modal.item.fechaHora ? modal.item.fechaHora.slice(0, 10) : ""}
-            onCrear={(t) => { onCrearTarea(t); setModal(null); }}
-            onOmitir={() => setModal(null)}
-          />
-        </Modal>
-      )}
-    </div>
-  );
-}
-
 function CitaForm({ item, contactos, tagsExistentes, onCrearContacto, onSave }) {
   const inicial = fechaHoraALocalInputs(item.fechaHora);
   const [titulo, setTitulo] = useState(item.titulo || "");
@@ -11759,7 +11692,7 @@ const KEY_TO_VIEW_BUSQUEDA = {
   actividades: "actividades", activos: "activos", metas: "metas", contactos: "contactos", redesMetricas: "redes",
   documentos: "documentos", habitos: "habitos", salud: "salud", apartados: "apartados", eventos: "eventos",
   regalos: "regalos", facturas: "facturas", campanas: "marketing", patrimonio: "patrimonio", medicamentos: "medicamentos",
-  citas: "citas", notas: "notas",
+  citas: "agenda", notas: "notas",
 };
 function subtituloResultadoBusqueda(key, item) {
   switch (key) {
@@ -13334,9 +13267,11 @@ function QuickCapture({ data, onAdd, onCrearRecordatorio, irAVista }) {
 
   const cerrar = () => { setAbierto(false); setTipo(null); };
 
-  const estiloContenedor = pos
-    ? { position: "fixed", left: pos.x, top: pos.y, zIndex: 55 }
-    : { position: "fixed", right: 20, bottom: "calc(env(safe-area-inset-bottom) + 20px)", zIndex: 55 };
+  // Posición default (sin arrastrar): en móvil se levanta lo suficiente para no quedar tapado
+  // por el nuevo BottomNav fijo (solo existe en móvil, md:hidden) — en desktop no hay BottomNav,
+  // así que ahí se queda en su offset original de 20px.
+  const estiloContenedor = pos ? { position: "fixed", left: pos.x, top: pos.y, zIndex: 55 } : { position: "fixed", right: 20, zIndex: 55 };
+  const claseContenedorDefault = pos ? "" : "bottom-[calc(env(safe-area-inset-bottom)+5.5rem)] md:bottom-[calc(env(safe-area-inset-bottom)+20px)]";
 
   // El panel de opciones ya no depende de si el botón está a la izquierda/derecha/arriba/abajo
   // por CSS (eso era lo que lo hacía "perderse" en las esquinas). En vez de eso, cuando se abre
@@ -13395,7 +13330,7 @@ function QuickCapture({ data, onAdd, onCrearRecordatorio, irAVista }) {
         <div className="fixed inset-0" style={{ zIndex: 54 }} onClick={() => setAbierto(false)} />
       )}
       {panel}
-      <div style={estiloContenedor}>
+      <div className={claseContenedorDefault} style={estiloContenedor}>
         <button
           ref={btnRef}
           onPointerDown={onPointerDown}
@@ -13414,7 +13349,7 @@ function QuickCapture({ data, onAdd, onCrearRecordatorio, irAVista }) {
         <Modal title="Nueva cita" onClose={cerrar}>
           <CitaForm item={{ titulo: "", fechaHora: localInputsAFechaHora(todayISO(), "09:00"), lugar: "", contactoIds: [], tags: [], notas: "" }} contactos={data.contactos}
             tagsExistentes={tagsUnicos(data.citas)} onCrearContacto={(nombre) => { const nid = uid(); onAdd("contactos", { id: nid, nombre, tipos: ["Otro"] }); return nid; }}
-            onSave={(v) => { onAdd("citas", { ...v, id: uid() }); cerrar(); irAVista("citas"); }} />
+            onSave={(v) => { onAdd("citas", { ...v, id: uid() }); cerrar(); irAVista("agenda"); }} />
         </Modal>
       )}
       {tipo === "nota" && (

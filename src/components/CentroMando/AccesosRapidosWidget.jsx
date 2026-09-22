@@ -4,13 +4,18 @@
 // solo (ver irACrear en AppLoggedIn). Respeta los mismos permisos que ya filtra el sidebar
 // (navGroupsFiltrados): un colaborador sin acceso a un módulo no ve su acceso rápido.
 
-import { CheckSquare, CalendarClock, FolderKanban, Receipt, Dumbbell } from 'lucide-react';
+import { CheckSquare, CalendarRange, FolderKanban, Receipt, Gift, Dumbbell } from 'lucide-react';
 
+// "Nuevo evento" (antes "Nueva cita"): Citas ya no es pantalla aparte (rediseño de navegación,
+// 22 sept 2026 — Agenda es la única forma de ver/crear citas) — este acceso ya solo navega a
+// Agenda, sin abrir un formulario automático (Agenda no tiene ese mecanismo, a diferencia de
+// las pantallas de lista de antes). "Registrar atención" navega a Atenciones (regalos) igual.
 const ACCESOS = [
   { modulo: 'pendientes', label: 'Nueva tarea', icon: CheckSquare, preset: {} },
-  { modulo: 'citas', label: 'Nueva cita', icon: CalendarClock, preset: {} },
+  { modulo: 'agenda', label: 'Nuevo evento', icon: CalendarRange, preset: {} },
   { modulo: 'proyectos', label: 'Nuevo proyecto', icon: FolderKanban, preset: {} },
   { modulo: 'finanzas', label: 'Nuevo gasto', icon: Receipt, preset: { tipo: 'Egreso' } },
+  { modulo: 'regalos', label: 'Registrar atención', icon: Gift, preset: {} },
   // Entrenamiento no abre un formulario de "Nuevo" — lleva directo a Salud > Ejercicio > Sesión
   // (ver Salud/Ejercicio en App.jsx, que interpretan preset.tab/preset.subtab en vez de un item).
   { modulo: 'salud', label: 'Entrenamiento', icon: Dumbbell, preset: { tab: 'ejercicio', subtab: 'sesion' } },
