@@ -131,9 +131,10 @@ const REGISTRO_CONFIG: Record<string, { tabla: string; campos: string[]; etiquet
   medidas_corporales: { tabla: "medidas_corporales", campos: ["fecha", "cintura_cm", "cadera_cm", "pecho_cm", "biceps_cm", "muslo_cm", "pantorrilla_cm", "cuello_cm", "notas", "contacto_id"], etiquetaCampo: "fecha" },
   recetas: { tabla: "recetas", campos: ["nombre", "categoria", "porciones", "ingredientes", "instrucciones", "notas"], etiquetaCampo: "nombre", checarDuplicado: true },
   dieta_dias: { tabla: "dieta_dias", campos: ["fecha", "tipo_comida", "receta_id", "descripcion", "notas", "contacto_id"], etiquetaCampo: "tipo_comida" },
+  presupuestos: { tabla: "presupuestos", campos: ["tipo", "categoria", "proyecto_id", "periodo", "monto", "notas"], etiquetaCampo: "categoria" },
 };
 // Módulos SIN herramienta de creación propia -- solo estos usan crear_registro.
-const SOLO_CREAR_GENERICO = new Set(["equipo", "redes_metricas", "activos", "campanas", "campana_actividades"]);
+const SOLO_CREAR_GENERICO = new Set(["equipo", "redes_metricas", "activos", "campanas", "campana_actividades", "presupuestos"]);
 // Módulos con herramienta de actualizar propia y lógica especial (confirmación por monto en
 // finanzas, etc.) -- se excluyen de actualizar_registro para no abrir un segundo camino sin esa
 // validación.

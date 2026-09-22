@@ -22,7 +22,7 @@ import {
   LayoutDashboard, FolderKanban, CheckSquare, Wallet, AlertTriangle,
   Users, Activity, Plus, X, Trash2, Pencil, Github, ChevronDown,
   ChevronRight, Bell, Lightbulb, Rocket, MessageCircle, Mail, Globe,
-  Target, Contact, BarChart3, FileText, Flame, HeartPulse, Check, Menu, PieChart as PieChartIcon,
+  Target, Contact, BarChart3, FileText, Flame, HeartPulse, Check, Menu, PieChart as PieChartIcon, User,
   PiggyBank, Camera, Film, Upload, MapPin, Clock, Mic, Gift, Receipt, Megaphone, ChevronUp, Gem, Download, Sun, Moon, Shield, LogOut, ChevronLeft, Lock, Pill, CalendarClock, Zap, StickyNote, Search, Sparkles, Send, Bot, Square, Settings, CalendarRange, Palette, Eye, EyeOff, Sliders, Volume2, VolumeX, Play, Copy,
 } from "lucide-react";
 import {
@@ -436,7 +436,7 @@ const categoriaIMC = (imc) => {
 };
 
 /* ---------- persistencia relacional ---------- */
-const TABLES = ["proyectos", "pendientes", "equipo", "finanzas", "actividades", "activos", "metas", "contactos", "redesMetricas", "documentos", "habitos", "salud", "apartados", "apartadosMovimientos", "eventos", "comentarios", "saldoInicial", "regalos", "facturas", "campanas", "campanaActividades", "patrimonio", "patrimonioValuaciones", "medicamentos", "citas", "notas", "pagosFinanzas", "rutinasEjercicio", "rutinaEjercicioItems", "sesionesEjercicio", "sesionEjercicioItems", "medidasCorporales", "recetas", "dietaDias"];
+const TABLES = ["proyectos", "pendientes", "equipo", "finanzas", "actividades", "activos", "metas", "contactos", "redesMetricas", "documentos", "habitos", "salud", "apartados", "apartadosMovimientos", "eventos", "comentarios", "saldoInicial", "regalos", "facturas", "campanas", "campanaActividades", "patrimonio", "patrimonioValuaciones", "medicamentos", "citas", "notas", "pagosFinanzas", "rutinasEjercicio", "rutinaEjercicioItems", "sesionesEjercicio", "sesionEjercicioItems", "medidasCorporales", "recetas", "dietaDias", "presupuestos"];
 // Deudas ya NO es una tabla propia (Documento Maestro v1.2, secc. 23.11/40): es una vista
 // calculada sobre Finanzas (egresos no recurrentes con saldo pendiente). Esta función se usa
 // en cualquier lugar que antes leía `data.deudas`.
@@ -578,7 +578,7 @@ const ETIQUETA_TABLA = {
   comentarios: "Comentario", saldoInicial: "Saldo inicial", regalos: "Regalo",
   facturas: "Factura", campanas: "Campaña", campanaActividades: "Actividad de campaña", patrimonio: "Bien patrimonial",
   patrimonioValuaciones: "Valuación de patrimonio", medicamentos: "Medicamento", citas: "Cita", notas: "Nota",
-  pagosFinanzas: "Pago registrado",
+  pagosFinanzas: "Pago registrado", presupuestos: "Presupuesto",
 };
 
 // Exporta toda la información visible del usuario a un archivo Excel, un módulo por hoja.
@@ -653,6 +653,8 @@ function labelFor(key, item) {
       return `Medidas del ${item.fecha || "—"}`;
     case "dietaDias":
       return `${item.tipoComida || "Comida"} del ${item.fecha || "—"}`;
+    case "presupuestos":
+      return item.categoria || "Presupuesto de proyecto";
     default:
       return item.id;
   }
@@ -1589,7 +1591,7 @@ function AvisoInstalarPWA() {
 // Por seguridad, las pantallas sensibles (Finanzas, Salud, etc.) NO se restauran automáticamente
 // -- tras una recarga, vuelven a pedir la contraseña de reautenticación como cualquier otra vez
 // que expira la sesión corta, así que se manda a "dashboard" en esos casos.
-const VISTAS_SENSIBLES_NO_RESTAURAR = ["finanzas", "facturas", "reportes", "estimaciones", "deudas", "apartados", "patrimonio", "activos", "documentos", "salud", "medicamentos", "actividades"];
+const VISTAS_SENSIBLES_NO_RESTAURAR = ["finanzas", "facturas", "reportes", "estimaciones", "deudas", "apartados", "patrimonio", "activos", "documentos", "salud", "medicamentos", "actividades", "presupuesto"];
 function leerVistaGuardadaTrasReload() {
   try {
     const cruda = localStorage.getItem("arkeyone_reload_vista");
@@ -1703,6 +1705,7 @@ export default function App() {
 const VIEW_TO_MODULO = {
   proyectos: "proyectos", metas: "metas", pendientes: "pendientes",
   finanzas: "finanzas", facturas: "facturas", deudas: "deudas", apartados: "apartados",
+  presupuesto: "presupuestos",
   patrimonio: "patrimonio", activos: "activos", documentos: "documentos",
   equipo: "equipo", contactos: "contactos", regalos: "regalos",
   redes: "redes_metricas", marketing: "campanas",
@@ -2005,7 +2008,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
   // reautenticación o actividad. Si se cumple el plazo, se pide contraseña de nuevo antes de
   // entrar/seguir en el módulo — independiente del cierre general de sesión a los 30 min.
   const SENSIBLE_MS = 15 * 60 * 1000;
-  const VISTAS_SENSIBLES = ["finanzas", "facturas", "reportes", "estimaciones", "deudas", "apartados", "patrimonio", "activos", "documentos", "salud", "medicamentos"];
+  const VISTAS_SENSIBLES = ["finanzas", "facturas", "reportes", "estimaciones", "deudas", "apartados", "patrimonio", "activos", "documentos", "salud", "medicamentos", "presupuesto"];
   // Sentinel para "solo desbloquear, sin navegar a ningún lado" — se usa cuando el candado
   // aparece dentro de otra pantalla (Centro de Mando, pestañas de un proyecto) para revelar
   // información ya enmascarada ahí mismo, en vez de mandar al usuario al módulo completo.
@@ -2186,7 +2189,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
       const { data: colabs } = await supabase.from("colaboradores").select("*, colaborador_dependientes(contacto_id)").eq("colaborador_user_id", misId).eq("estatus", "Activo");
       setMisColaboraciones((colabs || []).map((c) => ({ propietarioId: c.propietario_id, propietarioEmail: c.propietario_email, modulos: c.modulos, dependientes: (c.colaborador_dependientes || []).map((d) => d.contacto_id) })));
 
-      const { data: pref } = await supabase.from("preferencias").select("tema, alertas_correo_activas, notif_tipos_desactivados, notif_silencio_activo, notif_silencio_inicio, notif_silencio_fin, notif_anticipacion_citas_min, dashboard_widgets, nombre_mostrar, avatar_url, presupuesto_mensual, ciudad, clima_lat, clima_lon").eq("user_id", misId).maybeSingle();
+      const { data: pref } = await supabase.from("preferencias").select("tema, alertas_correo_activas, notif_tipos_desactivados, notif_silencio_activo, notif_silencio_inicio, notif_silencio_fin, notif_anticipacion_citas_min, dashboard_widgets, nombre_mostrar, avatar_url, presupuesto_mensual, ciudad, clima_lat, clima_lon, perfil_bio, perfil_estudios, perfil_habilidades, perfil_redes").eq("user_id", misId).maybeSingle();
       const temaGuardado = normalizarTema(pref?.tema);
       if (temaGuardado !== tema) setTema(temaGuardado);
       if (pref && pref.alertas_correo_activas === false) setAlertasCorreoActivas(false);
@@ -2202,6 +2205,10 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
       if (pref?.ciudad) setCiudad(pref.ciudad);
       if (pref?.clima_lat != null) setClimaLat(pref.clima_lat);
       if (pref?.clima_lon != null) setClimaLon(pref.clima_lon);
+      if (pref?.perfil_bio) setPerfilBio(pref.perfil_bio);
+      if (pref?.perfil_estudios) setPerfilEstudios(pref.perfil_estudios);
+      if (pref?.perfil_habilidades) setPerfilHabilidades(pref.perfil_habilidades);
+      if (pref?.perfil_redes) setPerfilRedes(pref.perfil_redes);
 
       let result = await loadAllTables(misId);
       result = await migrateFromOldBlobIfNeeded(result, misId);
@@ -2294,6 +2301,19 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
   const guardarPresupuestoMensual = async (monto) => {
     setPresupuestoMensual(monto);
     await supabase.from("preferencias").upsert({ user_id: misId, presupuesto_mensual: monto }, { onConflict: "user_id" });
+  };
+
+  // --- Mi Perfil: bio/estudios/habilidades/redes, mismo patrón que nombre_mostrar/ciudad (1 fila
+  // en preferencias, no una tabla nueva) — ver migración 20260928_presupuesto_y_mi_perfil.
+  const [perfilBio, setPerfilBio] = useState("");
+  const [perfilEstudios, setPerfilEstudios] = useState([]);
+  const [perfilHabilidades, setPerfilHabilidades] = useState([]);
+  const [perfilRedes, setPerfilRedes] = useState([]);
+  const guardarPerfil = async ({ bio, estudios, habilidades, redes }) => {
+    setPerfilBio(bio); setPerfilEstudios(estudios); setPerfilHabilidades(habilidades); setPerfilRedes(redes);
+    await supabase.from("preferencias").upsert({
+      user_id: misId, perfil_bio: bio, perfil_estudios: estudios, perfil_habilidades: habilidades, perfil_redes: redes,
+    }, { onConflict: "user_id" });
   };
 
   // --- Notificaciones Push -------------------------------------------------
@@ -2724,6 +2744,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
       { id: "finanzas", label: "Finanzas", icon: Wallet },
       { id: "deudas", label: "Deudas", icon: AlertTriangle },
       { id: "apartados", label: "Apartados", icon: PiggyBank },
+      { id: "presupuesto", label: "Presupuesto", icon: Target },
       { id: "reportes", label: "Reportes", icon: PieChartIcon },
       { id: "estimaciones", label: "Estimaciones", icon: Sparkles },
     ]},
@@ -2736,6 +2757,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
       { id: "documentos", label: "Documentos", icon: FileText },
     ]},
     { label: "Personal", items: [
+      { id: "mi-perfil", label: "Mi Perfil", icon: User },
       { id: "actividades", label: "Diario", icon: Activity },
       { id: "eventos", label: "Eventos", icon: Camera },
       { id: "habitos", label: "Hábitos", icon: Flame },
@@ -3090,6 +3112,17 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
           )}
           {view === "documentos" && (
             <Documentos data={data} onAdd={(i) => addItem("documentos", i)} onEdit={(id, p) => editItem("documentos", id, p)} onRemove={(id) => askDelete("documentos", id)} onCrearTarea={(t) => addItem("pendientes", t)} />
+          )}
+          {view === "presupuesto" && (
+            <Presupuesto data={data} onAdd={(i) => addItem("presupuestos", i)} onEdit={(id, p) => editItem("presupuestos", id, p)} onRemove={(id) => askDelete("presupuestos", id)}
+              presupuestoMensual={presupuestoMensual} onGuardarPresupuestoMensual={guardarPresupuestoMensual} />
+          )}
+          {view === "mi-perfil" && (
+            <MiPerfil
+              nombreMostrar={nombreMostrar || miEmail} avatarUrl={avatarUrl} ciudad={ciudad}
+              bio={perfilBio} estudios={perfilEstudios} habilidades={perfilHabilidades} redes={perfilRedes}
+              onGuardar={guardarPerfil}
+            />
           )}
           {view === "equipo" && (
             <Equipo data={data}
@@ -8802,6 +8835,353 @@ function DocumentoForm({ item, proyectos, onSave }) {
       {error && <p className="text-xs gp-text-red mb-2">{error}</p>}
 
       <button className="gp-btn w-full py-2 text-sm mt-2" onClick={() => { if (!v.nombre?.toString().trim()) { setError("El nombre del documento es obligatorio."); return; } setError(""); onSave(v); }}>Guardar</button>
+    </div>
+  );
+}
+
+/* ---------- Presupuesto (metas de gasto por categoría/proyecto, comparadas contra Finanzas) ----------
+   El presupuesto GENERAL mensual (un número) ya existía y sigue viviendo en preferencias/el widget
+   "Tu progreso" -- aquí solo se muestra arriba con acceso directo a redefinirlo, para no duplicarlo.
+   Lo nuevo es el nivel granular: metas por categoría o por proyecto, mensuales o anuales, comparadas
+   contra el histórico real de Finanzas (misma lógica que Reportes: buildMonthlyLedger). ---------- */
+function Presupuesto({ data, onAdd, onEdit, onRemove, presupuestoMensual, onGuardarPresupuestoMensual }) {
+  const [modal, setModal] = useState(null);
+  const [presupuestoGeneralModal, setPresupuestoGeneralModal] = useState(false);
+  const [orden, setOrden] = useState("default");
+  const [ordenDir, setOrdenDir] = useState("asc");
+  const [busqueda, setBusqueda] = useState("");
+  const toggleOrden = (key) => { if (orden === key) setOrdenDir((d) => (d === "asc" ? "desc" : "asc")); else { setOrden(key); setOrdenDir("asc"); } };
+  const empty = { tipo: "categoria", categoria: "", proyectoId: "", periodo: "mensual", monto: "", notas: "" };
+
+  const nombreProyecto = (id) => data.proyectos.find((p) => p.id === id)?.nombre || "—";
+  const etiqueta = (p) => (p.tipo === "proyecto" ? nombreProyecto(p.proyectoId) : (p.categoria || "Sin categoría"));
+  const categoriasFinanzas = [...new Set((data.finanzas || []).map((f) => f.categoria).filter(Boolean))].sort();
+
+  const hoy = todayISO();
+  const mesActual = hoy.slice(0, 7);
+  const anioActual = hoy.slice(0, 4);
+  const monthKeysAnio = useMemo(() => Array.from({ length: 12 }, (_, i) => `${anioActual}-${String(i + 1).padStart(2, "0")}`), [anioActual]);
+  const ledgerAnio = useMemo(() => buildMonthlyLedger(data.finanzas, monthKeysAnio), [data.finanzas, monthKeysAnio]);
+  const gastoMesActual = ledgerAnio.filter((e) => e.mes === mesActual && e.tipo === "Egreso").reduce((s, e) => s + e.monto, 0);
+
+  const gastoReal = (p) => {
+    const movimientos = p.periodo === "anual" ? ledgerAnio : ledgerAnio.filter((e) => e.mes === mesActual);
+    const propios = p.tipo === "proyecto"
+      ? movimientos.filter((e) => e.proyectoId === p.proyectoId)
+      : movimientos.filter((e) => (e.categoria || "Sin categoría") === (p.categoria || "Sin categoría"));
+    return propios.filter((e) => e.tipo === "Egreso").reduce((s, e) => s + e.monto, 0);
+  };
+
+  const camposOrden = {
+    alfabetico: { get: (p) => etiqueta(p), tipo: "texto" },
+    registro: { get: (p) => p.createdAt, tipo: "fecha" },
+    monto: { get: (p) => Number(p.monto) || 0, tipo: "numero" },
+  };
+  const opcionesOrden = [
+    { key: "alfabetico", label: "alfabético" },
+    { key: "registro", label: "fecha de registro" },
+    { key: "monto", label: "monto" },
+  ];
+
+  const filtrados = filtrarPorBusqueda(data.presupuestos || [], busqueda, [(p) => etiqueta(p), (p) => p.notas]);
+  const ordenados = ordenarLista(filtrados, orden, camposOrden, ordenDir);
+  const columnasExport = [
+    { label: "Tipo", get: (p) => (p.tipo === "proyecto" ? "Proyecto" : "Categoría") },
+    { label: "Nombre", get: (p) => etiqueta(p) }, { label: "Periodo", get: (p) => p.periodo },
+    { label: "Presupuestado", get: (p) => p.monto }, { label: "Gastado", get: (p) => gastoReal(p) },
+    { label: "Notas", get: (p) => p.notas },
+  ];
+
+  return (
+    <div>
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-1">
+        <h2 className="gp-serif text-2xl">Presupuesto</h2>
+        <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm w-full sm:w-auto"><Plus size={14} /> Nueva meta</button>
+      </div>
+      <p className="text-sm gp-text-muted mb-3">Cuánto planeas gastar por categoría o por proyecto, comparado contra lo que realmente gastaste en Finanzas.</p>
+
+      <div className="gp-panel p-4 mb-4">
+        <div className="flex items-center justify-between mb-1">
+          <p className="text-sm font-medium">Presupuesto general mensual</p>
+          <button onClick={() => setPresupuestoGeneralModal(true)} className="text-xs gp-text-gold">{presupuestoMensual ? "Redefinir" : "Definir"}</button>
+        </div>
+        {presupuestoMensual ? (
+          <>
+            <p className="text-xs gp-text-muted mb-2">{fmtMoney(gastoMesActual)} de {fmtMoney(presupuestoMensual)} este mes</p>
+            <div className="h-2 rounded" style={{ background: "var(--border)" }}>
+              <div className="h-2 rounded" style={{ width: `${Math.min(100, Math.round((gastoMesActual / presupuestoMensual) * 100))}%`, background: gastoMesActual > presupuestoMensual ? "var(--red)" : "var(--teal)" }} />
+            </div>
+          </>
+        ) : (
+          <p className="text-xs gp-text-muted">Aún no defines cuánto planeas gastar al mes en total — el widget "Tu progreso" del Centro de mando lo usa.</p>
+        )}
+      </div>
+
+      <div className="mb-2"><OrdenSelector opciones={opcionesOrden} value={orden} onChange={setOrden} /></div>
+      <BarraListaEstandar busqueda={busqueda} onBusqueda={setBusqueda} placeholder="Buscar por categoría, proyecto o notas…"
+        onExportExcel={() => exportarFilasExcel(ordenados, columnasExport, "presupuesto")}
+        onExportPDF={() => exportarFilasPDF(ordenados, columnasExport, "presupuesto", "Presupuesto", busqueda ? `búsqueda: "${busqueda}"` : "")} />
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        {ordenados.map((p) => {
+          const gastado = gastoReal(p);
+          const monto = Number(p.monto) || 0;
+          const pct = monto ? Math.min(100, Math.round((gastado / monto) * 100)) : 0;
+          const sobrepasado = monto > 0 && gastado > monto;
+          return (
+            <div key={p.id} className="gp-panel p-4">
+              <div className="flex items-start justify-between">
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <p className="text-sm font-medium">{etiqueta(p)}</p>
+                    <Badge tone="muted">{p.tipo === "proyecto" ? "Proyecto" : "Categoría"}</Badge>
+                    <Badge tone="muted">{p.periodo === "anual" ? "Anual" : "Mensual"}</Badge>
+                  </div>
+                  {p.notas && <p className="text-xs gp-text-muted mt-0.5">{p.notas}</p>}
+                </div>
+                <div className="flex gap-1">
+                  <IconBtn onClick={() => setModal({ item: p })}><Pencil size={13} /></IconBtn>
+                  <IconBtn onClick={() => onRemove(p.id)}><Trash2 size={13} /></IconBtn>
+                </div>
+              </div>
+              <div className="mt-3">
+                <div className="flex items-end justify-between mb-1">
+                  <p className="gp-serif text-lg">{fmtMoney(gastado)}</p>
+                  <p className="text-xs gp-text-muted">de {fmtMoney(monto)}</p>
+                </div>
+                <div className="h-2 rounded" style={{ background: "var(--border)" }}>
+                  <div className="h-2 rounded" style={{ width: `${pct}%`, background: sobrepasado ? "var(--red)" : "var(--teal)" }} />
+                </div>
+                {sobrepasado && <p className="text-xs gp-text-red mt-1">Te pasaste por {fmtMoney(gastado - monto)}</p>}
+              </div>
+            </div>
+          );
+        })}
+        {ordenados.length === 0 && <p className="text-sm gp-text-muted col-span-2">Aún no registras metas de presupuesto por categoría o proyecto.</p>}
+      </div>
+
+      {presupuestoGeneralModal && (
+        <Modal title="Presupuesto mensual general" onClose={() => setPresupuestoGeneralModal(false)}>
+          <PresupuestoMensualForm presupuestoMensual={presupuestoMensual} onSave={async (v) => { await onGuardarPresupuestoMensual(v); }} onSaved={() => setPresupuestoGeneralModal(false)} />
+        </Modal>
+      )}
+
+      {modal && (
+        <Modal title={modal.item.id ? "Editar meta de presupuesto" : "Nueva meta de presupuesto"} onClose={() => setModal(null)}>
+          <PresupuestoForm item={modal.item} proyectos={data.proyectos} categoriasFinanzas={categoriasFinanzas}
+            onSave={(v) => { modal.item.id ? onEdit(modal.item.id, v) : onAdd(v); setModal(null); }} />
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+function PresupuestoForm({ item, proyectos, categoriasFinanzas, onSave }) {
+  const [v, setV] = useState(item);
+  const [error, setError] = useState("");
+  return (
+    <div>
+      <Field label="Aplica a">
+        <select className="gp-input" value={v.tipo} onChange={(e) => setV({ ...v, tipo: e.target.value })}>
+          <option value="categoria">Categoría</option>
+          <option value="proyecto">Proyecto</option>
+        </select>
+      </Field>
+      {v.tipo === "proyecto" ? (
+        <Field label="Proyecto">
+          <select className="gp-input" value={v.proyectoId} onChange={(e) => setV({ ...v, proyectoId: e.target.value })}>
+            <option value="">— elige un proyecto —</option>
+            {proyectos.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+          </select>
+        </Field>
+      ) : (
+        <Field label="Categoría">
+          <input className="gp-input" list="presupuesto-categorias" value={v.categoria || ""} onChange={(e) => setV({ ...v, categoria: e.target.value })} placeholder="ej. hosting, renta, comida" />
+          <datalist id="presupuesto-categorias">{categoriasFinanzas.map((c) => <option key={c} value={c} />)}</datalist>
+        </Field>
+      )}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <Field label="Periodo">
+          <select className="gp-input" value={v.periodo} onChange={(e) => setV({ ...v, periodo: e.target.value })}>
+            <option value="mensual">Mensual</option>
+            <option value="anual">Anual</option>
+          </select>
+        </Field>
+        <Field label="Monto"><MoneyInput className="gp-input" value={v.monto} onChange={(val) => setV({ ...v, monto: val })} /></Field>
+      </div>
+      <Field label="Notas"><textarea className="gp-input" rows={2} value={v.notas || ""} onChange={(e) => setV({ ...v, notas: e.target.value })} /></Field>
+      {error && <p className="text-xs gp-text-red mb-2">{error}</p>}
+      <button
+        className="gp-btn w-full py-2 text-sm mt-2"
+        onClick={() => {
+          if (v.tipo === "proyecto" && !v.proyectoId) { setError("Elige un proyecto."); return; }
+          if (v.tipo === "categoria" && !v.categoria?.toString().trim()) { setError("Captura una categoría."); return; }
+          if (!v.monto || Number(v.monto) <= 0) { setError("Captura un monto mayor a cero."); return; }
+          setError("");
+          onSave(v);
+        }}
+      >
+        Guardar
+      </button>
+    </div>
+  );
+}
+
+/* ---------- Mi Perfil (bio, estudios, habilidades, redes — configuración personal, no una lista
+   de registros; se guarda en preferencias, igual que nombre_mostrar/ciudad/avatar). No incluye
+   generador de CV ni QR de invitación -- quedan para una ronda posterior (documento consolidado
+   secc. 13), esto es solo la ficha editable. ---------- */
+function MiPerfil({ nombreMostrar, avatarUrl, ciudad, bio, estudios, habilidades, redes, onGuardar }) {
+  const [editando, setEditando] = useState(false);
+  const [v, setV] = useState({ bio: bio || "", estudios: estudios || [], habilidades: habilidades || [], redes: redes || [] });
+  const [habilidadNueva, setHabilidadNueva] = useState("");
+  const [guardando, setGuardando] = useState(false);
+
+  const empezarEdicion = () => { setV({ bio: bio || "", estudios: estudios || [], habilidades: habilidades || [], redes: redes || [] }); setEditando(true); };
+  const guardar = async () => { setGuardando(true); await onGuardar(v); setGuardando(false); setEditando(false); };
+
+  const agregarEstudio = () => setV({ ...v, estudios: [...v.estudios, { institucion: "", titulo: "", anio: "" }] });
+  const editarEstudio = (i, patch) => setV({ ...v, estudios: v.estudios.map((e, idx) => (idx === i ? { ...e, ...patch } : e)) });
+  const quitarEstudio = (i) => setV({ ...v, estudios: v.estudios.filter((_, idx) => idx !== i) });
+
+  const agregarHabilidad = () => {
+    const h = habilidadNueva.trim();
+    if (h && !v.habilidades.includes(h)) setV({ ...v, habilidades: [...v.habilidades, h] });
+    setHabilidadNueva("");
+  };
+  const quitarHabilidad = (h) => setV({ ...v, habilidades: v.habilidades.filter((x) => x !== h) });
+
+  const agregarRed = () => setV({ ...v, redes: [...v.redes, { red: "", url: "" }] });
+  const editarRed = (i, patch) => setV({ ...v, redes: v.redes.map((r, idx) => (idx === i ? { ...r, ...patch } : r)) });
+  const quitarRed = (i) => setV({ ...v, redes: v.redes.filter((_, idx) => idx !== i) });
+
+  return (
+    <div>
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-1">
+        <h2 className="gp-serif text-2xl">Mi Perfil</h2>
+        {!editando && <button onClick={empezarEdicion} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm w-full sm:w-auto"><Pencil size={14} /> Editar</button>}
+      </div>
+      <p className="text-sm gp-text-muted mb-4">Tu ficha personal — estudios, habilidades y redes. Sirve como referencia rápida, dentro de ARKEYONE.</p>
+
+      <div className="gp-panel p-5 mb-4 flex items-center gap-4">
+        {avatarUrl ? (
+          <img src={avatarUrl} alt="" className="w-16 h-16 rounded-full object-cover shrink-0" style={{ border: "1px solid var(--border)" }} />
+        ) : (
+          <span className="w-16 h-16 rounded-full flex items-center justify-center shrink-0 text-lg font-semibold" style={{ background: "var(--panel-hi)", color: "var(--gold)" }}>
+            {(nombreMostrar || "").slice(0, 2).toUpperCase()}
+          </span>
+        )}
+        <div>
+          <p className="gp-serif text-lg">{nombreMostrar}</p>
+          {ciudad && <p className="text-xs gp-text-muted flex items-center gap-1 mt-0.5"><MapPin size={11} /> {ciudad}</p>}
+          <p className="text-[11px] gp-text-muted mt-1">La foto y la ciudad se cambian desde Configuración.</p>
+        </div>
+      </div>
+
+      {editando ? (
+        <div className="gp-panel p-5 space-y-5">
+          <Field label="Sobre mí"><textarea className="gp-input" rows={3} value={v.bio} onChange={(e) => setV({ ...v, bio: e.target.value })} placeholder="Una breve descripción sobre ti…" /></Field>
+
+          <div>
+            <p className="text-sm font-medium mb-2">Estudios</p>
+            <div className="space-y-2">
+              {v.estudios.map((e, i) => (
+                <div key={i} className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_100px_auto] gap-2 items-center">
+                  <input className="gp-input" placeholder="Institución" value={e.institucion} onChange={(ev) => editarEstudio(i, { institucion: ev.target.value })} />
+                  <input className="gp-input" placeholder="Título / grado" value={e.titulo} onChange={(ev) => editarEstudio(i, { titulo: ev.target.value })} />
+                  <input className="gp-input" placeholder="Año" value={e.anio} onChange={(ev) => editarEstudio(i, { anio: ev.target.value })} />
+                  <IconBtn onClick={() => quitarEstudio(i)}><Trash2 size={13} /></IconBtn>
+                </div>
+              ))}
+            </div>
+            <button onClick={agregarEstudio} className="gp-btn-ghost mt-2 py-1.5 px-3 text-xs">+ Agregar estudio</button>
+          </div>
+
+          <div>
+            <p className="text-sm font-medium mb-2">Habilidades</p>
+            <div className="flex flex-wrap gap-1.5 mb-2">
+              {v.habilidades.map((h) => (
+                <span key={h} className="text-xs px-2.5 py-1 rounded-full border flex items-center gap-1">
+                  {h}
+                  <button onClick={() => quitarHabilidad(h)} className="gp-text-red">✕</button>
+                </span>
+              ))}
+            </div>
+            <div className="flex gap-2">
+              <input className="gp-input flex-1" placeholder="ej. Piano, Excel, Cocina" value={habilidadNueva} onChange={(e) => setHabilidadNueva(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); agregarHabilidad(); } }} />
+              <button onClick={agregarHabilidad} className="gp-btn-ghost px-3 text-xs">Agregar</button>
+            </div>
+          </div>
+
+          <div>
+            <p className="text-sm font-medium mb-2">Redes</p>
+            <div className="space-y-2">
+              {v.redes.map((r, i) => (
+                <div key={i} className="grid grid-cols-1 sm:grid-cols-[140px_1fr_auto] gap-2 items-center">
+                  <input className="gp-input" placeholder="Red (ej. LinkedIn)" value={r.red} onChange={(ev) => editarRed(i, { red: ev.target.value })} />
+                  <input className="gp-input" placeholder="URL" value={r.url} onChange={(ev) => editarRed(i, { url: ev.target.value })} />
+                  <IconBtn onClick={() => quitarRed(i)}><Trash2 size={13} /></IconBtn>
+                </div>
+              ))}
+            </div>
+            <button onClick={agregarRed} className="gp-btn-ghost mt-2 py-1.5 px-3 text-xs">+ Agregar red</button>
+          </div>
+
+          <div className="flex gap-2 pt-2">
+            <button onClick={() => setEditando(false)} className="gp-btn-ghost flex-1 py-2 text-sm">Cancelar</button>
+            <button onClick={guardar} disabled={guardando} className="gp-btn flex-1 py-2 text-sm disabled:opacity-70">{guardando ? "Guardando…" : "Guardar"}</button>
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          <div className="gp-panel p-5">
+            <p className="text-sm font-medium mb-2">Sobre mí</p>
+            <p className="text-sm gp-text-muted">{bio || "Aún no capturas una descripción."}</p>
+          </div>
+
+          <div className="gp-panel p-5">
+            <p className="text-sm font-medium mb-2">Estudios</p>
+            {(estudios || []).length === 0 ? (
+              <p className="text-sm gp-text-muted">Aún no registras estudios.</p>
+            ) : (
+              <ul className="space-y-1.5 text-sm">
+                {estudios.map((e, i) => (
+                  <li key={i} className="flex items-center justify-between gap-2">
+                    <span>{e.titulo || "—"} {e.institucion ? `· ${e.institucion}` : ""}</span>
+                    {e.anio && <span className="text-xs gp-text-muted shrink-0">{e.anio}</span>}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          <div className="gp-panel p-5">
+            <p className="text-sm font-medium mb-2">Habilidades</p>
+            {(habilidades || []).length === 0 ? (
+              <p className="text-sm gp-text-muted">Aún no registras habilidades.</p>
+            ) : (
+              <div className="flex flex-wrap gap-1.5">
+                {habilidades.map((h) => <span key={h} className="text-xs px-2.5 py-1 rounded-full border">{h}</span>)}
+              </div>
+            )}
+          </div>
+
+          <div className="gp-panel p-5">
+            <p className="text-sm font-medium mb-2">Redes</p>
+            {(redes || []).length === 0 ? (
+              <p className="text-sm gp-text-muted">Aún no agregas redes.</p>
+            ) : (
+              <ul className="space-y-1.5 text-sm">
+                {redes.map((r, i) => (
+                  <li key={i}>
+                    <a href={r.url} target="_blank" rel="noreferrer" className="gp-text-gold">{r.red || r.url}</a>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
