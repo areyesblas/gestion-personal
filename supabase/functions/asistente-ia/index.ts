@@ -87,8 +87,63 @@ const MODULOS_DISPONIBLES = [
   "proyectos", "pendientes", "notas", "finanzas", "citas", "contactos",
   "salud", "medicamentos", "habitos", "actividades", "documentos", "patrimonio",
   "activos", "apartados", "eventos", "campanas", "regalos", "metas", "facturas",
-  "rutinas_ejercicio", "recetas",
+  "rutinas_ejercicio", "recetas", "equipo",
 ];
+
+// --- CRUD genérico para módulos que no tienen (o no necesitan) una herramienta propia -------
+// En vez de una herramienta "crear_X/actualizar_X/eliminar_X" por cada una de las ~34 tablas
+// (eso serían ~70-90 herramientas — con un modelo rápido como Haiku, cuantas más herramientas
+// se le mandan en cada llamada, más riesgo de que elija mal cuál usar, y más tokens/latencia en
+// cada mensaje), se usan 3 herramientas genéricas dirigidas por esta configuración: qué tabla
+// real corresponde a cada "modulo", qué campos se pueden tocar, y qué campo sirve de etiqueta
+// legible en los mensajes de confirmación. Los módulos que YA tienen una herramienta dedicada
+// con lógica propia (duplicados, confirmación por monto, etc.) se excluyen de crear/actualizar
+// genérico para no abrir un segundo camino que se salte esa lógica -- eliminar_registro sí es
+// universal porque siempre confirma antes de borrar, así que no hay nada que "saltarse".
+const REGISTRO_CONFIG: Record<string, { tabla: string; campos: string[]; etiquetaCampo: string; checarDuplicado?: boolean }> = {
+  proyectos: { tabla: "proyectos", campos: ["nombre", "categoria", "estatus", "modo", "monetizacion", "prioridad", "descripcion"], etiquetaCampo: "nombre" },
+  pendientes: { tabla: "pendientes", campos: ["descripcion", "proyecto_id", "fecha_limite", "prioridad", "estatus"], etiquetaCampo: "descripcion" },
+  equipo: { tabla: "equipo", campos: ["nombre", "whatsapp", "correo", "comentarios"], etiquetaCampo: "nombre", checarDuplicado: true },
+  finanzas: { tabla: "finanzas", campos: ["tipo", "concepto", "monto", "fecha", "categoria", "estatus"], etiquetaCampo: "concepto" },
+  actividades: { tabla: "actividades", campos: ["nombre", "notas", "fecha", "proyecto_id"], etiquetaCampo: "nombre" },
+  activos: { tabla: "activos", campos: ["tipo", "nombre", "proyecto_id", "fecha_vencimiento", "costo_renovacion", "notas", "proveedor", "renovacion_automatica", "frecuencia_renovacion"], etiquetaCampo: "nombre", checarDuplicado: true },
+  metas: { tabla: "metas", campos: ["descripcion", "proyecto_id", "fecha_objetivo", "fecha_revision", "prioridad", "estatus"], etiquetaCampo: "descripcion" },
+  contactos: { tabla: "contactos", campos: ["nombre", "whatsapp", "correo", "tipos", "notas"], etiquetaCampo: "nombre" },
+  redes_metricas: { tabla: "redes_metricas", campos: ["proyecto_id", "plataforma", "fecha", "seguidores", "alcance"], etiquetaCampo: "plataforma" },
+  documentos: { tabla: "documentos", campos: ["tipo", "nombre", "proyecto_id", "fecha_vencimiento", "notas"], etiquetaCampo: "nombre" },
+  habitos: { tabla: "habitos", campos: ["nombre", "frecuencia_tipo", "frecuencia_dias_semana", "frecuencia_veces_semana"], etiquetaCampo: "nombre" },
+  salud: { tabla: "salud", campos: ["peso", "glucosa", "sistolica", "diastolica", "colesterol", "trigliceridos", "notas", "fecha", "contacto_id"], etiquetaCampo: "fecha" },
+  apartados: { tabla: "apartados", campos: ["nombre", "monto_objetivo", "fecha_objetivo", "proyecto_id", "notas"], etiquetaCampo: "nombre" },
+  eventos: { tabla: "eventos", campos: ["nombre", "fecha", "lugar", "horario", "contacto_id", "proyecto_id", "comentarios", "costo", "gastos"], etiquetaCampo: "nombre" },
+  comentarios: { tabla: "comentarios", campos: ["texto"], etiquetaCampo: "texto" },
+  regalos: { tabla: "regalos", campos: ["contacto_id", "tipo", "ocasion", "descripcion", "fecha", "costo", "estatus"], etiquetaCampo: "descripcion" },
+  facturas: { tabla: "facturas", campos: ["tipo", "proyecto_id", "contacto_id", "folio", "fecha", "concepto", "subtotal", "iva", "total", "estatus", "notas"], etiquetaCampo: "concepto" },
+  campanas: { tabla: "campanas", campos: ["proyecto_id", "nombre", "plataforma", "fecha_inicio", "fecha_fin", "presupuesto", "estatus", "notas"], etiquetaCampo: "nombre", checarDuplicado: true },
+  campana_actividades: { tabla: "campana_actividades", campos: ["campana_id", "proyecto_id", "fecha", "hora", "canal", "tipo_contenido", "accion", "responsable_contacto_id", "prioridad", "tiempo_estimado_horas", "tiempo_real_horas", "estado", "notas"], etiquetaCampo: "accion" },
+  patrimonio: { tabla: "patrimonio", campos: ["nombre", "categoria", "fecha_adquisicion", "valor_adquisicion", "notas"], etiquetaCampo: "nombre" },
+  medicamentos: { tabla: "medicamentos", campos: ["nombre", "dosis", "contacto_id", "horarios", "dias_semana", "fecha_inicio", "fecha_fin", "instrucciones", "motivo", "medico", "via_administracion", "observaciones"], etiquetaCampo: "nombre" },
+  citas: { tabla: "citas", campos: ["titulo", "fecha_hora", "lugar"], etiquetaCampo: "titulo" },
+  notas: { tabla: "notas", campos: ["titulo", "contenido"], etiquetaCampo: "titulo" },
+  rutinas_ejercicio: { tabla: "rutinas_ejercicio", campos: ["nombre", "fecha_inicio", "fecha_fin", "notas"], etiquetaCampo: "nombre" },
+  rutina_ejercicio_items: { tabla: "rutina_ejercicio_items", campos: ["ejercicio", "tipo", "peso", "series", "repeticiones", "duracion_segundos", "descanso_segundos", "orden"], etiquetaCampo: "ejercicio" },
+  sesiones_ejercicio: { tabla: "sesiones_ejercicio", campos: ["fecha", "hora", "notas"], etiquetaCampo: "fecha" },
+  sesion_ejercicio_items: { tabla: "sesion_ejercicio_items", campos: ["ejercicio", "tipo", "peso", "series", "repeticiones", "duracion_segundos", "descanso_segundos", "hecho", "orden"], etiquetaCampo: "ejercicio" },
+  medidas_corporales: { tabla: "medidas_corporales", campos: ["fecha", "cintura_cm", "cadera_cm", "pecho_cm", "biceps_cm", "muslo_cm", "pantorrilla_cm", "cuello_cm", "notas", "contacto_id"], etiquetaCampo: "fecha" },
+  recetas: { tabla: "recetas", campos: ["nombre", "categoria", "porciones", "ingredientes", "instrucciones", "notas"], etiquetaCampo: "nombre", checarDuplicado: true },
+  dieta_dias: { tabla: "dieta_dias", campos: ["fecha", "tipo_comida", "receta_id", "descripcion", "notas", "contacto_id"], etiquetaCampo: "tipo_comida" },
+};
+// Módulos SIN herramienta de creación propia -- solo estos usan crear_registro.
+const SOLO_CREAR_GENERICO = new Set(["equipo", "redes_metricas", "activos", "campanas", "campana_actividades"]);
+// Módulos con herramienta de actualizar propia y lógica especial (confirmación por monto en
+// finanzas, etc.) -- se excluyen de actualizar_registro para no abrir un segundo camino sin esa
+// validación.
+const EXCLUIDOS_ACTUALIZAR_GENERICO = new Set(["finanzas", "pendientes", "proyectos", "citas"]);
+const MODULOS_CREAR_GENERICO = [...SOLO_CREAR_GENERICO];
+const MODULOS_ACTUALIZAR_GENERICO = Object.keys(REGISTRO_CONFIG).filter((m) => !EXCLUIDOS_ACTUALIZAR_GENERICO.has(m));
+const MODULOS_ELIMINAR_GENERICO = Object.keys(REGISTRO_CONFIG);
+function describirCampos(modulos: string[]) {
+  return modulos.map((m) => `${m}: ${REGISTRO_CONFIG[m].campos.join(", ")}`).join(" | ");
+}
 
 const TOOLS = [
   {
@@ -582,6 +637,140 @@ const TOOLS = [
       required: ["tipo_comida"],
     },
   },
+  {
+    name: "crear_registro",
+    description: `Crea un registro nuevo en un modulo que NO tiene herramienta propia de creacion (para los que si la tienen -- proyectos, tareas, finanzas, notas, contactos, citas, habitos, eventos, patrimonio, apartados, metas, medicamentos, regalos (via crear_atencion), rutinas de ejercicio, medidas corporales, recetas, comidas -- usa esa herramienta especifica en vez de esta, tienen validaciones propias). Campos disponibles por modulo: ${describirCampos(MODULOS_CREAR_GENERICO)}. Los campos que no mandes quedan vacios. equipo, activos y campanas revisan duplicados por nombre primero (mismo mecanismo que las demas herramientas crear_*): si devuelve posible_duplicado=true, no la repitas en el mismo turno.`,
+    input_schema: {
+      type: "object",
+      properties: {
+        modulo: { type: "string", enum: MODULOS_CREAR_GENERICO },
+        campos: { type: "object", description: "Pares campo:valor a guardar -- solo los campos listados en la descripcion para ese modulo." },
+        confirmado: { type: "boolean", description: "Solo relevante si ya se devolvio posible_duplicado=true antes." },
+      },
+      required: ["modulo", "campos"],
+    },
+  },
+  {
+    name: "actualizar_registro",
+    description: `Actualiza campos de un registro existente por su id, en cualquier modulo SALVO finanzas/tareas/proyectos/citas (esos usan su propia herramienta: actualizar_movimiento, actualizar_pendiente, actualizar_proyecto, actualizar_cita -- tienen validaciones propias, como la confirmacion al cambiar un monto). Usa buscar_datos (o la herramienta de lectura correspondiente, ej. obtener_entrenamiento_hoy) primero para obtener el id exacto -- nunca inventes un id. Campos disponibles por modulo: ${describirCampos(MODULOS_ACTUALIZAR_GENERICO)}. No requiere confirmacion.`,
+    input_schema: {
+      type: "object",
+      properties: {
+        modulo: { type: "string", enum: MODULOS_ACTUALIZAR_GENERICO },
+        id: { type: "string" },
+        campos: { type: "object", description: "Pares campo:valor a cambiar -- solo los campos listados en la descripcion para ese modulo." },
+      },
+      required: ["modulo", "id", "campos"],
+    },
+  },
+  {
+    name: "eliminar_registro",
+    description: `Elimina (borrado logico, recuperable desde Papelera) un registro por su id, en CUALQUIER modulo -- incluidos los que ya tienen su propia herramienta de eliminar (eliminar_pendiente, eliminar_movimiento, cancelar_cita funcionan igual de bien para esos, cualquiera de las dos formas sirve). ACCION QUE REQUIERE CONFIRMACION: llamala primero sin 'confirmado' -- no borrara nada y te regresara el mensaje de confirmacion para decirle al usuario tal cual, en texto, sin volver a llamar la herramienta en ese mismo turno; solo tras su 'si' en el siguiente mensaje, vuelve a llamarla con confirmado=true. Modulos validos: ${MODULOS_ELIMINAR_GENERICO.join(", ")}.`,
+    input_schema: {
+      type: "object",
+      properties: {
+        modulo: { type: "string", enum: MODULOS_ELIMINAR_GENERICO },
+        id: { type: "string" },
+        confirmado: { type: "boolean" },
+      },
+      required: ["modulo", "id"],
+    },
+  },
+  {
+    name: "aportar_apartado",
+    description: "Aparta (transfiere) dinero hacia un Apartado (meta de ahorro) -- no es un gasto, es mover dinero a una 'bolsa' aparte, no toca Finanzas. Usa buscar_datos con modulo=apartados primero para obtener el id exacto. No requiere confirmacion.",
+    input_schema: {
+      type: "object",
+      properties: { apartado_id: { type: "string" }, monto: { type: "number" } },
+      required: ["apartado_id", "monto"],
+    },
+  },
+  {
+    name: "retirar_apartado",
+    description: "Retira dinero de un Apartado. Si el dinero se libera hacia un proyecto o gasto concreto, tambien se refleja como Ingreso en Finanzas para dejar el rastro de a donde fue (regla maestra de dinero). Usa buscar_datos con modulo=apartados primero para el id. No requiere confirmacion.",
+    input_schema: {
+      type: "object",
+      properties: {
+        apartado_id: { type: "string" },
+        monto: { type: "number" },
+        concepto: { type: "string", description: "A donde fue el dinero, ej. 'gasto de renta'." },
+        proyecto_id: { type: "string", description: "Opcional, si el retiro esta ligado a un proyecto." },
+      },
+      required: ["apartado_id", "monto", "concepto"],
+    },
+  },
+  {
+    name: "agregar_ejercicio_a_rutina",
+    description: "Agrega un ejercicio a una rutina YA EXISTENTE -- a diferencia de crear_rutina_ejercicio, que arma una rutina completa de una vez. Usa buscar_datos con modulo=rutinas_ejercicio primero para el id de la rutina. No requiere confirmacion.",
+    input_schema: {
+      type: "object",
+      properties: {
+        rutina_id: { type: "string" },
+        ejercicio: { type: "string" },
+        tipo: { type: "string", enum: ["series", "tiempo"], description: "Por defecto 'series'." },
+        peso: { type: "number" },
+        series: { type: "number" },
+        repeticiones: { type: "number" },
+        duracion_segundos: { type: "number" },
+        descanso_segundos: { type: "number" },
+      },
+      required: ["rutina_id", "ejercicio"],
+    },
+  },
+  {
+    name: "crear_comentario",
+    description: "Agrega un comentario/nota de bitacora a cualquier entidad (proyecto, tarea, contacto, evento, etc.) -- distinto de registrar_avance_proyecto, que es especifico para bitacora de avance de proyectos. Usa buscar_datos primero para obtener el id exacto de la entidad. No requiere confirmacion.",
+    input_schema: {
+      type: "object",
+      properties: {
+        entidad_tipo: { type: "string", description: "Modulo de la entidad, ej. 'proyectos', 'pendientes', 'contactos', 'eventos'." },
+        entidad_id: { type: "string" },
+        texto: { type: "string" },
+      },
+      required: ["entidad_tipo", "entidad_id", "texto"],
+    },
+  },
+  {
+    name: "obtener_comentarios",
+    description: "Trae los comentarios/bitacora guardados sobre una entidad especifica (proyecto, tarea, contacto, etc.), mas recientes primero.",
+    input_schema: {
+      type: "object",
+      properties: { entidad_tipo: { type: "string" }, entidad_id: { type: "string" } },
+      required: ["entidad_tipo", "entidad_id"],
+    },
+  },
+  {
+    name: "actualizar_estatura",
+    description: "Guarda o actualiza la estatura (cm) del usuario o de una persona vinculada, usada para calcular el IMC en Salud. Usa buscar_datos con modulo=contactos primero si es de un tercero. No requiere confirmacion.",
+    input_schema: {
+      type: "object",
+      properties: {
+        altura_cm: { type: "number" },
+        contacto_id: { type: "string", description: "Opcional, solo si es una persona vinculada." },
+      },
+      required: ["altura_cm"],
+    },
+  },
+  {
+    name: "obtener_medidas_corporales",
+    description: "Trae el historial de medidas corporales (cintura, cadera, pecho, biceps, muslo, pantorrilla, cuello) del usuario o de una persona vinculada, mas recientes primero.",
+    input_schema: {
+      type: "object",
+      properties: { contacto_id: { type: "string", description: "Opcional, solo si es de una persona vinculada." } },
+    },
+  },
+  {
+    name: "obtener_comidas",
+    description: "Trae las comidas registradas en un rango de fechas (por defecto los ultimos 7 dias) para el usuario o una persona vinculada -- para preguntas como 'que comi el fin de semana' o 'que tengo planeado esta semana'. Para HOY especificamente, obtener_entrenamiento_hoy ya lo incluye.",
+    input_schema: {
+      type: "object",
+      properties: {
+        desde: { type: "string", description: "YYYY-MM-DD, por defecto hace 7 dias." },
+        hasta: { type: "string", description: "YYYY-MM-DD, por defecto hoy." },
+        contacto_id: { type: "string" },
+      },
+    },
+  },
 ];
 
 const SELECT_POR_MODULO: Record<string, string> = {
@@ -606,13 +795,14 @@ const SELECT_POR_MODULO: Record<string, string> = {
   facturas: "id, concepto, total, fecha, estatus",
   rutinas_ejercicio: "id, nombre, fecha_inicio, fecha_fin, notas",
   recetas: "id, nombre, categoria, porciones, instrucciones",
+  equipo: "id, nombre, whatsapp, correo, comentarios",
 };
 const CAMPO_BUSQUEDA: Record<string, string> = {
   proyectos: "nombre", pendientes: "descripcion", notas: "titulo", finanzas: "concepto", citas: "titulo", contactos: "nombre",
   salud: "notas", medicamentos: "nombre", habitos: "nombre", actividades: "nombre", documentos: "nombre",
   patrimonio: "nombre", activos: "nombre", apartados: "nombre", eventos: "nombre", campanas: "nombre",
   regalos: "descripcion", metas: "descripcion", facturas: "concepto",
-  rutinas_ejercicio: "nombre", recetas: "nombre",
+  rutinas_ejercicio: "nombre", recetas: "nombre", equipo: "nombre",
 };
 
 async function ejecutarHerramienta(nombre: string, input: any, userId: string) {
@@ -1114,6 +1304,123 @@ async function ejecutarHerramienta(nombre: string, input: any, userId: string) {
       const { error } = await admin.from("dieta_dias").insert(row);
       return error ? { error: error.message } : { ok: true, id: row.id, receta_vinculada: !!recetaId };
     }
+    case "crear_registro": {
+      const cfg = REGISTRO_CONFIG[input.modulo];
+      if (!cfg || !SOLO_CREAR_GENERICO.has(input.modulo)) return { error: "Modulo no valido para crear_registro -- usa la herramienta especifica de ese modulo, o este modulo no admite creacion por aqui." };
+      if (cfg.checarDuplicado && input.confirmado !== true) {
+        const dup = await buscarPosibleDuplicado(cfg.tabla, cfg.etiquetaCampo, input.campos?.[cfg.etiquetaCampo], userId);
+        if (dup) return { posible_duplicado: true, existente: dup, mensaje_para_usuario: `Ya existe algo parecido en ${input.modulo}: "${dup[cfg.etiquetaCampo]}". ¿Lo creo de todas formas o te refieres a ese?` };
+      }
+      const row: any = { id: uid(), user_id: userId };
+      for (const campo of cfg.campos) {
+        if (input.campos && input.campos[campo] !== undefined) row[campo] = input.campos[campo];
+      }
+      const { error } = await admin.from(cfg.tabla).insert(row);
+      return error ? { error: error.message } : { ok: true, id: row.id };
+    }
+    case "actualizar_registro": {
+      const cfg = REGISTRO_CONFIG[input.modulo];
+      if (!cfg || EXCLUIDOS_ACTUALIZAR_GENERICO.has(input.modulo)) return { error: "Modulo no valido para actualizar_registro -- usa la herramienta especifica de ese modulo (actualizar_movimiento, actualizar_pendiente, actualizar_proyecto o actualizar_cita)." };
+      const { data: existente } = await admin.from(cfg.tabla).select("id").eq("id", input.id).eq("user_id", userId).maybeSingle();
+      if (!existente) return { error: "No se encontro ese registro (o no te pertenece). Usa buscar_datos primero." };
+      const cambios: any = {};
+      for (const campo of cfg.campos) {
+        if (input.campos && input.campos[campo] !== undefined) cambios[campo] = input.campos[campo];
+      }
+      if (Object.keys(cambios).length === 0) return { error: "No se especificaron campos validos para actualizar en ese modulo." };
+      const { error } = await admin.from(cfg.tabla).update(cambios).eq("id", input.id).eq("user_id", userId);
+      return error ? { error: error.message } : { ok: true };
+    }
+    case "eliminar_registro": {
+      const cfg = REGISTRO_CONFIG[input.modulo];
+      if (!cfg) return { error: "Modulo no valido para eliminar_registro." };
+      const { data: existente } = await admin.from(cfg.tabla).select(`id, ${cfg.etiquetaCampo}`).eq("id", input.id).eq("user_id", userId).is("deleted_at", null).maybeSingle();
+      if (!existente) return { error: "No se encontro ese registro (o no te pertenece, o ya estaba eliminado)." };
+      if (input.confirmado !== true) {
+        const etiqueta = (existente as any)[cfg.etiquetaCampo] || input.id;
+        return { requiere_confirmacion: true, mensaje_para_usuario: `¿Confirmas eliminar "${etiqueta}" de ${input.modulo}?` };
+      }
+      const { error } = await admin.from(cfg.tabla).update({ deleted_at: new Date().toISOString() }).eq("id", input.id).eq("user_id", userId);
+      return error ? { error: error.message } : { ok: true };
+    }
+    case "aportar_apartado": {
+      const { data: apartado } = await admin.from("apartados").select("id, nombre, monto_actual").eq("id", input.apartado_id).eq("user_id", userId).is("deleted_at", null).maybeSingle();
+      if (!apartado) return { error: "No se encontro ese apartado (o no te pertenece). Usa buscar_datos primero." };
+      const nuevoMontoActual = (Number(apartado.monto_actual) || 0) + Number(input.monto);
+      const { error: e1 } = await admin.from("apartados_movimientos").insert({
+        id: uid(), user_id: userId, apartado_id: apartado.id, tipo: "aporte", monto: input.monto,
+        fecha: fechaHoraActualMexico().iso, concepto: `Aporte a "${apartado.nombre}"`,
+      });
+      if (e1) return { error: e1.message };
+      const { error: e2 } = await admin.from("apartados").update({ monto_actual: nuevoMontoActual }).eq("id", apartado.id).eq("user_id", userId);
+      return e2 ? { error: e2.message } : { ok: true, monto_actual: nuevoMontoActual };
+    }
+    case "retirar_apartado": {
+      const { data: apartado } = await admin.from("apartados").select("id, nombre, monto_actual").eq("id", input.apartado_id).eq("user_id", userId).is("deleted_at", null).maybeSingle();
+      if (!apartado) return { error: "No se encontro ese apartado (o no te pertenece). Usa buscar_datos primero." };
+      const nuevoMontoActual = (Number(apartado.monto_actual) || 0) - Number(input.monto);
+      const hoy = fechaHoraActualMexico().iso;
+      const { error: e1 } = await admin.from("apartados_movimientos").insert({
+        id: uid(), user_id: userId, apartado_id: apartado.id, tipo: "retiro", monto: input.monto,
+        fecha: hoy, concepto: input.concepto, proyecto_id: input.proyecto_id || null,
+      });
+      if (e1) return { error: e1.message };
+      const { error: e2 } = await admin.from("apartados").update({ monto_actual: nuevoMontoActual }).eq("id", apartado.id).eq("user_id", userId);
+      if (e2) return { error: e2.message };
+      const { error: e3 } = await admin.from("finanzas").insert({
+        id: uid(), user_id: userId, tipo: "Ingreso", concepto: input.concepto,
+        monto: input.monto, fecha: hoy, estatus: "Cobrado",
+      });
+      return e3 ? { error: e3.message } : { ok: true, monto_actual: nuevoMontoActual };
+    }
+    case "agregar_ejercicio_a_rutina": {
+      const { data: rutina } = await admin.from("rutinas_ejercicio").select("id").eq("id", input.rutina_id).eq("user_id", userId).is("deleted_at", null).maybeSingle();
+      if (!rutina) return { error: "No se encontro esa rutina (o no te pertenece). Usa buscar_datos primero." };
+      const { count } = await admin.from("rutina_ejercicio_items").select("id", { count: "exact", head: true }).eq("rutina_id", rutina.id).is("deleted_at", null);
+      const row = {
+        id: uid(), user_id: userId, rutina_id: rutina.id, ejercicio: input.ejercicio, tipo: input.tipo || "series",
+        peso: input.peso ?? null, series: input.series ?? null, repeticiones: input.repeticiones ?? null,
+        duracion_segundos: input.duracion_segundos ?? null, descanso_segundos: input.descanso_segundos ?? null, orden: count || 0,
+      };
+      const { error } = await admin.from("rutina_ejercicio_items").insert(row);
+      return error ? { error: error.message } : { ok: true, id: row.id };
+    }
+    case "crear_comentario": {
+      const row = { id: uid(), user_id: userId, entidad_tipo: input.entidad_tipo, entidad_id: input.entidad_id, texto: input.texto };
+      const { error } = await admin.from("comentarios").insert(row);
+      return error ? { error: error.message } : { ok: true, id: row.id };
+    }
+    case "obtener_comentarios": {
+      const { data, error } = await admin.from("comentarios").select("id, texto, created_at")
+        .eq("user_id", userId).eq("entidad_tipo", input.entidad_tipo).eq("entidad_id", input.entidad_id).is("deleted_at", null)
+        .order("created_at", { ascending: false });
+      return error ? { error: error.message } : { comentarios: data || [] };
+    }
+    case "actualizar_estatura": {
+      const row = { user_id: userId, contacto_id: input.contacto_id || null, altura_cm: input.altura_cm };
+      const { error } = await admin.from("perfil_salud").upsert(row, { onConflict: input.contacto_id ? "user_id,contacto_id" : "user_id" });
+      return error ? { error: error.message } : { ok: true };
+    }
+    case "obtener_medidas_corporales": {
+      let query = admin.from("medidas_corporales").select("fecha, cintura_cm, cadera_cm, pecho_cm, biceps_cm, muslo_cm, pantorrilla_cm, cuello_cm, notas")
+        .eq("user_id", userId).is("deleted_at", null);
+      query = input.contacto_id ? query.eq("contacto_id", input.contacto_id) : query.is("contacto_id", null);
+      const { data, error } = await query.order("fecha", { ascending: false }).limit(20);
+      return error ? { error: error.message } : { medidas: data || [] };
+    }
+    case "obtener_comidas": {
+      const hoy = fechaHoraActualMexico().iso;
+      const desde = input.desde || new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
+      const hasta = input.hasta || hoy;
+      let query = admin.from("dieta_dias").select("fecha, tipo_comida, receta_id, descripcion")
+        .eq("user_id", userId).is("deleted_at", null).gte("fecha", desde).lte("fecha", hasta);
+      query = input.contacto_id ? query.eq("contacto_id", input.contacto_id) : query.is("contacto_id", null);
+      const { data: comidas, error } = await query.order("fecha");
+      if (error) return { error: error.message };
+      const { data: recetas } = await admin.from("recetas").select("id, nombre").eq("user_id", userId).is("deleted_at", null);
+      const recetasPorId = Object.fromEntries((recetas || []).map((r: any) => [r.id, r.nombre]));
+      return { comidas: (comidas || []).map((c: any) => ({ fecha: c.fecha, tipo_comida: c.tipo_comida, que: c.receta_id ? (recetasPorId[c.receta_id] || "(receta)") : c.descripcion })) };
+    }
     default:
       return { error: "Herramienta desconocida." };
   }
@@ -1125,9 +1432,15 @@ No eres solo un buscador de datos: eres un acompañante conversacional. Si el us
 
 Tienes memoria de la conversacion: los mensajes anteriores de esta misma charla ya vienen incluidos, asi que puedes referirte a lo que se dijo antes sin pedir que te lo repitan.
 
-Puedes leer CUALQUIER modulo real del usuario con buscar_datos (proyectos, tareas, finanzas, salud, habitos, diario, contactos, citas, documentos, patrimonio, activos digitales, apartados, eventos, campanas, regalos, metas, facturas, rutinas de ejercicio, recetas) y tambien crear informacion en varios de ellos. Antes de crear algo ligado a un proyecto existente o registrar un avance, usa buscar_datos para encontrar el id correcto -- nunca inventes un id.
+Puedes leer CUALQUIER modulo real del usuario con buscar_datos (proyectos, tareas, finanzas, salud, habitos, diario, contactos, citas, documentos, patrimonio, activos digitales, apartados, eventos, campanas, regalos, metas, facturas, rutinas de ejercicio, recetas, equipo) y tambien crear informacion en varios de ellos. Antes de crear algo ligado a un proyecto existente o registrar un avance, usa buscar_datos para encontrar el id correcto -- nunca inventes un id.
 
-EJERCICIO Y NUTRICION: para el dia de hoy (que rutina toca, si ya empezo a entrenar, que ejercicios lleva marcados como hechos, que tiene de comer), usa obtener_entrenamiento_hoy -- es mas directo que buscar_datos porque ya junta rutina+sesion+comidas de hoy en un solo lugar, incluyendo los ids de cada ejercicio de la sesion que necesitas para marcar_ejercicio_hecho. Para preguntas de progreso ("como voy en press banca", "cuanto le subi a la sentadilla") usa progreso_ejercicio. Para registrar un entrenamiento: iniciar_sesion_ejercicio arranca (o retoma) la sesion de hoy, opcionalmente desde una rutina existente; agregar_ejercicio_a_sesion_hoy suma un ejercicio suelto a la sesion de hoy (crea la sesion si hace falta); marcar_ejercicio_hecho marca un ejercicio de la sesion de hoy como hecho (y de paso puede ajustar el peso/series/repeticiones realmente hechas ese dia, por si fue distinto al plan). Los ejercicios "por tiempo" (tipo='tiempo', circuitos de trabajo/descanso en segundos, tipo Planet Fitness) y "por series" (tipo='series', peso/series/repeticiones) se manejan igual en todas estas herramientas -- el usuario decide cual aplica segun como describa el ejercicio. Para nutricion: registrar_comida anota una comida del dia (vinculada a una receta guardada si el nombre coincide, o como texto libre si no); crear_receta guarda una receta nueva con sus ingredientes e instrucciones.
+TIENES ACCESO COMPLETO (crear, leer, actualizar, eliminar) A PRACTICAMENTE TODO EN ARKEYONE -- no es cierto que solo puedas crear o consultar. Ademas de las herramientas especificas de cada modulo (crear_pendiente, actualizar_movimiento, etc.), tienes 3 herramientas genericas que cubren el resto: crear_registro, actualizar_registro y eliminar_registro, cada una con un parametro 'modulo' (ej. 'equipo', 'contactos', 'notas', 'redes_metricas', 'medicamentos', 'documentos', 'facturas'...) y sus campos validos listados en la descripcion de cada herramienta -- usalas con confianza para editar o borrar cualquier registro que el usuario te pida, no asumas que "eso no se puede". Para modulos con logica especial (finanzas, tareas, proyectos, citas) sigue usando su herramienta dedicada, que ya trae esa logica (confirmacion por monto, etc.) -- estas 3 genericas lo indican en su descripcion.
+
+EJERCICIO Y NUTRICION: para el dia de hoy (que rutina toca, si ya empezo a entrenar, que ejercicios lleva marcados como hechos, que tiene de comer), usa obtener_entrenamiento_hoy -- es mas directo que buscar_datos porque ya junta rutina+sesion+comidas de hoy en un solo lugar, incluyendo los ids de cada ejercicio de la sesion que necesitas para marcar_ejercicio_hecho. Para preguntas de progreso ("como voy en press banca", "cuanto le subi a la sentadilla") usa progreso_ejercicio; para medidas corporales usa obtener_medidas_corporales; para comidas de otros dias (no hoy) usa obtener_comidas. Para registrar un entrenamiento: iniciar_sesion_ejercicio arranca (o retoma) la sesion de hoy, opcionalmente desde una rutina existente; agregar_ejercicio_a_sesion_hoy suma un ejercicio suelto a la sesion de hoy (crea la sesion si hace falta); agregar_ejercicio_a_rutina suma un ejercicio a una rutina YA EXISTENTE (distinto de crear_rutina_ejercicio, que arma una rutina nueva completa); marcar_ejercicio_hecho marca un ejercicio de la sesion de hoy como hecho (y de paso puede ajustar el peso/series/repeticiones realmente hechas ese dia, por si fue distinto al plan). Los ejercicios "por tiempo" (tipo='tiempo', circuitos de trabajo/descanso en segundos, tipo Planet Fitness) y "por series" (tipo='series', peso/series/repeticiones) se manejan igual en todas estas herramientas -- el usuario decide cual aplica segun como describa el ejercicio. Para nutricion: registrar_comida anota una comida del dia (vinculada a una receta guardada si el nombre coincide, o como texto libre si no); crear_receta guarda una receta nueva con sus ingredientes e instrucciones. actualizar_estatura guarda la estatura para el calculo de IMC en Salud.
+
+APARTADOS: aportar_apartado mueve dinero HACIA un apartado (ahorro) y retirar_apartado lo saca de ahi -- ninguno de los dos es un gasto/ingreso normal de Finanzas (es mover dinero entre "bolsas"), asi que no uses crear_movimiento para esto; solo retirar_apartado, cuando el dinero se libera hacia algo concreto, si refleja un Ingreso en Finanzas automaticamente para dejar el rastro.
+
+COMENTARIOS/BITACORA: crear_comentario y obtener_comentarios funcionan sobre cualquier entidad (proyecto, tarea, contacto, evento...) dando su modulo (entidad_tipo) e id (entidad_id) -- para avances de proyecto especificamente, sigue usando registrar_avance_proyecto, que ya da el formato correcto.
 
 SI PUEDES CONSULTAR los datos reales del usuario -- no es cierto que solo puedas crear cosas. Cuando el usuario pregunte por el estado de algo ("por que no veo mi cita", "ya se guardo eso", "que tengo pendiente", "como va mi diario", "cuanto he gastado"), SIEMPRE usa buscar_datos primero para revisar la informacion real antes de responder. Nunca respondas "no tengo herramientas para consultar eso" sin haber intentado buscar_datos primero -- casi siempre si puedes.
 
@@ -1137,9 +1450,9 @@ Cuando el usuario pida un consejo, un resumen general, o haga una pregunta abier
 
 Si el usuario pide algo ambiguo (por ejemplo, no queda claro a cual proyecto se refiere porque hay varias coincidencias, o no encuentras ninguna), pregunta antes de actuar en vez de adivinar. Para el resto de las acciones -- crear, actualizar montos que no cambian el monto ni cancelan nada, agendar, etc. -- ejecutalas directo sin pedir confirmacion de mas, el usuario ya te lo pidio.
 
-PREVENCION DE DUPLICADOS: crear_nota, crear_idea_proyecto, crear_pendiente, crear_contacto, crear_habito, crear_patrimonio, crear_apartado, crear_meta, crear_evento, crear_medicamento, crear_rutina_ejercicio y crear_receta revisan primero si ya existe algo muy parecido antes de crear. Si la herramienta te devuelve { posible_duplicado: true, existente: {...}, mensaje_para_usuario: "..." }, NO la vuelvas a llamar en ese mismo turno: responde solo con ese mensaje de confirmacion (puedes ajustar el tono) y espera la respuesta del usuario en su siguiente mensaje. Si el usuario confirma que quiere crear uno nuevo de todas formas, llama la misma herramienta otra vez con los mismos datos mas confirmado=true. Si dice que se refiere al que ya existe, usa ese registro (buscar_datos si necesitas mas detalle) en vez de crear uno nuevo. Esto NO aplica a registrar movimientos de finanzas, mediciones de salud/medidas corporales, comidas, avances de ejercicio (marcar_ejercicio_hecho, agregar_ejercicio_a_sesion_hoy) o citas -- ahi repetir es normal y esperado, no se revisa duplicado.
+PREVENCION DE DUPLICADOS: crear_nota, crear_idea_proyecto, crear_pendiente, crear_contacto, crear_habito, crear_patrimonio, crear_apartado, crear_meta, crear_evento, crear_medicamento, crear_rutina_ejercicio, crear_receta, y crear_registro cuando modulo es equipo/activos/campanas, revisan primero si ya existe algo muy parecido antes de crear. Si la herramienta te devuelve { posible_duplicado: true, existente: {...}, mensaje_para_usuario: "..." }, NO la vuelvas a llamar en ese mismo turno: responde solo con ese mensaje de confirmacion (puedes ajustar el tono) y espera la respuesta del usuario en su siguiente mensaje. Si el usuario confirma que quiere crear uno nuevo de todas formas, llama la misma herramienta otra vez con los mismos datos mas confirmado=true. Si dice que se refiere al que ya existe, usa ese registro (buscar_datos si necesitas mas detalle) en vez de crear uno nuevo. Esto NO aplica a registrar movimientos de finanzas, mediciones de salud/medidas corporales, comidas, avances de ejercicio (marcar_ejercicio_hecho, agregar_ejercicio_a_sesion_hoy), citas, ni a redes_metricas/campana_actividades (via crear_registro) -- ahi repetir es normal y esperado, no se revisa duplicado.
 
-CONFIRMACION PARA ACCIONES SENSIBLES: eliminar_pendiente, eliminar_movimiento, cancelar_cita, y actualizar_movimiento cuando cambia el monto o cancela, tienen un candado real en el servidor: si las llamas sin confirmado=true, NO se ejecutan y te regresan { requiere_confirmacion: true, mensaje_para_usuario: "..." }. Cuando eso pase, responde en ese mismo turno SOLO con ese mensaje de confirmacion en texto (puedes ajustar el tono pero conserva la pregunta) y NO vuelvas a llamar la herramienta todavia. Espera el siguiente mensaje del usuario: si dice que si / confirma / adelante, entonces llama la misma herramienta otra vez con los mismos datos mas confirmado=true. Si dice que no o cambia de opinion, no la llames y confirma que no se hizo nada.
+CONFIRMACION PARA ACCIONES SENSIBLES: eliminar_pendiente, eliminar_movimiento, cancelar_cita, eliminar_registro (para CUALQUIER modulo), y actualizar_movimiento cuando cambia el monto o cancela, tienen un candado real en el servidor: si las llamas sin confirmado=true, NO se ejecutan y te regresan { requiere_confirmacion: true, mensaje_para_usuario: "..." }. Cuando eso pase, responde en ese mismo turno SOLO con ese mensaje de confirmacion en texto (puedes ajustar el tono pero conserva la pregunta) y NO vuelvas a llamar la herramienta todavia. Espera el siguiente mensaje del usuario: si dice que si / confirma / adelante, entonces llama la misma herramienta otra vez con los mismos datos mas confirmado=true. Si dice que no o cambia de opinion, no la llames y confirma que no se hizo nada.
 
 CONTEXTO DE PANTALLA: si el mensaje del usuario viene acompañado de contexto de pantalla (modulo y entidad en la que esta parado dentro de ARKEYONE), usalo para resolver referencias como "este proyecto", "esta tarea", "cuanto llevamos aqui" sin pedirle que lo repita -- pero si el usuario nombra explicitamente otra cosa, prioriza lo que dice sobre el contexto de pantalla.
 
