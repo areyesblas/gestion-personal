@@ -8,10 +8,10 @@
 // Solo visible en móvil (md:hidden, mismo breakpoint que ya usa el cajón). Se posiciona fijo al
 // fondo de la pantalla, respetando el safe-area-inset-bottom de iOS (igual que el resto de la UI).
 
-import { LayoutDashboard, CalendarRange, CheckSquare, FolderKanban, Menu } from 'lucide-react';
+import { Home, CalendarRange, CheckSquare, FolderKanban, Menu } from 'lucide-react';
 
 const ITEMS = [
-  { id: 'dashboard', label: 'Inicio', icon: LayoutDashboard },
+  { id: 'dashboard', label: 'Inicio', icon: Home },
   { id: 'agenda', label: 'Agenda', icon: CalendarRange },
   { id: 'pendientes', label: 'Tareas', icon: CheckSquare },
   { id: 'proyectos', label: 'Proyectos', icon: FolderKanban },

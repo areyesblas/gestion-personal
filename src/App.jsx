@@ -19,10 +19,10 @@ import BottomNav from "./components/nav/BottomNav";
 import Breadcrumb from "./components/nav/Breadcrumb";
 import * as XLSX from "xlsx";
 import {
-  LayoutDashboard, FolderKanban, CheckSquare, Wallet, AlertTriangle,
+  FolderKanban, CheckSquare, Wallet, AlertTriangle,
   Users, Activity, Plus, X, Trash2, Pencil, Github, ChevronDown,
   ChevronRight, Bell, Lightbulb, Rocket, MessageCircle, Mail, Globe,
-  Target, Contact, BarChart3, FileText, Flame, HeartPulse, Check, Menu, PieChart as PieChartIcon, User,
+  Target, Contact, BarChart3, FileText, Flame, HeartPulse, Check, Menu, PieChart as PieChartIcon, User, Home,
   PiggyBank, Camera, Film, Upload, MapPin, Clock, Mic, Gift, Receipt, Megaphone, ChevronUp, Gem, Download, Sun, Moon, Shield, LogOut, ChevronLeft, Lock, Pill, CalendarClock, Zap, StickyNote, Search, Sparkles, Send, Bot, Square, Settings, CalendarRange, Palette, Eye, EyeOff, Sliders, Volume2, VolumeX, Play, Copy,
 } from "lucide-react";
 import {
@@ -1739,6 +1739,9 @@ const VIEW_LABELS_EXTRA = {
   "mi-trabajo": "Mi trabajo",
   "mi-calendario": "Mi calendario",
   "mis-pagos": "Mis pagos",
+  // "dashboard" tampoco vive ya en navGroups (botón fijo aparte, ver render del sidebar) —
+  // mismo respaldo, aunque el breadcrumb nunca lo usa (view==="dashboard" no muestra breadcrumb).
+  dashboard: "Centro de mando",
 };
 
 // Convierte la llave pública VAPID (base64url, como la da el navegador/servidor) al formato
@@ -2729,16 +2732,19 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
   // (tabla ya desactivada desde el 10-sep, colaboradores es un rol de Contactos, no un módulo),
   // y ya no hay contenedores genéricos "Trabajo"/"Negocio" — Patrimonio y Módulos propios quedan
   // aparte de Dinero, como en la estructura revisada del documento.
+  // "Centro de mando" ya no vive dentro de un grupo colapsable — va fijo hasta arriba del
+  // sidebar, con ícono de casita, como un botón "Inicio" propio (ver render más abajo, justo
+  // antes de navGroupsFiltrados.map). Ajuste 22 sept 2026 sobre la propuesta visual: Agenda,
+  // Notas y Atenciones se unen a "Principal"; Eventos pasa a "Dinero" (son shows/eventos
+  // pagados, ligados a Finanzas por su naturaleza).
   const navGroups = [
-    { label: "Inicio", items: [
-      { id: "dashboard", label: "Centro de mando", icon: LayoutDashboard },
-      { id: "agenda", label: "Agenda", icon: CalendarRange },
-      { id: "notas", label: "Notas", icon: StickyNote },
-    ]},
     { label: "Principal", items: [
-      { id: "pendientes", label: "Tareas", icon: CheckSquare },
-      { id: "proyectos", label: "Proyectos e ideas", icon: FolderKanban },
       { id: "contactos", label: "Contactos", icon: Contact },
+      { id: "agenda", label: "Agenda", icon: CalendarRange },
+      { id: "regalos", label: "Atenciones", icon: Gift },
+      { id: "proyectos", label: "Proyectos e ideas", icon: FolderKanban },
+      { id: "pendientes", label: "Tareas", icon: CheckSquare },
+      { id: "notas", label: "Notas", icon: StickyNote },
     ]},
     { label: "Dinero", items: [
       { id: "finanzas", label: "Finanzas", icon: Wallet },
@@ -2747,6 +2753,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
       { id: "presupuesto", label: "Presupuesto", icon: Target },
       { id: "reportes", label: "Reportes", icon: PieChartIcon },
       { id: "estimaciones", label: "Estimaciones", icon: Sparkles },
+      { id: "eventos", label: "Eventos", icon: Camera },
     ]},
     { label: "Patrimonio", items: [
       { id: "patrimonio", label: "Patrimonio", icon: Gem },
@@ -2759,10 +2766,8 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
     { label: "Personal", items: [
       { id: "mi-perfil", label: "Mi Perfil", icon: User },
       { id: "actividades", label: "Diario", icon: Activity },
-      { id: "eventos", label: "Eventos", icon: Camera },
       { id: "habitos", label: "Hábitos", icon: Flame },
       { id: "salud", label: "Salud", icon: HeartPulse },
-      { id: "regalos", label: "Atenciones", icon: Gift },
     ]},
   ];
 
@@ -2890,6 +2895,20 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
                 ))}
               </select>
             </div>
+          )}
+
+          {/* Centro de mando: fijo hasta arriba, fuera de cualquier grupo colapsable (propuesta
+              visual 22 sept 2026) — ícono de casita en vez del de dashboard. Oculto para un
+              colaborador viendo la cuenta de otra persona (modulosPermitidos !== null), igual
+              que antes cuando vivía dentro de un grupo filtrado — ver GRUPO_TRABAJO_COLABORADOR. */}
+          {modulosPermitidos === null && (
+            <button
+              onClick={() => { irAVista("dashboard"); setMobileNavOpen(false); }}
+              title="Centro de mando"
+              className={`gp-navitem flex items-center gap-2 px-3 py-2.5 md:py-2 text-sm text-left w-full ${sidebarColapsado ? "md:justify-center md:px-2" : ""} ${view === "dashboard" ? "gp-navitem-active" : ""}`}
+            >
+              <Home size={15} /> <span className={sidebarColapsado ? "md:hidden" : ""}>Centro de mando</span>
+            </button>
           )}
 
           {navGroupsFiltrados.map((g) => {
