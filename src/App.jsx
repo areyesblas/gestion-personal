@@ -238,7 +238,7 @@ const DASHBOARD_WIDGETS_CATALOGO = [
   { id: "salud", label: "Salud" },
   { id: "imagenMotivacional", label: "Imagen motivacional" },
   { id: "notasRapidas", label: "Notas rápidas" },
-  { id: "accesosRapidos", label: "Accesos rápidos" },
+  { id: "accesosRapidos", label: "Acciones rápidas" },
   { id: "arki", label: "ARKI" },
 ];
 // Reconcilia el orden guardado del usuario (preferencias.dashboard_widgets) con el catálogo
@@ -2878,7 +2878,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
               <div key={g.label}>
                 <button
                   onClick={() => toggleGrupo(g.label)}
-                  className={`w-full flex items-center justify-between px-3 mb-1 text-xs gp-text-muted gp-btn-ghost rounded py-1 ${sidebarColapsado ? "md:hidden" : ""}`}
+                  className={`w-full flex items-center justify-between px-3 mb-1 text-xs gp-text-muted gp-btn-ghost rounded py-1 uppercase tracking-wide ${sidebarColapsado ? "md:hidden" : ""}`}
                 >
                   <span>{g.label}</span>
                   {!cerrado ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
@@ -2911,6 +2911,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
             );
           })}
           <div className="mt-auto pt-2 border-t gp-border flex flex-col gap-0.5">
+            <p className={`px-3 mb-1 text-xs gp-text-muted uppercase tracking-wide ${sidebarColapsado ? "md:hidden" : ""}`}>Sistema</p>
             <button onClick={() => { setNotifPanelAbierto(true); setMobileNavOpen(false); }} title="Notificaciones"
               className={`gp-navitem flex items-center gap-2 px-3 py-2.5 md:py-2 text-sm text-left w-full relative ${sidebarColapsado ? "md:justify-center md:px-2" : ""}`}>
               <Bell size={15} />

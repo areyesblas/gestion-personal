@@ -74,10 +74,12 @@ export default function WeatherWidget({ ciudad, lat, lon, onConfigurarCiudad }) 
   // solo mostramos el nombre corto; el resto queda en el tooltip para no saturar el espacio.
   const ciudadCorta = ciudad ? ciudad.split(",")[0].trim() : "";
   return (
-    <div className="hidden sm:flex items-center gap-1.5 text-sm gp-text-muted" title={`${label}${ciudad ? ` · ${ciudad}` : ''}`}>
-      <Icon size={17} />
-      <span className="gp-mono">{datos.temp}°C</span>
-      {ciudadCorta && <span className="truncate max-w-[9rem]">{ciudadCorta}</span>}
+    <div className="hidden sm:flex items-center gap-2" title={`${label}${ciudad ? ` · ${ciudad}` : ''}`}>
+      <Icon size={24} className="gp-text-gold shrink-0" />
+      <div className="leading-tight">
+        <p className="gp-mono text-base font-semibold">{datos.temp}°C</p>
+        {ciudadCorta && <p className="text-[11px] gp-text-muted truncate max-w-[9rem]">{ciudadCorta}</p>}
+      </div>
     </div>
   );
 }

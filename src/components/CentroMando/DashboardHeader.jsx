@@ -22,7 +22,7 @@ export default function DashboardHeader({ primerNombre, avatarUrl, onBuscar, onN
         className="gp-input flex items-center gap-2.5 px-3.5 py-2.5 text-sm text-left flex-1 min-w-[220px] max-w-md"
       >
         <Search size={16} className="gp-text-muted shrink-0" />
-        <span className="gp-text-muted flex-1 truncate">Buscar en ARKEYONE...</span>
+        <span className="gp-text-muted flex-1 truncate">Buscar en ARKEYONE... (tareas, proyectos, contactos, etc.)</span>
         <span className="text-[10px] gp-text-muted border gp-border rounded px-1.5 py-0.5 shrink-0">⌘K</span>
       </button>
 
@@ -34,7 +34,12 @@ export default function DashboardHeader({ primerNombre, avatarUrl, onBuscar, onN
         <button onClick={onNotificaciones} className="relative p-2.5 rounded-xl gp-btn-ghost" title="Notificaciones" aria-label="Notificaciones">
           <Bell size={18} />
           {notifNoLeidas > 0 && (
-            <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full" style={{ background: 'var(--red)' }} />
+            <span
+              className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 rounded-full flex items-center justify-center text-[10px] font-semibold text-white"
+              style={{ background: 'var(--red)' }}
+            >
+              {notifNoLeidas > 9 ? '9+' : notifNoLeidas}
+            </span>
           )}
         </button>
 

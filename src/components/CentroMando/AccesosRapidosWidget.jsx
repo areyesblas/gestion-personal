@@ -27,7 +27,7 @@ export default function AccesosRapidosWidget({ onCrear, modulosPermitidos }) {
 
   return (
     <div className="gp-panel p-4 h-full flex flex-col">
-      <h3 className="text-sm font-medium mb-3">Accesos rápidos</h3>
+      <h3 className="text-sm font-medium mb-3">Acciones rápidas</h3>
       <div className="grid grid-cols-2 gap-2 flex-1">
         {visibles.map((a) => (
           <button
