@@ -13,19 +13,23 @@
 // un cálculo nuevo, solo lo repite arriba.
 //
 // Cada tarjeta es clicable y navega al módulo correspondiente — ícono grande en círculo de
-// color propio por tarjeta.
+// color propio por tarjeta. El valor usa `truncate` (pedido de Angel, 22 sept 2026): si la
+// cifra no cabe, se corta con "…" en vez de desbordar la tarjeta; ver el detalle completo es
+// cuestión de dar clic (ya navega al módulo correspondiente). El botón (el ítem del grid)
+// también necesita `min-w-0` -- sin él, el track del grid crece para acomodar una cifra larga
+// en vez de respetar el ancho de columna, y el `truncate` de adentro nunca llega a activarse.
 
 import { FolderKanban, CheckSquare, CalendarClock, TrendingDown, Flame, HeartPulse } from 'lucide-react';
 
 function Card({ icon, label, value, color, onClick }) {
   return (
-    <button onClick={onClick} className="gp-panel p-4 flex items-start gap-3 text-left w-full">
+    <button onClick={onClick} className="gp-panel p-4 flex items-start gap-3 text-left w-full min-w-0">
       <div className="w-12 h-12 rounded-xl flex items-center justify-center shrink-0" style={{ background: `${color}26` }}>
         {icon}
       </div>
       <div className="min-w-0">
         <p className="text-xs gp-text-muted truncate">{label}</p>
-        <p className="gp-serif text-xl mt-0.5" style={{ color }}>{value}</p>
+        <p className="gp-serif text-xl mt-0.5 truncate" style={{ color }} title={typeof value === 'string' ? value : undefined}>{value}</p>
       </div>
     </button>
   );

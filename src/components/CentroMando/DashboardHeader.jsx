@@ -7,13 +7,19 @@
 // El avatar (foto o iniciales + menú Configuración/Cerrar sesión) se agregó en el rediseño del
 // 21 sept 2026, a pedido de Angel — subir la foto se hace desde Configuración, aquí solo se
 // muestra y da acceso rápido a la cuenta.
+// Ampliar foto (22 sept 2026, pedido de Angel): la imagen del avatar tiene su propio onClick
+// con stopPropagation, separado del botón que la envuelve (que sigue abriendo el menú de
+// cuenta) — así un clic en la foto la muestra en grande y un clic en el resto (nombre) sigue
+// abriendo Configuración/Cerrar sesión. No hay un componente de lightbox reutilizable en el
+// proyecto todavía, así que este overlay vive aquí, local al único lugar que lo necesita.
 
 import { useState } from 'react';
-import { Search, Bell, Sliders, Settings, LogOut } from 'lucide-react';
+import { Search, Bell, Sliders, Settings, LogOut, X } from 'lucide-react';
 import WeatherWidget from './WeatherWidget';
 
 export default function DashboardHeader({ primerNombre, avatarUrl, onBuscar, onNotificaciones, notifNoLeidas, onPersonalizarClick, onAbrirConfiguracion, onCerrarSesion, ciudad, climaLat, climaLon }) {
   const [menuAbierto, setMenuAbierto] = useState(false);
+  const [avatarGrandeAbierto, setAvatarGrandeAbierto] = useState(false);
   const iniciales = (primerNombre || '').slice(0, 2).toUpperCase();
   return (
     <div className="flex items-center justify-between gap-3 mb-5 flex-wrap">
@@ -45,7 +51,13 @@ export default function DashboardHeader({ primerNombre, avatarUrl, onBuscar, onN
         <div className="relative">
           <button onClick={() => setMenuAbierto((v) => !v)} className="flex items-center gap-2" aria-label="Cuenta">
             {avatarUrl ? (
-              <img src={avatarUrl} alt="" className="w-9 h-9 rounded-full object-cover shrink-0" style={{ border: '1px solid var(--border)' }} />
+              <img
+                src={avatarUrl}
+                alt=""
+                onClick={(e) => { e.stopPropagation(); setAvatarGrandeAbierto(true); }}
+                className="w-9 h-9 rounded-full object-cover shrink-0 cursor-zoom-in"
+                style={{ border: '1px solid var(--border)' }}
+              />
             ) : (
               <span
                 className="w-9 h-9 rounded-full flex items-center justify-center shrink-0 text-xs font-semibold shrink-0"
@@ -76,6 +88,29 @@ export default function DashboardHeader({ primerNombre, avatarUrl, onBuscar, onN
           )}
         </div>
       </div>
+
+      {avatarGrandeAbierto && avatarUrl && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center p-6"
+          style={{ background: 'rgba(11,35,72,.85)' }}
+          onClick={() => setAvatarGrandeAbierto(false)}
+        >
+          <button
+            onClick={() => setAvatarGrandeAbierto(false)}
+            className="absolute top-5 right-5 text-white"
+            aria-label="Cerrar"
+          >
+            <X size={28} />
+          </button>
+          <img
+            src={avatarUrl}
+            alt=""
+            onClick={(e) => e.stopPropagation()}
+            className="rounded-2xl object-cover"
+            style={{ maxWidth: 'min(90vw, 480px)', maxHeight: '80vh', boxShadow: '0 20px 60px rgba(0,0,0,.4)' }}
+          />
+        </div>
+      )}
     </div>
   );
 }
