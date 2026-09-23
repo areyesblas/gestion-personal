@@ -3,22 +3,23 @@
 // Parte de la columna 3: botones que navegan a un módulo y abren su formulario de "Nuevo"
 // solo (ver irACrear en AppLoggedIn). Respeta los mismos permisos que ya filtra el sidebar
 // (navGroupsFiltrados): un colaborador sin acceso a un módulo no ve su acceso rápido.
+//
+// Iconos y colores (22 sept 2026, pedido de Angel): calcados de su mockup de referencia — cada
+// acción tiene su propio color (chip + ícono + etiqueta), no un solo tono dorado como antes.
+// "Tomar nota" reemplaza a "Entrenamiento" (que no salía en el mockup) — navega a Notas, mismo
+// patrón de solo-navegar que ya usan "Nuevo evento"/"Registrar atención" (Agenda/Regalos no
+// tienen el mecanismo crearAlEntrar de Proyectos/Pendientes/Finanzas/Salud, así que tampoco se
+// le agregó aquí — es consistente con lo que ya había, no un mecanismo nuevo).
 
-import { CheckSquare, CalendarRange, FolderKanban, Receipt, Gift, Dumbbell } from 'lucide-react';
+import { CheckSquare, CalendarClock, BookOpen, MapPin, Heart, NotebookPen } from 'lucide-react';
 
-// "Nuevo evento" (antes "Nueva cita"): Citas ya no es pantalla aparte (rediseño de navegación,
-// 22 sept 2026 — Agenda es la única forma de ver/crear citas) — este acceso ya solo navega a
-// Agenda, sin abrir un formulario automático (Agenda no tiene ese mecanismo, a diferencia de
-// las pantallas de lista de antes). "Registrar atención" navega a Atenciones (regalos) igual.
 const ACCESOS = [
-  { modulo: 'pendientes', label: 'Nueva tarea', icon: CheckSquare, preset: {} },
-  { modulo: 'agenda', label: 'Nuevo evento', icon: CalendarRange, preset: {} },
-  { modulo: 'proyectos', label: 'Nuevo proyecto', icon: FolderKanban, preset: {} },
-  { modulo: 'finanzas', label: 'Nuevo gasto', icon: Receipt, preset: { tipo: 'Egreso' } },
-  { modulo: 'regalos', label: 'Registrar atención', icon: Gift, preset: {} },
-  // Entrenamiento no abre un formulario de "Nuevo" — lleva directo a Salud > Ejercicio > Sesión
-  // (ver Salud/Ejercicio en App.jsx, que interpretan preset.tab/preset.subtab en vez de un item).
-  { modulo: 'salud', label: 'Entrenamiento', icon: Dumbbell, preset: { tab: 'ejercicio', subtab: 'sesion' } },
+  { modulo: 'pendientes', label: 'Nueva tarea', icon: CheckSquare, preset: {}, color: '#087CF5' },
+  { modulo: 'agenda', label: 'Nuevo evento', icon: CalendarClock, preset: {}, color: '#16A36A' },
+  { modulo: 'proyectos', label: 'Nuevo proyecto', icon: BookOpen, preset: {}, color: '#8B5CF6' },
+  { modulo: 'finanzas', label: 'Nuevo gasto', icon: MapPin, preset: { tipo: 'Egreso' }, color: '#EF4444' },
+  { modulo: 'regalos', label: 'Registrar atención', icon: Heart, preset: {}, color: '#F59E0B' },
+  { modulo: 'notas', label: 'Tomar nota', icon: NotebookPen, preset: {}, color: '#475569' },
 ];
 
 export default function AccesosRapidosWidget({ onCrear, modulosPermitidos }) {
@@ -33,11 +34,13 @@ export default function AccesosRapidosWidget({ onCrear, modulosPermitidos }) {
           <button
             key={a.modulo}
             onClick={() => onCrear(a.modulo, a.preset)}
-            className="gp-btn-ghost rounded-xl p-3 flex flex-col items-center gap-1.5 text-xs"
-            style={{ border: '1px solid var(--border)' }}
+            className="rounded-xl p-3 flex flex-col items-center gap-1.5 text-xs text-center"
+            style={{ background: `${a.color}17` }}
           >
-            <a.icon size={17} className="gp-text-gold" />
-            {a.label}
+            <span className="w-9 h-9 rounded-full flex items-center justify-center shrink-0" style={{ background: `${a.color}30` }}>
+              <a.icon size={18} style={{ color: a.color }} />
+            </span>
+            <span style={{ color: a.color }}>{a.label}</span>
           </button>
         ))}
       </div>
