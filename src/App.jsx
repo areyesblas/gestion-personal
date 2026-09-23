@@ -70,7 +70,7 @@ const Tokens = ({ tema = "oscuro" }) => (
     .gp-btn:hover{ opacity:.9; }
     .gp-btn-ghost{ background:transparent; border:1px solid var(--border); color:var(--text); border-radius:4px; }
     .gp-btn-ghost:hover{ background:var(--panel-hi); }
-    .gp-navitem{ color:var(--muted); border-radius:4px; }
+    .gp-navitem{ color:var(--muted); border-radius:4px; font-weight:500; }
     .gp-navitem:hover{ background:var(--panel-hi); color:var(--text); }
     .gp-navitem-active{ background:var(--panel-hi); color:var(--text); border-left:2px solid var(--gold); }
     .gp-navitem-drop{ box-shadow: inset 0 2px 0 var(--gold); }
@@ -88,7 +88,10 @@ const Tokens = ({ tema = "oscuro" }) => (
        usan este azul oscuro fijo, sin importar qué tema esté activo en el resto de la app —
        incluidos los 5 temas claros nuevos. Esto es justo lo que evita que el logo pierda
        contraste otra vez, sin tener que renunciar a tener temas claros. */
-    .gp-sidebar-area{ --bg:#0B2341; --panel:#12304F; --panel-hi:#1A3D63; --border:#234A70; --text:#EAF1FA; --muted:#93A7C4; }
+    /* --muted más claro que el resto de la app (22 sept 2026, pedido de Angel: "letra de color
+       más fuerte") -- el menú lateral necesita más contraste que un texto secundario normal
+       porque ES la navegación principal, no un dato de apoyo. */
+    .gp-sidebar-area{ --bg:#0B2341; --panel:#12304F; --panel-hi:#1A3D63; --border:#234A70; --text:#EAF1FA; --muted:#C3D6EE; }
     /* Fondo "blanco hueso" para paneles puntuales (chat del Asistente, calendario de Agenda)
        que deben verse claros aunque el resto de la app esté en un tema oscuro. Redefine las
        variables de color solo dentro de este panel, así todo lo de adentro (texto, badges,
@@ -2864,7 +2867,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
             <button
               onClick={() => { irAVista("dashboard"); setMobileNavOpen(false); }}
               title="Centro de mando"
-              className={`gp-navitem flex items-center gap-2 px-3 py-2.5 md:py-2 text-sm text-left w-full ${sidebarColapsado ? "md:justify-center md:px-2" : ""} ${view === "dashboard" ? "gp-navitem-active" : ""}`}
+              className={`gp-navitem flex items-center gap-2 px-3 py-2.5 md:py-2 text-[15px] text-left w-full ${sidebarColapsado ? "md:justify-center md:px-2" : ""} ${view === "dashboard" ? "gp-navitem-active" : ""}`}
             >
               <Home size={15} /> <span className={sidebarColapsado ? "md:hidden" : ""}>Centro de mando</span>
             </button>
@@ -2900,7 +2903,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
                           setDragNav(null); setDragNavSobre(null);
                         }}
                         onDragEnd={() => { setDragNav(null); setDragNavSobre(null); }}
-                        className={`gp-navitem flex items-center gap-2 px-3 py-2.5 md:py-2 text-sm text-left ${sidebarColapsado ? "md:justify-center md:px-2" : ""} ${view === n.id ? "gp-navitem-active" : ""} ${dragNav && dragNav.id === n.id ? "opacity-40" : ""} ${dragNavSobre === n.id && dragNav && dragNav.id !== n.id ? "gp-navitem-drop" : ""}`}
+                        className={`gp-navitem flex items-center gap-2 px-3 py-2.5 md:py-2 text-[15px] text-left ${sidebarColapsado ? "md:justify-center md:px-2" : ""} ${view === n.id ? "gp-navitem-active" : ""} ${dragNav && dragNav.id === n.id ? "opacity-40" : ""} ${dragNavSobre === n.id && dragNav && dragNav.id !== n.id ? "gp-navitem-drop" : ""}`}
                       >
                         <n.icon size={15} /> <span className={sidebarColapsado ? "md:hidden" : ""}>{n.label}</span>
                       </button>
@@ -2913,17 +2916,17 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
           <div className="mt-auto pt-2 border-t gp-border flex flex-col gap-0.5">
             <p className={`px-3 mb-1 text-xs gp-text-muted uppercase tracking-wide ${sidebarColapsado ? "md:hidden" : ""}`}>Sistema</p>
             <button onClick={() => { setNotifPanelAbierto(true); setMobileNavOpen(false); }} title="Notificaciones"
-              className={`gp-navitem flex items-center gap-2 px-3 py-2.5 md:py-2 text-sm text-left w-full relative ${sidebarColapsado ? "md:justify-center md:px-2" : ""}`}>
+              className={`gp-navitem flex items-center gap-2 px-3 py-2.5 md:py-2 text-[15px] text-left w-full relative ${sidebarColapsado ? "md:justify-center md:px-2" : ""}`}>
               <Bell size={15} />
               <span className={sidebarColapsado ? "md:hidden" : ""}>Notificaciones{notifNoLeidas > 0 ? ` (${notifNoLeidas})` : ""}</span>
               {notifNoLeidas > 0 && <span className="w-2 h-2 rounded-full absolute" style={{ background: "var(--red)", top: 8, left: sidebarColapsado ? 24 : 14 }} />}
             </button>
             <button onClick={() => { irAVista("configuracion"); setMobileNavOpen(false); }} title="Configuración"
-              className={`gp-navitem flex items-center gap-2 px-3 py-2.5 md:py-2 text-sm text-left w-full ${sidebarColapsado ? "md:justify-center md:px-2" : ""} ${view === "configuracion" ? "gp-navitem-active" : ""}`}>
+              className={`gp-navitem flex items-center gap-2 px-3 py-2.5 md:py-2 text-[15px] text-left w-full ${sidebarColapsado ? "md:justify-center md:px-2" : ""} ${view === "configuracion" ? "gp-navitem-active" : ""}`}>
               <Settings size={15} /> <span className={sidebarColapsado ? "md:hidden" : ""}>Configuración</span>
             </button>
             <button onClick={cerrarSesion} disabled={cerrandoSesion} title="Cerrar sesión"
-              className={`gp-navitem flex items-center gap-2 px-3 py-2.5 md:py-2 text-sm text-left w-full ${sidebarColapsado ? "md:justify-center md:px-2" : ""}`}
+              className={`gp-navitem flex items-center gap-2 px-3 py-2.5 md:py-2 text-[15px] text-left w-full ${sidebarColapsado ? "md:justify-center md:px-2" : ""}`}
               style={cerrandoSesion ? { opacity: 0.6 } : undefined}>
               <LogOut size={15} /> <span className={sidebarColapsado ? "md:hidden" : ""}>{cerrandoSesion ? "Cerrando sesión…" : "Cerrar sesión"}</span>
             </button>
