@@ -78,7 +78,7 @@ const CONFIGS = {
         item: {
           nombres, apellidoPaterno, apellidoMaterno, nombre, tipos: [tipo],
           whatsapp: (m.whatsapp || '').toString().trim(), correo: (m.correo || '').toString().trim(),
-          notas: (m.notas || '').toString().trim(), contexto: '', proyectoId: '', parentesco: '', fechaNacimiento: '', direccion: '',
+          notas: (m.notas || '').toString().trim(), contexto: '', parentesco: '', fechaNacimiento: '', direccion: '',
         },
       };
     },

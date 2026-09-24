@@ -23,7 +23,7 @@ import {
   Users, Activity, Plus, X, Trash2, Pencil, Github, ChevronDown,
   ChevronRight, Bell, Lightbulb, Rocket, MessageCircle, Mail, Globe,
   Target, Contact, BarChart3, FileText, Flame, HeartPulse, Check, Menu, PieChart as PieChartIcon, User, Home,
-  PiggyBank, Camera, Film, Upload, MapPin, Clock, Mic, Gift, Receipt, Megaphone, ChevronUp, Gem, Download, Sun, Moon, Shield, LogOut, ChevronLeft, Lock, Pill, CalendarClock, Zap, StickyNote, Search, Sparkles, Send, Bot, Square, Settings, CalendarRange, Palette, Eye, EyeOff, Sliders, Volume2, VolumeX, Play, Copy,
+  PiggyBank, Camera, Film, Upload, MapPin, Clock, Mic, Gift, Receipt, Megaphone, ChevronUp, Gem, Download, Sun, Moon, Shield, LogOut, ChevronLeft, Lock, Pill, CalendarClock, Zap, StickyNote, Search, Sparkles, Send, Bot, Square, Settings, CalendarRange, Palette, Eye, EyeOff, Sliders, Volume2, VolumeX, Play, Copy, RefreshCw, Phone, MessageSquare,
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
@@ -151,7 +151,7 @@ const OCASIONES_REGALO = ["Cumpleaños", "Navidad", "Aniversario", "Felicitació
 const ESTATUS_REGALO = ["Por comprar", "Comprado", "Envuelto", "Entregado"];
 // Tipo de atención: distinto de la ocasión (Cumpleaños/Navidad/…). La ocasión es CUÁNDO/POR QUÉ;
 // el tipo es QUÉ clase de atención se dio o se dará.
-const TIPOS_ATENCION = ["Regalo", "Felicitación", "Condolencia", "Agradecimiento", "Otro"];
+const TIPOS_ATENCION = ["Regalo", "Felicitación", "Condolencia", "Agradecimiento", "Llamada", "Visita", "Mensaje", "Otro"];
 
 // Categorías de notificación configurables por el usuario (Configuración > Notificaciones).
 // Cada "tipo" concreto de notificación (medicamento, cita, deuda, etc.) pertenece a una de estas
@@ -200,6 +200,7 @@ const seed = () => ({
   habitos: [],
   salud: [],
   perfilSalud: {},
+  contactoProyectos: [],
 });
 
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2, 10) + Date.now().toString(36));
@@ -760,6 +761,10 @@ async function loadAllTables(ownerId) {
   const result = Object.fromEntries(entries);
   const { data: perfilRows } = await supabase.from("perfil_salud").select("*").eq("user_id", ownerId);
   result.perfilSalud = Object.fromEntries((perfilRows || []).map((r) => [r.contacto_id || "yo", { alturaCm: r.altura_cm ?? "", metasSalud: r.metas_salud || {} }]));
+  // Vínculos Contacto–Proyecto (muchos-a-muchos, tabla puente contacto_proyectos — no es una
+  // entidad con papelera propia, por eso no vive en TABLES, igual que colaborador_dependientes).
+  const { data: vinculosRows } = await supabase.from("contacto_proyectos").select("*").eq("user_id", ownerId);
+  result.contactoProyectos = (vinculosRows || []).map(rowToJs);
   return result;
 }
 
@@ -2654,6 +2659,22 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
     if (error) { console.error("Error al guardar el perfil de salud:", error); return; }
     setData((prev) => ({ ...prev, perfilSalud: { ...(prev.perfilSalud || {}), [contactoId || "yo"]: nuevo } }));
   };
+  // Contacto–Proyecto es muchos-a-muchos (anexo de arquitectura, sept 2026) — antes un contacto
+  // solo podía tener un proyecto (contactos.proyecto_id, ya eliminado). vincular/desvincular
+  // trabajan directo contra la tabla puente contacto_proyectos, sin pasar por addItem/removeItem
+  // porque no es una entidad con papelera propia (mismo criterio que colaborador_dependientes).
+  const vincularProyectoContacto = async (contactoId, proyectoId) => {
+    const { data: fila, error } = await supabase.from("contacto_proyectos")
+      .insert({ contacto_id: contactoId, proyecto_id: proyectoId, user_id: activeOwnerId })
+      .select().single();
+    if (error) { console.error("Error al vincular proyecto al contacto:", error); alert(mensajeErrorGuardado(error)); return; }
+    setData((prev) => ({ ...prev, contactoProyectos: [...(prev.contactoProyectos || []), rowToJs(fila)] }));
+  };
+  const desvincularProyectoContacto = async (vinculoId) => {
+    const { error } = await supabase.from("contacto_proyectos").delete().eq("id", vinculoId);
+    if (error) { console.error("Error al desvincular proyecto del contacto:", error); alert(mensajeErrorGuardado(error)); return; }
+    setData((prev) => ({ ...prev, contactoProyectos: (prev.contactoProyectos || []).filter((v) => v.id !== vinculoId) }));
+  };
   // Apartar dinero: registra el aporte en el historial de movimientos del apartado y actualiza
   // el caché de "ahorrado" — nunca se captura el monto ahorrado directamente. No toca Finanzas:
   // apartar no es un egreso, es una transferencia interna entre "bolsas" (secc. 23.13).
@@ -3111,10 +3132,12 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
               onEditContacto={(id, p) => editItem("contactos", id, p)}
               onAddFinanzas={(i) => addItem("finanzas", i)}
               onAddFactura={(i) => addItem("facturas", i)}
+              onVincularProyecto={vincularProyectoContacto} onDesvincularProyecto={desvincularProyectoContacto}
             />
           )}
           {view === "contactos" && (
-            <Contactos data={data} onAdd={(i) => addItem("contactos", i)} onEdit={(id, p) => editItem("contactos", id, p)} onRemove={(id) => askDelete("contactos", id)} onAddComentario={(i) => addItem("comentarios", i)} onRemoveComentario={(id) => askDelete("comentarios", id)} onVerRegalos={(c) => { setRegalosFiltroContacto(c.id); setView("regalos"); }} />
+            <Contactos data={data} onAdd={(i) => addItem("contactos", i)} onEdit={(id, p) => editItem("contactos", id, p)} onRemove={(id) => askDelete("contactos", id)} onAddComentario={(i) => addItem("comentarios", i)} onRemoveComentario={(id) => askDelete("comentarios", id)} onVerRegalos={(c) => { setRegalosFiltroContacto(c.id); setView("regalos"); }}
+              onVincularProyecto={vincularProyectoContacto} onDesvincularProyecto={desvincularProyectoContacto} />
           )}
           {view === "regalos" && (
             <Regalos data={data} onAdd={(i) => addItem("regalos", i)} onEdit={(id, p) => editItem("regalos", id, p)} onRemove={(id) => askDelete("regalos", id)} filtroContactoInicial={regalosFiltroContacto} onLimpiarFiltro={() => setRegalosFiltroContacto("")} />
@@ -3595,7 +3618,7 @@ function Configuracion({
 
 // Foto que se muestra en el avatar del Centro de mando — sube a Storage (bucket "adjuntos") y
 // guarda la URL pública en preferencias.avatar_url (ver subirAvatar en AppLoggedIn).
-function AvatarForm({ avatarUrl, subirAvatar, onSaved }) {
+function AvatarForm({ avatarUrl, subirAvatar, onSaved, helpText }) {
   const [archivoElegido, setArchivoElegido] = useState(null); // File recién elegido, pendiente de recortar
   const [previa, setPrevia] = useState(avatarUrl || "");
   const [estado, setEstado] = useState("idle"); // idle | subiendo | listo
@@ -3626,7 +3649,7 @@ function AvatarForm({ avatarUrl, subirAvatar, onSaved }) {
 
   return (
     <div>
-      <p className="text-xs gp-text-muted mb-3">Se muestra en el Centro de mando, junto al buscador. Si no subes una, se muestran tus iniciales.</p>
+      <p className="text-xs gp-text-muted mb-3">{helpText || "Se muestra en el Centro de mando, junto al buscador. Si no subes una, se muestran tus iniciales."}</p>
       <div className="flex flex-col items-center gap-3">
         {previa ? (
           <img src={previa} alt="" className="w-24 h-24 rounded-full object-cover" style={{ border: "1px solid var(--border)" }} />
@@ -5243,7 +5266,12 @@ function ProyectoDetalle({ data, proyectoId, onVolver, onAddTarea, onEditTarea, 
   const campanasProyecto = (data.campanas || []).filter((c) => c.proyectoId === proyectoId);
   const redesProyecto = (data.redesMetricas || []).filter((r2) => r2.proyectoId === proyectoId);
   const documentosProyecto = (data.documentos || []).filter((d) => d.proyectoId === proyectoId);
-  const contactosProyecto = (data.contactos || []).filter((c) => c.proyectoId === proyectoId);
+  // Contacto–Proyecto es muchos-a-muchos desde la tabla puente contacto_proyectos (antes era un
+  // campo proyectoId directo en el contacto, ya no existe esa columna).
+  const contactosProyecto = (data.contactoProyectos || [])
+    .filter((v) => v.proyectoId === proyectoId)
+    .map((v) => data.contactos.find((c) => c.id === v.contactoId))
+    .filter(Boolean);
 
   const TABS = [
     { key: "resumen", label: "Resumen" },
@@ -7262,11 +7290,11 @@ function DeudaForm({ item, proyectos, saldoPendiente, onAbrirPago, onSave }) {
 // reutilizada transversalmente). La tabla `equipo` quedó desactivada; esta pantalla ahora muestra,
 // por cada colaborador, sus tareas asignadas, lo ganado (tareas aceptadas, aunque sigan en proceso),
 // lo ya pagado (egresos reales en Finanzas) y el saldo pendiente — sin duplicar el dinero real.
-function Equipo({ data, onAddContacto, onEditContacto, onAddFinanzas, onAddFactura }) {
+function Equipo({ data, onAddContacto, onEditContacto, onAddFinanzas, onAddFactura, onVincularProyecto, onDesvincularProyecto }) {
   const [modal, setModal] = useState(null); // {item} alta/edición contacto | {colaborador, paso:"pagar"}
   const [orden, setOrden] = useState("alfabetico");
   const [busqueda, setBusqueda] = useState("");
-  const emptyContacto = { nombre: "", nombres: "", apellidoPaterno: "", apellidoMaterno: "", tipos: ["Colaborador"], whatsapp: "", correo: "", direccion: "", notas: "", contexto: "", proyectoId: "", parentesco: "", fechaNacimiento: "" };
+  const emptyContacto = { nombre: "", nombres: "", apellidoPaterno: "", apellidoMaterno: "", tipos: ["Colaborador"], whatsapp: "", correo: "", direccion: "", notas: "", contexto: "", parentesco: "", fechaNacimiento: "" };
 
   const colaboradores = data.contactos.filter((c) => (c.tipos && c.tipos.length ? c.tipos : [c.tipo || "Otro"]).includes("Colaborador"));
   const tareasDe = (id) => data.pendientes.filter((p) => p.colaboradorContactoId === id);
@@ -7346,6 +7374,8 @@ function Equipo({ data, onAddContacto, onEditContacto, onAddFinanzas, onAddFactu
         <Modal title={modal.item.id ? "Editar colaborador" : "Nuevo colaborador"} onClose={() => setModal(null)}>
           <ContactoForm
             item={modal.item} proyectos={data.proyectos}
+            vinculos={(data.contactoProyectos || []).filter((v) => v.contactoId === modal.item.id)}
+            onVincularProyecto={onVincularProyecto} onDesvincularProyecto={onDesvincularProyecto}
             onSave={(v) => {
               const vConTipo = { ...v, tipos: v.tipos.includes("Colaborador") ? v.tipos : [...v.tipos, "Colaborador"] };
               if (modal.item.id) onEditContacto(modal.item.id, vConTipo); else onAddContacto(vConTipo);
@@ -7754,15 +7784,15 @@ function MetaForm({ item, proyectos, onSave }) {
 }
 
 /* ---------- Contactos / networking ---------- */
-function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveComentario, onVerRegalos }) {
+function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveComentario, onVerRegalos, onVincularProyecto, onDesvincularProyecto }) {
   const [modal, setModal] = useState(null);
   const [importarAbierto, setImportarAbierto] = useState(false);
+  const [sincronizarAbierto, setSincronizarAbierto] = useState(false);
   const [comentariosDe, setComentariosDe] = useState(null);
   const [filtroTipo, setFiltroTipo] = useState("Todos");
   const [orden, setOrden] = useState("default");
   const [busqueda, setBusqueda] = useState("");
-  const empty = { nombre: "", nombres: "", apellidoPaterno: "", apellidoMaterno: "", tipos: ["Cliente"], parentesco: "", fechaNacimiento: "", contexto: "", proyectoId: "", whatsapp: "", correo: "", direccion: "", notas: "" };
-  const nombreProyecto = (id) => data.proyectos.find((p) => p.id === id)?.nombre || "—";
+  const empty = { nombre: "", nombres: "", apellidoPaterno: "", apellidoMaterno: "", tipos: ["Cliente"], parentesco: "", fechaNacimiento: "", contexto: "", fotoUrl: "", empresa: "", puesto: "", whatsapp: "", telefono: "", correo: "", direccion: "", notas: "" };
   const toneTipo = { Cliente: "teal", Proveedor: "gold", Colaborador: "red", Otro: "" };
   const camposOrden = {
     alfabetico: { get: (c) => claveOrdenContacto(c), tipo: "texto" },
@@ -7773,15 +7803,27 @@ function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
     { key: "registro", label: "fecha de registro" },
   ];
   const tiposDe = (c) => (c.tipos && c.tipos.length ? c.tipos : [c.tipo || "Otro"]);
+  const proyectosDe = (contactoId) => (data.contactoProyectos || [])
+    .filter((v) => v.contactoId === contactoId)
+    .map((v) => data.proyectos.find((p) => p.id === v.proyectoId))
+    .filter(Boolean);
+  const ultimaAtencionDe = (contactoId) => (data.regalos || [])
+    .filter((r) => r.contactoId === contactoId)
+    .sort((a, b) => (b.fecha || b.createdAt || "").localeCompare(a.fecha || a.createdAt || ""))[0];
+
+  const FILTROS = ["Todos", "Cliente", "Proveedor", "Colaborador", "Otro"];
+  const contarFiltro = (t) => (t === "Todos" ? data.contactos.length : data.contactos.filter((c) => tiposDe(c).includes(t)).length);
+
   const filtrados = filtroTipo === "Todos" ? data.contactos : data.contactos.filter((c) => tiposDe(c).includes(filtroTipo));
-  const buscados = filtrarPorBusqueda(filtrados, busqueda, [(c) => c.nombre, (c) => c.apellidoPaterno, (c) => c.apellidoMaterno, (c) => c.contexto, (c) => c.whatsapp, (c) => c.correo, (c) => c.parentesco, (c) => c.notas]);
+  const buscados = filtrarPorBusqueda(filtrados, busqueda, [(c) => c.nombre, (c) => c.empresa, (c) => c.contexto, (c) => c.whatsapp, (c) => c.telefono, (c) => c.correo, (c) => c.parentesco, (c) => c.notas]);
   const visibles = ordenarLista(buscados, orden, camposOrden);
   const columnasExport = [
     { label: "Nombre completo", get: (c) => c.nombre }, { label: "Nombre(s)", get: (c) => c.nombres || "" },
     { label: "Apellido paterno", get: (c) => c.apellidoPaterno || "" }, { label: "Apellido materno", get: (c) => c.apellidoMaterno || "" },
     { label: "Tipo", get: (c) => tiposDe(c).join(", ") },
-    { label: "Parentesco", get: (c) => c.parentesco }, { label: "WhatsApp", get: (c) => c.whatsapp },
-    { label: "Correo", get: (c) => c.correo }, { label: "Proyecto", get: (c) => nombreProyecto(c.proyectoId) },
+    { label: "Empresa/Organización", get: (c) => c.empresa || "" }, { label: "Puesto", get: (c) => c.puesto || "" },
+    { label: "Parentesco", get: (c) => c.parentesco }, { label: "WhatsApp", get: (c) => c.whatsapp }, { label: "Teléfono", get: (c) => c.telefono || "" },
+    { label: "Correo", get: (c) => c.correo }, { label: "Proyectos", get: (c) => proyectosDe(c.id).map((p) => p.nombre).join(", ") },
     { label: "Notas", get: (c) => c.notas },
   ];
 
@@ -7790,6 +7832,7 @@ function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-1">
         <h2 className="gp-serif text-2xl">Contactos</h2>
         <div className="flex gap-2 w-full sm:w-auto">
+          <button onClick={() => setSincronizarAbierto(true)} className="gp-btn-ghost flex items-center justify-center gap-1 px-3 py-1.5 text-sm flex-1 sm:flex-initial"><RefreshCw size={14} /> Sincronizar</button>
           <button onClick={() => setImportarAbierto(true)} className="gp-btn-ghost flex items-center justify-center gap-1 px-3 py-1.5 text-sm flex-1 sm:flex-initial"><Upload size={14} /> Importar</button>
           <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm flex-1 sm:flex-initial"><Plus size={14} /> Nuevo</button>
         </div>
@@ -7798,46 +7841,71 @@ function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
 
       <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
         <div className="flex flex-wrap gap-1">
-          {["Todos", "Cliente", "Proveedor", "Colaborador", "Otro"].map((t) => (
-            <button key={t} onClick={() => setFiltroTipo(t)} className={`text-xs px-2.5 py-1 rounded-full border ${filtroTipo === t ? "gp-btn" : "gp-text-muted"}`}>{t}</button>
+          {FILTROS.map((t) => (
+            <button key={t} onClick={() => setFiltroTipo(t)} className={`text-xs px-2.5 py-1 rounded-full border ${filtroTipo === t ? "gp-btn" : "gp-text-muted"}`}>{t} {contarFiltro(t)}</button>
           ))}
         </div>
         <OrdenSelector opciones={opcionesOrden} value={orden} onChange={setOrden} />
       </div>
-      <BarraListaEstandar busqueda={busqueda} onBusqueda={setBusqueda} placeholder="Buscar por nombre, contexto, WhatsApp, correo…"
+      <BarraListaEstandar busqueda={busqueda} onBusqueda={setBusqueda} placeholder="Buscar por nombre, empresa, contexto, WhatsApp, correo…"
         onExportExcel={() => exportarFilasExcel(visibles, columnasExport, "contactos")}
         onExportPDF={() => exportarFilasPDF(visibles, columnasExport, "contactos", "Contactos", `filtro: ${filtroTipo}${busqueda ? ` · búsqueda: "${busqueda}"` : ""}`)} />
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        {visibles.map((c) => (
+        {visibles.map((c) => {
+          const proyectosVinculados = proyectosDe(c.id);
+          const ultimaAtencion = ultimaAtencionDe(c.id);
+          return (
           <div key={c.id} className="gp-panel p-4">
-            <div className="flex items-start justify-between">
-              <div>
-                <div className="flex items-center gap-2 flex-wrap">
-                  <p className="text-sm font-medium">{c.nombre}</p>
-                  {tiposDe(c).map((t) => <Badge key={t} tone={toneTipo[t] || ""}>{t}</Badge>)}
-                  {c.parentesco && <Badge tone="muted">{c.parentesco}</Badge>}
-                  {(() => {
-                    const dc = diasParaCumple(c.fechaNacimiento);
-                    if (dc === null || dc > 30) return null;
-                    return <Badge tone="gold">🎂 {dc === 0 ? "¡hoy!" : `en ${dc}d`}</Badge>;
-                  })()}
-                </div>
-                <p className="text-xs gp-text-muted mt-0.5">{c.contexto} {c.proyectoId ? `· ${nombreProyecto(c.proyectoId)}` : ""}</p>
-                <div className="flex gap-3 mt-1 text-xs gp-text-muted flex-wrap">
-                  {c.whatsapp && <span className="flex items-center gap-1"><MessageCircle size={12} /> {c.whatsapp}</span>}
-                  {c.correo && <span className="flex items-center gap-1"><Mail size={12} /> {c.correo}</span>}
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex items-start gap-3 min-w-0">
+                {c.fotoUrl ? (
+                  <img src={c.fotoUrl} alt="" className="w-10 h-10 rounded-full object-cover shrink-0" style={{ border: "1px solid var(--border)" }} />
+                ) : (
+                  <div className="w-10 h-10 rounded-full flex items-center justify-center shrink-0 text-xs font-semibold" style={{ background: "var(--panel-hi)", color: "var(--gold)" }}>
+                    {(c.nombre || "").slice(0, 2).toUpperCase()}
+                  </div>
+                )}
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <p className="text-sm font-medium truncate">{c.nombre}</p>
+                    {(() => {
+                      const dc = diasParaCumple(c.fechaNacimiento);
+                      if (dc === null || dc > 30) return null;
+                      return <Badge tone="gold">🎂 {dc === 0 ? "¡hoy!" : `en ${dc}d`}</Badge>;
+                    })()}
+                  </div>
+                  <div className="flex items-center gap-1 flex-wrap mt-0.5">
+                    {tiposDe(c).map((t) => <Badge key={t} tone={toneTipo[t] || ""}>{t}</Badge>)}
+                    {c.parentesco && <Badge tone="muted">{c.parentesco}</Badge>}
+                  </div>
+                  {(c.empresa || c.puesto) && (
+                    <p className="text-xs gp-text-muted mt-1 truncate">{[c.puesto, c.empresa].filter(Boolean).join(" · ")}</p>
+                  )}
+                  {proyectosVinculados.length > 0 && (
+                    <p className="text-xs gp-text-muted mt-0.5 truncate">
+                      {proyectosVinculados[0].nombre}{proyectosVinculados.length > 1 ? ` +${proyectosVinculados.length - 1}` : ""}
+                    </p>
+                  )}
+                  {ultimaAtencion && (
+                    <p className="text-xs gp-text-muted mt-0.5">Última atención: {ultimaAtencion.fecha || "—"} · {ultimaAtencion.tipo}</p>
+                  )}
                 </div>
               </div>
-              <div className="flex gap-1">
-                <IconBtn onClick={() => setComentariosDe(c)}><MessageCircle size={13} /></IconBtn>
-                {onVerRegalos && <IconBtn onClick={() => onVerRegalos(c)}><Gift size={13} /></IconBtn>}
-                <IconBtn onClick={() => setModal({ item: c })}><Pencil size={13} /></IconBtn><IconBtn onClick={() => onRemove(c.id)}><Trash2 size={13} /></IconBtn>
+              <div className="flex gap-1 shrink-0">
+                {c.whatsapp && <a href={`https://wa.me/${(c.whatsapp || "").replace(/\D/g, "")}`} target="_blank" rel="noopener noreferrer" title="WhatsApp" className="p-1.5 rounded gp-btn-ghost" style={{ lineHeight: 0 }}><MessageCircle size={13} /></a>}
+                {c.correo && <a href={`mailto:${c.correo}`} title="Correo" className="p-1.5 rounded gp-btn-ghost" style={{ lineHeight: 0 }}><Mail size={13} /></a>}
+                {(c.telefono || c.whatsapp) && <a href={`tel:${c.telefono || c.whatsapp}`} title="Llamar" className="p-1.5 rounded gp-btn-ghost" style={{ lineHeight: 0 }}><Phone size={13} /></a>}
+                <IconBtn title="Comentarios" onClick={() => setComentariosDe(c)}><MessageSquare size={13} /></IconBtn>
+                {onVerRegalos && <IconBtn title="Atenciones" onClick={() => onVerRegalos(c)}><Gift size={13} /></IconBtn>}
+                <IconBtn title="Editar" onClick={() => setModal({ item: c })}><Pencil size={13} /></IconBtn>
+                <IconBtn title="Eliminar" onClick={() => onRemove(c.id)}><Trash2 size={13} /></IconBtn>
               </div>
             </div>
             {c.notas && <p className="text-xs mt-2 gp-text-muted">{c.notas}</p>}
           </div>
-        ))}
+          );
+        })}
         {visibles.length === 0 && <p className="text-sm gp-text-muted col-span-2">Aún no registras contactos {filtroTipo !== "Todos" ? `de tipo "${filtroTipo}"` : ""}.</p>}
       </div>
 
@@ -7849,7 +7917,15 @@ function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
 
       {modal && (
         <Modal title={modal.item.id ? "Editar contacto" : "Nuevo contacto"} onClose={() => setModal(null)}>
-          <ContactoForm item={modal.item} proyectos={data.proyectos} onSave={(v) => { modal.item.id ? onEdit(modal.item.id, v) : onAdd(v); setModal(null); }} />
+          <ContactoForm
+            item={modal.item}
+            proyectos={data.proyectos}
+            vinculos={(data.contactoProyectos || []).filter((v) => v.contactoId === modal.item.id)}
+            activeOwnerId={activeOwnerId}
+            onVincularProyecto={onVincularProyecto}
+            onDesvincularProyecto={onDesvincularProyecto}
+            onSave={(v) => { modal.item.id ? onEdit(modal.item.id, v) : onAdd(v); setModal(null); }}
+          />
         </Modal>
       )}
 
@@ -7860,23 +7936,81 @@ function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
           </Suspense>
         </Modal>
       )}
+
+      {sincronizarAbierto && (
+        <Modal title="Sincronizar contactos" onClose={() => setSincronizarAbierto(false)}>
+          <p className="text-sm gp-text-muted mb-3">
+            Muy pronto vas a poder sincronizar tus contactos de ARKEYONE con Google, Apple o Microsoft
+            (dos vías: traer contactos de ahí, y mandarles los datos básicos de los tuyos), con
+            detección de duplicados antes de aplicar cualquier cambio.
+          </p>
+          <p className="text-sm gp-text-muted mb-4">Por ahora, usa "Importar" para traer contactos desde un Excel.</p>
+          <button className="gp-btn-ghost w-full py-2 text-sm" onClick={() => setSincronizarAbierto(false)}>Entendido</button>
+        </Modal>
+      )}
     </div>
   );
 }
 
-function ContactoForm({ item, proyectos, onSave }) {
+function ContactoForm({ item, proyectos, vinculos, onVincularProyecto, onDesvincularProyecto, onSave }) {
+  // El id se decide desde ahora (no al guardar) para poder subir la foto y armar la ruta de
+  // Storage antes de que el contacto exista como fila — mismo truco que ya usa ContactoRapidoForm.
+  const [contactoId] = useState(() => item.id || uid());
   const [v, setV] = useState({
     ...item,
     nombres: item.nombres ?? item.nombre ?? "",
     apellidoPaterno: item.apellidoPaterno || "",
     apellidoMaterno: item.apellidoMaterno || "",
     tipos: item.tipos && item.tipos.length ? item.tipos : (item.tipo ? [item.tipo] : ["Cliente"]),
+    fotoUrl: item.fotoUrl || "",
+    empresa: item.empresa || "",
+    puesto: item.puesto || "",
+    telefono: item.telefono || "",
   });
   const [error, setError] = useState("");
   const [otroParentesco, setOtroParentesco] = useState(() => !!item.parentesco && !PARENTESCOS.includes(item.parentesco));
+  // Proyectos vinculados: se editan solo en memoria aquí (como el resto del formulario) y se
+  // reconcilian contra la tabla puente hasta que se da Guardar — así "Cancelar" no deja vínculos
+  // sueltos a medio guardar.
+  const [proyectosSeleccionados, setProyectosSeleccionados] = useState(() =>
+    (vinculos || []).map((vinc) => ({ id: vinc.proyectoId, label: proyectos.find((p) => p.id === vinc.proyectoId)?.nombre || "—" }))
+  );
   const toggleTipo = (t) => setV((prev) => ({ ...prev, tipos: prev.tipos.includes(t) ? prev.tipos.filter((x) => x !== t) : [...prev.tipos, t] }));
+
+  const guardar = () => {
+    if (!v.nombres?.toString().trim()) { setError("El nombre del contacto es obligatorio."); return; }
+    if (v.tipos.length === 0) { setError("Elige al menos un tipo."); return; }
+    setError("");
+    const nombres = v.nombres.trim();
+    const apellidoPaterno = (v.apellidoPaterno || "").trim();
+    const apellidoMaterno = (v.apellidoMaterno || "").trim();
+    onSave({ ...v, id: contactoId, nombres, apellidoPaterno, apellidoMaterno, nombre: armarNombreContacto(nombres, apellidoPaterno, apellidoMaterno) });
+    const idsOriginales = new Set((vinculos || []).map((vv) => vv.proyectoId));
+    const idsActuales = new Set(proyectosSeleccionados.map((p) => p.id));
+    for (const p of proyectosSeleccionados) {
+      if (!idsOriginales.has(p.id)) onVincularProyecto?.(contactoId, p.id);
+    }
+    for (const vv of (vinculos || [])) {
+      if (!idsActuales.has(vv.proyectoId)) onDesvincularProyecto?.(vv.id);
+    }
+  };
+
   return (
     <div>
+      <div className="flex justify-center mb-3">
+        <AvatarForm
+          avatarUrl={v.fotoUrl}
+          helpText="Foto del contacto (opcional). Si no subes una, se muestran sus iniciales."
+          subirAvatar={async (file) => {
+            const path = `contactos/${contactoId}/${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
+            const { error: upErr } = await supabase.storage.from("adjuntos").upload(path, file);
+            if (upErr) return { error: upErr.message };
+            const { data: pub } = supabase.storage.from("adjuntos").getPublicUrl(path);
+            setV((prev) => ({ ...prev, fotoUrl: pub.publicUrl }));
+            return { url: pub.publicUrl };
+          }}
+        />
+      </div>
       <Field label="Nombre(s)"><input className="gp-input" autoFocus value={v.nombres} onChange={(e) => setV({ ...v, nombres: e.target.value })} /></Field>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Field label="Apellido paterno"><input className="gp-input" value={v.apellidoPaterno} onChange={(e) => setV({ ...v, apellidoPaterno: e.target.value })} /></Field>
@@ -7895,6 +8029,10 @@ function ContactoForm({ item, proyectos, onSave }) {
           ))}
         </div>
       </Field>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <Field label="Empresa/Organización (opcional)"><input className="gp-input" value={v.empresa} onChange={(e) => setV({ ...v, empresa: e.target.value })} /></Field>
+        <Field label="Puesto/Cargo (opcional)"><input className="gp-input" value={v.puesto} onChange={(e) => setV({ ...v, puesto: e.target.value })} /></Field>
+      </div>
       <Field label="Parentesco (opcional)">
         <select
           className="gp-input"
@@ -7914,32 +8052,25 @@ function ContactoForm({ item, proyectos, onSave }) {
       </Field>
       <CumpleanosField value={v.fechaNacimiento} onChange={(f) => setV({ ...v, fechaNacimiento: f })} />
       <Field label="Dónde lo conociste"><input className="gp-input" placeholder="ej. Expo Acapulco 2026" value={v.contexto} onChange={(e) => setV({ ...v, contexto: e.target.value })} /></Field>
-      <Field label="Proyecto relacionado">
-        <select className="gp-input" value={v.proyectoId} onChange={(e) => setV({ ...v, proyectoId: e.target.value })}>
-          <option value="">— ninguno —</option>
-          {proyectos.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
-        </select>
+      <Field label="Proyectos relacionados (puede ser varios)">
+        <ComboboxMultiBuscar
+          seleccionados={proyectosSeleccionados}
+          opciones={proyectos.map((p) => ({ id: p.id, label: p.nombre }))}
+          onAgregar={(o) => setProyectosSeleccionados((prev) => [...prev, o])}
+          onQuitar={(id) => setProyectosSeleccionados((prev) => prev.filter((p) => p.id !== id))}
+          placeholder="Buscar proyecto…"
+        />
       </Field>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Field label="WhatsApp"><input className="gp-input" value={v.whatsapp} onChange={(e) => setV({ ...v, whatsapp: e.target.value })} /></Field>
-        <Field label="Correo (opcional)"><input className="gp-input" value={v.correo} onChange={(e) => setV({ ...v, correo: e.target.value })} /></Field>
+        <Field label="Teléfono (opcional)"><input className="gp-input" value={v.telefono} onChange={(e) => setV({ ...v, telefono: e.target.value })} /></Field>
       </div>
+      <Field label="Correo (opcional)"><input className="gp-input" value={v.correo} onChange={(e) => setV({ ...v, correo: e.target.value })} /></Field>
       <Field label="Dirección (opcional)"><textarea className="gp-input" rows={2} placeholder="Calle, número, colonia, ciudad…" value={v.direccion || ""} onChange={(e) => setV({ ...v, direccion: e.target.value })} /></Field>
       <Field label="Notas"><textarea className="gp-input" rows={2} value={v.notas} onChange={(e) => setV({ ...v, notas: e.target.value })} /></Field>
       {error && <p className="text-xs gp-text-red mb-2">{error}</p>}
 
-      <button
-        className="gp-btn w-full py-2 text-sm mt-2"
-        onClick={() => {
-          if (!v.nombres?.toString().trim()) { setError("El nombre del contacto es obligatorio."); return; }
-          if (v.tipos.length === 0) { setError("Elige al menos un tipo."); return; }
-          setError("");
-          const nombres = v.nombres.trim();
-          const apellidoPaterno = (v.apellidoPaterno || "").trim();
-          const apellidoMaterno = (v.apellidoMaterno || "").trim();
-          onSave({ ...v, nombres, apellidoPaterno, apellidoMaterno, nombre: armarNombreContacto(nombres, apellidoPaterno, apellidoMaterno) });
-        }}
-      >
+      <button className="gp-btn w-full py-2 text-sm mt-2" onClick={guardar}>
         Guardar
       </button>
     </div>
