@@ -1872,6 +1872,9 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
   // así, si sales a Agenda o a Notas y le das "Regresar", vuelves al mismo renglón con su ficha
   // abierta en vez de a la lista en blanco (pedido de Angel, 24 sept 2026).
   const [contactoSelId, setContactoSelId] = useState(null);
+  // También la pestaña activa de esa ficha: si te vas a Agenda desde "Ver Agenda →" y regresas,
+  // vuelves a la pestaña de Agenda del contacto, no al principio de la ficha.
+  const [contactoSelTab, setContactoSelTab] = useState("informacion");
 
   // --- Breadcrumb / "volver" a una vista anterior --------------------------------------------
   // El historial se arma pasivamente observando cambios de `view` (cubre tanto irAVista como los
@@ -3170,7 +3173,8 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
             <Contactos data={data} onAdd={(i) => addItem("contactos", i)} onEdit={(id, p) => editItem("contactos", id, p)} onRemove={(id) => askDelete("contactos", id)} onAddComentario={(i) => addItem("comentarios", i)} onRemoveComentario={(id) => askDelete("comentarios", id)} onVerRegalos={(c) => { setRegalosFiltroContacto(c.id); setView("regalos"); }}
               onVincularProyecto={vincularProyectoContacto} onDesvincularProyecto={desvincularProyectoContacto}
               onAddNota={(i) => addItem("notas", i)} onAddCita={(i) => addItem("citas", i)} onIrAVista={irAVista}
-              contactoSel={contactoSelId} onSeleccionar={setContactoSelId} />
+              contactoSel={contactoSelId} onSeleccionar={(id) => { setContactoSelId(id); setContactoSelTab("informacion"); }}
+              fichaTab={contactoSelTab} onFichaTab={setContactoSelTab} />
           )}
           {view === "regalos" && (
             <Regalos data={data} onAdd={(i) => addItem("regalos", i)} onEdit={(id, p) => editItem("regalos", id, p)} onRemove={(id) => askDelete("regalos", id)} filtroContactoInicial={regalosFiltroContacto} onLimpiarFiltro={() => setRegalosFiltroContacto("")} />
@@ -7896,7 +7900,7 @@ function MenuFilaContacto({ c, abierto, onToggle, onCerrar, onEditar, onComentar
   );
 }
 
-function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveComentario, onVerRegalos, onVincularProyecto, onDesvincularProyecto, onAddNota, onAddCita, onIrAVista, contactoSel, onSeleccionar }) {
+function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveComentario, onVerRegalos, onVincularProyecto, onDesvincularProyecto, onAddNota, onAddCita, onIrAVista, contactoSel, onSeleccionar, fichaTab, onFichaTab }) {
   const [modal, setModal] = useState(null);
   const [importarAbierto, setImportarAbierto] = useState(false);
   const [comentariosDe, setComentariosDe] = useState(null);
@@ -8162,6 +8166,7 @@ function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
             onAddNota={onAddNota}
             onAddCita={onAddCita}
             onAddComentario={onAddComentario}
+            tab={fichaTab} onTab={onFichaTab}
           />
         </div>
       )}
@@ -8290,6 +8295,18 @@ function NuevaNotaContacto({ c, onAddNota }) {
   );
 }
 
+// Horarios y duraciones en bloques de media hora (pedido de Angel, 24 sept 2026): agendar a las
+// 9, 9:30, 10… y poder apartar más de una hora para una reunión, sin teclear la hora a mano.
+const HORAS_MEDIA_HORA = Array.from({ length: 48 }, (_, i) =>
+  `${String(Math.floor(i / 2)).padStart(2, "0")}:${i % 2 === 0 ? "00" : "30"}`);
+const DURACIONES_MEDIA_HORA = Array.from({ length: 16 }, (_, i) => (i + 1) * 0.5); // 0.5 h a 8 h
+const etiquetaDuracion = (h) => {
+  const horas = Math.floor(h);
+  const media = h % 1 !== 0;
+  if (horas === 0) return "30 min";
+  return `${horas}${media ? " ½" : ""} h`;
+};
+
 // Lo que tienes agendado con esta persona: citas del módulo Agenda ligadas a su contacto_id, más
 // la opción de agendar una nueva sin salir de la ficha (queda en Agenda, no en una copia).
 function AgendaContacto({ c, data, onAddCita, onIrAVista }) {
@@ -8297,11 +8314,14 @@ function AgendaContacto({ c, data, onAddCita, onIrAVista }) {
   const [titulo, setTitulo] = useState("");
   const [fecha, setFecha] = useState(todayISO());
   const [hora, setHora] = useState("09:00");
+  const [duracionHoras, setDuracionHoras] = useState(1);
   const [lugar, setLugar] = useState("");
 
   const ahora = new Date().toISOString();
+  // Una cita puede tener VARIOS contactos (citas.contacto_ids). Se revisa ese arreglo y también
+  // el contacto_id suelto, que es como quedaron las citas viejas de antes de que fuera multi.
   const citas = (data.citas || [])
-    .filter((x) => x.contactoId === c.id)
+    .filter((x) => (x.contactoIds || []).includes(c.id) || x.contactoId === c.id)
     .sort((a, b) => (a.fechaHora || "").localeCompare(b.fechaHora || ""));
   const proximas = citas.filter((x) => (x.fechaHora || "") >= ahora);
   const pasadas = citas.filter((x) => (x.fechaHora || "") < ahora).reverse();
@@ -8310,7 +8330,9 @@ function AgendaContacto({ c, data, onAddCita, onIrAVista }) {
     <div className="flex items-start justify-between gap-2 py-1.5" style={tenue ? { opacity: 0.6 } : undefined}>
       <div className="min-w-0">
         <p className="text-xs font-medium truncate">{x.titulo}</p>
-        {x.lugar && <p className="text-[10px] gp-text-muted truncate">{x.lugar}</p>}
+        <p className="text-[10px] gp-text-muted truncate">
+          {[x.lugar, `${Number(x.duracionHoras) > 0 ? Number(x.duracionHoras) : 1} h`].filter(Boolean).join(" · ")}
+        </p>
       </div>
       <span className="text-[10px] gp-mono gp-text-muted shrink-0">{fmtFechaHora(x.fechaHora)}</span>
     </div>
@@ -8344,9 +8366,14 @@ function AgendaContacto({ c, data, onAddCita, onIrAVista }) {
       ) : (
         <div className="mt-2 pt-2 border-t gp-border">
           <input className="gp-input text-xs mb-2" autoFocus placeholder="¿De qué es la cita?" value={titulo} onChange={(e) => setTitulo(e.target.value)} />
-          <div className="grid grid-cols-2 gap-2 mb-2">
+          <div className="grid grid-cols-3 gap-2 mb-2">
             <input type="date" className="gp-input text-xs" value={fecha} onChange={(e) => setFecha(e.target.value)} />
-            <input type="time" className="gp-input text-xs" value={hora} onChange={(e) => setHora(e.target.value)} />
+            <select className="gp-input text-xs" value={hora} onChange={(e) => setHora(e.target.value)} aria-label="Hora de inicio">
+              {HORAS_MEDIA_HORA.map((h) => <option key={h} value={h}>{h}</option>)}
+            </select>
+            <select className="gp-input text-xs" value={duracionHoras} onChange={(e) => setDuracionHoras(Number(e.target.value))} aria-label="Duración">
+              {DURACIONES_MEDIA_HORA.map((d) => <option key={d} value={d}>{etiquetaDuracion(d)}</option>)}
+            </select>
           </div>
           <input className="gp-input text-xs" placeholder="Lugar (opcional)" value={lugar} onChange={(e) => setLugar(e.target.value)} />
           <div className="flex gap-2 mt-2">
@@ -8355,7 +8382,12 @@ function AgendaContacto({ c, data, onAddCita, onIrAVista }) {
               className="gp-btn flex-1 py-1.5 text-xs"
               onClick={() => {
                 if (!titulo.trim() || !fecha) return;
-                onAddCita({ titulo: titulo.trim(), fechaHora: new Date(`${fecha}T${hora || "09:00"}`).toISOString(), lugar: lugar.trim(), contactoId: c.id, notas: "" });
+                // contactoIds (arreglo) es como guarda la Agenda: así esta cita también sale bien
+                // en el calendario y admite sumarle más personas después.
+                onAddCita({
+                  titulo: titulo.trim(), fechaHora: localInputsAFechaHora(fecha, hora),
+                  duracionHoras, lugar: lugar.trim(), contactoIds: [c.id], tags: [], notas: "",
+                });
                 setAbierto(false); setLugar("");
               }}
             >Guardar cita</button>
@@ -8389,8 +8421,8 @@ function BotonAccionFicha({ color, icono, label, href, nuevaPestana, onClick, on
 // seleccionar a alguien en la lista. NO duplica datos: Proyectos sale de la tabla puente,
 // Atenciones del módulo Regalos/Atenciones, Eventos del módulo Eventos y Notas del módulo Notas
 // — cada bloque solo consulta y deja abrir el módulo fuente, como pide el documento maestro.
-function FichaContacto({ c, data, proyectosVinculados, onCerrar, onEditar, onVerAtenciones, onIrAVista, onAddNota, onAddCita, onAddComentario }) {
-  const [tab, setTab] = useState("informacion");
+function FichaContacto({ c, data, proyectosVinculados, onCerrar, onEditar, onVerAtenciones, onIrAVista, onAddNota, onAddCita, onAddComentario, tab, onTab }) {
+  const setTab = onTab;
   const citas = (data.citas || []).filter((x) => x.contactoId === c.id);
   const archivos = (data.comentarios || [])
     .filter((x) => x.entidadTipo === "contactos" && x.entidadId === c.id)
