@@ -3160,7 +3160,8 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
           )}
           {view === "contactos" && (
             <Contactos data={data} onAdd={(i) => addItem("contactos", i)} onEdit={(id, p) => editItem("contactos", id, p)} onRemove={(id) => askDelete("contactos", id)} onAddComentario={(i) => addItem("comentarios", i)} onRemoveComentario={(id) => askDelete("comentarios", id)} onVerRegalos={(c) => { setRegalosFiltroContacto(c.id); setView("regalos"); }}
-              onVincularProyecto={vincularProyectoContacto} onDesvincularProyecto={desvincularProyectoContacto} />
+              onVincularProyecto={vincularProyectoContacto} onDesvincularProyecto={desvincularProyectoContacto}
+              onAddNota={(i) => addItem("notas", i)} onIrAVista={irAVista} />
           )}
           {view === "regalos" && (
             <Regalos data={data} onAdd={(i) => addItem("regalos", i)} onEdit={(id, p) => editItem("regalos", id, p)} onRemove={(id) => askDelete("regalos", id)} filtroContactoInicial={regalosFiltroContacto} onLimpiarFiltro={() => setRegalosFiltroContacto("")} />
@@ -7807,7 +7808,86 @@ function MetaForm({ item, proyectos, onSave }) {
 }
 
 /* ---------- Contactos / networking ---------- */
-function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveComentario, onVerRegalos, onVincularProyecto, onDesvincularProyecto }) {
+
+// Piezas compartidas entre la lista y la ficha lateral. Viven aquí afuera a propósito: si se
+// declaran dentro de Contactos, React las trata como un tipo de componente nuevo en cada render
+// y vuelve a montar todas las filas (pierde estado y parpadea).
+const tiposDeContacto = (c) => (c.tipos && c.tipos.length ? c.tipos : [c.tipo || "Otro"]);
+
+function AvatarContacto({ c, size = 32 }) {
+  if (c.fotoUrl) {
+    return <img src={c.fotoUrl} alt="" className="rounded-full object-cover shrink-0" style={{ width: size, height: size, border: "1px solid var(--border)" }} />;
+  }
+  return (
+    <div className="rounded-full flex items-center justify-center shrink-0 font-semibold" style={{ width: size, height: size, fontSize: Math.round(size / 2.8), background: "var(--panel-hi)", color: "var(--gold)" }}>
+      {(c.nombre || "").slice(0, 2).toUpperCase()}
+    </div>
+  );
+}
+
+function ChipsTiposContacto({ c }) {
+  return (
+    <div className="flex items-center gap-1 flex-wrap">
+      {tiposDeContacto(c).map((t) => (
+        <span key={t} className="gp-badge" style={{ color: COLOR_TIPO_CONTACTO[t] || "var(--muted)", background: `${COLOR_TIPO_CONTACTO[t] || "#64748B"}22` }}>{t}</span>
+      ))}
+      {c.parentesco && <Badge tone="muted">{c.parentesco}</Badge>}
+    </div>
+  );
+}
+
+function BadgeCumpleContacto({ c }) {
+  const dc = diasParaCumple(c.fechaNacimiento);
+  if (dc === null || dc > 30) return null;
+  return <Badge tone="gold">🎂 {dc === 0 ? "¡hoy!" : `en ${dc}d`}</Badge>;
+}
+
+function AccionesContactoRapidas({ c }) {
+  const sinNada = !c.whatsapp && !c.correo && !c.telefono;
+  return (
+    <div className="flex items-center gap-1">
+      {c.whatsapp && <a href={`https://wa.me/${(c.whatsapp || "").replace(/\D/g, "")}`} target="_blank" rel="noopener noreferrer" title="WhatsApp" className="p-1.5 rounded gp-btn-ghost" style={{ lineHeight: 0, color: "#16A36A" }}><MessageCircle size={14} /></a>}
+      {c.correo && <a href={`mailto:${c.correo}`} title="Correo" className="p-1.5 rounded gp-btn-ghost" style={{ lineHeight: 0, color: "#087CF5" }}><Mail size={14} /></a>}
+      {(c.telefono || c.whatsapp) && <a href={`tel:${c.telefono || c.whatsapp}`} title="Llamar" className="p-1.5 rounded gp-btn-ghost" style={{ lineHeight: 0 }}><Phone size={14} /></a>}
+      {sinNada && <span className="gp-text-muted text-xs">—</span>}
+    </div>
+  );
+}
+
+function ChipsProyectosContacto({ lista }) {
+  if (lista.length === 0) return <span className="gp-text-muted text-xs">—</span>;
+  return (
+    <div className="flex items-center gap-1">
+      <span className="gp-badge inline-flex items-center gap-1" style={{ color: "var(--gold)", background: "rgba(245,158,11,.14)" }}>
+        <FolderKanban size={11} /> {lista[0].nombre}
+      </span>
+      {lista.length > 1 && <span className="text-xs gp-text-muted">+{lista.length - 1}</span>}
+    </div>
+  );
+}
+
+// Menú "···" de cada fila. El estado de cuál está abierto vive en la lista (uno solo para toda
+// la tabla), no uno por fila.
+function MenuFilaContacto({ c, abierto, onToggle, onCerrar, onEditar, onComentarios, onAtenciones, onEliminar }) {
+  return (
+    <div className="relative">
+      <IconBtn title="Acciones" onClick={onToggle}><MoreHorizontal size={15} /></IconBtn>
+      {abierto && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={onCerrar} />
+          <div className="absolute right-0 top-8 z-20 gp-panel py-1 text-sm" style={{ minWidth: 190 }}>
+            <button onClick={() => { onCerrar(); onEditar(c); }} className="w-full text-left px-3 py-2 gp-panel-hi flex items-center gap-2"><Pencil size={13} /> Editar</button>
+            <button onClick={() => { onCerrar(); onComentarios(c); }} className="w-full text-left px-3 py-2 gp-panel-hi flex items-center gap-2"><MessageSquare size={13} /> Comentarios</button>
+            {onAtenciones && <button onClick={() => { onCerrar(); onAtenciones(c); }} className="w-full text-left px-3 py-2 gp-panel-hi flex items-center gap-2"><Gift size={13} /> Atenciones</button>}
+            <button onClick={() => { onCerrar(); onEliminar(c.id); }} className="w-full text-left px-3 py-2 gp-panel-hi flex items-center gap-2 gp-text-red"><Trash2 size={13} /> Eliminar</button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveComentario, onVerRegalos, onVincularProyecto, onDesvincularProyecto, onAddNota, onIrAVista }) {
   const [modal, setModal] = useState(null);
   const [importarAbierto, setImportarAbierto] = useState(false);
   const [comentariosDe, setComentariosDe] = useState(null);
@@ -7817,6 +7897,7 @@ function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
   const [busqueda, setBusquedaState] = useState("");
   const [filtrosAbiertos, setFiltrosAbiertos] = useState(false);
   const [menuAcciones, setMenuAcciones] = useState(null); // id del contacto con su menú "···" abierto
+  const [contactoSel, setContactoSel] = useState(null); // id del contacto con su ficha abierta a la derecha
   const [pagina, setPagina] = useState(1);
   const [porPagina, setPorPagina] = useState(12);
   // Cambiar filtro o búsqueda siempre regresa a la página 1 — si no, se queda en una página que
@@ -7871,76 +7952,25 @@ function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
     { label: "Notas", get: (c) => c.notas },
   ];
 
-  // Fila de "Contacto": los tres accesos directos (WhatsApp / correo / llamar) que se repiten
-  // igual en la tabla de escritorio y en las tarjetas de celular.
-  const AccionesContacto = ({ c }) => (
-    <div className="flex items-center gap-1">
-      {c.whatsapp && <a href={`https://wa.me/${(c.whatsapp || "").replace(/\D/g, "")}`} target="_blank" rel="noopener noreferrer" title="WhatsApp" className="p-1.5 rounded gp-btn-ghost" style={{ lineHeight: 0, color: "#16A36A" }}><MessageCircle size={14} /></a>}
-      {c.correo && <a href={`mailto:${c.correo}`} title="Correo" className="p-1.5 rounded gp-btn-ghost" style={{ lineHeight: 0, color: "#087CF5" }}><Mail size={14} /></a>}
-      {(c.telefono || c.whatsapp) && <a href={`tel:${c.telefono || c.whatsapp}`} title="Llamar" className="p-1.5 rounded gp-btn-ghost" style={{ lineHeight: 0 }}><Phone size={14} /></a>}
-      {!c.whatsapp && !c.correo && !c.telefono && <span className="gp-text-muted text-xs">—</span>}
-    </div>
-  );
+  // Props que comparten todas las filas para su menú "···".
+  const propsMenu = (c) => ({
+    c,
+    abierto: menuAcciones === c.id,
+    onToggle: () => setMenuAcciones(menuAcciones === c.id ? null : c.id),
+    onCerrar: () => setMenuAcciones(null),
+    onEditar: (x) => setModal({ item: x }),
+    onComentarios: setComentariosDe,
+    onAtenciones: onVerRegalos,
+    onEliminar: onRemove,
+  });
 
-  const ChipsTipos = ({ c }) => (
-    <div className="flex items-center gap-1 flex-wrap">
-      {tiposDe(c).map((t) => (
-        <span key={t} className="gp-badge" style={{ color: COLOR_TIPO_CONTACTO[t] || "var(--muted)", background: `${COLOR_TIPO_CONTACTO[t] || "#64748B"}22` }}>{t}</span>
-      ))}
-      {c.parentesco && <Badge tone="muted">{c.parentesco}</Badge>}
-    </div>
-  );
-
-  const ChipsProyectos = ({ c }) => {
-    const lista = proyectosDe(c.id);
-    if (lista.length === 0) return <span className="gp-text-muted text-xs">—</span>;
-    return (
-      <div className="flex items-center gap-1">
-        <span className="gp-badge inline-flex items-center gap-1" style={{ color: "var(--gold)", background: "rgba(245,158,11,.14)" }}>
-          <FolderKanban size={11} /> {lista[0].nombre}
-        </span>
-        {lista.length > 1 && <span className="text-xs gp-text-muted">+{lista.length - 1}</span>}
-      </div>
-    );
-  };
-
-  // Menú "···" de cada fila: comentarios, atenciones, editar y eliminar. Un solo estado para toda
-  // la tabla (el id de la fila abierta), no uno por fila.
-  const MenuFila = ({ c }) => (
-    <div className="relative">
-      <IconBtn title="Acciones" onClick={() => setMenuAcciones(menuAcciones === c.id ? null : c.id)}><MoreHorizontal size={15} /></IconBtn>
-      {menuAcciones === c.id && (
-        <>
-          <div className="fixed inset-0 z-10" onClick={() => setMenuAcciones(null)} />
-          <div className="absolute right-0 top-8 z-20 gp-panel py-1 text-sm" style={{ minWidth: 190 }}>
-            <button onClick={() => { setMenuAcciones(null); setModal({ item: c }); }} className="w-full text-left px-3 py-2 gp-panel-hi flex items-center gap-2"><Pencil size={13} /> Editar</button>
-            <button onClick={() => { setMenuAcciones(null); setComentariosDe(c); }} className="w-full text-left px-3 py-2 gp-panel-hi flex items-center gap-2"><MessageSquare size={13} /> Comentarios</button>
-            {onVerRegalos && <button onClick={() => { setMenuAcciones(null); onVerRegalos(c); }} className="w-full text-left px-3 py-2 gp-panel-hi flex items-center gap-2"><Gift size={13} /> Atenciones</button>}
-            <button onClick={() => { setMenuAcciones(null); onRemove(c.id); }} className="w-full text-left px-3 py-2 gp-panel-hi flex items-center gap-2 gp-text-red"><Trash2 size={13} /> Eliminar</button>
-          </div>
-        </>
-      )}
-    </div>
-  );
-
-  const Avatar = ({ c, size = 32 }) => (
-    c.fotoUrl ? (
-      <img src={c.fotoUrl} alt="" className="rounded-full object-cover shrink-0" style={{ width: size, height: size, border: "1px solid var(--border)" }} />
-    ) : (
-      <div className="rounded-full flex items-center justify-center shrink-0 font-semibold" style={{ width: size, height: size, fontSize: size / 3, background: "var(--panel-hi)", color: "var(--gold)" }}>
-        {(c.nombre || "").slice(0, 2).toUpperCase()}
-      </div>
-    )
-  );
-
-  const BadgeCumple = ({ c }) => {
-    const dc = diasParaCumple(c.fechaNacimiento);
-    if (dc === null || dc > 30) return null;
-    return <Badge tone="gold">🎂 {dc === 0 ? "¡hoy!" : `en ${dc}d`}</Badge>;
-  };
+  const seleccionado = data.contactos.find((c) => c.id === contactoSel) || null;
 
   return (
-    <div>
+    <div className="flex flex-col lg:flex-row gap-4 items-start">
+      {/* Columna de la lista. En celular se esconde cuando hay una ficha abierta (no caben lado
+          a lado), en escritorio se angosta y la ficha se pone a la derecha, como el mockup. */}
+      <div className={`min-w-0 flex-1 w-full ${seleccionado ? "hidden lg:block" : ""}`}>
       {/* Banner de la pantalla (mockup de Angel, 24 sept 2026): foto + título + bajada, con un
           degradado direccional para que el texto se lea sin apagar toda la foto. */}
       <div className="relative overflow-hidden rounded-2xl mb-4">
@@ -8013,26 +8043,33 @@ function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
           <tbody>
             {enPagina.map((c) => {
               const ultima = ultimaAtencionDe(c.id);
+              const esSel = contactoSel === c.id;
               return (
-                <tr key={c.id}>
+                // Clic en la fila abre la ficha a la derecha. Los controles de adentro (iconos de
+                // contacto, menú "···") paran la propagación para no abrirla sin querer.
+                <tr
+                  key={c.id}
+                  onClick={() => setContactoSel(c.id)}
+                  style={{ cursor: "pointer", background: esSel ? "var(--panel-hi)" : undefined }}
+                >
                   <td>
                     <div className="flex items-center gap-2.5">
-                      <Avatar c={c} />
+                      <AvatarContacto c={c} />
                       <div className="min-w-0">
                         <div className="flex items-center gap-1.5 flex-wrap">
                           <span className="font-medium">{c.nombre}</span>
-                          <BadgeCumple c={c} />
+                          <BadgeCumpleContacto c={c} />
                         </div>
                         {c.puesto && <div className="text-xs gp-text-muted">{c.puesto}</div>}
                       </div>
                     </div>
                   </td>
-                  <td><ChipsTipos c={c} /></td>
+                  <td><ChipsTiposContacto c={c} /></td>
                   <td className="gp-text-muted">{c.empresa || "—"}</td>
-                  <td><ChipsProyectos c={c} /></td>
+                  <td><ChipsProyectosContacto lista={proyectosDe(c.id)} /></td>
                   <td className="gp-mono gp-text-muted">{ultima?.fecha || "—"}</td>
-                  <td><AccionesContacto c={c} /></td>
-                  <td><MenuFila c={c} /></td>
+                  <td onClick={(e) => e.stopPropagation()}><AccionesContactoRapidas c={c} /></td>
+                  <td onClick={(e) => e.stopPropagation()}><MenuFilaContacto {...propsMenu(c)} /></td>
                 </tr>
               );
             })}
@@ -8047,22 +8084,25 @@ function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
 
       <div className="md:hidden flex flex-col gap-2">
         {enPagina.map((c) => (
-          <div key={c.id} className="gp-panel p-3">
+          <div key={c.id} className="gp-panel p-3" onClick={() => setContactoSel(c.id)} style={{ cursor: "pointer" }}>
             <div className="flex items-start gap-3">
-              <Avatar c={c} size={40} />
+              <AvatarContacto c={c} size={40} />
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-1.5 flex-wrap">
                   <p className="text-sm font-medium truncate">{c.nombre}</p>
-                  <BadgeCumple c={c} />
+                  <BadgeCumpleContacto c={c} />
                 </div>
-                <div className="mt-1"><ChipsTipos c={c} /></div>
+                <div className="mt-1"><ChipsTiposContacto c={c} /></div>
                 {(c.empresa || c.puesto) && <p className="text-xs gp-text-muted mt-1 truncate">{[c.puesto, c.empresa].filter(Boolean).join(" · ")}</p>}
-                <div className="mt-1"><ChipsProyectos c={c} /></div>
+                <div className="mt-1"><ChipsProyectosContacto lista={proyectosDe(c.id)} /></div>
               </div>
-              <MenuFila c={c} />
+              <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
+                <MenuFilaContacto {...propsMenu(c)} />
+                <ChevronRight size={16} className="gp-text-muted" />
+              </div>
             </div>
-            <div className="flex items-center justify-between mt-2 pt-2 border-t gp-border">
-              <AccionesContacto c={c} />
+            <div className="flex items-center justify-between mt-2 pt-2 border-t gp-border" onClick={(e) => e.stopPropagation()}>
+              <AccionesContactoRapidas c={c} />
               <span className="text-xs gp-text-muted">{ultimaAtencionDe(c.id)?.fecha || ""}</span>
             </div>
           </div>
@@ -8095,6 +8135,24 @@ function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
             </select>
             por página
           </label>
+        </div>
+      )}
+      </div>
+
+      {/* Ficha del contacto: panel a la derecha en escritorio (pegado arriba mientras se baja la
+          lista), y pantalla completa en celular — lado a lado no cabe en un teléfono. */}
+      {seleccionado && (
+        <div className="w-full lg:w-[420px] xl:w-[460px] shrink-0 lg:sticky lg:top-4">
+          <FichaContacto
+            c={seleccionado}
+            data={data}
+            proyectosVinculados={proyectosDe(seleccionado.id)}
+            onCerrar={() => setContactoSel(null)}
+            onEditar={() => setModal({ item: seleccionado })}
+            onVerAtenciones={onVerRegalos}
+            onIrAVista={onIrAVista}
+            onAddNota={onAddNota}
+          />
         </div>
       )}
 
@@ -8130,6 +8188,281 @@ function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
             <ImportarExcelModal tipo="contactos" XLSX={XLSX} onImportarFila={(item) => onAdd(item)} onCerrar={() => setImportarAbierto(false)} />
           </Suspense>
         </Modal>
+      )}
+    </div>
+  );
+}
+
+// Ficha del contacto (mockup de Angel, 24 sept 2026): el panel que aparece a la derecha al
+// seleccionar a alguien en la lista. NO duplica datos: Proyectos sale de la tabla puente,
+// Atenciones del módulo Regalos/Atenciones, Eventos del módulo Eventos y Notas del módulo Notas
+// — cada bloque solo consulta y deja abrir el módulo fuente, como pide el documento maestro.
+function FichaContacto({ c, data, proyectosVinculados, onCerrar, onEditar, onVerAtenciones, onIrAVista, onAddNota }) {
+  const [tab, setTab] = useState("informacion");
+  const atenciones = (data.regalos || [])
+    .filter((r) => r.contactoId === c.id)
+    .sort((a, b) => (b.fecha || "").localeCompare(a.fecha || ""));
+  const eventos = (data.eventos || [])
+    .filter((e) => e.contactoId === c.id)
+    .sort((a, b) => (b.fecha || "").localeCompare(a.fecha || ""));
+  const notas = (data.notas || []).filter((n) => n.contactoId === c.id);
+  const ultimaAtencion = atenciones[0];
+
+  const TABS = [
+    { key: "informacion", label: "Información" },
+    { key: "proyectos", label: "Proyectos", n: proyectosVinculados.length },
+    { key: "notas", label: "Notas", n: notas.length },
+    { key: "eventos", label: "Eventos", n: eventos.length },
+    { key: "atenciones", label: "Atenciones", n: atenciones.length },
+    { key: "archivos", label: "Archivos" },
+  ];
+
+  const Dato = ({ label, valor }) => (
+    valor ? (
+      <div className="flex items-start justify-between gap-3 py-1.5">
+        <span className="text-xs gp-text-muted shrink-0">{label}</span>
+        <span className="text-xs text-right">{valor}</span>
+      </div>
+    ) : null
+  );
+
+  const Bloque = ({ titulo, icono, accion, children }) => (
+    <div className="gp-panel p-3.5 mb-3">
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-sm font-medium flex items-center gap-1.5">{icono} {titulo}</p>
+        {accion}
+      </div>
+      {children}
+    </div>
+  );
+
+  const Vacio = ({ children }) => <p className="text-xs gp-text-muted py-2">{children}</p>;
+
+  return (
+    <div className="gp-panel p-4">
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex items-start gap-3 min-w-0">
+          <AvatarContacto c={c} size={64} />
+          <div className="min-w-0">
+            <p className="gp-serif text-lg leading-tight">{c.nombre}</p>
+            <div className="mt-1"><ChipsTiposContacto c={c} /></div>
+            {c.puesto && <p className="text-xs gp-text-muted mt-1">{c.puesto}</p>}
+            {c.empresa && <p className="text-xs gp-text-muted">{c.empresa}</p>}
+            <div className="mt-1"><BadgeCumpleContacto c={c} /></div>
+          </div>
+        </div>
+        <div className="flex items-center gap-1 shrink-0">
+          <button onClick={onEditar} className="gp-btn-ghost px-2.5 py-1.5 text-xs rounded flex items-center gap-1"><Pencil size={12} /> Editar</button>
+          <IconBtn title="Cerrar" onClick={onCerrar}><X size={15} /></IconBtn>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2 mt-3">
+        <a
+          href={c.whatsapp ? `https://wa.me/${(c.whatsapp || "").replace(/\D/g, "")}` : undefined}
+          target="_blank" rel="noopener noreferrer"
+          className="py-2 text-xs rounded flex items-center justify-center gap-1.5 font-medium"
+          style={c.whatsapp ? { background: "#16A36A", color: "#fff" } : { background: "var(--panel-hi)", color: "var(--muted)", pointerEvents: "none" }}
+        >
+          <MessageCircle size={13} /> WhatsApp
+        </a>
+        <a
+          href={c.correo ? `mailto:${c.correo}` : undefined}
+          className="py-2 text-xs rounded flex items-center justify-center gap-1.5 font-medium"
+          style={c.correo ? { background: "#087CF5", color: "#fff" } : { background: "var(--panel-hi)", color: "var(--muted)", pointerEvents: "none" }}
+        >
+          <Mail size={13} /> Enviar correo
+        </a>
+        <a
+          href={(c.telefono || c.whatsapp) ? `tel:${c.telefono || c.whatsapp}` : undefined}
+          className="gp-btn-ghost py-2 text-xs rounded flex items-center justify-center gap-1.5"
+          style={(c.telefono || c.whatsapp) ? undefined : { opacity: 0.5, pointerEvents: "none" }}
+        >
+          <Phone size={13} /> Llamar
+        </a>
+        <button onClick={() => onIrAVista?.("agenda")} className="gp-btn-ghost py-2 text-xs rounded flex items-center justify-center gap-1.5">
+          <CalendarClock size={13} /> Agendar
+        </button>
+      </div>
+
+      <div className="flex gap-1 overflow-x-auto gp-scroll mt-4 mb-3 pb-1">
+        {TABS.map((t) => (
+          <button
+            key={t.key} onClick={() => setTab(t.key)}
+            className="text-xs px-2.5 py-1.5 rounded-full whitespace-nowrap shrink-0"
+            style={tab === t.key
+              ? { background: "var(--panel-hi)", color: "var(--text)", fontWeight: 600 }
+              : { color: "var(--muted)" }}
+          >
+            {t.label}{t.n ? ` ${t.n}` : ""}
+          </button>
+        ))}
+      </div>
+
+      {tab === "informacion" && (
+        <>
+          <Bloque titulo="Información personal" icono={<User size={14} className="gp-text-gold" />}>
+            <Dato label="Nombre(s)" valor={c.nombres} />
+            <Dato label="Apellido paterno" valor={c.apellidoPaterno} />
+            <Dato label="Apellido materno" valor={c.apellidoMaterno} />
+            <Dato label="Cumpleaños" valor={c.fechaNacimiento} />
+            <Dato label="Parentesco" valor={c.parentesco} />
+            <Dato label="Dónde lo conociste" valor={c.contexto} />
+            <Dato label="Notas" valor={c.notas} />
+            {!c.nombres && !c.fechaNacimiento && !c.contexto && !c.notas && <Vacio>Sin datos personales capturados todavía.</Vacio>}
+          </Bloque>
+
+          <Bloque titulo="Contacto" icono={<Contact size={14} className="gp-text-gold" />}>
+            <Dato label="WhatsApp" valor={c.whatsapp} />
+            <Dato label="Teléfono" valor={c.telefono} />
+            <Dato label="Correo" valor={c.correo} />
+            <Dato label="Dirección" valor={c.direccion} />
+            {!c.whatsapp && !c.telefono && !c.correo && !c.direccion && <Vacio>Sin datos de contacto todavía.</Vacio>}
+          </Bloque>
+
+          <Bloque titulo="Resumen" icono={<BarChart3 size={14} className="gp-text-gold" />}>
+            <div className="grid grid-cols-4 gap-2">
+              {[
+                { n: proyectosVinculados.length, label: "Proyectos", color: "#F59E0B" },
+                { n: atenciones.length, label: "Atenciones", color: "#EC4899" },
+                { n: eventos.length, label: "Eventos", color: "#087CF5" },
+                { n: notas.length, label: "Notas", color: "#8B5CF6" },
+              ].map((x) => (
+                <div key={x.label} className="rounded-lg p-2 text-center" style={{ background: `${x.color}17` }}>
+                  <p className="gp-serif text-lg" style={{ color: x.color }}>{x.n}</p>
+                  <p className="text-[10px] gp-text-muted">{x.label}</p>
+                </div>
+              ))}
+            </div>
+            {ultimaAtencion && (
+              <div className="flex items-center justify-between gap-2 mt-3 pt-2.5 border-t gp-border">
+                <span className="text-xs gp-text-muted">Última atención: <span className="gp-mono">{ultimaAtencion.fecha || "—"}</span> · {ultimaAtencion.tipo}</span>
+                {onVerAtenciones && <button onClick={() => onVerAtenciones(c)} className="text-xs gp-text-gold shrink-0">Ver todas →</button>}
+              </div>
+            )}
+          </Bloque>
+
+          <Bloque
+            titulo="Proyectos relacionados"
+            icono={<FolderKanban size={14} className="gp-text-gold" />}
+            accion={proyectosVinculados.length > 0 && <button onClick={() => setTab("proyectos")} className="text-xs gp-text-gold">Ver todos ({proyectosVinculados.length})</button>}
+          >
+            {proyectosVinculados.length === 0
+              ? <Vacio>Sin proyectos vinculados. Se vinculan al editar el contacto.</Vacio>
+              : (
+                <div className="flex flex-col gap-1.5">
+                  {proyectosVinculados.slice(0, 3).map((p) => (
+                    <div key={p.id} className="flex items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="text-xs font-medium truncate">{p.nombre}</p>
+                        <p className="text-[10px] gp-text-muted">{p.categoria}</p>
+                      </div>
+                      <Badge tone={p.estatus === "Activo" ? "teal" : "muted"}>{p.estatus}</Badge>
+                    </div>
+                  ))}
+                </div>
+              )}
+          </Bloque>
+        </>
+      )}
+
+      {tab === "proyectos" && (
+        <Bloque titulo="Proyectos relacionados" icono={<FolderKanban size={14} className="gp-text-gold" />} accion={<button onClick={onEditar} className="text-xs gp-text-gold">Vincular</button>}>
+          {proyectosVinculados.length === 0
+            ? <Vacio>Sin proyectos vinculados. Dale a "Vincular" para relacionarlo con uno o varios.</Vacio>
+            : (
+              <div className="flex flex-col gap-2">
+                {proyectosVinculados.map((p) => (
+                  <div key={p.id} className="flex items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="text-xs font-medium truncate">{p.nombre}</p>
+                      <p className="text-[10px] gp-text-muted">{p.categoria}</p>
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <Badge tone={p.estatus === "Activo" ? "teal" : "muted"}>{p.estatus}</Badge>
+                      <button onClick={() => onIrAVista?.("proyectos")} className="text-xs gp-text-gold">Abrir</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+        </Bloque>
+      )}
+
+      {tab === "notas" && (
+        <Bloque
+          titulo="Notas"
+          icono={<StickyNote size={14} className="gp-text-gold" />}
+          accion={onAddNota && <button onClick={() => onAddNota({ titulo: `Nota de ${c.nombre}`, contenido: "", contactoId: c.id })} className="text-xs gp-text-gold">+ Nueva nota</button>}
+        >
+          {notas.length === 0
+            ? <Vacio>Sin notas ligadas a este contacto. Las que crees aquí quedan también en el módulo de Notas.</Vacio>
+            : (
+              <div className="flex flex-col gap-2">
+                {notas.map((n) => (
+                  <div key={n.id} className="pb-2 border-b gp-border last:border-0">
+                    <p className="text-xs font-medium">{n.titulo || "(sin título)"}</p>
+                    {n.contenido && <p className="text-[11px] gp-text-muted line-clamp-2">{n.contenido}</p>}
+                  </div>
+                ))}
+                <button onClick={() => onIrAVista?.("notas")} className="text-xs gp-text-gold text-left">Ver en Notas →</button>
+              </div>
+            )}
+        </Bloque>
+      )}
+
+      {tab === "eventos" && (
+        <Bloque titulo="Eventos" icono={<CalendarClock size={14} className="gp-text-gold" />}>
+          {eventos.length === 0
+            ? <Vacio>Sin eventos relacionados con este contacto.</Vacio>
+            : (
+              <div className="flex flex-col gap-2">
+                {eventos.map((e) => (
+                  <div key={e.id} className="flex items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="text-xs font-medium truncate">{e.nombre}</p>
+                      {e.lugar && <p className="text-[10px] gp-text-muted truncate">{e.lugar}</p>}
+                    </div>
+                    <span className="text-[10px] gp-mono gp-text-muted shrink-0">{e.fecha}</span>
+                  </div>
+                ))}
+                <button onClick={() => onIrAVista?.("eventos")} className="text-xs gp-text-gold text-left">Ver en Eventos →</button>
+              </div>
+            )}
+        </Bloque>
+      )}
+
+      {tab === "atenciones" && (
+        <Bloque
+          titulo="Atenciones"
+          icono={<Gift size={14} className="gp-text-gold" />}
+          accion={onVerAtenciones && <button onClick={() => onVerAtenciones(c)} className="text-xs gp-text-gold">Ver todas</button>}
+        >
+          {atenciones.length === 0
+            ? <Vacio>Sin atenciones registradas: regalos, felicitaciones, llamadas, visitas…</Vacio>
+            : (
+              <div className="flex flex-col gap-2">
+                {atenciones.map((a) => (
+                  <div key={a.id} className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="text-xs font-medium">{a.tipo}{a.ocasion ? ` · ${a.ocasion}` : ""}</p>
+                      {a.descripcion && <p className="text-[10px] gp-text-muted truncate">{a.descripcion}</p>}
+                    </div>
+                    <span className="text-[10px] gp-mono gp-text-muted shrink-0">{a.fecha || a.anio || ""}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+        </Bloque>
+      )}
+
+      {tab === "archivos" && (
+        <Bloque titulo="Archivos" icono={<FileText size={14} className="gp-text-gold" />}>
+          <Vacio>
+            Todavía no se pueden adjuntar archivos a un contacto — el módulo de Documentos hoy
+            guarda contratos por proyecto, no adjuntos por persona. Queda pendiente.
+          </Vacio>
+        </Bloque>
       )}
     </div>
   );
