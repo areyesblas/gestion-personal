@@ -28,6 +28,7 @@ import {
   Target, Contact, BarChart3, FileText, Flame, HeartPulse, Check, Menu, PieChart as PieChartIcon, User, Home,
   PiggyBank, Camera, Film, Upload, MapPin, Clock, Mic, Gift, Receipt, Megaphone, ChevronUp, Gem, Download, Sun, Moon, Shield, LogOut, ChevronLeft, Lock, Pill, CalendarClock, Zap, StickyNote, Search, Sparkles, Send, Bot, Square, Settings, CalendarRange, Palette, Eye, EyeOff, Sliders, Volume2, VolumeX, Play, Copy, Phone, MessageSquare, MoreHorizontal,
   Heart, Code2, Music, Tag, Archive, ExternalLink, ListChecks, Info,
+  ChevronsDownUp, ChevronsUpDown,
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
@@ -5664,6 +5665,8 @@ function FichaProyecto({
   sensibleDesbloqueadoHasta, onDesbloquear,
 }) {
   const setTab = onTab;
+  // Ramas cerradas del árbol de tareas de la pestaña "Tareas" de esta ficha.
+  const [colapsadasTareas, setColapsadasTareas] = useState(() => new Set());
   // La ventana de 15 min de los módulos sensibles se vence sola, sin que nada más vuelva a
   // dibujar la pantalla. Este latido hace que el resumen financiero se vuelva a tapar cuando
   // caduca, igual que en el centro de proyecto.
@@ -5676,6 +5679,12 @@ function FichaProyecto({
 
   const tareas = (data.pendientes || []).filter((t) => t.proyectoId === p.id);
   const tareasAbiertas = tareas.filter((t) => !ESTATUS_TAREA_CERRADOS.includes(t.estatus));
+  // El resumen de tareas también respeta la jerarquía padre/hija: una lista plana escondería que
+  // media docena de renglones son en realidad subtareas de uno solo.
+  const arbolTareas = buildTareaTree(tareas);
+  const filasTareas = flattenTareas(arbolTareas, 0, colapsadasTareas);
+  const ramasTareas = idsRamasTareas(arbolTareas);
+  const toggleRamaFicha = (id) => setColapsadasTareas((prev) => { const st = new Set(prev); st.has(id) ? st.delete(id) : st.add(id); return st; });
   const proximas = [...tareasAbiertas]
     .sort((a, b) => (a.fechaLimite || "9999").localeCompare(b.fechaLimite || "9999"))
     .slice(0, 5);
@@ -5867,30 +5876,36 @@ function FichaProyecto({
           titulo="Tareas del proyecto" icono={<ListChecks size={14} className="gp-text-gold" />}
           accion={<button onClick={onNuevaTarea} className="text-xs gp-text-gold flex items-center gap-1"><Plus size={12} /> Agregar tarea</button>}
         >
-          <p className="text-xs gp-text-muted mb-2">
-            {tareasAbiertas.length} pendiente{tareasAbiertas.length === 1 ? "" : "s"} de {tareas.length} tarea{tareas.length === 1 ? "" : "s"}.
-          </p>
+          <div className="flex items-center justify-between gap-2 mb-2">
+            <p className="text-xs gp-text-muted">
+              {tareasAbiertas.length} pendiente{tareasAbiertas.length === 1 ? "" : "s"} de {tareas.length} tarea{tareas.length === 1 ? "" : "s"}.
+            </p>
+            <BotonArbolTareas idsRamas={ramasTareas} colapsadas={colapsadasTareas} onCambiar={setColapsadasTareas} />
+          </div>
           {tareas.length === 0
             ? <VacioFicha>Sin tareas todavía. Las tareas viven en el módulo Tareas — aquí solo se resumen las de este proyecto.</VacioFicha>
             : (
               <div className="flex flex-col gap-2">
-                {[...tareas]
-                  .sort((a, b) => (a.fechaLimite || "9999").localeCompare(b.fechaLimite || "9999"))
-                  .slice(0, 8)
-                  .map((t) => {
-                    const cerrada = ESTATUS_TAREA_CERRADOS.includes(t.estatus);
-                    const vencida = !cerrada && t.fechaLimite && daysUntil(t.fechaLimite) < 0;
-                    return (
-                      <div key={t.id} className="flex items-start justify-between gap-2">
+                {filasTareas.slice(0, 12).map(({ item: t, nivel }) => {
+                  const cerrada = ESTATUS_TAREA_CERRADOS.includes(t.estatus);
+                  const vencida = !cerrada && t.fechaLimite && daysUntil(t.fechaLimite) < 0;
+                  const colapsada = colapsadasTareas.has(t.id);
+                  return (
+                    <div key={t.id} className="flex items-start justify-between gap-2" style={{ paddingLeft: nivel * 14 }}>
+                      <span className="flex items-start gap-1 min-w-0">
+                        {nivel > 0 && <span className="gp-text-muted shrink-0 text-xs">└</span>}
+                        <ToggleArbolTarea nodo={t} colapsada={colapsada} onToggle={toggleRamaFicha} />
                         <span className={`text-xs min-w-0 ${cerrada ? "gp-text-muted" : ""}`} style={cerrada ? { textDecoration: "line-through" } : undefined}>{t.descripcion}</span>
-                        <div className="flex items-center gap-1.5 shrink-0">
-                          <Badge tone={toneEstatusTarea(t.estatus)}>{t.estatus}</Badge>
-                          <span className="gp-mono text-[10px]" style={{ color: vencida ? "var(--red)" : "var(--muted)" }}>{t.fechaLimite || ""}</span>
-                        </div>
+                        <ContadorRamaColapsada nodo={t} colapsada={colapsada} />
+                      </span>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <Badge tone={toneEstatusTarea(t.estatus)}>{t.estatus}</Badge>
+                        <span className="gp-mono text-[10px]" style={{ color: vencida ? "var(--red)" : "var(--muted)" }}>{t.fechaLimite || ""}</span>
                       </div>
-                    );
-                  })}
-                {tareas.length > 8 && <p className="text-[10px] gp-text-muted">y {tareas.length - 8} más.</p>}
+                    </div>
+                  );
+                })}
+                {filasTareas.length > 12 && <p className="text-[10px] gp-text-muted">y {filasTareas.length - 12} más.</p>}
               </div>
             )}
           <button onClick={() => onVerTareas(p.id)} className="text-xs gp-text-gold mt-3 flex items-center gap-1">Ver todas las tareas <ChevronRight size={12} /></button>
@@ -6189,6 +6204,8 @@ function ProyectoDetalle({ data, proyectoId, onVolver, onAddTarea, onEditTarea, 
   const [modal, setModal] = useState(null);
   const [modalMeta, setModalMeta] = useState(null);
   const [comentariosDe, setComentariosDe] = useState(null);
+  // Ramas del árbol de tareas que están cerradas (ids de las tareas padre). Vacío = todo abierto.
+  const [colapsadas, setColapsadas] = useState(() => new Set());
   // Etapa 7 (Centro de Proyecto, secc. 24.1): vista integral con pestañas — no crea tablas nuevas,
   // solo consulta y filtra las entidades reales por proyectoId y permite navegar al módulo fuente.
   const [tab, setTab] = useState("resumen");
@@ -6215,7 +6232,9 @@ function ProyectoDetalle({ data, proyectoId, onVolver, onAddTarea, onEditTarea, 
   const empty = { proyectoId, parentId: "", descripcion: "", fechaLimite: todayISO(), fechaRevision: "", prioridad: "Media", estatus: "Pendiente", colaboradorContactoId: null, contactoId: "", precio: "", fechaPagoAprox: "", tiempoEstimado: "", tiempoReal: "", asignadoA: "", avance: "" };
   const tareasProyecto = data.pendientes.filter((t) => t.proyectoId === proyectoId);
   const arbol = buildTareaTree(tareasProyecto);
-  const filas = flattenTareas(arbol);
+  const filas = flattenTareas(arbol, 0, colapsadas);
+  const idsRamas = idsRamasTareas(arbol);
+  const toggleRama = (id) => setColapsadas((prev) => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s; });
   const avanceGeneral = arbol.length ? Math.round(arbol.reduce((s, n) => s + calcAvanceTarea(n), 0) / arbol.length) : 0;
   const r = rentabilidadProyecto(data, proyectoId);
   const metasProyecto = (data.metas || []).filter((m) => m.proyectoId === proyectoId);
@@ -6371,6 +6390,11 @@ function ProyectoDetalle({ data, proyectoId, onVolver, onAddTarea, onEditTarea, 
             </Modal>
           )}
 
+          <div className="flex items-center justify-between gap-2 mb-2">
+            <p className="text-sm font-medium">Tareas y subtareas · {tareasProyecto.length}</p>
+            <BotonArbolTareas idsRamas={idsRamas} colapsadas={colapsadas} onCambiar={setColapsadas} />
+          </div>
+
           <div className="gp-panel overflow-x-auto">
             <table className="gp-table">
               <thead><tr><th>Pendiente</th><th>Cliente</th><th>Responsable</th><th>Fecha</th><th>Prioridad</th><th>Avance</th><th>Precio</th><th></th></tr></thead>
@@ -6379,13 +6403,16 @@ function ProyectoDetalle({ data, proyectoId, onVolver, onAddTarea, onEditTarea, 
                   const vencido = p.estatus !== "Completada" && p.fechaLimite && daysUntil(p.fechaLimite) < 0;
                   const nc = nComentarios(p.id);
                   const tieneHijos = p.hijos && p.hijos.length > 0;
+                  const colapsada = colapsadas.has(p.id);
                   const avance = Math.round(calcAvanceTarea(p));
                   return (
                     <tr key={p.id}>
                       <td>
                         <span style={{ paddingLeft: nivel * 18 }} className="flex items-center gap-1">
-                          {nivel > 0 && <span className="gp-text-muted">└</span>}
-                          {p.descripcion}
+                          {nivel > 0 && <span className="gp-text-muted shrink-0">└</span>}
+                          <ToggleArbolTarea nodo={p} colapsada={colapsada} onToggle={toggleRama} />
+                          <span>{p.descripcion}</span>
+                          <ContadorRamaColapsada nodo={p} colapsada={colapsada} />
                         </span>
                       </td>
                       <td className="gp-text-muted">{p.contactoId ? nombreCliente(p.contactoId) : "—"}</td>
@@ -6936,13 +6963,79 @@ function buildTareaTree(items) {
   return attach("_root");
 }
 // Aplana el árbol a una lista con nivel de profundidad, para renderizar con indentación.
-function flattenTareas(tree, nivel = 0) {
+// `colapsadas` (opcional) es un Set con los ids de las tareas cuya rama está cerrada: la tarea
+// sigue apareciendo, pero sus subtareas no se incluyen en el resultado.
+function flattenTareas(tree, nivel = 0, colapsadas = null) {
   const out = [];
   for (const nodo of tree) {
     out.push({ item: nodo, nivel });
-    out.push(...flattenTareas(nodo.hijos, nivel + 1));
+    if (colapsadas && colapsadas.has(nodo.id)) continue;
+    out.push(...flattenTareas(nodo.hijos, nivel + 1, colapsadas));
   }
   return out;
+}
+// ids de todas las tareas que tienen al menos una subtarea, en cualquier nivel del árbol. Es lo
+// que necesita "Colapsar todo" para saber qué ramas existen.
+function idsRamasTareas(tree) {
+  const out = [];
+  for (const nodo of tree) {
+    if (nodo.hijos && nodo.hijos.length > 0) {
+      out.push(nodo.id);
+      out.push(...idsRamasTareas(nodo.hijos));
+    }
+  }
+  return out;
+}
+// Cuántas tareas cuelgan de este nodo contando todos los niveles — para poder decir cuántas se
+// están escondiendo al colapsar, en vez de esconderlas en silencio.
+function contarDescendientesTarea(nodo) {
+  return (nodo.hijos || []).reduce((n, h) => n + 1 + contarDescendientesTarea(h), 0);
+}
+
+// Flecha de colapsar/expandir de una fila del árbol. Una tarea sin subtareas dibuja un hueco del
+// mismo ancho, para que todas las descripciones de un mismo nivel queden alineadas.
+function ToggleArbolTarea({ nodo, colapsada, onToggle }) {
+  const tieneHijos = nodo.hijos && nodo.hijos.length > 0;
+  if (!tieneHijos) return <span className="shrink-0" style={{ width: 16, display: "inline-block" }} />;
+  const n = contarDescendientesTarea(nodo);
+  return (
+    <button
+      type="button"
+      onClick={(e) => { e.stopPropagation(); onToggle(nodo.id); }}
+      title={colapsada ? `Expandir ${n} subtarea${n === 1 ? "" : "s"}` : "Colapsar subtareas"}
+      aria-label={colapsada ? "Expandir subtareas" : "Colapsar subtareas"}
+      aria-expanded={!colapsada}
+      className="shrink-0 gp-text-muted"
+      style={{ width: 16, lineHeight: 0 }}
+    >
+      {colapsada ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+    </button>
+  );
+}
+
+// Cuántas subtareas quedaron escondidas en esta rama, para que colapsar no borre información.
+function ContadorRamaColapsada({ nodo, colapsada }) {
+  if (!colapsada) return null;
+  const n = contarDescendientesTarea(nodo);
+  if (n === 0) return null;
+  return <span className="gp-badge shrink-0" style={{ color: "var(--muted)", background: "var(--panel-2)" }}>+{n}</span>;
+}
+
+// "Colapsar todo / Expandir todo". Un solo botón que alterna: si ya está todo cerrado, abre; si
+// no, cierra. No se dibuja cuando el árbol no tiene ninguna rama que colapsar.
+function BotonArbolTareas({ idsRamas, colapsadas, onCambiar }) {
+  if (idsRamas.length === 0) return null;
+  const todasColapsadas = idsRamas.every((id) => colapsadas.has(id));
+  return (
+    <button
+      type="button"
+      onClick={() => onCambiar(todasColapsadas ? new Set() : new Set(idsRamas))}
+      className="text-xs px-2.5 py-1.5 rounded gp-btn-ghost flex items-center gap-1.5 whitespace-nowrap"
+    >
+      {todasColapsadas ? <ChevronsUpDown size={12} /> : <ChevronsDownUp size={12} />}
+      {todasColapsadas ? "Expandir todo" : "Colapsar todo"}
+    </button>
+  );
 }
 // % de avance: si la tarea tiene subtareas, es el promedio del avance de sus hijos (recursivo);
 // si es una tarea final (sin hijos), es binario según su estatus.
@@ -7075,6 +7168,8 @@ function Pendientes({ data, activeOwnerId, onAdd, onEdit, onRemove, onAddComenta
   const [proyectoMindMap, setProyectoMindMap] = useState("");
   // Se entra aquí ya filtrado cuando vienes de "Ver todas las tareas" en la ficha de un proyecto.
   const [filtroProyecto, setFiltroProyecto] = useState(filtroProyectoInicial || ""); // "" = todos los proyectos, en la vista de lista
+  // Ramas del árbol de tareas que están cerradas (ids de las tareas padre). Vacío = todo abierto.
+  const [colapsadas, setColapsadas] = useState(() => new Set());
   const [colaboradores, setColaboradores] = useState([]);
   const empty = { proyectoId: "", parentId: "", descripcion: "", fechaLimite: todayISO(), fechaRevision: "", prioridad: "Media", estatus: "Pendiente", colaboradorContactoId: null, contactoId: "", precio: "", fechaPagoAprox: "", tiempoEstimado: "", tiempoReal: "", asignadoA: "" };
 
@@ -7123,7 +7218,9 @@ function Pendientes({ data, activeOwnerId, onAdd, onEdit, onRemove, onAddComenta
       })
     : ordenarLista(pendientesFiltrados, orden, camposOrden);
   const arbol = buildTareaTree(base);
-  const filas = flattenTareas(arbol);
+  const filas = flattenTareas(arbol, 0, colapsadas);
+  const idsRamas = idsRamasTareas(arbol);
+  const toggleRama = (id) => setColapsadas((prev) => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s; });
   const nComentarios = (id) => (data.comentarios || []).filter((c) => c.entidadTipo === "pendientes" && c.entidadId === id).length;
 
   const nombreProyecto = (id) => data.proyectos.find((p) => p.id === id)?.nombre || "—";
@@ -7161,6 +7258,7 @@ function Pendientes({ data, activeOwnerId, onAdd, onEdit, onRemove, onAddComenta
               {[...data.proyectos].sort((a, b) => a.nombre.localeCompare(b.nombre, "es")).map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
             </select>
             <OrdenSelector opciones={opcionesOrden} value={orden} onChange={setOrden} />
+            <BotonArbolTareas idsRamas={idsRamas} colapsadas={colapsadas} onCambiar={setColapsadas} />
           </div>
         )}
         {vista === "mindmap" && (
@@ -7205,13 +7303,16 @@ function Pendientes({ data, activeOwnerId, onAdd, onEdit, onRemove, onAddComenta
               const vencido = p.estatus !== "Completada" && p.fechaLimite && daysUntil(p.fechaLimite) < 0;
               const nc = nComentarios(p.id);
               const tieneHijos = p.hijos && p.hijos.length > 0;
+              const colapsada = colapsadas.has(p.id);
               const avance = tieneHijos ? Math.round(calcAvanceTarea(p)) : null;
               return (
                 <tr key={p.id}>
                   <td style={{ maxWidth: 220 }}>
                     <span style={{ paddingLeft: nivel * 18 }} className="flex items-start gap-1">
                       {nivel > 0 && <span className="gp-text-muted shrink-0">└</span>}
+                      <ToggleArbolTarea nodo={p} colapsada={colapsada} onToggle={toggleRama} />
                       <span className="line-clamp-2 md:line-clamp-none">{p.descripcion}</span>
+                      <ContadorRamaColapsada nodo={p} colapsada={colapsada} />
                     </span>
                   </td>
                   <td className="gp-text-muted hidden md:table-cell">{nombreProyecto(p.proyectoId)}</td>
