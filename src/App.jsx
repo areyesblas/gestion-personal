@@ -8197,6 +8197,25 @@ function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
   );
 }
 
+// Botón de acción de la ficha. Mantiene su color siempre; si el dato que necesita no está
+// capturado, en vez de quedar muerto lleva a capturarlo. `color` vacío = botón neutro (ghost).
+function BotonAccionFicha({ color, icono, label, href, nuevaPestana, onClick, onFalta, faltaTitulo }) {
+  const estilo = color ? { background: color, color: "#fff" } : undefined;
+  const clases = `py-2 text-xs rounded flex items-center justify-center gap-1.5 font-medium ${color ? "" : "gp-btn-ghost"}`;
+  if (href) {
+    return (
+      <a href={href} className={clases} style={estilo} {...(nuevaPestana ? { target: "_blank", rel: "noopener noreferrer" } : {})}>
+        {icono} {label}
+      </a>
+    );
+  }
+  return (
+    <button onClick={onClick || onFalta} title={onClick ? undefined : faltaTitulo} className={clases} style={estilo}>
+      {icono} {label}
+    </button>
+  );
+}
+
 // Ficha del contacto (mockup de Angel, 24 sept 2026): el panel que aparece a la derecha al
 // seleccionar a alguien en la lista. NO duplica datos: Proyectos sale de la tabla puente,
 // Atenciones del módulo Regalos/Atenciones, Eventos del módulo Eventos y Notas del módulo Notas
@@ -8261,35 +8280,33 @@ function FichaContacto({ c, data, proyectosVinculados, onCerrar, onEditar, onVer
         </div>
       </div>
 
+      {/* Los botones SIEMPRE conservan su color (verde WhatsApp, azul correo), aunque el contacto
+          todavía no tenga ese dato — apagarlos hacía que la ficha se viera rota estando bien
+          (pedido de Angel, 24 sept 2026). Si falta el dato, el botón no lleva a un enlace roto:
+          abre el formulario para capturarlo. */}
       <div className="grid grid-cols-2 gap-2 mt-3">
-        <a
-          href={c.whatsapp ? `https://wa.me/${(c.whatsapp || "").replace(/\D/g, "")}` : undefined}
-          target="_blank" rel="noopener noreferrer"
-          className="py-2 text-xs rounded flex items-center justify-center gap-1.5 font-medium"
-          style={c.whatsapp ? { background: "#16A36A", color: "#fff" } : { background: "var(--panel-hi)", color: "var(--muted)", pointerEvents: "none" }}
-        >
-          <MessageCircle size={13} /> WhatsApp
-        </a>
-        <a
-          href={c.correo ? `mailto:${c.correo}` : undefined}
-          className="py-2 text-xs rounded flex items-center justify-center gap-1.5 font-medium"
-          style={c.correo ? { background: "#087CF5", color: "#fff" } : { background: "var(--panel-hi)", color: "var(--muted)", pointerEvents: "none" }}
-        >
-          <Mail size={13} /> Enviar correo
-        </a>
-        <a
-          href={(c.telefono || c.whatsapp) ? `tel:${c.telefono || c.whatsapp}` : undefined}
-          className="gp-btn-ghost py-2 text-xs rounded flex items-center justify-center gap-1.5"
-          style={(c.telefono || c.whatsapp) ? undefined : { opacity: 0.5, pointerEvents: "none" }}
-        >
-          <Phone size={13} /> Llamar
-        </a>
-        <button onClick={() => onIrAVista?.("agenda")} className="gp-btn-ghost py-2 text-xs rounded flex items-center justify-center gap-1.5">
-          <CalendarClock size={13} /> Agendar
-        </button>
+        <BotonAccionFicha
+          color="#16A36A" icono={<MessageCircle size={13} />} label="WhatsApp"
+          href={c.whatsapp ? `https://wa.me/${(c.whatsapp || "").replace(/\D/g, "")}` : null}
+          nuevaPestana onFalta={onEditar} faltaTitulo="Agrega su WhatsApp"
+        />
+        <BotonAccionFicha
+          color="#087CF5" icono={<Mail size={13} />} label="Enviar correo"
+          href={c.correo ? `mailto:${c.correo}` : null}
+          onFalta={onEditar} faltaTitulo="Agrega su correo"
+        />
+        <BotonAccionFicha
+          icono={<Phone size={13} />} label="Llamar"
+          href={(c.telefono || c.whatsapp) ? `tel:${c.telefono || c.whatsapp}` : null}
+          onFalta={onEditar} faltaTitulo="Agrega su teléfono"
+        />
+        <BotonAccionFicha
+          icono={<CalendarClock size={13} />} label="Agendar"
+          onClick={() => onIrAVista?.("agenda")}
+        />
       </div>
 
-      <div className="flex gap-1 overflow-x-auto gp-scroll mt-4 mb-3 pb-1">
+      <div className="flex flex-wrap gap-1 mt-4 mb-3">
         {TABS.map((t) => (
           <button
             key={t.key} onClick={() => setTab(t.key)}
@@ -8298,7 +8315,7 @@ function FichaContacto({ c, data, proyectosVinculados, onCerrar, onEditar, onVer
               ? { background: "var(--panel-hi)", color: "var(--text)", fontWeight: 600 }
               : { color: "var(--muted)" }}
           >
-            {t.label}{t.n ? ` ${t.n}` : ""}
+            {t.label}{t.n === undefined ? "" : ` ${t.n}`}
           </button>
         ))}
       </div>
