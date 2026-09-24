@@ -48,7 +48,11 @@ const Tokens = ({ tema = "oscuro" }) => (
        porque el de arriba (blanco a 12%) es invisible sobre fondo claro. El menú lateral SÍ seguía
        este tema desde acá (ver .gp-sidebar-area más abajo — esa clase se quedó solo para las
        pantallas de login/verificación, que sí se quedan siempre oscuras a propósito). */
-    .gp-root.tema-azul-claro{ --bg:#E8F1FB; --panel:#F7FBFF; --panel-hi:#DCEAFA; --border:#C3D9EE; --text:#0B2341; --muted:#5B7A9E; --panel-2:rgba(11,35,65,.06); }
+    /* 24 sept 2026: los valores se alinearon a la paleta oficial del documento de diseño de
+       ARKEYONE (fondo #F5F7FB, superficie BLANCA, borde #DDE3EC, texto #14213D, secundario
+       #667085) — antes era un azulado propio que no coincidía con los mockups. El id interno
+       "azul-claro" se queda igual para no migrar la preferencia guardada de nadie. */
+    .gp-root.tema-azul-claro{ --bg:#F5F7FB; --panel:#FFFFFF; --panel-hi:#EDF1F7; --border:#DDE3EC; --text:#14213D; --muted:#667085; --panel-2:rgba(20,33,61,.06); }
     .gp-serif{ font-family:'Poppins',sans-serif; font-weight:600; }
     .gp-mono{ font-family:'IBM Plex Mono',monospace; }
     .gp-panel{ background:var(--panel); border:1px solid var(--border); border-radius:14px; }
