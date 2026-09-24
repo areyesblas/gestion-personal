@@ -236,8 +236,10 @@ const diaMesDeFecha = (fechaNacimiento) => {
 const construirFechaCumple = (dia, mes) => (dia && mes ? `2000-${String(mes).padStart(2, "0")}-${String(dia).padStart(2, "0")}` : "");
 const armarNombreContacto = (nombres, apellidoPaterno, apellidoMaterno) =>
   [nombres, apellidoPaterno, apellidoMaterno].map((s) => (s || "").toString().trim()).filter(Boolean).join(" ");
+// Orden alfabético de contactos: nombre(s), luego apellido paterno y materno — así lo pidió
+// Angel el 24 sept 2026 (antes ordenaba por apellido primero, estilo directorio telefónico).
 const claveOrdenContacto = (c) =>
-  (c.apellidoPaterno || c.apellidoMaterno) ? `${c.apellidoPaterno || ""} ${c.apellidoMaterno || ""} ${c.nombres || ""}`.trim() : c.nombre;
+  `${c.nombres || c.nombre || ""} ${c.apellidoPaterno || ""} ${c.apellidoMaterno || ""}`.trim();
 
 // Catálogo de widgets configurables del Centro de mando — rediseño 21 sept 2026 (brief de
 // Angel): 9 bloques agrupados en vez de los 17 granulares que había antes (orden aquí = orden
@@ -839,12 +841,17 @@ function IconBtn({ onClick, children, title }) {
   );
 }
 
+// OJO: esto es un <div>, no un <label>, y es a propósito. Cuando era <label>, el navegador
+// reenviaba CUALQUIER clic dentro del campo al primer botón que hubiera adentro — así que tocar
+// el texto de un chip (proyecto vinculado, tag, tipo de contacto) equivalía a picarle su "✕" y lo
+// borraba (reportado por Angel el 24 sept 2026 y reproducido con Playwright). Se pierde el
+// "clic en la etiqueta para enfocar el campo", que vale mucho menos que borrar datos sin querer.
 function Field({ label, children }) {
   return (
-    <label className="block mb-3">
+    <div className="block mb-3">
       <span className="block text-xs gp-text-muted mb-1">{label}</span>
       {children}
-    </label>
+    </div>
   );
 }
 
