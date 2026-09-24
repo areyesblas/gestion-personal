@@ -1868,6 +1868,10 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
   const [regalosFiltroContacto, setRegalosFiltroContacto] = useState("");
   const [proyectoDetalleId, setProyectoDetalleId] = useState(() => vistaRestauradaTrasReload?.entidad_id || null);
   const irADetalleProyecto = (proyectoId) => { setProyectoDetalleId(proyectoId); irAVista("proyecto-detalle"); };
+  // El contacto seleccionado (su ficha a la derecha) vive aquí arriba, no dentro de Contactos:
+  // así, si sales a Agenda o a Notas y le das "Regresar", vuelves al mismo renglón con su ficha
+  // abierta en vez de a la lista en blanco (pedido de Angel, 24 sept 2026).
+  const [contactoSelId, setContactoSelId] = useState(null);
 
   // --- Breadcrumb / "volver" a una vista anterior --------------------------------------------
   // El historial se arma pasivamente observando cambios de `view` (cubre tanto irAVista como los
@@ -3165,7 +3169,8 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
           {view === "contactos" && (
             <Contactos data={data} onAdd={(i) => addItem("contactos", i)} onEdit={(id, p) => editItem("contactos", id, p)} onRemove={(id) => askDelete("contactos", id)} onAddComentario={(i) => addItem("comentarios", i)} onRemoveComentario={(id) => askDelete("comentarios", id)} onVerRegalos={(c) => { setRegalosFiltroContacto(c.id); setView("regalos"); }}
               onVincularProyecto={vincularProyectoContacto} onDesvincularProyecto={desvincularProyectoContacto}
-              onAddNota={(i) => addItem("notas", i)} onIrAVista={irAVista} />
+              onAddNota={(i) => addItem("notas", i)} onAddCita={(i) => addItem("citas", i)} onIrAVista={irAVista}
+              contactoSel={contactoSelId} onSeleccionar={setContactoSelId} />
           )}
           {view === "regalos" && (
             <Regalos data={data} onAdd={(i) => addItem("regalos", i)} onEdit={(id, p) => editItem("regalos", id, p)} onRemove={(id) => askDelete("regalos", id)} filtroContactoInicial={regalosFiltroContacto} onLimpiarFiltro={() => setRegalosFiltroContacto("")} />
@@ -7891,7 +7896,7 @@ function MenuFilaContacto({ c, abierto, onToggle, onCerrar, onEditar, onComentar
   );
 }
 
-function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveComentario, onVerRegalos, onVincularProyecto, onDesvincularProyecto, onAddNota, onIrAVista }) {
+function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveComentario, onVerRegalos, onVincularProyecto, onDesvincularProyecto, onAddNota, onAddCita, onIrAVista, contactoSel, onSeleccionar }) {
   const [modal, setModal] = useState(null);
   const [importarAbierto, setImportarAbierto] = useState(false);
   const [comentariosDe, setComentariosDe] = useState(null);
@@ -7901,7 +7906,6 @@ function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
   const [busqueda, setBusquedaState] = useState("");
   const [filtrosAbiertos, setFiltrosAbiertos] = useState(false);
   const [menuAcciones, setMenuAcciones] = useState(null); // id del contacto con su menú "···" abierto
-  const [contactoSel, setContactoSel] = useState(null); // id del contacto con su ficha abierta a la derecha
   const [pagina, setPagina] = useState(1);
   const [porPagina, setPorPagina] = useState(12);
   // Cambiar filtro o búsqueda siempre regresa a la página 1 — si no, se queda en una página que
@@ -8053,7 +8057,7 @@ function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
                 // contacto, menú "···") paran la propagación para no abrirla sin querer.
                 <tr
                   key={c.id}
-                  onClick={() => setContactoSel(c.id)}
+                  onClick={() => onSeleccionar(c.id)}
                   style={{ cursor: "pointer", background: esSel ? "var(--panel-hi)" : undefined }}
                 >
                   <td>
@@ -8088,7 +8092,7 @@ function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
 
       <div className="md:hidden flex flex-col gap-2">
         {enPagina.map((c) => (
-          <div key={c.id} className="gp-panel p-3" onClick={() => setContactoSel(c.id)} style={{ cursor: "pointer" }}>
+          <div key={c.id} className="gp-panel p-3" onClick={() => onSeleccionar(c.id)} style={{ cursor: "pointer" }}>
             <div className="flex items-start gap-3">
               <AvatarContacto c={c} size={40} />
               <div className="min-w-0 flex-1">
@@ -8151,11 +8155,13 @@ function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
             c={seleccionado}
             data={data}
             proyectosVinculados={proyectosDe(seleccionado.id)}
-            onCerrar={() => setContactoSel(null)}
+            onCerrar={() => onSeleccionar(null)}
             onEditar={() => setModal({ item: seleccionado })}
             onVerAtenciones={onVerRegalos}
             onIrAVista={onIrAVista}
             onAddNota={onAddNota}
+            onAddCita={onAddCita}
+            onAddComentario={onAddComentario}
           />
         </div>
       )}
@@ -8197,6 +8203,169 @@ function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
   );
 }
 
+// Archivos del contacto. NO crea una tabla nueva: reutiliza el sistema universal de comentarios
+// y adjuntos que ya existe desde la migración 0006 (entidad_tipo/entidad_id + adjuntos jsonb),
+// el mismo que usa la Bitácora. Aquí solo se muestran los adjuntos, sin el texto, y subir un
+// archivo crea un comentario que únicamente lleva el adjunto.
+function ArchivosContacto({ c, data, onAddComentario }) {
+  const [subiendo, setSubiendo] = useState(false);
+  const [error, setError] = useState("");
+
+  const archivos = (data.comentarios || [])
+    .filter((x) => x.entidadTipo === "contactos" && x.entidadId === c.id)
+    .flatMap((x) => (x.adjuntos || []).map((a) => ({ ...a, comentarioId: x.id, fecha: x.createdAt })))
+    .sort((a, b) => (b.fecha || "").localeCompare(a.fecha || ""));
+
+  const iconoTipo = (t) => t === "video" ? <Film size={13} /> : t === "audio" ? <Mic size={13} /> : t === "imagen" ? <Camera size={13} /> : <FileText size={13} />;
+
+  const subir = async (e) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+    setError("");
+    setSubiendo(true);
+    const nuevos = [];
+    for (const file of files) {
+      if (file.size > 25 * 1024 * 1024) { setError(`"${file.name}" pesa más de 25 MB, se omitió.`); continue; }
+      const path = `contactos/${c.id}/${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
+      const { error: upErr } = await supabase.storage.from("adjuntos").upload(path, file);
+      if (upErr) { setError(`No se pudo subir "${file.name}": ${upErr.message}`); continue; }
+      const { data: pub } = supabase.storage.from("adjuntos").getPublicUrl(path);
+      const tipo = file.type.startsWith("image/") ? "imagen" : file.type.startsWith("video/") ? "video" : file.type.startsWith("audio/") ? "audio" : "documento";
+      nuevos.push({ tipo, nombre: file.name, url: pub.publicUrl });
+    }
+    if (nuevos.length > 0) onAddComentario({ entidadTipo: "contactos", entidadId: c.id, texto: "", adjuntos: nuevos });
+    setSubiendo(false);
+    e.target.value = "";
+  };
+
+  return (
+    <>
+      {archivos.length === 0
+        ? <p className="text-xs gp-text-muted py-2">Sin archivos todavía. Sube contratos, identificaciones, cotizaciones o lo que necesites tener a la mano de esta persona.</p>
+        : (
+          <div className="flex flex-col gap-1.5 mb-3">
+            {archivos.map((a, i) => (
+              <a key={`${a.comentarioId}-${i}`} href={a.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-xs py-1.5 px-2 rounded gp-panel-hi">
+                <span className="gp-text-gold shrink-0">{iconoTipo(a.tipo)}</span>
+                <span className="truncate flex-1">{a.nombre}</span>
+                <span className="gp-mono gp-text-muted shrink-0" style={{ fontSize: 10 }}>{(a.fecha || "").slice(0, 10)}</span>
+              </a>
+            ))}
+          </div>
+        )}
+      <label className="gp-btn-ghost px-3 py-2 text-xs rounded cursor-pointer inline-flex items-center gap-1.5">
+        <Upload size={13} /> {subiendo ? "Subiendo…" : "Subir archivo"}
+        <input type="file" multiple className="hidden" onChange={subir} disabled={subiendo} />
+      </label>
+      {error && <p className="text-xs gp-text-red mt-1">{error}</p>}
+    </>
+  );
+}
+
+// Nota rápida ligada al contacto: se guarda en el módulo de Notas con su contacto_id, no en una
+// copia aparte — por eso también aparece en la pantalla de Notas.
+function NuevaNotaContacto({ c, onAddNota }) {
+  const [abierto, setAbierto] = useState(false);
+  const [titulo, setTitulo] = useState("");
+  const [contenido, setContenido] = useState("");
+  if (!abierto) {
+    return <button onClick={() => setAbierto(true)} className="text-xs gp-text-gold">+ Nueva nota</button>;
+  }
+  return (
+    <div className="mt-2 pt-2 border-t gp-border">
+      <input className="gp-input text-xs mb-2" autoFocus placeholder="Título" value={titulo} onChange={(e) => setTitulo(e.target.value)} />
+      <textarea className="gp-input text-xs" rows={3} placeholder="Escribe la nota…" value={contenido} onChange={(e) => setContenido(e.target.value)} />
+      <div className="flex gap-2 mt-2">
+        <button onClick={() => { setAbierto(false); setTitulo(""); setContenido(""); }} className="gp-btn-ghost flex-1 py-1.5 text-xs">Cancelar</button>
+        <button
+          className="gp-btn flex-1 py-1.5 text-xs"
+          onClick={() => {
+            if (!titulo.trim() && !contenido.trim()) return;
+            onAddNota({ titulo: titulo.trim() || `Nota de ${c.nombre}`, contenido: contenido.trim(), contactoId: c.id });
+            setAbierto(false); setTitulo(""); setContenido("");
+          }}
+        >Guardar</button>
+      </div>
+    </div>
+  );
+}
+
+// Lo que tienes agendado con esta persona: citas del módulo Agenda ligadas a su contacto_id, más
+// la opción de agendar una nueva sin salir de la ficha (queda en Agenda, no en una copia).
+function AgendaContacto({ c, data, onAddCita, onIrAVista }) {
+  const [abierto, setAbierto] = useState(false);
+  const [titulo, setTitulo] = useState("");
+  const [fecha, setFecha] = useState(todayISO());
+  const [hora, setHora] = useState("09:00");
+  const [lugar, setLugar] = useState("");
+
+  const ahora = new Date().toISOString();
+  const citas = (data.citas || [])
+    .filter((x) => x.contactoId === c.id)
+    .sort((a, b) => (a.fechaHora || "").localeCompare(b.fechaHora || ""));
+  const proximas = citas.filter((x) => (x.fechaHora || "") >= ahora);
+  const pasadas = citas.filter((x) => (x.fechaHora || "") < ahora).reverse();
+
+  const Linea = ({ x, tenue }) => (
+    <div className="flex items-start justify-between gap-2 py-1.5" style={tenue ? { opacity: 0.6 } : undefined}>
+      <div className="min-w-0">
+        <p className="text-xs font-medium truncate">{x.titulo}</p>
+        {x.lugar && <p className="text-[10px] gp-text-muted truncate">{x.lugar}</p>}
+      </div>
+      <span className="text-[10px] gp-mono gp-text-muted shrink-0">{fmtFechaHora(x.fechaHora)}</span>
+    </div>
+  );
+
+  return (
+    <>
+      {proximas.length === 0 && pasadas.length === 0 && (
+        <p className="text-xs gp-text-muted py-2">No tienes nada agendado con {c.nombre.split(" ")[0]}. Agenda algo aquí abajo.</p>
+      )}
+      {proximas.length > 0 && (
+        <div className="mb-2">
+          <p className="text-[10px] uppercase tracking-wide gp-text-muted mb-1">Próximas</p>
+          {proximas.map((x) => <Linea key={x.id} x={x} />)}
+        </div>
+      )}
+      {pasadas.length > 0 && (
+        <div className="mb-2">
+          <p className="text-[10px] uppercase tracking-wide gp-text-muted mb-1">Ya pasaron</p>
+          {pasadas.slice(0, 5).map((x) => <Linea key={x.id} x={x} tenue />)}
+        </div>
+      )}
+
+      {!abierto ? (
+        <div className="flex items-center gap-3 mt-1">
+          <button onClick={() => { setAbierto(true); setTitulo(`Cita con ${c.nombre}`); }} className="gp-btn px-3 py-1.5 text-xs rounded flex items-center gap-1.5">
+            <CalendarClock size={13} /> Agendar cita
+          </button>
+          <button onClick={() => onIrAVista?.("agenda")} className="text-xs gp-text-gold">Ver Agenda →</button>
+        </div>
+      ) : (
+        <div className="mt-2 pt-2 border-t gp-border">
+          <input className="gp-input text-xs mb-2" autoFocus placeholder="¿De qué es la cita?" value={titulo} onChange={(e) => setTitulo(e.target.value)} />
+          <div className="grid grid-cols-2 gap-2 mb-2">
+            <input type="date" className="gp-input text-xs" value={fecha} onChange={(e) => setFecha(e.target.value)} />
+            <input type="time" className="gp-input text-xs" value={hora} onChange={(e) => setHora(e.target.value)} />
+          </div>
+          <input className="gp-input text-xs" placeholder="Lugar (opcional)" value={lugar} onChange={(e) => setLugar(e.target.value)} />
+          <div className="flex gap-2 mt-2">
+            <button onClick={() => setAbierto(false)} className="gp-btn-ghost flex-1 py-1.5 text-xs">Cancelar</button>
+            <button
+              className="gp-btn flex-1 py-1.5 text-xs"
+              onClick={() => {
+                if (!titulo.trim() || !fecha) return;
+                onAddCita({ titulo: titulo.trim(), fechaHora: new Date(`${fecha}T${hora || "09:00"}`).toISOString(), lugar: lugar.trim(), contactoId: c.id, notas: "" });
+                setAbierto(false); setLugar("");
+              }}
+            >Guardar cita</button>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 // Botón de acción de la ficha. Mantiene su color siempre; si el dato que necesita no está
 // capturado, en vez de quedar muerto lleva a capturarlo. `color` vacío = botón neutro (ghost).
 function BotonAccionFicha({ color, icono, label, href, nuevaPestana, onClick, onFalta, faltaTitulo }) {
@@ -8220,8 +8389,12 @@ function BotonAccionFicha({ color, icono, label, href, nuevaPestana, onClick, on
 // seleccionar a alguien en la lista. NO duplica datos: Proyectos sale de la tabla puente,
 // Atenciones del módulo Regalos/Atenciones, Eventos del módulo Eventos y Notas del módulo Notas
 // — cada bloque solo consulta y deja abrir el módulo fuente, como pide el documento maestro.
-function FichaContacto({ c, data, proyectosVinculados, onCerrar, onEditar, onVerAtenciones, onIrAVista, onAddNota }) {
+function FichaContacto({ c, data, proyectosVinculados, onCerrar, onEditar, onVerAtenciones, onIrAVista, onAddNota, onAddCita, onAddComentario }) {
   const [tab, setTab] = useState("informacion");
+  const citas = (data.citas || []).filter((x) => x.contactoId === c.id);
+  const archivos = (data.comentarios || [])
+    .filter((x) => x.entidadTipo === "contactos" && x.entidadId === c.id)
+    .reduce((n, x) => n + (x.adjuntos || []).length, 0);
   const atenciones = (data.regalos || [])
     .filter((r) => r.contactoId === c.id)
     .sort((a, b) => (b.fecha || "").localeCompare(a.fecha || ""));
@@ -8234,10 +8407,11 @@ function FichaContacto({ c, data, proyectosVinculados, onCerrar, onEditar, onVer
   const TABS = [
     { key: "informacion", label: "Información" },
     { key: "proyectos", label: "Proyectos", n: proyectosVinculados.length },
+    { key: "agenda", label: "Agenda", n: citas.length },
     { key: "notas", label: "Notas", n: notas.length },
     { key: "eventos", label: "Eventos", n: eventos.length },
     { key: "atenciones", label: "Atenciones", n: atenciones.length },
-    { key: "archivos", label: "Archivos" },
+    { key: "archivos", label: "Archivos", n: archivos },
   ];
 
   const Dato = ({ label, valor }) => (
@@ -8302,7 +8476,7 @@ function FichaContacto({ c, data, proyectosVinculados, onCerrar, onEditar, onVer
         />
         <BotonAccionFicha
           icono={<CalendarClock size={13} />} label="Agendar"
-          onClick={() => onIrAVista?.("agenda")}
+          onClick={() => setTab("agenda")}
         />
       </div>
 
@@ -8410,12 +8584,14 @@ function FichaContacto({ c, data, proyectosVinculados, onCerrar, onEditar, onVer
         </Bloque>
       )}
 
+      {tab === "agenda" && (
+        <Bloque titulo="Agenda con este contacto" icono={<CalendarClock size={14} className="gp-text-gold" />}>
+          <AgendaContacto c={c} data={data} onAddCita={onAddCita} onIrAVista={onIrAVista} />
+        </Bloque>
+      )}
+
       {tab === "notas" && (
-        <Bloque
-          titulo="Notas"
-          icono={<StickyNote size={14} className="gp-text-gold" />}
-          accion={onAddNota && <button onClick={() => onAddNota({ titulo: `Nota de ${c.nombre}`, contenido: "", contactoId: c.id })} className="text-xs gp-text-gold">+ Nueva nota</button>}
-        >
+        <Bloque titulo="Notas" icono={<StickyNote size={14} className="gp-text-gold" />}>
           {notas.length === 0
             ? <Vacio>Sin notas ligadas a este contacto. Las que crees aquí quedan también en el módulo de Notas.</Vacio>
             : (
@@ -8429,6 +8605,7 @@ function FichaContacto({ c, data, proyectosVinculados, onCerrar, onEditar, onVer
                 <button onClick={() => onIrAVista?.("notas")} className="text-xs gp-text-gold text-left">Ver en Notas →</button>
               </div>
             )}
+          {onAddNota && <NuevaNotaContacto c={c} onAddNota={onAddNota} />}
         </Bloque>
       )}
 
@@ -8479,10 +8656,7 @@ function FichaContacto({ c, data, proyectosVinculados, onCerrar, onEditar, onVer
 
       {tab === "archivos" && (
         <Bloque titulo="Archivos" icono={<FileText size={14} className="gp-text-gold" />}>
-          <Vacio>
-            Todavía no se pueden adjuntar archivos a un contacto — el módulo de Documentos hoy
-            guarda contratos por proyecto, no adjuntos por persona. Queda pendiente.
-          </Vacio>
+          <ArchivosContacto c={c} data={data} onAddComentario={onAddComentario} />
         </Bloque>
       )}
     </div>
