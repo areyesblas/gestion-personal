@@ -3180,6 +3180,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
             <Contactos data={data} onAdd={(i) => addItem("contactos", i)} onEdit={(id, p) => editItem("contactos", id, p)} onRemove={(id) => askDelete("contactos", id)} onAddComentario={(i) => addItem("comentarios", i)} onRemoveComentario={(id) => askDelete("comentarios", id)} onVerRegalos={(c) => { setRegalosFiltroContacto(c.id); setView("regalos"); }}
               onVincularProyecto={vincularProyectoContacto} onDesvincularProyecto={desvincularProyectoContacto}
               onAddNota={(i) => addItem("notas", i)} onAddCita={(i) => addItem("citas", i)} onIrAVista={irAVista}
+              onVerProyecto={irADetalleProyecto}
               contactoSel={contactoSelId} onSeleccionar={(id) => { setContactoSelId(id); setContactoSelTab("informacion"); }}
               fichaTab={contactoSelTab} onFichaTab={setContactoSelTab} />
           )}
@@ -7907,7 +7908,7 @@ function MenuFilaContacto({ c, abierto, onToggle, onCerrar, onEditar, onComentar
   );
 }
 
-function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveComentario, onVerRegalos, onVincularProyecto, onDesvincularProyecto, onAddNota, onAddCita, onIrAVista, contactoSel, onSeleccionar, fichaTab, onFichaTab }) {
+function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveComentario, onVerRegalos, onVincularProyecto, onDesvincularProyecto, onAddNota, onAddCita, onIrAVista, onVerProyecto, contactoSel, onSeleccionar, fichaTab, onFichaTab }) {
   const [modal, setModal] = useState(null);
   const [importarAbierto, setImportarAbierto] = useState(false);
   const [comentariosDe, setComentariosDe] = useState(null);
@@ -8174,6 +8175,7 @@ function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
             onAddCita={onAddCita}
             onAddComentario={onAddComentario}
             tab={fichaTab} onTab={onFichaTab}
+            onVerProyecto={onVerProyecto}
           />
         </div>
       )}
@@ -8428,7 +8430,7 @@ function BotonAccionFicha({ color, icono, label, href, nuevaPestana, onClick, on
 // seleccionar a alguien en la lista. NO duplica datos: Proyectos sale de la tabla puente,
 // Atenciones del módulo Regalos/Atenciones, Eventos del módulo Eventos y Notas del módulo Notas
 // — cada bloque solo consulta y deja abrir el módulo fuente, como pide el documento maestro.
-function FichaContacto({ c, data, proyectosVinculados, onCerrar, onEditar, onVerAtenciones, onIrAVista, onAddNota, onAddCita, onAddComentario, tab, onTab }) {
+function FichaContacto({ c, data, proyectosVinculados, onCerrar, onEditar, onVerAtenciones, onIrAVista, onAddNota, onAddCita, onAddComentario, tab, onTab, onVerProyecto }) {
   const setTab = onTab;
   const citas = (data.citas || []).filter((x) => x.contactoId === c.id);
   const archivos = (data.comentarios || [])
@@ -8588,13 +8590,13 @@ function FichaContacto({ c, data, proyectosVinculados, onCerrar, onEditar, onVer
               : (
                 <div className="flex flex-col gap-1.5">
                   {proyectosVinculados.slice(0, 3).map((p) => (
-                    <div key={p.id} className="flex items-center justify-between gap-2">
+                    <button key={p.id} onClick={() => onVerProyecto?.(p.id)} className="flex items-center justify-between gap-2 w-full text-left">
                       <div className="min-w-0">
                         <p className="text-xs font-medium truncate">{p.nombre}</p>
                         <p className="text-[10px] gp-text-muted">{p.categoria}</p>
                       </div>
                       <Badge tone={p.estatus === "Activo" ? "teal" : "muted"}>{p.estatus}</Badge>
-                    </div>
+                    </button>
                   ))}
                 </div>
               )}
@@ -8616,7 +8618,7 @@ function FichaContacto({ c, data, proyectosVinculados, onCerrar, onEditar, onVer
                     </div>
                     <div className="flex items-center gap-1.5 shrink-0">
                       <Badge tone={p.estatus === "Activo" ? "teal" : "muted"}>{p.estatus}</Badge>
-                      <button onClick={() => onIrAVista?.("proyectos")} className="text-xs gp-text-gold">Abrir</button>
+                      <button onClick={() => onVerProyecto?.(p.id)} className="text-xs gp-text-gold">Abrir</button>
                     </div>
                   </div>
                 ))}
