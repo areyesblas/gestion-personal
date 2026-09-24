@@ -7921,7 +7921,6 @@ function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
             item={modal.item}
             proyectos={data.proyectos}
             vinculos={(data.contactoProyectos || []).filter((v) => v.contactoId === modal.item.id)}
-            activeOwnerId={activeOwnerId}
             onVincularProyecto={onVincularProyecto}
             onDesvincularProyecto={onDesvincularProyecto}
             onSave={(v) => { modal.item.id ? onEdit(modal.item.id, v) : onAdd(v); setModal(null); }}
