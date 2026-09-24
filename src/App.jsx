@@ -7984,7 +7984,11 @@ function ContactoForm({ item, proyectos, vinculos, onVincularProyecto, onDesvinc
     const nombres = v.nombres.trim();
     const apellidoPaterno = (v.apellidoPaterno || "").trim();
     const apellidoMaterno = (v.apellidoMaterno || "").trim();
-    onSave({ ...v, id: contactoId, nombres, apellidoPaterno, apellidoMaterno, nombre: armarNombreContacto(nombres, apellidoPaterno, apellidoMaterno) });
+    // proyectoId ya no es una columna de contactos (ahora es tabla puente contacto_proyectos) —
+    // se descarta explícitamente por si el navegador todavía trae un contacto en memoria desde
+    // antes de la migración, para no mandar una columna que Supabase ya no tiene.
+    const { proyectoId: _proyectoIdViejo, ...vLimpio } = v;
+    onSave({ ...vLimpio, id: contactoId, nombres, apellidoPaterno, apellidoMaterno, nombre: armarNombreContacto(nombres, apellidoPaterno, apellidoMaterno) });
     const idsOriginales = new Set((vinculos || []).map((vv) => vv.proyectoId));
     const idsActuales = new Set(proyectosSeleccionados.map((p) => p.id));
     for (const p of proyectosSeleccionados) {
