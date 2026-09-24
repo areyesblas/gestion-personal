@@ -46,6 +46,9 @@ const Tokens = ({ tema = "oscuro" }) => (
     @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');
     .gp-root{ --bg:#0B2341; --panel:#12304F; --panel-hi:#1A3D63; --border:#234A70;
       --text:#EAF1FA; --muted:#93A7C4; --gold:#F59E0B; --teal:#5FBF8B; --teal-tint:#DCF5E6; --teal-text:#1D6B42; --panel-2:rgba(255,255,255,.12); --red:#EF4444;
+      /* Fila de una tarea ya completada. Sobre el azul oscuro hace falta un verde con algo de
+         luz propia para que se note sin gritar; el tema claro lo redefine más abajo. */
+      --hecho-bg:rgba(95,191,139,.16); --hecho-bg-hi:rgba(95,191,139,.26); --hecho-borde:#5FBF8B;
       background:var(--bg); color:var(--text); font-family:'IBM Plex Sans',sans-serif; }
     /* Tema Claro — el único claro que queda (ARKEYONE es solo Oscuro/Claro, sin color
        personalizado ni temas adicionales). --panel-2 se redefine con un tinte OSCURO (no blanco)
@@ -56,7 +59,10 @@ const Tokens = ({ tema = "oscuro" }) => (
        ARKEYONE (fondo #F5F7FB, superficie BLANCA, borde #DDE3EC, texto #14213D, secundario
        #667085) — antes era un azulado propio que no coincidía con los mockups. El id interno
        "azul-claro" se queda igual para no migrar la preferencia guardada de nadie. */
-    .gp-root.tema-azul-claro{ --bg:#F5F7FB; --panel:#FFFFFF; --panel-hi:#EDF1F7; --border:#DDE3EC; --text:#14213D; --muted:#667085; --panel-2:rgba(20,33,61,.06); }
+    .gp-root.tema-azul-claro{ --bg:#F5F7FB; --panel:#FFFFFF; --panel-hi:#EDF1F7; --border:#DDE3EC; --text:#14213D; --muted:#667085; --panel-2:rgba(20,33,61,.06);
+      /* Sobre blanco el mismo verde se ve lavado: aquí se usa el verde sólido de ARKEYONE con
+         poca opacidad, que sí contrasta contra #FFFFFF. */
+      --hecho-bg:rgba(22,163,106,.10); --hecho-bg-hi:rgba(22,163,106,.18); --hecho-borde:#16A36A; }
     .gp-serif{ font-family:'Poppins',sans-serif; font-weight:600; }
     .gp-mono{ font-family:'IBM Plex Mono',monospace; }
     .gp-panel{ background:var(--panel); border:1px solid var(--border); border-radius:14px; }
@@ -90,6 +96,12 @@ const Tokens = ({ tema = "oscuro" }) => (
     table.gp-table th{ text-align:left; color:var(--muted); font-weight:500; padding:8px 10px; border-bottom:1px solid var(--border); font-size:11px; letter-spacing:.02em; }
     table.gp-table td{ padding:8px 10px; border-bottom:1px solid var(--border); vertical-align:top; }
     table.gp-table tr:hover td{ background:var(--panel-hi); }
+    /* Tarea completada: la fila entera se tiñe de verde y lleva una guía a la izquierda, para
+       distinguirla de las pendientes de un vistazo en los dos temas. Va DESPUÉS de la regla de
+       :hover para que también se note al pasar el mouse encima. */
+    table.gp-table tr.gp-fila-hecha td{ background:var(--hecho-bg); }
+    table.gp-table tr.gp-fila-hecha:hover td{ background:var(--hecho-bg-hi); }
+    table.gp-table tr.gp-fila-hecha td:first-child{ box-shadow: inset 3px 0 0 var(--hecho-borde); }
     .gp-badge{ display:inline-block; padding:2px 8px; border-radius:3px; font-size:11px; font-weight:500; }
     .gp-scroll::-webkit-scrollbar{ width:6px; height:6px; }
     .gp-scroll::-webkit-scrollbar-thumb{ background:var(--border); border-radius:3px; }
@@ -3143,7 +3155,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
               data={data}
               onAdd={(i) => addItem("proyectos", i)} onEdit={(id, p) => editItem("proyectos", id, p)} onRemove={(id) => askDelete("proyectos", id)}
               onAddComentario={(i) => addItem("comentarios", i)} onRemoveComentario={(id) => askDelete("comentarios", id)}
-              onAddTarea={(i) => addItem("pendientes", i)}
+              onAddTarea={(i) => addItem("pendientes", i)} onEditTarea={(id, t) => editItem("pendientes", id, t)}
               onVerDetalle={irACentroProyecto}
               onVincularContacto={vincularProyectoContacto} onDesvincularContacto={desvincularProyectoContacto}
               onIrAVista={irAVista} onVerTareasDeProyecto={irATareasDeProyecto} onVerContacto={irAFichaContacto}
@@ -3162,6 +3174,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
               onVolver={() => { setProyectoSelId(proyectoDetalleId); setProyectoSelTab("resumen"); irAVista("proyectos"); }}
               onAddTarea={(i) => addItem("pendientes", i)}
               onEditTarea={(id, p) => editItem("pendientes", id, p)}
+              onEditProyecto={(id, patch) => editItem("proyectos", id, patch)}
               onRemoveTarea={(id, extraIds, mensaje) => askDelete("pendientes", id, { extraIds, mensaje })}
               onAddComentario={(i) => addItem("comentarios", i)}
               onRemoveComentario={(id) => askDelete("comentarios", id)}
@@ -3179,6 +3192,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
           {view === "pendientes" && (
             <Pendientes data={data} activeOwnerId={activeOwnerId} onAdd={(i) => addItem("pendientes", i)} onEdit={(id, p) => editItem("pendientes", id, p)} onRemove={(id, extraIds, mensaje) => askDelete("pendientes", id, { extraIds, mensaje })} onAddComentario={(i) => addItem("comentarios", i)} onRemoveComentario={(id) => askDelete("comentarios", id)}
               filtroProyectoInicial={pendientesFiltroProyecto} onConsumirFiltroProyecto={() => setPendientesFiltroProyecto("")}
+              onEditProyecto={(id, patch) => editItem("proyectos", id, patch)}
               onCrearContacto={crearContactoRapido}
               onEnviarInvitacion={enviarInvitacionTarea}
               onAceptarEnNombre={aceptarTareaEnNombre}
@@ -3732,7 +3746,7 @@ function Configuracion({
 
 // Foto que se muestra en el avatar del Centro de mando — sube a Storage (bucket "adjuntos") y
 // guarda la URL pública en preferencias.avatar_url (ver subirAvatar en AppLoggedIn).
-function AvatarForm({ avatarUrl, subirAvatar, onSaved, helpText }) {
+function AvatarForm({ avatarUrl, subirAvatar, onSaved, helpText, forma = "circulo", iconoVacio, textoBoton }) {
   const [archivoElegido, setArchivoElegido] = useState(null); // File recién elegido, pendiente de recortar
   const [previa, setPrevia] = useState(avatarUrl || "");
   const [estado, setEstado] = useState("idle"); // idle | subiendo | listo
@@ -3766,14 +3780,14 @@ function AvatarForm({ avatarUrl, subirAvatar, onSaved, helpText }) {
       <p className="text-xs gp-text-muted mb-3">{helpText || "Se muestra en el Centro de mando, junto al buscador. Si no subes una, se muestran tus iniciales."}</p>
       <div className="flex flex-col items-center gap-3">
         {previa ? (
-          <img src={previa} alt="" className="w-24 h-24 rounded-full object-cover" style={{ border: "1px solid var(--border)" }} />
+          <img src={previa} alt="" className={`w-24 h-24 object-cover ${forma === "cuadro" ? "rounded-2xl" : "rounded-full"}`} style={{ border: "1px solid var(--border)" }} />
         ) : (
-          <div className="w-24 h-24 rounded-full flex items-center justify-center" style={{ background: "var(--panel-hi)" }}>
-            <Contact size={32} className="gp-text-muted" />
+          <div className={`w-24 h-24 flex items-center justify-center ${forma === "cuadro" ? "rounded-2xl" : "rounded-full"}`} style={{ background: "var(--panel-hi)" }}>
+            {iconoVacio || <Contact size={32} className="gp-text-muted" />}
           </div>
         )}
         <label className="gp-btn-ghost px-3 py-2 text-sm rounded cursor-pointer">
-          {estado === "subiendo" ? "Subiendo…" : estado === "listo" ? "Guardado ✓" : "Elegir foto…"}
+          {estado === "subiendo" ? "Subiendo…" : estado === "listo" ? "Guardado ✓" : (textoBoton || "Elegir foto…")}
           <input type="file" accept="image/*" className="hidden" onChange={onArchivo} disabled={estado === "subiendo"} />
         </label>
         {error && <p className="text-xs gp-text-red">{error}</p>}
@@ -5100,8 +5114,18 @@ function avanceProyecto(data, proyectoId) {
   return Math.round(arbol.reduce((s, n) => s + calcAvanceTarea(n), 0) / arbol.length);
 }
 
-// Ícono del proyecto derivado de su categoría (no hay campo "ícono" que capturar).
+// Imagen del proyecto si subiste una; si no, un ícono derivado de su categoría. Así ningún
+// proyecto se queda sin identidad visual, pero el que la merece puede tener la suya.
 function IconoProyecto({ p, size = 36 }) {
+  if (p.imagenUrl) {
+    return (
+      <img
+        src={p.imagenUrl} alt=""
+        className="rounded-xl object-cover shrink-0"
+        style={{ width: size, height: size, border: "1px solid var(--border)" }}
+      />
+    );
+  }
   const Icono = ICONO_CATEGORIA_PROYECTO[p.categoria] || FolderKanban;
   const color = COLOR_CATEGORIA_PROYECTO[p.categoria] || "#64748B";
   return (
@@ -5211,7 +5235,7 @@ function MenuFilaProyecto({ p, abierto, onToggle, onCerrar, onAbrir, onEditar, o
 function Proyectos({
   data, onAdd, onEdit, onRemove, onAddComentario, onRemoveComentario,
   onVerDetalle, onVincularContacto, onDesvincularContacto,
-  onAddTarea, onIrAVista, onVerTareasDeProyecto, onVerContacto,
+  onAddTarea, onEditTarea, onIrAVista, onVerTareasDeProyecto, onVerContacto,
   onCrearContacto, onEnviarInvitacion, onAceptarEnNombre,
   sensibleDesbloqueadoHasta, onDesbloquear, miNombre, miAvatarUrl,
   proyectoSel, onSeleccionar, fichaTab, onFichaTab,
@@ -5238,7 +5262,7 @@ function Proyectos({
 
   const empty = {
     nombre: "", descripcion: "", estatus: "Idea", contexto: "Personal", categoria: CATS[0],
-    responsableContactoId: "", fechaInicio: "", fechaFin: "", etiquetas: [],
+    responsableContactoId: "", fechaInicio: "", fechaFin: "", etiquetas: [], imagenUrl: "",
     modo: "Finito", monetizacion: MONETIZACION[0], prioridad: "Media", fechaRevision: "",
     github: "", githubSubido: false, notas: [],
   };
@@ -5523,6 +5547,7 @@ function Proyectos({
             onCerrar={() => onSeleccionar(null)}
             onEditar={() => setModal({ item: seleccionado })}
             onEdit={onEdit}
+            onEditTarea={onEditTarea}
             onAddComentario={onAddComentario}
             onVincularContacto={onVincularContacto}
             onDesvincularContacto={onDesvincularContacto}
@@ -5659,7 +5684,7 @@ function EtiquetasProyecto({ p, onEdit }) {
 // relaciona y manda al módulo fuente — nunca guarda una copia de esos datos.
 function FichaProyecto({
   p, data, contactosVinculados, miNombre, miAvatarUrl, tab, onTab,
-  onCerrar, onEditar, onEdit, onAddComentario,
+  onCerrar, onEditar, onEdit, onEditTarea, onAddComentario,
   onVincularContacto, onDesvincularContacto, onVerContacto,
   onVerDetalle, onVerTareas, onIrAVista, onNuevaTarea,
   sensibleDesbloqueadoHasta, onDesbloquear,
@@ -5667,6 +5692,7 @@ function FichaProyecto({
   const setTab = onTab;
   // Ramas cerradas del árbol de tareas de la pestaña "Tareas" de esta ficha.
   const [colapsadasTareas, setColapsadasTareas] = useState(() => new Set());
+  const [confirmacion, setConfirmacion] = useState(null);
   // La ventana de 15 min de los módulos sensibles se vence sola, sin que nada más vuelva a
   // dibujar la pantalla. Este latido hace que el resumen financiero se vuelva a tapar cuando
   // caduca, igual que en el centro de proyecto.
@@ -5685,6 +5711,17 @@ function FichaProyecto({
   const filasTareas = flattenTareas(arbolTareas, 0, colapsadasTareas);
   const ramasTareas = idsRamasTareas(arbolTareas);
   const toggleRamaFicha = (id) => setColapsadasTareas((prev) => { const st = new Set(prev); st.has(id) ? st.delete(id) : st.add(id); return st; });
+  const pedirCompletarTarea = (t) => setConfirmacion(preguntaCompletarTarea({
+    tarea: t, data, onEditTarea, onEditProyecto: onEdit, onAviso: (m) => alert(m),
+  }));
+  // Cambiar el estado del proyecto pasa SIEMPRE por aquí, venga del check o del selector: así
+  // completar por cualquiera de los dos caminos registra la fecha, y salir de "Finalizado" la
+  // borra (si no, quedaría una fecha de cierre en un proyecto abierto).
+  const cambiarEstatusProyecto = (nuevo) => {
+    if (nuevo === p.estatus) return;
+    if (nuevo === "Finalizado") { setConfirmacion(preguntaCompletarProyecto({ proyecto: p, data, onEditProyecto: onEdit })); return; }
+    onEdit(p.id, p.estatus === "Finalizado" ? { estatus: nuevo, completadoEn: null } : { estatus: nuevo });
+  };
   const proximas = [...tareasAbiertas]
     .sort((a, b) => (a.fechaLimite || "9999").localeCompare(b.fechaLimite || "9999"))
     .slice(0, 5);
@@ -5711,6 +5748,7 @@ function FichaProyecto({
   ];
 
   const responsable = p.responsableContactoId ? (data.contactos || []).find((c) => c.id === p.responsableContactoId) : null;
+  const completado = p.estatus === "Finalizado";
 
   return (
     <div className="gp-panel p-4">
@@ -5738,7 +5776,7 @@ function FichaProyecto({
       <div className="grid grid-cols-2 gap-2 mt-3">
         <select
           className="gp-input text-xs" value={p.estatus}
-          onChange={(e) => onEdit(p.id, { estatus: e.target.value })}
+          onChange={(e) => cambiarEstatusProyecto(e.target.value)}
           aria-label="Cambiar estado del proyecto"
         >
           {ESTATUS_PROYECTO.map((e) => <option key={e} value={e}>{e}</option>)}
@@ -5747,6 +5785,25 @@ function FichaProyecto({
           <ExternalLink size={12} /> Centro de proyecto
         </button>
       </div>
+
+      {/* Un proyecto se puede dar por terminado aunque le queden tareas abiertas — la confirmación
+          avisa cuántas faltan. Y no necesita fecha de fin: los proyectos continuos no la tienen y
+          aun así se cierran. Lo que sí queda registrado siempre es CUÁNDO se completó. */}
+      <label
+        className="flex items-center gap-2 mt-2 px-2.5 py-2 rounded cursor-pointer"
+        style={completado ? { background: "var(--hecho-bg)", boxShadow: "inset 3px 0 0 var(--hecho-borde)" } : { background: "var(--panel-2)" }}
+      >
+        <input
+          type="checkbox" checked={completado}
+          onChange={(e) => cambiarEstatusProyecto(e.target.checked ? "Finalizado" : "Activo")}
+          style={{ width: 16, height: 16, accentColor: "var(--teal)", cursor: "pointer" }}
+        />
+        <span className="text-xs">
+          {completado
+            ? <>Proyecto completado{p.completadoEn ? <span className="gp-text-muted"> · {fmtFechaCompletado(p.completadoEn)}</span> : null}</>
+            : "Marcar proyecto como completado"}
+        </span>
+      </label>
 
       <div className="flex flex-wrap gap-1 mt-4 mb-3">
         {TABS.map((t) => (
@@ -5767,7 +5824,20 @@ function FichaProyecto({
             <DatoFicha label="Categoría" icono={<Tag size={12} />} valor={p.categoria} />
             <DatoFicha label="Estado" icono={<Rocket size={12} />} valor={<BadgeEstatusProyecto estatus={p.estatus} />} />
             <DatoFicha label="Inicio" icono={<CalendarClock size={12} />} valor={fmtFechaCorta(p.fechaInicio)} />
-            <DatoFicha label="Fin" icono={<CalendarClock size={12} />} valor={fmtFechaCorta(p.fechaFin)} />
+            <DatoFicha
+              label="Fin" icono={<CalendarClock size={12} />}
+              valor={p.fechaFin
+                ? fmtFechaCorta(p.fechaFin)
+                : (p.modo === "Continuo" ? <span className="gp-text-muted">Sin fecha (continuo)</span> : null)}
+            />
+            {completado && (
+              <DatoFicha
+                label="Completado" icono={<Check size={12} />}
+                valor={p.completadoEn
+                  ? <span className="gp-text-teal">{fmtFechaCompletado(p.completadoEn)}</span>
+                  : <span className="gp-text-muted">sin fecha registrada</span>}
+              />
+            )}
             <DatoFicha
               label="Responsable" icono={<User size={12} />}
               valor={<span className="inline-flex items-center gap-1.5"><AvatarContacto c={responsable || { nombre: miNombre || "Tú", fotoUrl: miAvatarUrl || "" }} size={20} />{responsable ? responsable.nombre : (miNombre || "Tú")}</span>}
@@ -5892,7 +5962,8 @@ function FichaProyecto({
                   const colapsada = colapsadasTareas.has(t.id);
                   return (
                     <div key={t.id} className="flex items-start justify-between gap-2" style={{ paddingLeft: nivel * 14 }}>
-                      <span className="flex items-start gap-1 min-w-0">
+                      <span className="flex items-start gap-1.5 min-w-0">
+                        <CheckTareaHecha tarea={t} size={14} onCompletar={pedirCompletarTarea} onReabrir={(x) => reabrirTarea(x, onEditTarea)} />
                         {nivel > 0 && <span className="gp-text-muted shrink-0 text-xs">└</span>}
                         <ToggleArbolTarea nodo={t} colapsada={colapsada} onToggle={toggleRamaFicha} />
                         <span className={`text-xs min-w-0 ${cerrada ? "gp-text-muted" : ""}`} style={cerrada ? { textDecoration: "line-through" } : undefined}>{t.descripcion}</span>
@@ -5976,6 +6047,8 @@ function FichaProyecto({
         </BloqueFicha>
       )}
 
+      <ConfirmacionModal pregunta={confirmacion} onCerrar={() => setConfirmacion(null)} />
+
       {tab === "archivos" && (
         <BloqueFicha titulo="Archivos" icono={<FileText size={14} className="gp-text-gold" />}>
           <ArchivosEntidad
@@ -6018,6 +6091,7 @@ function ProyectoForm({ item, contactos, vinculos, onVincularContacto, onDesvinc
     fechaInicio: item.fechaInicio || "",
     fechaFin: item.fechaFin || "",
     etiquetas: item.etiquetas || [],
+    imagenUrl: item.imagenUrl || "",
   });
   const [error, setError] = useState("");
   const [adicionalAbierto, setAdicionalAbierto] = useState(false);
@@ -6062,6 +6136,28 @@ function ProyectoForm({ item, contactos, vinculos, onVincularContacto, onDesvinc
 
   return (
     <div>
+      <div className="flex flex-col items-center mb-3">
+        <AvatarForm
+          avatarUrl={v.imagenUrl}
+          forma="cuadro"
+          textoBoton="Elegir imagen…"
+          iconoVacio={<FolderKanban size={32} className="gp-text-muted" />}
+          helpText="Imagen del proyecto (opcional). Si no subes una, se dibuja un ícono según su categoría."
+          subirAvatar={async (file) => {
+            const path = `proyectos/${proyectoId}/${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
+            const { error: upErr } = await supabase.storage.from("adjuntos").upload(path, file);
+            if (upErr) return { error: upErr.message };
+            const { data: pub } = supabase.storage.from("adjuntos").getPublicUrl(path);
+            setV((prev) => ({ ...prev, imagenUrl: pub.publicUrl }));
+            return { url: pub.publicUrl };
+          }}
+        />
+        {v.imagenUrl && (
+          <button type="button" onClick={() => setV({ ...v, imagenUrl: "" })} className="text-xs gp-text-muted mt-2">
+            Quitar imagen y volver al ícono
+          </button>
+        )}
+      </div>
       <SeccionForm titulo="Información básica">
         <Field label="Nombre"><input className="gp-input" autoFocus value={v.nombre || ""} onChange={(e) => setV({ ...v, nombre: e.target.value })} /></Field>
         <Field label="Descripción"><textarea className="gp-input" rows={2} placeholder="En una línea: de qué se trata." value={v.descripcion || ""} onChange={(e) => setV({ ...v, descripcion: e.target.value })} /></Field>
@@ -6199,13 +6295,14 @@ function ProyectoForm({ item, contactos, vinculos, onVincularContacto, onDesvinc
 /* ---------- Detalle de proyecto (Fase: navegación con breadcrumb) ---------- */
 // Pantalla completa de un solo proyecto: todos sus pendientes con subtareas anidadas,
 // porcentaje de avance (manual en tareas finales, calculado en tareas con hijos), y comentarios.
-function ProyectoDetalle({ data, proyectoId, onVolver, onAddTarea, onEditTarea, onRemoveTarea, onAddComentario, onRemoveComentario, onAddMeta, onEditMeta, onRemoveMeta, onIrAVista, sensibleDesbloqueadoHasta, onDesbloquear, onCrearContacto, onEnviarInvitacion, onAceptarEnNombre }) {
+function ProyectoDetalle({ data, proyectoId, onVolver, onAddTarea, onEditTarea, onEditProyecto, onRemoveTarea, onAddComentario, onRemoveComentario, onAddMeta, onEditMeta, onRemoveMeta, onIrAVista, sensibleDesbloqueadoHasta, onDesbloquear, onCrearContacto, onEnviarInvitacion, onAceptarEnNombre }) {
   const proyecto = data.proyectos.find((p) => p.id === proyectoId);
   const [modal, setModal] = useState(null);
   const [modalMeta, setModalMeta] = useState(null);
   const [comentariosDe, setComentariosDe] = useState(null);
   // Ramas del árbol de tareas que están cerradas (ids de las tareas padre). Vacío = todo abierto.
   const [colapsadas, setColapsadas] = useState(() => new Set());
+  const [confirmacion, setConfirmacion] = useState(null);
   // Etapa 7 (Centro de Proyecto, secc. 24.1): vista integral con pestañas — no crea tablas nuevas,
   // solo consulta y filtra las entidades reales por proyectoId y permite navegar al módulo fuente.
   const [tab, setTab] = useState("resumen");
@@ -6242,6 +6339,16 @@ function ProyectoDetalle({ data, proyectoId, onVolver, onAddTarea, onEditTarea, 
   const nombreResp = (id) => data.contactos.find((c) => c.id === id)?.nombre || "Tú";
   const nombreCliente = (id) => data.contactos.find((c) => c.id === id)?.nombre || "—";
   const paraEditar = (t) => { const { hijos, ...limpio } = t; return limpio; };
+  const pedirCompletarTarea = (t) => setConfirmacion(preguntaCompletarTarea({
+    tarea: t, data, onEditTarea, onEditProyecto, onAviso: (m) => alert(m),
+  }));
+  // Elegir "Completada" en el selector pasa por la misma regla que el check: confirma y registra
+  // la fecha. Salir de "Completada" la borra, junto con el avance de 100 que se había fijado.
+  const cambiarEstatusTarea = (t, nuevo) => {
+    if (nuevo === t.estatus) return;
+    if (nuevo === "Completada") { pedirCompletarTarea(t); return; }
+    onEditTarea(t.id, t.estatus === "Completada" ? { estatus: nuevo, completadaEn: null, avance: null } : { estatus: nuevo });
+  };
   const confirmarBorrado = (item) => {
     const hijosIds = descendientesDe(item.id, data.pendientes);
     if (hijosIds.length > 0) {
@@ -6397,27 +6504,33 @@ function ProyectoDetalle({ data, proyectoId, onVolver, onAddTarea, onEditTarea, 
 
           <div className="gp-panel overflow-x-auto">
             <table className="gp-table">
-              <thead><tr><th>Pendiente</th><th>Cliente</th><th>Responsable</th><th>Fecha</th><th>Prioridad</th><th>Avance</th><th>Precio</th><th></th></tr></thead>
+              <thead><tr><th style={{ width: 30 }}></th><th>Pendiente</th><th>Cliente</th><th>Responsable</th><th>Fecha</th><th>Prioridad</th><th>Avance</th><th>Precio</th><th></th></tr></thead>
               <tbody>
                 {filas.map(({ item: p, nivel }) => {
                   const vencido = p.estatus !== "Completada" && p.fechaLimite && daysUntil(p.fechaLimite) < 0;
                   const nc = nComentarios(p.id);
                   const tieneHijos = p.hijos && p.hijos.length > 0;
                   const colapsada = colapsadas.has(p.id);
+                  const hecha = p.estatus === "Completada";
                   const avance = Math.round(calcAvanceTarea(p));
                   return (
-                    <tr key={p.id}>
+                    <tr key={p.id} className={hecha ? "gp-fila-hecha" : undefined}>
+                      <td><CheckTareaHecha tarea={p} onCompletar={pedirCompletarTarea} onReabrir={(t) => reabrirTarea(t, onEditTarea)} /></td>
                       <td>
                         <span style={{ paddingLeft: nivel * 18 }} className="flex items-center gap-1">
                           {nivel > 0 && <span className="gp-text-muted shrink-0">└</span>}
                           <ToggleArbolTarea nodo={p} colapsada={colapsada} onToggle={toggleRama} />
-                          <span>{p.descripcion}</span>
+                          <span className={hecha ? "gp-text-muted" : ""} style={hecha ? { textDecoration: "line-through" } : undefined}>{p.descripcion}</span>
                           <ContadorRamaColapsada nodo={p} colapsada={colapsada} />
                         </span>
                       </td>
                       <td className="gp-text-muted">{p.contactoId ? nombreCliente(p.contactoId) : "—"}</td>
                       <td className="gp-text-muted">{nombreResp(p.colaboradorContactoId)}</td>
-                      <td className="gp-mono" style={{ color: vencido ? "var(--red)" : undefined }}>{p.fechaLimite}</td>
+                      <td className="gp-mono" style={{ color: hecha ? "var(--teal)" : vencido ? "var(--red)" : undefined }}>
+                        {hecha
+                          ? <span title={p.fechaLimite ? `Fecha límite: ${p.fechaLimite}` : undefined}>✓ {p.completadaEn ? fmtFechaCompletado(p.completadaEn) : "—"}</span>
+                          : p.fechaLimite}
+                      </td>
                       <td><Badge tone={p.prioridad === "Alta" ? "red" : p.prioridad === "Media" ? "gold" : "muted"}>{p.prioridad}</Badge></td>
                       <td>
                         <div className="flex items-center gap-1.5" style={{ minWidth: 130 }}>
@@ -6437,7 +6550,7 @@ function ProyectoDetalle({ data, proyectoId, onVolver, onAddTarea, onEditTarea, 
                             />
                           )}
                           {!tieneHijos && (
-                            <select className="gp-input" style={{ padding: "1px 4px", fontSize: 10, width: 88 }} value={p.estatus} onChange={(e) => onEditTarea(p.id, { estatus: e.target.value })}>
+                            <select className="gp-input" style={{ padding: "1px 4px", fontSize: 10, width: 88 }} value={p.estatus} onChange={(e) => cambiarEstatusTarea(p, e.target.value)}>
                               {ESTATUS_TAREA.map((s) => <option key={s}>{s}</option>)}
                             </select>
                           )}
@@ -6453,7 +6566,7 @@ function ProyectoDetalle({ data, proyectoId, onVolver, onAddTarea, onEditTarea, 
                     </tr>
                   );
                 })}
-                {filas.length === 0 && <tr><td colSpan={8} className="text-center gp-text-muted py-6">Sin tareas registradas en este proyecto todavía.</td></tr>}
+                {filas.length === 0 && <tr><td colSpan={9} className="text-center gp-text-muted py-6">Sin tareas registradas en este proyecto todavía.</td></tr>}
               </tbody>
             </table>
           </div>
@@ -6621,6 +6734,10 @@ function ProyectoDetalle({ data, proyectoId, onVolver, onAddTarea, onEditTarea, 
           )}
         </div>
       )}
+
+      <ConfirmacionModal pregunta={confirmacion} onCerrar={() => setConfirmacion(null)} />
+
+      <ConfirmacionModal pregunta={confirmacion} onCerrar={() => setConfirmacion(null)} />
 
       {comentariosDe && (
         <Modal title={`Comentarios — ${comentariosDe.descripcion}`} onClose={() => setComentariosDe(null)}>
@@ -7047,6 +7164,111 @@ function calcAvanceTarea(nodo) {
   const suma = nodo.hijos.reduce((s, h) => s + calcAvanceTarea(h), 0);
   return suma / nodo.hijos.length;
 }
+/* ---------- Completar tareas y proyectos (una sola regla para toda la app) ---------- */
+// El check de completar aparece en tres pantallas (Tareas, centro de proyecto y ficha del
+// proyecto). La regla vive aquí una sola vez para que se comporte igual en las tres: mismo texto
+// de confirmación, misma fecha registrada y mismo cierre automático del proyecto.
+
+const ahoraISO = () => new Date().toISOString();
+// "2026-09-24T18:30:00Z" -> "24 Sep 2026". Para mostrar cuándo se completó algo. (Aparte de
+// fmtFechaHora(), que es el de Citas y no lleva año.)
+const fmtFechaCompletado = (iso) => (iso ? fmtFechaCorta(String(iso).slice(0, 10)) : "");
+
+// Subtareas todavía abiertas que cuelgan de una tarea.
+function subtareasAbiertas(tareaId, pendientes) {
+  return descendientesDe(tareaId, pendientes)
+    .map((id) => pendientes.find((t) => t.id === id))
+    .filter((t) => t && !ESTATUS_TAREA_CERRADOS.includes(t.estatus));
+}
+
+// Pregunta de confirmación para completar una tarea, con todo lo que hay que hacer si se acepta.
+// Devuelve el objeto que consume ConfirmacionModal; no toca nada por su cuenta.
+function preguntaCompletarTarea({ tarea, data, onEditTarea, onEditProyecto, onAviso }) {
+  const pendientes = data.pendientes || [];
+  const abiertas = subtareasAbiertas(tarea.id, pendientes);
+  const n = abiertas.length;
+  return {
+    titulo: "Completar tarea",
+    mensaje: n > 0
+      ? `"${tarea.descripcion}" tiene ${n} subtarea${n === 1 ? "" : "s"} sin terminar.\n\nAl completarla, esa${n === 1 ? "" : "s"} subtarea${n === 1 ? "" : "s"} también quedará${n === 1 ? "" : "n"} como completada${n === 1 ? "" : "s"}, con la fecha de hoy.`
+      : `Se va a marcar "${tarea.descripcion}" como completada y se va a guardar la fecha de hoy.`,
+    etiqueta: "Sí, completar",
+    onConfirmar: () => {
+      const ahora = ahoraISO();
+      // El avance se fija en 100 junto con el estatus: calcAvanceTarea() usa el avance manual
+      // cuando está capturado, así que sin esto una tarea "completada" al 40% dejaría a su tarea
+      // padre en un porcentaje que no cuadra con tener todo cerrado.
+      onEditTarea(tarea.id, { estatus: "Completada", completadaEn: ahora, avance: 100 });
+      for (const h of abiertas) onEditTarea(h.id, { estatus: "Completada", completadaEn: ahora, avance: 100 });
+
+      // ¿Fue la última tarea abierta del proyecto? Entonces el proyecto se cierra solo.
+      const cerradasAhora = new Set([tarea.id, ...abiertas.map((h) => h.id)]);
+      const delProyecto = pendientes.filter((t) => t.proyectoId === tarea.proyectoId);
+      const quedaAlgoAbierto = delProyecto.some((t) => !cerradasAhora.has(t.id) && !ESTATUS_TAREA_CERRADOS.includes(t.estatus));
+      const proyecto = (data.proyectos || []).find((pr) => pr.id === tarea.proyectoId);
+      if (proyecto && delProyecto.length > 0 && !quedaAlgoAbierto && proyecto.estatus !== "Finalizado") {
+        onEditProyecto?.(proyecto.id, { estatus: "Finalizado", completadoEn: ahora });
+        // Diferido para que el aviso salga con el modal de confirmación ya cerrado, no encima.
+        setTimeout(() => onAviso?.(`Era la última tarea abierta de "${proyecto.nombre}", así que el proyecto se marcó como Finalizado. Si el proyecto sigue vivo, puedes reabrirlo desde su ficha.`), 60);
+      }
+    },
+  };
+}
+
+// Reabrir una tarea borra su fecha de completado: la fecha guardada tiene que ser la de la vez que
+// de verdad se terminó, no la de un clic que se deshizo. No pide confirmación porque no destruye
+// nada más que ese dato y se vuelve a generar al completarla otra vez.
+function reabrirTarea(tarea, onEditTarea) {
+  onEditTarea(tarea.id, { estatus: "Pendiente", completadaEn: null, avance: null });
+}
+
+// Pregunta de confirmación para completar un proyecto. Un proyecto SÍ se puede dar por terminado
+// con tareas abiertas (a veces se cierra algo dejando pendientes que ya no se van a hacer), pero
+// el aviso tiene que decir cuántas quedan para que sea una decisión, no un descuido.
+function preguntaCompletarProyecto({ proyecto, data, onEditProyecto }) {
+  const abiertas = (data.pendientes || []).filter((t) => t.proyectoId === proyecto.id && !ESTATUS_TAREA_CERRADOS.includes(t.estatus));
+  const n = abiertas.length;
+  return {
+    titulo: "Completar proyecto",
+    mensaje: n > 0
+      ? `"${proyecto.nombre}" todavía tiene ${n} tarea${n === 1 ? "" : "s"} sin completar.\n\n¿Aun así quieres marcar el proyecto como completado? Las tareas se quedan como están; solo se cierra el proyecto.`
+      : `Se va a marcar "${proyecto.nombre}" como completado y se va a guardar la fecha de hoy.`,
+    etiqueta: n > 0 ? "Sí, completar de todos modos" : "Sí, completar",
+    onConfirmar: () => onEditProyecto(proyecto.id, { estatus: "Finalizado", completadoEn: ahoraISO() }),
+  };
+}
+
+// Modal de confirmación reutilizable. `pregunta` es null cuando no hay nada que preguntar.
+function ConfirmacionModal({ pregunta, onCerrar }) {
+  if (!pregunta) return null;
+  return (
+    <Modal title={pregunta.titulo} onClose={onCerrar}>
+      <p className="text-sm gp-text-muted mb-4" style={{ whiteSpace: "pre-line" }}>{pregunta.mensaje}</p>
+      <div className="flex gap-2">
+        <button onClick={onCerrar} className="gp-btn-ghost flex-1 py-2 text-sm">Cancelar</button>
+        <button onClick={() => { pregunta.onConfirmar(); onCerrar(); }} className="gp-btn flex-1 py-2 text-sm">{pregunta.etiqueta || "Confirmar"}</button>
+      </div>
+    </Modal>
+  );
+}
+
+// Check de "completada" de una fila de tareas. Completar pasa por confirmación (lo pide el flujo);
+// reabrir es directo, porque deshacer un clic no debería costar otro clic.
+function CheckTareaHecha({ tarea, onCompletar, onReabrir, size = 17 }) {
+  const hecha = tarea.estatus === "Completada";
+  return (
+    <input
+      type="checkbox"
+      checked={hecha}
+      title={hecha ? `Completada${tarea.completadaEn ? ` el ${fmtFechaCompletado(tarea.completadaEn)}` : ""} — clic para reabrirla` : "Marcar como completada"}
+      aria-label={hecha ? "Reabrir tarea" : "Marcar tarea como completada"}
+      onClick={(e) => e.stopPropagation()}
+      onChange={(e) => (e.target.checked ? onCompletar(tarea) : onReabrir(tarea))}
+      style={{ width: size, height: size, accentColor: "var(--teal)", cursor: "pointer" }}
+    />
+  );
+}
+
 // ids de todos los descendientes de una tarea (para no permitir que se vuelva subtarea de sí misma).
 function descendientesDe(id, items) {
   const hijos = items.filter((t) => t.parentId === id);
@@ -7160,7 +7382,7 @@ function MindMapPendientes({ proyecto, tareas, onNodoClick, onAgregar, onElimina
   );
 }
 
-function Pendientes({ data, activeOwnerId, onAdd, onEdit, onRemove, onAddComentario, onRemoveComentario, onAsignar, onCrearContacto, onEnviarInvitacion, onAceptarEnNombre, crearAlEntrar, onConsumirCrearAlEntrar, filtroProyectoInicial, onConsumirFiltroProyecto }) {
+function Pendientes({ data, activeOwnerId, onAdd, onEdit, onEditProyecto, onRemove, onAddComentario, onRemoveComentario, onAsignar, onCrearContacto, onEnviarInvitacion, onAceptarEnNombre, crearAlEntrar, onConsumirCrearAlEntrar, filtroProyectoInicial, onConsumirFiltroProyecto }) {
   const [modal, setModal] = useState(null);
   const [comentariosDe, setComentariosDe] = useState(null);
   const [orden, setOrden] = useState("default");
@@ -7170,6 +7392,7 @@ function Pendientes({ data, activeOwnerId, onAdd, onEdit, onRemove, onAddComenta
   const [filtroProyecto, setFiltroProyecto] = useState(filtroProyectoInicial || ""); // "" = todos los proyectos, en la vista de lista
   // Ramas del árbol de tareas que están cerradas (ids de las tareas padre). Vacío = todo abierto.
   const [colapsadas, setColapsadas] = useState(() => new Set());
+  const [confirmacion, setConfirmacion] = useState(null);
   const [colaboradores, setColaboradores] = useState([]);
   const empty = { proyectoId: "", parentId: "", descripcion: "", fechaLimite: todayISO(), fechaRevision: "", prioridad: "Media", estatus: "Pendiente", colaboradorContactoId: null, contactoId: "", precio: "", fechaPagoAprox: "", tiempoEstimado: "", tiempoReal: "", asignadoA: "" };
 
@@ -7221,6 +7444,16 @@ function Pendientes({ data, activeOwnerId, onAdd, onEdit, onRemove, onAddComenta
   const filas = flattenTareas(arbol, 0, colapsadas);
   const idsRamas = idsRamasTareas(arbol);
   const toggleRama = (id) => setColapsadas((prev) => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s; });
+  const pedirCompletarTarea = (t) => setConfirmacion(preguntaCompletarTarea({
+    tarea: t, data, onEditTarea: onEdit, onEditProyecto, onAviso: (m) => alert(m),
+  }));
+  // Elegir "Completada" en el selector pasa por la misma regla que el check: confirma y registra
+  // la fecha. Salir de "Completada" la borra, junto con el avance de 100 que se había fijado.
+  const cambiarEstatusTarea = (t, nuevo) => {
+    if (nuevo === t.estatus) return;
+    if (nuevo === "Completada") { pedirCompletarTarea(t); return; }
+    onEdit(t.id, t.estatus === "Completada" ? { estatus: nuevo, completadaEn: null, avance: null } : { estatus: nuevo });
+  };
   const nComentarios = (id) => (data.comentarios || []).filter((c) => c.entidadTipo === "pendientes" && c.entidadId === id).length;
 
   const nombreProyecto = (id) => data.proyectos.find((p) => p.id === id)?.nombre || "—";
@@ -7286,6 +7519,7 @@ function Pendientes({ data, activeOwnerId, onAdd, onEdit, onRemove, onAddComenta
         <table className="gp-table">
           <thead>
             <tr>
+              <th style={{ width: 30 }}></th>
               <th>Pendiente</th>
               <th className="hidden md:table-cell">Proyecto</th>
               <th className="hidden md:table-cell">Cliente</th>
@@ -7304,21 +7538,27 @@ function Pendientes({ data, activeOwnerId, onAdd, onEdit, onRemove, onAddComenta
               const nc = nComentarios(p.id);
               const tieneHijos = p.hijos && p.hijos.length > 0;
               const colapsada = colapsadas.has(p.id);
+              const hecha = p.estatus === "Completada";
               const avance = tieneHijos ? Math.round(calcAvanceTarea(p)) : null;
               return (
-                <tr key={p.id}>
+                <tr key={p.id} className={hecha ? "gp-fila-hecha" : undefined}>
+                  <td><CheckTareaHecha tarea={p} onCompletar={pedirCompletarTarea} onReabrir={(t) => reabrirTarea(t, onEdit)} /></td>
                   <td style={{ maxWidth: 220 }}>
                     <span style={{ paddingLeft: nivel * 18 }} className="flex items-start gap-1">
                       {nivel > 0 && <span className="gp-text-muted shrink-0">└</span>}
                       <ToggleArbolTarea nodo={p} colapsada={colapsada} onToggle={toggleRama} />
-                      <span className="line-clamp-2 md:line-clamp-none">{p.descripcion}</span>
+                      <span className={`line-clamp-2 md:line-clamp-none ${hecha ? "gp-text-muted" : ""}`} style={hecha ? { textDecoration: "line-through" } : undefined}>{p.descripcion}</span>
                       <ContadorRamaColapsada nodo={p} colapsada={colapsada} />
                     </span>
                   </td>
                   <td className="gp-text-muted hidden md:table-cell">{nombreProyecto(p.proyectoId)}</td>
                   <td className="gp-text-muted hidden md:table-cell">{p.contactoId ? nombreCliente(p.contactoId) : "—"}</td>
                   <td className="gp-text-muted hidden md:table-cell">{nombreResp(p.colaboradorContactoId)}</td>
-                  <td className="gp-mono hidden md:table-cell" style={{ color: vencido ? "var(--red)" : undefined }}>{p.fechaLimite}</td>
+                  <td className="gp-mono hidden md:table-cell" style={{ color: hecha ? "var(--teal)" : vencido ? "var(--red)" : undefined }}>
+                    {hecha
+                      ? <span title={p.fechaLimite ? `Fecha límite: ${p.fechaLimite}` : undefined}>✓ {p.completadaEn ? fmtFechaCompletado(p.completadaEn) : "—"}</span>
+                      : p.fechaLimite}
+                  </td>
                   <td className="hidden md:table-cell"><Badge tone={p.prioridad === "Alta" ? "red" : p.prioridad === "Media" ? "gold" : "muted"}>{p.prioridad}</Badge></td>
                   <td onClick={(e) => e.stopPropagation()}>
                     {tieneHijos ? (
@@ -7329,15 +7569,12 @@ function Pendientes({ data, activeOwnerId, onAdd, onEdit, onRemove, onAddComenta
                         <span className="gp-mono" style={{ fontSize: 10 }}>{avance}%</span>
                       </div>
                     ) : (
+                      // El check de completar ya vive en su propia columna; aquí queda el selector
+                      // completo para los demás estados (En proceso, En espera, Cancelada…). En
+                      // celular el selector no cabe, así que ahí se muestra el estado como badge.
                       <>
-                        <input
-                          type="checkbox"
-                          className="md:hidden"
-                          style={{ width: 20, height: 20, accentColor: "var(--teal)" }}
-                          checked={p.estatus === "Completada"}
-                          onChange={(e) => onEdit(p.id, { estatus: e.target.checked ? "Completada" : "Pendiente" })}
-                        />
-                        <select className="gp-input hidden md:inline-block" style={{ padding: "2px 6px" }} value={p.estatus} onChange={(e) => onEdit(p.id, { estatus: e.target.value })}>
+                        <span className="md:hidden"><Badge tone={toneEstatusTarea(p.estatus)}>{p.estatus}</Badge></span>
+                        <select className="gp-input hidden md:inline-block" style={{ padding: "2px 6px" }} value={p.estatus} onChange={(e) => cambiarEstatusTarea(p, e.target.value)}>
                           {ESTATUS_TAREA.map((s) => <option key={s}>{s}</option>)}
                         </select>
                       </>
@@ -7354,11 +7591,13 @@ function Pendientes({ data, activeOwnerId, onAdd, onEdit, onRemove, onAddComenta
                 </tr>
               );
             })}
-            {filas.length === 0 && <tr><td colSpan={10} className="text-center gp-text-muted py-6">Sin tareas registradas.</td></tr>}
+            {filas.length === 0 && <tr><td colSpan={11} className="text-center gp-text-muted py-6">Sin tareas registradas.</td></tr>}
           </tbody>
         </table>
       </div>
       )}
+
+      <ConfirmacionModal pregunta={confirmacion} onCerrar={() => setConfirmacion(null)} />
 
       {comentariosDe && (
         <Modal title={`Comentarios — ${comentariosDe.descripcion}`} onClose={() => setComentariosDe(null)}>
