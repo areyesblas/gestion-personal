@@ -17,13 +17,14 @@ import MotivationalCard from "./components/CentroMando/MotivationalCard";
 import ArkiWidget from "./components/CentroMando/ArkiWidget";
 import BottomNav from "./components/nav/BottomNav";
 import BotonRegresar from "./components/nav/BotonRegresar";
+import bannerContactos from "./assets/dashboard-banner-montanas-nevadas.jpg";
 import * as XLSX from "xlsx";
 import {
   FolderKanban, CheckSquare, Wallet, AlertTriangle,
   Users, Activity, Plus, X, Trash2, Pencil, Github, ChevronDown,
   ChevronRight, Bell, Lightbulb, Rocket, MessageCircle, Mail, Globe,
   Target, Contact, BarChart3, FileText, Flame, HeartPulse, Check, Menu, PieChart as PieChartIcon, User, Home,
-  PiggyBank, Camera, Film, Upload, MapPin, Clock, Mic, Gift, Receipt, Megaphone, ChevronUp, Gem, Download, Sun, Moon, Shield, LogOut, ChevronLeft, Lock, Pill, CalendarClock, Zap, StickyNote, Search, Sparkles, Send, Bot, Square, Settings, CalendarRange, Palette, Eye, EyeOff, Sliders, Volume2, VolumeX, Play, Copy, RefreshCw, Phone, MessageSquare,
+  PiggyBank, Camera, Film, Upload, MapPin, Clock, Mic, Gift, Receipt, Megaphone, ChevronUp, Gem, Download, Sun, Moon, Shield, LogOut, ChevronLeft, Lock, Pill, CalendarClock, Zap, StickyNote, Search, Sparkles, Send, Bot, Square, Settings, CalendarRange, Palette, Eye, EyeOff, Sliders, Volume2, VolumeX, Play, Copy, Phone, MessageSquare, MoreHorizontal,
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
@@ -152,6 +153,15 @@ const ESTATUS_REGALO = ["Por comprar", "Comprado", "Envuelto", "Entregado"];
 // Tipo de atención: distinto de la ocasión (Cumpleaños/Navidad/…). La ocasión es CUÁNDO/POR QUÉ;
 // el tipo es QUÉ clase de atención se dio o se dará.
 const TIPOS_ATENCION = ["Regalo", "Felicitación", "Condolencia", "Agradecimiento", "Llamada", "Visita", "Mensaje", "Otro"];
+
+// Roles de un contacto. Un contacto puede tener varios a la vez (anexo de arquitectura). "Personal"
+// y "Familia" se agregaron el 24 sept 2026 con el rediseño de la pantalla, calcados del mockup de
+// Angel — la columna `tipos` es text[], así que ampliar el catálogo no requiere migración.
+const TIPOS_CONTACTO = ["Cliente", "Proveedor", "Colaborador", "Personal", "Familia", "Otro"];
+// Cómo se nombra cada rol en las pastillas de filtro (en plural, como el mockup).
+const FILTRO_PLURAL = { Cliente: "Clientes", Proveedor: "Proveedores", Colaborador: "Colaboradores", Personal: "Personal", Familia: "Familia", Otro: "Otros" };
+// Un color propio por rol, para distinguirlos de un vistazo en la lista (mockup 24 sept 2026).
+const COLOR_TIPO_CONTACTO = { Cliente: "#087CF5", Proveedor: "#F59E0B", Colaborador: "#16A36A", Personal: "#8B5CF6", Familia: "#EC4899", Otro: "#64748B" };
 
 // Categorías de notificación configurables por el usuario (Configuración > Notificaciones).
 // Cada "tipo" concreto de notificación (medicamento, cita, deuda, etc.) pertenece a una de estas
@@ -305,6 +315,15 @@ function ordenarLista(lista, criterio, campos, dir = "asc") {
     return dir === "desc" ? -r : r;
   });
   return copia;
+}
+
+/* Números de página a dibujar, con "…" cuando hay muchas (1 2 3 4 5 … 11), para no llenar la
+   barra de paginación de botones. Devuelve números y la cadena "…" como separador. */
+function paginasVisibles(actual, total) {
+  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
+  if (actual <= 4) return [1, 2, 3, 4, 5, "…", total];
+  if (actual >= total - 3) return [1, "…", total - 4, total - 3, total - 2, total - 1, total];
+  return [1, "…", actual - 1, actual, actual + 1, "…", total];
 }
 
 /* Encabezado de tabla clicable para ordenar (como en Excel): clic ordena asc, clic de
@@ -500,7 +519,10 @@ async function exportarFilasPDF(filas, columnas, nombreArchivo, titulo, resumenF
 
 // Barra reutilizable: campo de búsqueda por contenido (independiente del buscador global) +
 // botones de exportar Excel/PDF, para el estándar transversal de listas.
-function BarraListaEstandar({ busqueda, onBusqueda, placeholder, onExportExcel, onExportPDF, rangoExport }) {
+// `extra` es opcional (lo usa Contactos para su botón "Filtros"): se dibuja junto al buscador y,
+// cuando se pasa, empuja Excel/PDF al extremo derecho de la fila. Sin `extra` el diseño queda
+// idéntico al de siempre en las demás pantallas.
+function BarraListaEstandar({ busqueda, onBusqueda, placeholder, onExportExcel, onExportPDF, rangoExport, extra }) {
   // rangoExport es opcional — solo Citas lo usa por ahora (Grupo B, punto 7). Cuando se pasa:
   // { opciones: [{key,label}], contar: (rangoKey, desde, hasta) => number }. Si no se pasa,
   // el comportamiento es exactamente el de antes: confirmar y exportar todo lo visible.
@@ -523,7 +545,8 @@ function BarraListaEstandar({ busqueda, onBusqueda, placeholder, onExportExcel, 
         <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 gp-text-muted" style={{ pointerEvents: "none" }} />
         <input className="gp-input text-sm" style={{ paddingLeft: 32 }} placeholder={placeholder || "Buscar en esta lista…"} value={busqueda} onChange={(e) => onBusqueda(e.target.value)} />
       </div>
-      <button onClick={() => setConfirmando("excel")} className="text-xs px-2.5 py-1.5 rounded gp-btn-ghost flex items-center gap-1"><Download size={12} /> Excel</button>
+      {extra}
+      <button onClick={() => setConfirmando("excel")} className={`text-xs px-2.5 py-1.5 rounded gp-btn-ghost flex items-center gap-1 ${extra ? "ml-auto" : ""}`}><Download size={12} /> Excel</button>
       <button onClick={() => setConfirmando("pdf")} className="text-xs px-2.5 py-1.5 rounded gp-btn-ghost flex items-center gap-1"><Download size={12} /> PDF</button>
 
       {confirmando && (
@@ -7787,21 +7810,22 @@ function MetaForm({ item, proyectos, onSave }) {
 function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveComentario, onVerRegalos, onVincularProyecto, onDesvincularProyecto }) {
   const [modal, setModal] = useState(null);
   const [importarAbierto, setImportarAbierto] = useState(false);
-  const [sincronizarAbierto, setSincronizarAbierto] = useState(false);
   const [comentariosDe, setComentariosDe] = useState(null);
-  const [filtroTipo, setFiltroTipo] = useState("Todos");
-  const [orden, setOrden] = useState("default");
-  const [busqueda, setBusqueda] = useState("");
+  const [filtroTipo, setFiltroTipoState] = useState("Todos");
+  const [orden, setOrden] = useState("alfabetico");
+  const [ordenDir, setOrdenDir] = useState("asc");
+  const [busqueda, setBusquedaState] = useState("");
+  const [filtrosAbiertos, setFiltrosAbiertos] = useState(false);
+  const [menuAcciones, setMenuAcciones] = useState(null); // id del contacto con su menú "···" abierto
+  const [pagina, setPagina] = useState(1);
+  const [porPagina, setPorPagina] = useState(12);
+  // Cambiar filtro o búsqueda siempre regresa a la página 1 — si no, se queda en una página que
+  // ya no existe con el nuevo resultado y la lista se ve vacía sin razón aparente.
+  const setFiltroTipo = (t) => { setFiltroTipoState(t); setPagina(1); };
+  const setBusqueda = (q) => { setBusquedaState(q); setPagina(1); };
+  const toggleOrden = (key) => { if (orden === key) setOrdenDir((d) => (d === "asc" ? "desc" : "asc")); else { setOrden(key); setOrdenDir("asc"); } };
+
   const empty = { nombre: "", nombres: "", apellidoPaterno: "", apellidoMaterno: "", tipos: ["Cliente"], parentesco: "", fechaNacimiento: "", contexto: "", fotoUrl: "", empresa: "", puesto: "", whatsapp: "", telefono: "", correo: "", direccion: "", notas: "" };
-  const toneTipo = { Cliente: "teal", Proveedor: "gold", Colaborador: "red", Otro: "" };
-  const camposOrden = {
-    alfabetico: { get: (c) => claveOrdenContacto(c), tipo: "texto" },
-    registro: { get: (c) => c.createdAt, tipo: "fecha" },
-  };
-  const opcionesOrden = [
-    { key: "alfabetico", label: "alfabético" },
-    { key: "registro", label: "fecha de registro" },
-  ];
   const tiposDe = (c) => (c.tipos && c.tipos.length ? c.tipos : [c.tipo || "Otro"]);
   const proyectosDe = (contactoId) => (data.contactoProyectos || [])
     .filter((v) => v.contactoId === contactoId)
@@ -7811,12 +7835,32 @@ function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
     .filter((r) => r.contactoId === contactoId)
     .sort((a, b) => (b.fecha || b.createdAt || "").localeCompare(a.fecha || a.createdAt || ""))[0];
 
-  const FILTROS = ["Todos", "Cliente", "Proveedor", "Colaborador", "Otro"];
+  const camposOrden = {
+    alfabetico: { get: (c) => claveOrdenContacto(c), tipo: "texto" },
+    empresa: { get: (c) => c.empresa || "", tipo: "texto" },
+    ultimaAtencion: { get: (c) => ultimaAtencionDe(c.id)?.fecha || "", tipo: "fecha" },
+    registro: { get: (c) => c.createdAt, tipo: "fecha" },
+  };
+  const opcionesOrden = [
+    { key: "alfabetico", label: "alfabético" },
+    { key: "empresa", label: "empresa" },
+    { key: "ultimaAtencion", label: "última atención" },
+    { key: "registro", label: "fecha de registro" },
+  ];
+
+  const FILTROS = ["Todos", ...TIPOS_CONTACTO];
   const contarFiltro = (t) => (t === "Todos" ? data.contactos.length : data.contactos.filter((c) => tiposDe(c).includes(t)).length);
 
   const filtrados = filtroTipo === "Todos" ? data.contactos : data.contactos.filter((c) => tiposDe(c).includes(filtroTipo));
-  const buscados = filtrarPorBusqueda(filtrados, busqueda, [(c) => c.nombre, (c) => c.empresa, (c) => c.contexto, (c) => c.whatsapp, (c) => c.telefono, (c) => c.correo, (c) => c.parentesco, (c) => c.notas]);
-  const visibles = ordenarLista(buscados, orden, camposOrden);
+  const buscados = filtrarPorBusqueda(filtrados, busqueda, [(c) => c.nombre, (c) => c.empresa, (c) => c.puesto, (c) => c.contexto, (c) => c.whatsapp, (c) => c.telefono, (c) => c.correo, (c) => c.parentesco, (c) => c.notas]);
+  const visibles = ordenarLista(buscados, orden, camposOrden, ordenDir);
+
+  // Paginación: `pagina` puede quedar fuera de rango si se borran contactos, así que se acota
+  // aquí en vez de confiar en que siempre se reinicie.
+  const totalPaginas = Math.max(1, Math.ceil(visibles.length / porPagina));
+  const paginaActual = Math.min(pagina, totalPaginas);
+  const desde = (paginaActual - 1) * porPagina;
+  const enPagina = visibles.slice(desde, desde + porPagina);
   const columnasExport = [
     { label: "Nombre completo", get: (c) => c.nombre }, { label: "Nombre(s)", get: (c) => c.nombres || "" },
     { label: "Apellido paterno", get: (c) => c.apellidoPaterno || "" }, { label: "Apellido materno", get: (c) => c.apellidoMaterno || "" },
@@ -7827,87 +7871,232 @@ function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
     { label: "Notas", get: (c) => c.notas },
   ];
 
+  // Fila de "Contacto": los tres accesos directos (WhatsApp / correo / llamar) que se repiten
+  // igual en la tabla de escritorio y en las tarjetas de celular.
+  const AccionesContacto = ({ c }) => (
+    <div className="flex items-center gap-1">
+      {c.whatsapp && <a href={`https://wa.me/${(c.whatsapp || "").replace(/\D/g, "")}`} target="_blank" rel="noopener noreferrer" title="WhatsApp" className="p-1.5 rounded gp-btn-ghost" style={{ lineHeight: 0, color: "#16A36A" }}><MessageCircle size={14} /></a>}
+      {c.correo && <a href={`mailto:${c.correo}`} title="Correo" className="p-1.5 rounded gp-btn-ghost" style={{ lineHeight: 0, color: "#087CF5" }}><Mail size={14} /></a>}
+      {(c.telefono || c.whatsapp) && <a href={`tel:${c.telefono || c.whatsapp}`} title="Llamar" className="p-1.5 rounded gp-btn-ghost" style={{ lineHeight: 0 }}><Phone size={14} /></a>}
+      {!c.whatsapp && !c.correo && !c.telefono && <span className="gp-text-muted text-xs">—</span>}
+    </div>
+  );
+
+  const ChipsTipos = ({ c }) => (
+    <div className="flex items-center gap-1 flex-wrap">
+      {tiposDe(c).map((t) => (
+        <span key={t} className="gp-badge" style={{ color: COLOR_TIPO_CONTACTO[t] || "var(--muted)", background: `${COLOR_TIPO_CONTACTO[t] || "#64748B"}22` }}>{t}</span>
+      ))}
+      {c.parentesco && <Badge tone="muted">{c.parentesco}</Badge>}
+    </div>
+  );
+
+  const ChipsProyectos = ({ c }) => {
+    const lista = proyectosDe(c.id);
+    if (lista.length === 0) return <span className="gp-text-muted text-xs">—</span>;
+    return (
+      <div className="flex items-center gap-1">
+        <span className="gp-badge inline-flex items-center gap-1" style={{ color: "var(--gold)", background: "rgba(245,158,11,.14)" }}>
+          <FolderKanban size={11} /> {lista[0].nombre}
+        </span>
+        {lista.length > 1 && <span className="text-xs gp-text-muted">+{lista.length - 1}</span>}
+      </div>
+    );
+  };
+
+  // Menú "···" de cada fila: comentarios, atenciones, editar y eliminar. Un solo estado para toda
+  // la tabla (el id de la fila abierta), no uno por fila.
+  const MenuFila = ({ c }) => (
+    <div className="relative">
+      <IconBtn title="Acciones" onClick={() => setMenuAcciones(menuAcciones === c.id ? null : c.id)}><MoreHorizontal size={15} /></IconBtn>
+      {menuAcciones === c.id && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={() => setMenuAcciones(null)} />
+          <div className="absolute right-0 top-8 z-20 gp-panel py-1 text-sm" style={{ minWidth: 190 }}>
+            <button onClick={() => { setMenuAcciones(null); setModal({ item: c }); }} className="w-full text-left px-3 py-2 gp-panel-hi flex items-center gap-2"><Pencil size={13} /> Editar</button>
+            <button onClick={() => { setMenuAcciones(null); setComentariosDe(c); }} className="w-full text-left px-3 py-2 gp-panel-hi flex items-center gap-2"><MessageSquare size={13} /> Comentarios</button>
+            {onVerRegalos && <button onClick={() => { setMenuAcciones(null); onVerRegalos(c); }} className="w-full text-left px-3 py-2 gp-panel-hi flex items-center gap-2"><Gift size={13} /> Atenciones</button>}
+            <button onClick={() => { setMenuAcciones(null); onRemove(c.id); }} className="w-full text-left px-3 py-2 gp-panel-hi flex items-center gap-2 gp-text-red"><Trash2 size={13} /> Eliminar</button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+
+  const Avatar = ({ c, size = 32 }) => (
+    c.fotoUrl ? (
+      <img src={c.fotoUrl} alt="" className="rounded-full object-cover shrink-0" style={{ width: size, height: size, border: "1px solid var(--border)" }} />
+    ) : (
+      <div className="rounded-full flex items-center justify-center shrink-0 font-semibold" style={{ width: size, height: size, fontSize: size / 3, background: "var(--panel-hi)", color: "var(--gold)" }}>
+        {(c.nombre || "").slice(0, 2).toUpperCase()}
+      </div>
+    )
+  );
+
+  const BadgeCumple = ({ c }) => {
+    const dc = diasParaCumple(c.fechaNacimiento);
+    if (dc === null || dc > 30) return null;
+    return <Badge tone="gold">🎂 {dc === 0 ? "¡hoy!" : `en ${dc}d`}</Badge>;
+  };
+
   return (
     <div>
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-1">
-        <h2 className="gp-serif text-2xl">Contactos</h2>
-        <div className="flex gap-2 w-full sm:w-auto">
-          <button onClick={() => setSincronizarAbierto(true)} className="gp-btn-ghost flex items-center justify-center gap-1 px-3 py-1.5 text-sm flex-1 sm:flex-initial"><RefreshCw size={14} /> Sincronizar</button>
-          <button onClick={() => setImportarAbierto(true)} className="gp-btn-ghost flex items-center justify-center gap-1 px-3 py-1.5 text-sm flex-1 sm:flex-initial"><Upload size={14} /> Importar</button>
-          <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm flex-1 sm:flex-initial"><Plus size={14} /> Nuevo</button>
+      {/* Banner de la pantalla (mockup de Angel, 24 sept 2026): foto + título + bajada, con un
+          degradado direccional para que el texto se lea sin apagar toda la foto. */}
+      <div className="relative overflow-hidden rounded-2xl mb-4">
+        <img src={bannerContactos} alt="" className="absolute inset-0 w-full h-full object-cover" style={{ objectPosition: "50% 45%" }} />
+        <div className="absolute inset-0" style={{ background: "linear-gradient(100deg, rgba(11,35,72,.88) 0%, rgba(11,35,72,.6) 45%, rgba(11,35,72,.12) 80%, rgba(11,35,72,0) 100%)" }} />
+        <div className="relative z-10 p-5 md:px-8 md:py-7">
+          <h2 className="gp-serif text-white text-2xl md:text-4xl font-extrabold" style={{ textShadow: "0 2px 8px rgba(0,0,0,.45)" }}>Contactos</h2>
+          <p className="text-white text-xs md:text-sm mt-1 font-medium" style={{ textShadow: "0 1px 5px rgba(0,0,0,.5)" }}>
+            Conecta, colabora y mantén cerca a las personas importantes en tu vida.
+          </p>
         </div>
       </div>
-      <p className="text-sm gp-text-muted mb-4">Clientes, proveedores, colaboradores y gente que conoces en eventos — para que no se pierdan. Un contacto puede ser varias cosas a la vez.</p>
 
-      <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
-        <div className="flex flex-wrap gap-1">
-          {FILTROS.map((t) => (
-            <button key={t} onClick={() => setFiltroTipo(t)} className={`text-xs px-2.5 py-1 rounded-full border ${filtroTipo === t ? "gp-btn" : "gp-text-muted"}`}>{t} {contarFiltro(t)}</button>
-          ))}
+      <div className="flex flex-wrap items-center gap-2 mb-3">
+        <div className="flex flex-wrap gap-1.5 flex-1 min-w-0">
+          {FILTROS.map((t) => {
+            const activo = filtroTipo === t;
+            const color = t === "Todos" ? "var(--gold)" : COLOR_TIPO_CONTACTO[t];
+            return (
+              <button
+                key={t} onClick={() => setFiltroTipo(t)}
+                className="text-xs px-3 py-1.5 rounded-full border inline-flex items-center gap-1.5"
+                style={activo
+                  ? { background: color, color: "#0B2341", borderColor: color, fontWeight: 600 }
+                  : { borderColor: "var(--border)", color: "var(--muted)" }}
+              >
+                {t === "Todos" ? "Todos" : (FILTRO_PLURAL[t] || t)}
+                <span style={{ opacity: activo ? 0.75 : 1 }}>{contarFiltro(t)}</span>
+              </button>
+            );
+          })}
         </div>
-        <OrdenSelector opciones={opcionesOrden} value={orden} onChange={setOrden} />
+        <div className="flex gap-2 shrink-0">
+          <button onClick={() => setImportarAbierto(true)} className="gp-btn-ghost flex items-center justify-center gap-1 px-3 py-1.5 text-sm"><Upload size={14} /> Importar</button>
+          <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm"><Plus size={14} /> Nuevo contacto</button>
+        </div>
       </div>
-      <BarraListaEstandar busqueda={busqueda} onBusqueda={setBusqueda} placeholder="Buscar por nombre, empresa, contexto, WhatsApp, correo…"
+
+      <BarraListaEstandar busqueda={busqueda} onBusqueda={setBusqueda} placeholder="Buscar contactos por nombre, empresa, teléfono, correo…"
+        extra={
+          <button onClick={() => setFiltrosAbiertos((v) => !v)} className="text-xs px-2.5 py-1.5 rounded gp-btn-ghost flex items-center gap-1">
+            <Sliders size={12} /> Filtros
+          </button>
+        }
         onExportExcel={() => exportarFilasExcel(visibles, columnasExport, "contactos")}
         onExportPDF={() => exportarFilasPDF(visibles, columnasExport, "contactos", "Contactos", `filtro: ${filtroTipo}${busqueda ? ` · búsqueda: "${busqueda}"` : ""}`)} />
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        {visibles.map((c) => {
-          const proyectosVinculados = proyectosDe(c.id);
-          const ultimaAtencion = ultimaAtencionDe(c.id);
-          return (
-          <div key={c.id} className="gp-panel p-4">
-            <div className="flex items-start justify-between gap-2">
-              <div className="flex items-start gap-3 min-w-0">
-                {c.fotoUrl ? (
-                  <img src={c.fotoUrl} alt="" className="w-10 h-10 rounded-full object-cover shrink-0" style={{ border: "1px solid var(--border)" }} />
-                ) : (
-                  <div className="w-10 h-10 rounded-full flex items-center justify-center shrink-0 text-xs font-semibold" style={{ background: "var(--panel-hi)", color: "var(--gold)" }}>
-                    {(c.nombre || "").slice(0, 2).toUpperCase()}
-                  </div>
-                )}
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <p className="text-sm font-medium truncate">{c.nombre}</p>
-                    {(() => {
-                      const dc = diasParaCumple(c.fechaNacimiento);
-                      if (dc === null || dc > 30) return null;
-                      return <Badge tone="gold">🎂 {dc === 0 ? "¡hoy!" : `en ${dc}d`}</Badge>;
-                    })()}
-                  </div>
-                  <div className="flex items-center gap-1 flex-wrap mt-0.5">
-                    {tiposDe(c).map((t) => <Badge key={t} tone={toneTipo[t] || ""}>{t}</Badge>)}
-                    {c.parentesco && <Badge tone="muted">{c.parentesco}</Badge>}
-                  </div>
-                  {(c.empresa || c.puesto) && (
-                    <p className="text-xs gp-text-muted mt-1 truncate">{[c.puesto, c.empresa].filter(Boolean).join(" · ")}</p>
-                  )}
-                  {proyectosVinculados.length > 0 && (
-                    <p className="text-xs gp-text-muted mt-0.5 truncate">
-                      {proyectosVinculados[0].nombre}{proyectosVinculados.length > 1 ? ` +${proyectosVinculados.length - 1}` : ""}
-                    </p>
-                  )}
-                  {ultimaAtencion && (
-                    <p className="text-xs gp-text-muted mt-0.5">Última atención: {ultimaAtencion.fecha || "—"} · {ultimaAtencion.tipo}</p>
-                  )}
-                </div>
-              </div>
-              <div className="flex gap-1 shrink-0">
-                {c.whatsapp && <a href={`https://wa.me/${(c.whatsapp || "").replace(/\D/g, "")}`} target="_blank" rel="noopener noreferrer" title="WhatsApp" className="p-1.5 rounded gp-btn-ghost" style={{ lineHeight: 0 }}><MessageCircle size={13} /></a>}
-                {c.correo && <a href={`mailto:${c.correo}`} title="Correo" className="p-1.5 rounded gp-btn-ghost" style={{ lineHeight: 0 }}><Mail size={13} /></a>}
-                {(c.telefono || c.whatsapp) && <a href={`tel:${c.telefono || c.whatsapp}`} title="Llamar" className="p-1.5 rounded gp-btn-ghost" style={{ lineHeight: 0 }}><Phone size={13} /></a>}
-                <IconBtn title="Comentarios" onClick={() => setComentariosDe(c)}><MessageSquare size={13} /></IconBtn>
-                {onVerRegalos && <IconBtn title="Atenciones" onClick={() => onVerRegalos(c)}><Gift size={13} /></IconBtn>}
-                <IconBtn title="Editar" onClick={() => setModal({ item: c })}><Pencil size={13} /></IconBtn>
-                <IconBtn title="Eliminar" onClick={() => onRemove(c.id)}><Trash2 size={13} /></IconBtn>
-              </div>
-            </div>
-            {c.notas && <p className="text-xs mt-2 gp-text-muted">{c.notas}</p>}
-          </div>
-          );
-        })}
-        {visibles.length === 0 && <p className="text-sm gp-text-muted col-span-2">Aún no registras contactos {filtroTipo !== "Todos" ? `de tipo "${filtroTipo}"` : ""}.</p>}
+      {filtrosAbiertos && (
+        <div className="gp-panel p-3 mb-3 flex flex-wrap items-center gap-3">
+          <OrdenSelector opciones={opcionesOrden} value={orden} onChange={(v) => { setOrden(v); setOrdenDir("asc"); }} />
+          <button onClick={() => { setFiltroTipo("Todos"); setBusqueda(""); setOrden("alfabetico"); setOrdenDir("asc"); }} className="text-xs gp-text-gold">Limpiar filtros</button>
+        </div>
+      )}
+
+      {/* Escritorio: tabla. Celular: tarjetas (el documento pide explícitamente no comprimir la
+          tabla en móvil). */}
+      <div className="gp-panel overflow-x-auto hidden md:block">
+        <table className="gp-table">
+          <thead>
+            <tr>
+              <Th label="Nombre" sortKey="alfabetico" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} />
+              <th>Tipos</th>
+              <Th label="Empresa / Organización" sortKey="empresa" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} />
+              <th>Proyectos</th>
+              <Th label="Última atención" sortKey="ultimaAtencion" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} />
+              <th>Contacto</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {enPagina.map((c) => {
+              const ultima = ultimaAtencionDe(c.id);
+              return (
+                <tr key={c.id}>
+                  <td>
+                    <div className="flex items-center gap-2.5">
+                      <Avatar c={c} />
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="font-medium">{c.nombre}</span>
+                          <BadgeCumple c={c} />
+                        </div>
+                        {c.puesto && <div className="text-xs gp-text-muted">{c.puesto}</div>}
+                      </div>
+                    </div>
+                  </td>
+                  <td><ChipsTipos c={c} /></td>
+                  <td className="gp-text-muted">{c.empresa || "—"}</td>
+                  <td><ChipsProyectos c={c} /></td>
+                  <td className="gp-mono gp-text-muted">{ultima?.fecha || "—"}</td>
+                  <td><AccionesContacto c={c} /></td>
+                  <td><MenuFila c={c} /></td>
+                </tr>
+              );
+            })}
+            {enPagina.length === 0 && (
+              <tr><td colSpan={7} className="text-center gp-text-muted py-8">
+                {data.contactos.length === 0 ? "Aún no registras contactos." : "Ningún contacto coincide con la búsqueda o el filtro."}
+              </td></tr>
+            )}
+          </tbody>
+        </table>
       </div>
+
+      <div className="md:hidden flex flex-col gap-2">
+        {enPagina.map((c) => (
+          <div key={c.id} className="gp-panel p-3">
+            <div className="flex items-start gap-3">
+              <Avatar c={c} size={40} />
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <p className="text-sm font-medium truncate">{c.nombre}</p>
+                  <BadgeCumple c={c} />
+                </div>
+                <div className="mt-1"><ChipsTipos c={c} /></div>
+                {(c.empresa || c.puesto) && <p className="text-xs gp-text-muted mt-1 truncate">{[c.puesto, c.empresa].filter(Boolean).join(" · ")}</p>}
+                <div className="mt-1"><ChipsProyectos c={c} /></div>
+              </div>
+              <MenuFila c={c} />
+            </div>
+            <div className="flex items-center justify-between mt-2 pt-2 border-t gp-border">
+              <AccionesContacto c={c} />
+              <span className="text-xs gp-text-muted">{ultimaAtencionDe(c.id)?.fecha || ""}</span>
+            </div>
+          </div>
+        ))}
+        {enPagina.length === 0 && (
+          <p className="text-sm gp-text-muted text-center py-6">
+            {data.contactos.length === 0 ? "Aún no registras contactos." : "Ningún contacto coincide con la búsqueda o el filtro."}
+          </p>
+        )}
+      </div>
+
+      {visibles.length > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-3 mt-3 text-xs gp-text-muted">
+          <span>Mostrando {desde + 1}–{Math.min(desde + porPagina, visibles.length)} de {visibles.length} contacto{visibles.length === 1 ? "" : "s"}</span>
+          {totalPaginas > 1 && (
+            <div className="flex items-center gap-1">
+              <button onClick={() => setPagina(Math.max(1, paginaActual - 1))} disabled={paginaActual === 1} className="px-2 py-1 rounded gp-btn-ghost disabled:opacity-40" aria-label="Página anterior"><ChevronLeft size={13} /></button>
+              {paginasVisibles(paginaActual, totalPaginas).map((p, i) => (
+                p === "…"
+                  ? <span key={`sep-${i}`} className="px-1">…</span>
+                  : <button key={p} onClick={() => setPagina(p)} className={`px-2.5 py-1 rounded ${p === paginaActual ? "gp-btn" : "gp-btn-ghost"}`}>{p}</button>
+              ))}
+              <button onClick={() => setPagina(Math.min(totalPaginas, paginaActual + 1))} disabled={paginaActual === totalPaginas} className="px-2 py-1 rounded gp-btn-ghost disabled:opacity-40" aria-label="Página siguiente"><ChevronRight size={13} /></button>
+            </div>
+          )}
+          <label className="flex items-center gap-1.5">
+            Mostrar
+            <select className="gp-input text-xs py-1" style={{ width: "auto" }} value={porPagina} onChange={(e) => { setPorPagina(Number(e.target.value)); setPagina(1); }}>
+              {[12, 24, 50, 100].map((n) => <option key={n} value={n}>{n}</option>)}
+            </select>
+            por página
+          </label>
+        </div>
+      )}
 
       {comentariosDe && (
         <Modal title={`Comentarios — ${comentariosDe.nombre}`} onClose={() => setComentariosDe(null)}>
@@ -7929,22 +8118,17 @@ function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
       )}
 
       {importarAbierto && (
-        <Modal title="Importar contactos desde Excel" onClose={() => setImportarAbierto(false)}>
+        <Modal title="Importar contactos" onClose={() => setImportarAbierto(false)}>
+          {/* La sincronización con Google/Apple/Microsoft es la dirección del anexo de
+              arquitectura, pero todavía NO existe — se anuncia aquí sin fingir que ya funciona
+              (el propio documento lo pide así), en vez de poner un botón que no hace nada. */}
+          <p className="text-xs gp-text-muted mb-3" style={{ borderLeft: "2px solid var(--gold)", paddingLeft: 8 }}>
+            Muy pronto vas a poder sincronizar directo con Google, Apple o Microsoft, con detección
+            de duplicados. Por ahora se importa desde Excel.
+          </p>
           <Suspense fallback={<p className="text-sm gp-text-muted">Cargando…</p>}>
             <ImportarExcelModal tipo="contactos" XLSX={XLSX} onImportarFila={(item) => onAdd(item)} onCerrar={() => setImportarAbierto(false)} />
           </Suspense>
-        </Modal>
-      )}
-
-      {sincronizarAbierto && (
-        <Modal title="Sincronizar contactos" onClose={() => setSincronizarAbierto(false)}>
-          <p className="text-sm gp-text-muted mb-3">
-            Muy pronto vas a poder sincronizar tus contactos de ARKEYONE con Google, Apple o Microsoft
-            (dos vías: traer contactos de ahí, y mandarles los datos básicos de los tuyos), con
-            detección de duplicados antes de aplicar cualquier cambio.
-          </p>
-          <p className="text-sm gp-text-muted mb-4">Por ahora, usa "Importar" para traer contactos desde un Excel.</p>
-          <button className="gp-btn-ghost w-full py-2 text-sm" onClick={() => setSincronizarAbierto(false)}>Entendido</button>
         </Modal>
       )}
     </div>
@@ -8019,17 +8203,22 @@ function ContactoForm({ item, proyectos, vinculos, onVincularProyecto, onDesvinc
         <Field label="Apellido paterno"><input className="gp-input" value={v.apellidoPaterno} onChange={(e) => setV({ ...v, apellidoPaterno: e.target.value })} /></Field>
         <Field label="Apellido materno"><input className="gp-input" value={v.apellidoMaterno} onChange={(e) => setV({ ...v, apellidoMaterno: e.target.value })} /></Field>
       </div>
-      <Field label="Tipo (puede ser varios a la vez)">
+      <Field label="Tipo de contacto (puede ser varios)">
         <div className="flex flex-wrap gap-1.5">
-          {["Cliente", "Proveedor", "Colaborador", "Otro"].map((t) => (
-            <button
-              key={t} type="button" onClick={() => toggleTipo(t)}
-              className="text-xs px-2.5 py-1 rounded-full border"
-              style={v.tipos.includes(t) ? { background: "var(--gold)", color: "#161822", borderColor: "var(--gold)" } : { borderColor: "var(--border)" }}
-            >
-              {t}
-            </button>
-          ))}
+          {TIPOS_CONTACTO.map((t) => {
+            const color = COLOR_TIPO_CONTACTO[t];
+            return (
+              <button
+                key={t} type="button" onClick={() => toggleTipo(t)}
+                className="text-xs px-2.5 py-1 rounded-full border"
+                style={v.tipos.includes(t)
+                  ? { background: color, color: "#0B2341", borderColor: color, fontWeight: 600 }
+                  : { borderColor: "var(--border)", color: "var(--muted)" }}
+              >
+                {t}
+              </button>
+            );
+          })}
         </div>
       </Field>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
