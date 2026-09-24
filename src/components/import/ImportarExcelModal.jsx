@@ -84,6 +84,57 @@ const CONFIGS = {
     },
     resumenFila: (item) => item.nombre,
   },
+  // Proyectos e ideas (rediseño del 24 sept 2026). Los estados y contextos válidos se repiten
+  // aquí a propósito: App.jsx no exporta sus constantes y este archivo se carga de forma perezosa.
+  // Si cambian allá, hay que cambiarlos aquí — cualquier valor que no calce cae en el default en
+  // vez de guardar un estado inventado.
+  proyectos: {
+    etiqueta: 'proyectos',
+    columnas: [
+      { campo: 'nombre', etiqueta: 'Nombre', alias: ['nombre', 'proyecto'], requerido: true },
+      { campo: 'descripcion', etiqueta: 'Descripción', alias: ['descripcion', 'descripción'], requerido: false },
+      { campo: 'estatus', etiqueta: 'Estado', alias: ['estado', 'estatus'], requerido: false },
+      { campo: 'contexto', etiqueta: 'Contexto', alias: ['contexto'], requerido: false },
+      { campo: 'categoria', etiqueta: 'Categoría', alias: ['categoria', 'categoría'], requerido: false },
+      { campo: 'fechaInicio', etiqueta: 'Inicio', alias: ['inicio', 'fecha de inicio', 'fecha inicio'], requerido: false },
+      { campo: 'fechaFin', etiqueta: 'Fin', alias: ['fin', 'fecha de fin', 'fecha fin'], requerido: false },
+      { campo: 'etiquetas', etiqueta: 'Etiquetas', alias: ['etiquetas', 'tags'], requerido: false },
+    ],
+    validar: (m) => {
+      const nombre = (m.nombre || '').toString().trim();
+      if (!nombre) return { ok: false, motivo: 'Falta Nombre' };
+      // Se acepta tanto el valor guardado ("En validación") como la etiqueta corta que se ve en
+      // pantalla ("Validación"), porque el usuario exporta lo que ve.
+      const estados = {
+        'idea': 'Idea',
+        'validacion': 'En validación', 'en validacion': 'En validación',
+        'desarrollo': 'En desarrollo', 'en desarrollo': 'En desarrollo',
+        'activo': 'Activo', 'finalizado': 'Finalizado',
+        'pausado': 'Pausado', 'en pausa': 'Pausado',
+        'archivado': 'Archivado',
+      };
+      const contextos = { personal: 'Personal', profesional: 'Profesional', empresarial: 'Empresarial' };
+      const categorias = ['Fundación', 'Software', 'Música', 'Renta', 'Marketing', 'Chatbots', 'Personal', 'Otro'];
+      const categoria = categorias.find((c) => norm(c) === norm(m.categoria)) || 'Otro';
+      const etiquetas = (m.etiquetas || '').toString().split(/[,;]/).map((t) => t.trim()).filter(Boolean);
+      return {
+        ok: true,
+        item: {
+          nombre,
+          descripcion: (m.descripcion || '').toString().trim(),
+          estatus: estados[norm(m.estatus)] || 'Idea',
+          contexto: contextos[norm(m.contexto)] || 'Personal',
+          categoria,
+          fechaInicio: parseFecha(m.fechaInicio) || '',
+          fechaFin: parseFecha(m.fechaFin) || '',
+          etiquetas,
+          responsableContactoId: '', modo: 'Finito', monetizacion: 'Dinero',
+          prioridad: 'Media', fechaRevision: '', github: '', githubSubido: false, notas: [],
+        },
+      };
+    },
+    resumenFila: (item) => `${item.nombre} — ${item.estatus}`,
+  },
   finanzas: {
     etiqueta: 'movimientos de Finanzas',
     columnas: [

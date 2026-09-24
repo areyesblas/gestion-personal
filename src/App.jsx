@@ -17,7 +17,9 @@ import MotivationalCard from "./components/CentroMando/MotivationalCard";
 import ArkiWidget from "./components/CentroMando/ArkiWidget";
 import BottomNav from "./components/nav/BottomNav";
 import BotonRegresar from "./components/nav/BotonRegresar";
-import bannerContactos from "./assets/dashboard-banner-montanas-nevadas.jpg";
+// Mismo banner para Contactos y Proyectos e ideas (cada pantalla lo recorta distinto) hasta que
+// haya una foto propia para cada una.
+import bannerMontanas from "./assets/dashboard-banner-montanas-nevadas.jpg";
 import * as XLSX from "xlsx";
 import {
   FolderKanban, CheckSquare, Wallet, AlertTriangle,
@@ -25,6 +27,7 @@ import {
   ChevronRight, Bell, Lightbulb, Rocket, MessageCircle, Mail, Globe,
   Target, Contact, BarChart3, FileText, Flame, HeartPulse, Check, Menu, PieChart as PieChartIcon, User, Home,
   PiggyBank, Camera, Film, Upload, MapPin, Clock, Mic, Gift, Receipt, Megaphone, ChevronUp, Gem, Download, Sun, Moon, Shield, LogOut, ChevronLeft, Lock, Pill, CalendarClock, Zap, StickyNote, Search, Sparkles, Send, Bot, Square, Settings, CalendarRange, Palette, Eye, EyeOff, Sliders, Volume2, VolumeX, Play, Copy, Phone, MessageSquare, MoreHorizontal,
+  Heart, Code2, Music, Tag, Archive, ExternalLink, ListChecks, Info,
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
@@ -135,6 +138,37 @@ const claseTema = (tema) => (tema && tema !== "actual" ? `tema-${tema}` : "");
 /* ---------- datos base ---------- */
 const CATS = ["Fundación", "Software", "Música", "Renta", "Marketing", "Chatbots", "Personal", "Otro"];
 const ESTATUS_PROYECTO = ["Idea", "En validación", "En desarrollo", "Activo", "Finalizado", "Pausado", "Archivado"];
+// Etiqueta corta SOLO para dibujar (chips de filtro, badges): el valor guardado en Supabase sigue
+// siendo el de ESTATUS_PROYECTO. No son estados nuevos — es el mismo estado escrito más corto para
+// que la fila de filtros no se convierta en una barra gigantesca (secc. 7 del rediseño).
+const ETIQUETA_ESTATUS_PROYECTO = { "En validación": "Validación", "En desarrollo": "Desarrollo", "Pausado": "En pausa" };
+const etiquetaEstatusProyecto = (e) => ETIQUETA_ESTATUS_PROYECTO[e] || e;
+// Colores semánticos del pipeline: de la idea (ámbar, todavía sin compromiso) al activo (verde,
+// produciendo), con el archivado en gris. Son los mismos colores que ya usa el resto de ARKEYONE.
+const COLOR_ESTATUS_PROYECTO = {
+  "Idea": "#F59E0B",
+  "En validación": "#8B5CF6",
+  "En desarrollo": "#087CF5",
+  "Activo": "#16A36A",
+  "Finalizado": "#5FBF8B",
+  "Pausado": "#F97316",
+  "Archivado": "#64748B",
+};
+// Contexto de vida del proyecto (secc. 12 del rediseño, 24 sept 2026). NO es un módulo por
+// contexto: es una propiedad del proyecto, como la categoría, para poder separar lo personal de
+// lo del negocio sin duplicar pantallas.
+const CONTEXTOS_PROYECTO = ["Personal", "Profesional", "Empresarial"];
+const COLOR_CONTEXTO_PROYECTO = { Personal: "#8B5CF6", Profesional: "#087CF5", Empresarial: "#16A36A" };
+// Ícono y color del proyecto: se DERIVAN de su categoría, no se guardan como campo. Así cada
+// proyecto se reconoce de un vistazo en la lista sin pedirle a nadie que elija un ícono.
+const ICONO_CATEGORIA_PROYECTO = {
+  "Fundación": Heart, "Software": Code2, "Música": Music, "Renta": Home,
+  "Marketing": Megaphone, "Chatbots": Bot, "Personal": User, "Otro": FolderKanban,
+};
+const COLOR_CATEGORIA_PROYECTO = {
+  "Fundación": "#EC4899", "Software": "#087CF5", "Música": "#8B5CF6", "Renta": "#16A36A",
+  "Marketing": "#F59E0B", "Chatbots": "#06B6D4", "Personal": "#64748B", "Otro": "#64748B",
+};
 const MODO_PROYECTO = ["Finito", "Continuo"];
 const MONETIZACION = ["Dinero", "Especie", "Intercambio", "No genera dinero"];
 const PRIORIDADES = ["Alta", "Media", "Baja"];
@@ -1867,14 +1901,13 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
   const [vistaRestauradaTrasReload] = useState(() => leerVistaGuardadaTrasReload());
   const [view, setView] = useState(() => {
     if (!vistaRestauradaTrasReload) return "dashboard";
-    // contextoPantalla usa {modulo:"proyectos", entidad_id} tanto para la lista como para el
-    // detalle de un proyecto -- solo es "proyecto-detalle" si venía con un entidad_id puesto.
-    if (vistaRestauradaTrasReload.modulo === "proyectos" && vistaRestauradaTrasReload.entidad_id) return "proyecto-detalle";
+    // contextoPantalla usa {modulo:"proyectos", entidad_id} cuando estabas viendo UN proyecto.
+    // Desde el rediseño del 24 sept 2026 eso se restaura como la lista con su ficha abierta (ver
+    // proyectoSelId más abajo), que es donde vive el detalle — ya no como una pantalla aparte.
     return vistaRestauradaTrasReload.modulo || "dashboard";
   });
   const [regalosFiltroContacto, setRegalosFiltroContacto] = useState("");
   const [proyectoDetalleId, setProyectoDetalleId] = useState(() => vistaRestauradaTrasReload?.entidad_id || null);
-  const irADetalleProyecto = (proyectoId) => { setProyectoDetalleId(proyectoId); irAVista("proyecto-detalle"); };
   // El contacto seleccionado (su ficha a la derecha) vive aquí arriba, no dentro de Contactos:
   // así, si sales a Agenda o a Notas y le das "Regresar", vuelves al mismo renglón con su ficha
   // abierta en vez de a la lista en blanco (pedido de Angel, 24 sept 2026).
@@ -1882,6 +1915,22 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
   // También la pestaña activa de esa ficha: si te vas a Agenda desde "Ver Agenda →" y regresas,
   // vuelves a la pestaña de Agenda del contacto, no al principio de la ficha.
   const [contactoSelTab, setContactoSelTab] = useState("informacion");
+  // Lo mismo para Proyectos e ideas, que desde el rediseño del 24 sept 2026 usa el mismo patrón
+  // lista + ficha: el proyecto seleccionado y la pestaña de su ficha viven aquí para sobrevivir a
+  // una salida a Finanzas/Tareas/Contactos y al "Regresar".
+  const [proyectoSelId, setProyectoSelId] = useState(() => vistaRestauradaTrasReload?.entidad_id || null);
+  const [proyectoSelTab, setProyectoSelTab] = useState("resumen");
+  // Filtro inicial del módulo Tareas cuando se entra desde la ficha de un proyecto ("Ver todas
+  // las tareas"): las tareas se gestionan en SU módulo, no en un sistema paralelo dentro de
+  // Proyectos.
+  const [pendientesFiltroProyecto, setPendientesFiltroProyecto] = useState("");
+  // "Ver el proyecto" desde cualquier lado (ficha de un contacto, buscador) abre la lista de
+  // Proyectos con su ficha abierta — ese ES el detalle. El centro de proyecto (pantalla completa
+  // con el árbol de tareas, metas, marketing y documentos) es un paso más adentro.
+  const irADetalleProyecto = (proyectoId) => { setProyectoSelId(proyectoId); setProyectoSelTab("resumen"); irAVista("proyectos"); };
+  const irACentroProyecto = (proyectoId) => { setProyectoDetalleId(proyectoId); irAVista("proyecto-detalle"); };
+  const irAFichaContacto = (contactoId) => { setContactoSelId(contactoId); setContactoSelTab("informacion"); irAVista("contactos"); };
+  const irATareasDeProyecto = (proyectoId) => { setPendientesFiltroProyecto(proyectoId); irAVista("pendientes"); };
 
   // --- Breadcrumb / "volver" a una vista anterior --------------------------------------------
   // El historial se arma pasivamente observando cambios de `view` (cubre tanto irAVista como los
@@ -3089,13 +3138,27 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
             />
           )}
           {view === "proyectos" && (
-            <Proyectos data={data} onAdd={(i) => addItem("proyectos", i)} onEdit={(id, p) => editItem("proyectos", id, p)} onRemove={(id) => askDelete("proyectos", id)} onAddComentario={(i) => addItem("comentarios", i)} onRemoveComentario={(id) => askDelete("comentarios", id)} onVerDetalle={irADetalleProyecto} crearAlEntrar={accionRapidaCrear?.modulo === "proyectos" ? accionRapidaCrear : null} onConsumirCrearAlEntrar={consumirAccionRapidaCrear} />
+            <Proyectos
+              data={data}
+              onAdd={(i) => addItem("proyectos", i)} onEdit={(id, p) => editItem("proyectos", id, p)} onRemove={(id) => askDelete("proyectos", id)}
+              onAddComentario={(i) => addItem("comentarios", i)} onRemoveComentario={(id) => askDelete("comentarios", id)}
+              onAddTarea={(i) => addItem("pendientes", i)}
+              onVerDetalle={irACentroProyecto}
+              onVincularContacto={vincularProyectoContacto} onDesvincularContacto={desvincularProyectoContacto}
+              onIrAVista={irAVista} onVerTareasDeProyecto={irATareasDeProyecto} onVerContacto={irAFichaContacto}
+              onCrearContacto={crearContactoRapido} onEnviarInvitacion={enviarInvitacionTarea} onAceptarEnNombre={aceptarTareaEnNombre}
+              sensibleDesbloqueadoHasta={sensibleDesbloqueadoHasta} onDesbloquear={desbloquearSensibleAqui}
+              miNombre={nombreMostrar || miEmail} miAvatarUrl={avatarUrl}
+              proyectoSel={proyectoSelId} onSeleccionar={(id) => { setProyectoSelId(id); setProyectoSelTab("resumen"); }}
+              fichaTab={proyectoSelTab} onFichaTab={setProyectoSelTab}
+              crearAlEntrar={accionRapidaCrear?.modulo === "proyectos" ? accionRapidaCrear : null} onConsumirCrearAlEntrar={consumirAccionRapidaCrear}
+            />
           )}
           {view === "proyecto-detalle" && (
             <ProyectoDetalle
               data={data}
               proyectoId={proyectoDetalleId}
-              onVolver={() => irAVista("proyectos")}
+              onVolver={() => { setProyectoSelId(proyectoDetalleId); setProyectoSelTab("resumen"); irAVista("proyectos"); }}
               onAddTarea={(i) => addItem("pendientes", i)}
               onEditTarea={(id, p) => editItem("pendientes", id, p)}
               onRemoveTarea={(id, extraIds, mensaje) => askDelete("pendientes", id, { extraIds, mensaje })}
@@ -3114,6 +3177,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
           )}
           {view === "pendientes" && (
             <Pendientes data={data} activeOwnerId={activeOwnerId} onAdd={(i) => addItem("pendientes", i)} onEdit={(id, p) => editItem("pendientes", id, p)} onRemove={(id, extraIds, mensaje) => askDelete("pendientes", id, { extraIds, mensaje })} onAddComentario={(i) => addItem("comentarios", i)} onRemoveComentario={(id) => askDelete("comentarios", id)}
+              filtroProyectoInicial={pendientesFiltroProyecto} onConsumirFiltroProyecto={() => setPendientesFiltroProyecto("")}
               onCrearContacto={crearContactoRapido}
               onEnviarInvitacion={enviarInvitacionTarea}
               onAceptarEnNombre={aceptarTareaEnNombre}
@@ -3250,7 +3314,11 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
 
       <QuickCapture data={data} onAdd={addItem} onCrearRecordatorio={onCrearRecordatorio} irAVista={irAVista} />
       <VoiceMode
-        contextoPantalla={view === "proyecto-detalle" && proyectoDetalleId ? { modulo: "proyectos", entidad_id: proyectoDetalleId } : (view && view !== "dashboard" ? { modulo: view } : null)}
+        contextoPantalla={
+          view === "proyecto-detalle" && proyectoDetalleId ? { modulo: "proyectos", entidad_id: proyectoDetalleId }
+          : view === "proyectos" && proyectoSelId ? { modulo: "proyectos", entidad_id: proyectoSelId }
+          : (view && view !== "dashboard" ? { modulo: view } : null)
+        }
         onDatosCreados={recargarModulos}
         nombreUsuario={nombreMostrar || miEmail}
       />
@@ -5019,14 +5087,160 @@ function repartoCostosProyecto(data, proyectoId) {
   return Object.values(grupos).sort((a, b) => (a.esYo ? -1 : b.esYo ? 1 : a.nombre.localeCompare(b.nombre)));
 }
 
-function Proyectos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveComentario, onVerDetalle, crearAlEntrar, onConsumirCrearAlEntrar }) {
-  const [modal, setModal] = useState(null);
-  const [expanded, setExpanded] = useState(null);
-  const [notaTexto, setNotaTexto] = useState("");
-  const [orden, setOrden] = useState("default");
-  const [busqueda, setBusqueda] = useState("");
+/* ---------- Proyectos e ideas — piezas compartidas entre la lista y la ficha ---------- */
 
-  const empty = { nombre: "", categoria: CATS[0], estatus: "Idea", modo: "Finito", monetizacion: MONETIZACION[0], descripcion: "", github: "", githubSubido: false, notas: [], prioridad: "Media", fechaRevision: "" };
+// Avance del proyecto: NO es un campo guardado, se calcula desde las tareas reales del módulo
+// Tareas (mismo cálculo que el centro de proyecto). Devuelve null —no 0— cuando el proyecto
+// todavía no tiene tareas, para no dibujar un "0%" que parece atraso cuando en realidad no hay
+// nada que medir.
+function avanceProyecto(data, proyectoId) {
+  const arbol = buildTareaTree((data.pendientes || []).filter((t) => t.proyectoId === proyectoId));
+  if (arbol.length === 0) return null;
+  return Math.round(arbol.reduce((s, n) => s + calcAvanceTarea(n), 0) / arbol.length);
+}
+
+// Ícono del proyecto derivado de su categoría (no hay campo "ícono" que capturar).
+function IconoProyecto({ p, size = 36 }) {
+  const Icono = ICONO_CATEGORIA_PROYECTO[p.categoria] || FolderKanban;
+  const color = COLOR_CATEGORIA_PROYECTO[p.categoria] || "#64748B";
+  return (
+    <div
+      className="rounded-xl flex items-center justify-center shrink-0"
+      style={{ width: size, height: size, background: `${color}1F`, color }}
+    >
+      <Icono size={Math.round(size * 0.5)} />
+    </div>
+  );
+}
+
+function BadgeEstatusProyecto({ estatus }) {
+  const color = COLOR_ESTATUS_PROYECTO[estatus] || "#64748B";
+  return <span className="gp-badge whitespace-nowrap" style={{ color, background: `${color}22` }}>{etiquetaEstatusProyecto(estatus)}</span>;
+}
+
+function BadgeContextoProyecto({ contexto }) {
+  if (!contexto) return <span className="gp-text-muted text-xs">—</span>;
+  const color = COLOR_CONTEXTO_PROYECTO[contexto] || "#64748B";
+  return <span className="gp-badge whitespace-nowrap" style={{ color, background: `${color}22` }}>{contexto}</span>;
+}
+
+// Barra compacta de progreso para comparar proyectos de un vistazo (secc. 10: nada de gráficas
+// grandes dentro de la lista).
+function BarraProgresoProyecto({ pct, ancho = 78 }) {
+  if (pct === null || pct === undefined) return <span className="text-xs gp-text-muted">sin tareas</span>;
+  const color = pct >= 100 ? "var(--teal)" : pct >= 50 ? "#087CF5" : "var(--gold)";
+  return (
+    <div className="flex items-center gap-2">
+      <div className="h-1.5 rounded-full" style={{ width: ancho, background: "var(--border)" }}>
+        <div className="h-1.5 rounded-full" style={{ width: `${pct}%`, background: color }} />
+      </div>
+      <span className="gp-mono text-xs shrink-0" style={{ color }}>{pct}%</span>
+    </div>
+  );
+}
+
+// Responsable del proyecto. null = tú (el dueño de la cuenta): se dibuja con tu propio nombre y
+// avatar en vez de un hueco. Reutiliza AvatarContacto para no tener dos formas de pintar una
+// persona en la app.
+function ResponsableProyecto({ p, data, miNombre, miAvatarUrl, size = 24 }) {
+  const c = p.responsableContactoId ? (data.contactos || []).find((x) => x.id === p.responsableContactoId) : null;
+  const persona = c || { nombre: miNombre || "Tú", fotoUrl: miAvatarUrl || "" };
+  return (
+    <div className="flex items-center gap-2 min-w-0">
+      <AvatarContacto c={persona} size={size} />
+      <span className="text-xs truncate">{primerNombreYApellido(persona.nombre)}</span>
+    </div>
+  );
+}
+
+// "Angel Reyes Blas" -> "Angel Reyes": nombre corto para que la columna Responsable no empuje al
+// resto de la tabla (secc. 14).
+const primerNombreYApellido = (nombre) => (nombre || "").trim().split(/\s+/).slice(0, 2).join(" ") || "—";
+
+// Rango de fechas del proyecto, en dos renglones como el mockup.
+function RangoFechasProyecto({ p }) {
+  if (!p.fechaInicio && !p.fechaFin) return <span className="gp-text-muted text-xs">—</span>;
+  const vencido = p.fechaFin && p.estatus !== "Finalizado" && p.estatus !== "Archivado" && daysUntil(p.fechaFin) < 0;
+  return (
+    <div className="gp-mono text-xs leading-snug">
+      <div className="gp-text-muted">{fmtFechaCorta(p.fechaInicio) || "—"}</div>
+      <div style={{ color: vencido ? "var(--red)" : "var(--muted)" }}>{fmtFechaCorta(p.fechaFin) || "—"}</div>
+    </div>
+  );
+}
+
+const MESES_CORTO_FECHA = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
+// "2026-03-01" -> "01 Mar 2026". Se parte la cadena a mano (sin new Date) porque construir una
+// fecha desde un ISO sin hora la interpreta en UTC y en México puede mostrar el día anterior.
+const fmtFechaCorta = (iso) => {
+  if (!iso) return "";
+  const [y, m, d] = String(iso).slice(0, 10).split("-");
+  if (!y || !m || !d) return String(iso);
+  return `${d} ${MESES_CORTO_FECHA[Number(m) - 1] || m} ${y}`;
+};
+
+// Menú "···" de cada proyecto. Igual que en Contactos, el estado de cuál está abierto vive en la
+// lista (uno solo para toda la tabla), no uno por fila.
+function MenuFilaProyecto({ p, abierto, onToggle, onCerrar, onAbrir, onEditar, onDuplicar, onArchivar, onEliminar }) {
+  const archivado = p.estatus === "Archivado";
+  return (
+    <div className="relative">
+      <IconBtn title="Acciones" onClick={onToggle}><MoreHorizontal size={15} /></IconBtn>
+      {abierto && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={onCerrar} />
+          <div className="absolute right-0 top-8 z-20 gp-panel py-1 text-sm" style={{ minWidth: 190 }}>
+            <button onClick={() => { onCerrar(); onAbrir(p); }} className="w-full text-left px-3 py-2 gp-panel-hi flex items-center gap-2"><Eye size={13} /> Abrir</button>
+            <button onClick={() => { onCerrar(); onEditar(p); }} className="w-full text-left px-3 py-2 gp-panel-hi flex items-center gap-2"><Pencil size={13} /> Editar</button>
+            <button onClick={() => { onCerrar(); onDuplicar(p); }} className="w-full text-left px-3 py-2 gp-panel-hi flex items-center gap-2"><Copy size={13} /> Duplicar</button>
+            <button onClick={() => { onCerrar(); onArchivar(p); }} className="w-full text-left px-3 py-2 gp-panel-hi flex items-center gap-2"><Archive size={13} /> {archivado ? "Desarchivar" : "Archivar"}</button>
+            <button onClick={() => { onCerrar(); onEliminar(p.id); }} className="w-full text-left px-3 py-2 gp-panel-hi flex items-center gap-2 gp-text-red"><Trash2 size={13} /> Eliminar</button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ---------- Proyectos e ideas (lista) ---------- */
+// Rediseño del 24 sept 2026: misma filosofía que Contactos — LISTA LIMPIA → SELECCIONAR → FICHA.
+// Se eliminó por completo la expansión en línea (antes cada fila abría finanzas, reparto de
+// costos, tabla de tareas, GitHub y bitácora dentro de la propia lista, y la lista dejaba de
+// servir como lista). Todo eso vive ahora en la ficha de la derecha o en su módulo fuente.
+function Proyectos({
+  data, onAdd, onEdit, onRemove, onAddComentario, onRemoveComentario,
+  onVerDetalle, onVincularContacto, onDesvincularContacto,
+  onAddTarea, onIrAVista, onVerTareasDeProyecto, onVerContacto,
+  onCrearContacto, onEnviarInvitacion, onAceptarEnNombre,
+  sensibleDesbloqueadoHasta, onDesbloquear, miNombre, miAvatarUrl,
+  proyectoSel, onSeleccionar, fichaTab, onFichaTab,
+  crearAlEntrar, onConsumirCrearAlEntrar,
+}) {
+  const [modal, setModal] = useState(null);
+  const [importarAbierto, setImportarAbierto] = useState(false);
+  const [filtroEstatus, setFiltroEstatusState] = useState("Todos");
+  const [filtroContexto, setFiltroContextoState] = useState("Todos");
+  const [filtroCategoria, setFiltroCategoriaState] = useState("Todas");
+  const [orden, setOrden] = useState("default");
+  const [ordenDir, setOrdenDir] = useState("asc");
+  const [busqueda, setBusquedaState] = useState("");
+  const [menuAcciones, setMenuAcciones] = useState(null);
+  const [pagina, setPagina] = useState(1);
+  const [porPagina, setPorPagina] = useState(8);
+  // Cualquier cambio de filtro o búsqueda regresa a la página 1 — si no, se queda en una página
+  // que ya no existe con el nuevo resultado y la lista se ve vacía sin razón aparente.
+  const setFiltroEstatus = (t) => { setFiltroEstatusState(t); setPagina(1); };
+  const setFiltroContexto = (t) => { setFiltroContextoState(t); setPagina(1); };
+  const setFiltroCategoria = (t) => { setFiltroCategoriaState(t); setPagina(1); };
+  const setBusqueda = (q) => { setBusquedaState(q); setPagina(1); };
+  const toggleOrden = (key) => { if (orden === key) setOrdenDir((d) => (d === "asc" ? "desc" : "asc")); else { setOrden(key); setOrdenDir("asc"); } };
+
+  const empty = {
+    nombre: "", descripcion: "", estatus: "Idea", contexto: "Personal", categoria: CATS[0],
+    responsableContactoId: "", fechaInicio: "", fechaFin: "", etiquetas: [],
+    modo: "Finito", monetizacion: MONETIZACION[0], prioridad: "Media", fechaRevision: "",
+    github: "", githubSubido: false, notas: [],
+  };
 
   // Accesos rápidos del Centro de mando: si se navegó aquí pidiendo crear directo, abre el
   // formulario solo (ver irACrear en AppLoggedIn) y limpia la señal para no reabrirlo después.
@@ -5034,220 +5248,935 @@ function Proyectos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
     if (crearAlEntrar) { setModal({ item: { ...empty, ...(crearAlEntrar.preset || {}) } }); onConsumirCrearAlEntrar(); }
   }, [crearAlEntrar]);
 
+  const contactosDe = (proyectoId) => (data.contactoProyectos || [])
+    .filter((v) => v.proyectoId === proyectoId)
+    .map((v) => ({ vinculoId: v.id, contacto: (data.contactos || []).find((c) => c.id === v.contactoId) }))
+    .filter((x) => x.contacto);
+
   const camposOrden = {
     alfabetico: { get: (p) => p.nombre, tipo: "texto" },
-    registro: { get: (p) => p.createdAt, tipo: "fecha" },
+    estatus: { get: (p) => ESTATUS_PROYECTO.indexOf(p.estatus), tipo: "numero" },
+    progreso: { get: (p) => avanceProyecto(data, p.id), tipo: "numero" },
+    inicio: { get: (p) => p.fechaInicio, tipo: "fecha" },
+    fin: { get: (p) => p.fechaFin, tipo: "fecha" },
+    // createdAt lo pone el servidor: un proyecto recién creado todavía no lo tiene en memoria. Se
+    // trata como "lo más nuevo que hay" para que aparezca hasta arriba al crearlo y no hasta el
+    // final, que es donde lo mandaría un valor vacío.
+    registro: { get: (p) => p.createdAt || "9999", tipo: "fecha" },
     prioridad: { get: (p) => p.prioridad, tipo: "prioridad" },
-    revision: { get: (p) => p.fechaRevision, tipo: "fecha" },
   };
   const opcionesOrden = [
     { key: "alfabetico", label: "alfabético" },
+    { key: "estatus", label: "estado" },
+    { key: "progreso", label: "progreso" },
+    { key: "inicio", label: "fecha de inicio" },
+    { key: "fin", label: "fecha de fin" },
     { key: "registro", label: "fecha de registro" },
     { key: "prioridad", label: "prioridad" },
-    { key: "revision", label: "fecha de revisión" },
   ];
 
-  const proyectosFiltrados = filtrarPorBusqueda(data.proyectos, busqueda, [(p) => p.nombre, (p) => p.categoria, (p) => p.descripcion]);
-  const grouped = ESTATUS_PROYECTO.map((e) => ({ estatus: e, items: ordenarLista(proyectosFiltrados.filter((p) => p.estatus === e), orden, camposOrden) }));
+  const FILTROS = ["Todos", ...ESTATUS_PROYECTO];
+  const contarFiltro = (t) => (t === "Todos" ? data.proyectos.length : data.proyectos.filter((p) => p.estatus === t).length);
+
+  const porEstatus = filtroEstatus === "Todos" ? data.proyectos : data.proyectos.filter((p) => p.estatus === filtroEstatus);
+  const porContexto = filtroContexto === "Todos" ? porEstatus : porEstatus.filter((p) => (p.contexto || "") === filtroContexto);
+  const porCategoria = filtroCategoria === "Todas" ? porContexto : porContexto.filter((p) => p.categoria === filtroCategoria);
+  // Búsqueda por contenido sobre lo que el proyecto realmente tiene: nombre, descripción,
+  // categoría, contexto y etiquetas (secc. 8 — nada de criterios inventados).
+  const buscados = filtrarPorBusqueda(porCategoria, busqueda, [
+    (p) => p.nombre, (p) => p.descripcion, (p) => p.categoria, (p) => p.contexto,
+    (p) => (p.etiquetas || []).join(" "),
+  ]);
+  // Sin criterio elegido, "Orden: más reciente" tiene que ser justo eso: el último proyecto que
+  // registraste hasta arriba (ordenarLista respeta el orden de llegada, que es el más viejo
+  // primero, así que aquí se invierte a propósito).
+  const visibles = orden === "default"
+    ? ordenarLista(buscados, "registro", camposOrden, "desc")
+    : ordenarLista(buscados, orden, camposOrden, ordenDir);
+
+  const totalPaginas = Math.max(1, Math.ceil(visibles.length / porPagina));
+  const paginaActual = Math.min(pagina, totalPaginas);
+  const desde = (paginaActual - 1) * porPagina;
+  const enPagina = visibles.slice(desde, desde + porPagina);
+
   const columnasExport = [
-    { label: "Nombre", get: (p) => p.nombre }, { label: "Categoría", get: (p) => p.categoria },
-    { label: "Estatus", get: (p) => p.estatus }, { label: "Prioridad", get: (p) => p.prioridad },
-    { label: "Fecha de revisión", get: (p) => p.fechaRevision }, { label: "Descripción", get: (p) => p.descripcion },
+    { label: "Nombre", get: (p) => p.nombre },
+    { label: "Descripción", get: (p) => p.descripcion || "" },
+    { label: "Estado", get: (p) => p.estatus },
+    { label: "Contexto", get: (p) => p.contexto || "" },
+    { label: "Categoría", get: (p) => p.categoria || "" },
+    { label: "Responsable", get: (p) => (p.responsableContactoId ? (data.contactos.find((c) => c.id === p.responsableContactoId)?.nombre || "—") : (miNombre || "Tú")) },
+    { label: "Progreso", get: (p) => { const a = avanceProyecto(data, p.id); return a === null ? "" : `${a}%`; } },
+    { label: "Inicio", get: (p) => p.fechaInicio || "" },
+    { label: "Fin", get: (p) => p.fechaFin || "" },
+    { label: "Etiquetas", get: (p) => (p.etiquetas || []).join(", ") },
+    { label: "Prioridad", get: (p) => p.prioridad || "" },
   ];
-  const todosVisibles = grouped.flatMap((g) => g.items);
 
-  const addNota = (proyecto) => {
-    if (!notaTexto.trim()) return;
-    onEdit(proyecto.id, { notas: [...(proyecto.notas || []), { id: uid(), fecha: todayISO(), texto: notaTexto }] });
-    setNotaTexto("");
+  // Duplicar: copia la definición del proyecto (lo que ES el proyecto), nunca su historia. Las
+  // tareas, movimientos, contactos vinculados y comentarios pertenecen al original — copiarlos
+  // sería duplicar datos de otros módulos, justo lo que la regla prohíbe.
+  const duplicar = (p) => {
+    const { id, createdAt, userId, ...definicion } = p;
+    onAdd({ ...definicion, nombre: `${p.nombre} (copia)`, estatus: "Idea", notas: [] });
   };
+  const archivar = (p) => onEdit(p.id, { estatus: p.estatus === "Archivado" ? "Activo" : "Archivado" });
 
-  const rentabilidad = (proyectoId) => rentabilidadProyecto(data, proyectoId);
+  const propsMenu = (p) => ({
+    p,
+    abierto: menuAcciones === p.id,
+    onToggle: () => setMenuAcciones(menuAcciones === p.id ? null : p.id),
+    onCerrar: () => setMenuAcciones(null),
+    onAbrir: (x) => onSeleccionar(x.id),
+    onEditar: (x) => setModal({ item: x }),
+    onDuplicar: duplicar,
+    onArchivar: archivar,
+    onEliminar: onRemove,
+  });
+
+  const seleccionado = data.proyectos.find((p) => p.id === proyectoSel) || null;
+  const limpiarFiltros = () => { setFiltroEstatus("Todos"); setFiltroContexto("Todos"); setFiltroCategoria("Todas"); setBusqueda(""); setOrden("default"); setOrdenDir("asc"); };
 
   return (
-    <div>
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-1">
-        <h2 className="gp-serif text-2xl">Proyectos e ideas</h2>
-        <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm w-full sm:w-auto"><Plus size={14} /> Nuevo</button>
-      </div>
-      <p className="text-sm gp-text-muted mb-3">De idea a proyecto activo — edita el estatus cuando avance.</p>
-      <div className="mb-2"><OrdenSelector opciones={opcionesOrden} value={orden} onChange={setOrden} /></div>
-      <BarraListaEstandar busqueda={busqueda} onBusqueda={setBusqueda} placeholder="Buscar por nombre, categoría o descripción…"
-        onExportExcel={() => exportarFilasExcel(todosVisibles, columnasExport, "proyectos")}
-        onExportPDF={() => exportarFilasPDF(todosVisibles, columnasExport, "proyectos", "Proyectos e ideas", busqueda ? `búsqueda: "${busqueda}"` : "")} />
-
-      <div className="space-y-6">
-        {grouped.filter((g) => g.items.length).map((g) => (
-          <div key={g.estatus}>
-            <div className="flex items-center gap-2 mb-2 text-xs gp-text-muted">
-              {g.estatus === "Idea" ? <Lightbulb size={13} /> : <Rocket size={13} />} {g.estatus} · {g.items.length}
-            </div>
-            <div className="space-y-2">
-              {g.items.map((p) => (
-                <div key={p.id} className="gp-panel">
-                  <div className="p-3 flex items-start gap-3 cursor-pointer" onClick={() => setExpanded(expanded === p.id ? null : p.id)}>
-                    {expanded === p.id ? <ChevronDown size={15} className="mt-0.5 gp-text-muted" /> : <ChevronRight size={15} className="mt-0.5 gp-text-muted" />}
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-sm font-medium">{p.nombre}</span>
-                        <Badge tone="muted">{p.categoria}</Badge>
-                        <Badge tone={p.modo === "Continuo" ? "teal" : "muted"}>{p.modo || "Finito"}</Badge>
-                        <Badge tone={p.monetizacion === "No genera dinero" ? "muted" : "gold"}>{p.monetizacion}</Badge>
-                        {p.prioridad && <Badge tone={p.prioridad === "Alta" ? "red" : p.prioridad === "Media" ? "gold" : "muted"}>{p.prioridad}</Badge>}
-                        {!p.githubSubido && <Badge tone="red">falta GitHub</Badge>}
-                      </div>
-                      <p className="text-xs gp-text-muted mt-1">{p.descripcion}</p>
-                    </div>
-                    <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
-                      <IconBtn onClick={() => setModal({ item: p })}><Pencil size={13} /></IconBtn>
-                      <IconBtn onClick={() => onRemove(p.id)}><Trash2 size={13} /></IconBtn>
-                    </div>
-                  </div>
-                  {expanded === p.id && (
-                    <div className="px-4 pb-4 border-t gp-border pt-3">
-                      {(() => {
-                        const r = rentabilidad(p.id);
-                        return (
-                          <div className="gp-panel-hi p-3 mb-3 grid grid-cols-2 sm:grid-cols-5 gap-2 text-xs">
-                            <div><p className="gp-text-muted">Ingresos</p><p className="gp-mono gp-text-teal">{fmtMoney(r.ingresos)}</p></div>
-                            <div><p className="gp-text-muted">Egresos</p><p className="gp-mono gp-text-red">{fmtMoney(r.egresos)}</p></div>
-                            <div><p className="gp-text-muted">Neto</p><p className={`gp-mono ${r.neto >= 0 ? "gp-text-teal" : "gp-text-red"}`}>{fmtMoney(r.neto)}</p></div>
-                            <div><p className="gp-text-muted">Pagado a colaboradores</p><p className="gp-mono gp-text-gold">{fmtMoney(r.pagosColab)}</p></div>
-                            <div><p className="gp-text-muted">Costo estimado total</p><p className="gp-mono">{fmtMoney(r.costoEstimadoTotal)}</p></div>
-                          </div>
-                        );
-                      })()}
-                      {(() => {
-                        const reparto = repartoCostosProyecto(data, p.id);
-                        if (reparto.length === 0) return null;
-                        return (
-                          <div className="mb-4">
-                            <p className="text-xs font-medium gp-text-muted mb-2">Reparto de costos por participante</p>
-                            <div className="gp-panel-hi overflow-x-auto">
-                              <table className="gp-table" style={{ fontSize: 12 }}>
-                                <thead><tr><th>Participante</th><th>Tareas</th><th>Ya generado</th><th>Por hacer</th><th>Total pactado</th></tr></thead>
-                                <tbody>
-                                  {reparto.map((g) => (
-                                    <tr key={g.key}>
-                                      <td>{g.esYo ? "Tú" : g.nombre}</td>
-                                      <td className="gp-mono">{g.tareas}</td>
-                                      <td className="gp-mono gp-text-teal">{fmtMoney(g.generado)}</td>
-                                      <td className="gp-mono gp-text-gold">{fmtMoney(g.pendiente)}</td>
-                                      <td className="gp-mono">{fmtMoney(g.total)}</td>
-                                    </tr>
-                                  ))}
-                                </tbody>
-                              </table>
-                            </div>
-                            <p className="text-xs gp-text-muted mt-1">Es un estimado según el precio pactado en cada tarea. Lo tuyo ("Tú") es ingreso potencial y no se suma solo a Ingresos y egresos; para eso registra el movimiento ahí cuando lo cobres.</p>
-                          </div>
-                        );
-                      })()}
-                      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs gp-text-muted mb-3">
-                        <label className="flex items-center gap-1.5">
-                          <input type="checkbox" checked={p.githubSubido} onChange={(e) => onEdit(p.id, { githubSubido: e.target.checked })} />
-                          Subido a GitHub
-                        </label>
-                        <input placeholder="link del repo (opcional)" value={p.github || ""} onChange={(e) => onEdit(p.id, { github: e.target.value })} className="gp-input flex-1" style={{ minWidth: 160, maxWidth: 280 }} />
-                      </div>
-
-                      {(() => {
-                        const tareasProyecto = data.pendientes.filter((t) => t.proyectoId === p.id);
-                        const arbolP = buildTareaTree(tareasProyecto);
-                        const filasP = flattenTareas(arbolP);
-                        return (
-                          <div className="mb-4">
-                            <div className="flex items-center justify-between mb-2">
-                              <p className="text-xs font-medium gp-text-muted">Pendientes de este proyecto · {tareasProyecto.length}</p>
-                              <button onClick={(e) => { e.stopPropagation(); onVerDetalle(p.id); }} className="text-xs gp-text-gold flex items-center gap-1">
-                                Ver detalle completo <ChevronRight size={12} />
-                              </button>
-                            </div>
-                            {filasP.length === 0 && <p className="text-xs gp-text-muted">Sin tareas registradas todavía.</p>}
-                            {filasP.length > 0 && (
-                              <div className="gp-panel-hi overflow-x-auto">
-                                <table className="gp-table" style={{ fontSize: 12 }}>
-                                  <thead><tr><th>Pendiente</th><th>Precio</th><th>Estatus</th></tr></thead>
-                                  <tbody>
-                                    {filasP.slice(0, 8).map(({ item: t, nivel }) => (
-                                      <tr key={t.id}>
-                                        <td>
-                                          <span style={{ paddingLeft: nivel * 16 }} className="flex items-center gap-1">
-                                            {nivel > 0 && <span className="gp-text-muted">└</span>}
-                                            <span className={t.estatus === "Completada" ? "gp-text-muted" : ""} style={t.estatus === "Completada" ? { textDecoration: "line-through" } : undefined}>{t.descripcion}</span>
-                                          </span>
-                                        </td>
-                                        <td className="gp-mono">{t.precio ? fmtMoney(t.precio) : "—"}</td>
-                                        <td><Badge tone={toneEstatusTarea(t.estatus)}>{t.estatus}</Badge></td>
-                                      </tr>
-                                    ))}
-                                  </tbody>
-                                </table>
-                              </div>
-                            )}
-                            {filasP.length > 8 && <p className="text-xs gp-text-muted mt-1">y {filasP.length - 8} más — ve al detalle completo para verlas todas.</p>}
-                          </div>
-                        );
-                      })()}
-
-                      <p className="text-xs font-medium mb-2 gp-text-muted">Bitácora de avances (texto rápido)</p>
-                      <div className="space-y-1.5 mb-2 max-h-40 overflow-y-auto gp-scroll">
-                        {(p.notas || []).slice().reverse().map((n) => (
-                          <div key={n.id} className="text-xs flex gap-2"><span className="gp-mono gp-text-muted shrink-0">{n.fecha}</span><span>{n.texto}</span></div>
-                        ))}
-                        {(!p.notas || p.notas.length === 0) && <p className="text-xs gp-text-muted">Sin comentarios todavía.</p>}
-                      </div>
-                      <div className="flex gap-2 mb-4">
-                        <input className="gp-input" placeholder="Agregar avance o comentario…" value={expanded === p.id ? notaTexto : ""} onChange={(e) => setNotaTexto(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addNota(p)} />
-                        <button className="gp-btn-ghost px-3 text-xs" onClick={() => addNota(p)}>Agregar</button>
-                      </div>
-                      <div className="border-t gp-border pt-3">
-                        <Bitacora data={data} entidadTipo="proyectos" entidadId={p.id} onAdd={onAddComentario} onRemove={onRemoveComentario} />
-                      </div>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
+    <div className="flex flex-col lg:flex-row gap-4 items-start">
+      {/* Columna de la lista. En celular se esconde cuando hay una ficha abierta (no caben lado a
+          lado); en escritorio se angosta y la ficha se pone a la derecha, igual que Contactos. */}
+      <div className={`min-w-0 flex-1 w-full ${seleccionado ? "hidden lg:block" : ""}`}>
+        <div className="relative overflow-hidden rounded-2xl mb-4">
+          <img src={bannerMontanas} alt="" className="absolute inset-0 w-full h-full object-cover" style={{ objectPosition: "50% 30%" }} />
+          <div className="absolute inset-0" style={{ background: "linear-gradient(100deg, rgba(11,35,72,.88) 0%, rgba(11,35,72,.6) 45%, rgba(11,35,72,.12) 80%, rgba(11,35,72,0) 100%)" }} />
+          <div className="relative z-10 p-5 md:px-8 md:py-7">
+            <h2 className="gp-serif text-white text-2xl md:text-4xl font-extrabold" style={{ textShadow: "0 2px 8px rgba(0,0,0,.45)" }}>Proyectos e ideas</h2>
+            <p className="text-white text-xs md:text-sm mt-1 font-medium" style={{ textShadow: "0 1px 5px rgba(0,0,0,.5)" }}>
+              De idea a proyecto activo — organiza, da seguimiento y avanza.
+            </p>
           </div>
-        ))}
-        {data.proyectos.length === 0 && <p className="text-sm gp-text-muted">Aún no tienes proyectos o ideas registradas.</p>}
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 mb-3">
+          <div className="flex flex-wrap gap-1.5 flex-1 min-w-0">
+            {FILTROS.map((t) => {
+              const activo = filtroEstatus === t;
+              const color = t === "Todos" ? "var(--gold)" : COLOR_ESTATUS_PROYECTO[t];
+              return (
+                <button
+                  key={t} onClick={() => setFiltroEstatus(t)}
+                  className="text-xs px-3 py-1.5 rounded-full border inline-flex items-center gap-1.5"
+                  style={activo
+                    ? { background: color, color: "#0B2341", borderColor: color, fontWeight: 600 }
+                    : { borderColor: "var(--border)", color: "var(--muted)" }}
+                >
+                  {t === "Todos" ? "Todos" : etiquetaEstatusProyecto(t)}
+                  <span style={{ opacity: activo ? 0.75 : 1 }}>{contarFiltro(t)}</span>
+                </button>
+              );
+            })}
+          </div>
+          <div className="flex gap-2 shrink-0">
+            <button onClick={() => setImportarAbierto(true)} className="gp-btn-ghost flex items-center justify-center gap-1 px-3 py-1.5 text-sm"><Upload size={14} /> Importar</button>
+            <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm"><Plus size={14} /> Nuevo proyecto</button>
+          </div>
+        </div>
+
+        <BarraListaEstandar
+          busqueda={busqueda} onBusqueda={setBusqueda}
+          placeholder="Buscar proyectos por nombre, descripción, categoría o etiqueta…"
+          extra={
+            <>
+              <select className="gp-input text-xs py-1.5" style={{ width: "auto" }} value={filtroContexto} onChange={(e) => setFiltroContexto(e.target.value)} aria-label="Filtrar por contexto">
+                <option value="Todos">Contexto: Todos</option>
+                {CONTEXTOS_PROYECTO.map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
+              <select className="gp-input text-xs py-1.5" style={{ width: "auto" }} value={filtroCategoria} onChange={(e) => setFiltroCategoria(e.target.value)} aria-label="Filtrar por categoría">
+                <option value="Todas">Categoría: Todas</option>
+                {CATS.map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
+              <OrdenSelector opciones={opcionesOrden} value={orden} onChange={(v) => { setOrden(v); setOrdenDir("asc"); }} />
+            </>
+          }
+          onExportExcel={() => exportarFilasExcel(visibles, columnasExport, "proyectos")}
+          onExportPDF={() => exportarFilasPDF(visibles, columnasExport, "proyectos", "Proyectos e ideas", `estado: ${filtroEstatus} · contexto: ${filtroContexto} · categoría: ${filtroCategoria}${busqueda ? ` · búsqueda: "${busqueda}"` : ""}`)}
+        />
+
+        {/* Escritorio: tabla. Celular: tarjetas — el documento pide explícitamente no comprimir la
+            tabla en móvil. */}
+        <div className="gp-panel overflow-x-auto hidden md:block">
+          <table className="gp-table">
+            <thead>
+              <tr>
+                <Th label="Nombre" sortKey="alfabetico" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} />
+                <Th label="Estado" sortKey="estatus" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} />
+                <th>Contexto</th>
+                <th>Categoría</th>
+                <th>Responsable</th>
+                <Th label="Progreso" sortKey="progreso" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} />
+                <Th label="Inicio / Fin" sortKey="inicio" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} />
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {enPagina.map((p) => {
+                const esSel = proyectoSel === p.id;
+                return (
+                  <tr key={p.id} onClick={() => onSeleccionar(p.id)} style={{ cursor: "pointer", background: esSel ? "var(--panel-hi)" : undefined }}>
+                    <td>
+                      <div className="flex items-center gap-2.5">
+                        <IconoProyecto p={p} size={32} />
+                        <div className="min-w-0">
+                          <div className="font-medium truncate" style={{ maxWidth: 240 }}>{p.nombre}</div>
+                          {p.descripcion && <div className="text-xs gp-text-muted truncate" style={{ maxWidth: 240 }}>{p.descripcion}</div>}
+                        </div>
+                      </div>
+                    </td>
+                    <td><BadgeEstatusProyecto estatus={p.estatus} /></td>
+                    <td><BadgeContextoProyecto contexto={p.contexto} /></td>
+                    <td className="gp-text-muted">{p.categoria || "—"}</td>
+                    <td><ResponsableProyecto p={p} data={data} miNombre={miNombre} miAvatarUrl={miAvatarUrl} /></td>
+                    <td><BarraProgresoProyecto pct={avanceProyecto(data, p.id)} /></td>
+                    <td><RangoFechasProyecto p={p} /></td>
+                    <td onClick={(e) => e.stopPropagation()}><MenuFilaProyecto {...propsMenu(p)} /></td>
+                  </tr>
+                );
+              })}
+              {enPagina.length === 0 && (
+                <tr><td colSpan={8} className="text-center gp-text-muted py-8">
+                  {data.proyectos.length === 0 ? "Aún no tienes proyectos o ideas registradas." : "Ningún proyecto coincide con la búsqueda o los filtros."}
+                </td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="md:hidden flex flex-col gap-2">
+          {enPagina.map((p) => (
+            <div key={p.id} className="gp-panel p-3" onClick={() => onSeleccionar(p.id)} style={{ cursor: "pointer" }}>
+              <div className="flex items-start gap-3">
+                <IconoProyecto p={p} size={40} />
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium truncate">{p.nombre}</p>
+                  {p.descripcion && <p className="text-xs gp-text-muted truncate">{p.descripcion}</p>}
+                  <div className="flex items-center gap-1.5 flex-wrap mt-1.5">
+                    <BadgeEstatusProyecto estatus={p.estatus} />
+                    {p.contexto && <BadgeContextoProyecto contexto={p.contexto} />}
+                    {p.categoria && <Badge tone="muted">{p.categoria}</Badge>}
+                  </div>
+                </div>
+                <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
+                  <MenuFilaProyecto {...propsMenu(p)} />
+                  <ChevronRight size={16} className="gp-text-muted" />
+                </div>
+              </div>
+              <div className="flex items-center justify-between gap-3 mt-2 pt-2 border-t gp-border">
+                <BarraProgresoProyecto pct={avanceProyecto(data, p.id)} ancho={70} />
+                <span className="gp-mono text-xs gp-text-muted text-right">
+                  {p.fechaInicio || p.fechaFin ? `${fmtFechaCorta(p.fechaInicio) || "—"} — ${fmtFechaCorta(p.fechaFin) || "—"}` : ""}
+                </span>
+              </div>
+            </div>
+          ))}
+          {enPagina.length === 0 && (
+            <p className="text-sm gp-text-muted text-center py-6">
+              {data.proyectos.length === 0 ? "Aún no tienes proyectos o ideas registradas." : "Ningún proyecto coincide con la búsqueda o los filtros."}
+            </p>
+          )}
+        </div>
+
+        {visibles.length > 0 && (
+          <div className="flex flex-wrap items-center justify-between gap-3 mt-3 text-xs gp-text-muted">
+            <span>Mostrando {desde + 1}–{Math.min(desde + porPagina, visibles.length)} de {visibles.length} proyecto{visibles.length === 1 ? "" : "s"}</span>
+            {totalPaginas > 1 && (
+              <div className="flex items-center gap-1">
+                <button onClick={() => setPagina(Math.max(1, paginaActual - 1))} disabled={paginaActual === 1} className="px-2 py-1 rounded gp-btn-ghost disabled:opacity-40" aria-label="Página anterior"><ChevronLeft size={13} /></button>
+                {paginasVisibles(paginaActual, totalPaginas).map((n, i) => (
+                  n === "…"
+                    ? <span key={`sep-${i}`} className="px-1">…</span>
+                    : <button key={n} onClick={() => setPagina(n)} className={`px-2.5 py-1 rounded ${n === paginaActual ? "gp-btn" : "gp-btn-ghost"}`}>{n}</button>
+                ))}
+                <button onClick={() => setPagina(Math.min(totalPaginas, paginaActual + 1))} disabled={paginaActual === totalPaginas} className="px-2 py-1 rounded gp-btn-ghost disabled:opacity-40" aria-label="Página siguiente"><ChevronRight size={13} /></button>
+              </div>
+            )}
+            <label className="flex items-center gap-1.5">
+              Mostrar
+              <select className="gp-input text-xs py-1" style={{ width: "auto" }} value={porPagina} onChange={(e) => { setPorPagina(Number(e.target.value)); setPagina(1); }}>
+                {[8, 12, 24, 50, 100].map((n) => <option key={n} value={n}>{n}</option>)}
+              </select>
+              por página
+            </label>
+          </div>
+        )}
+        {visibles.length === 0 && data.proyectos.length > 0 && (
+          <button onClick={limpiarFiltros} className="text-xs gp-text-gold mt-3">Limpiar filtros</button>
+        )}
       </div>
 
-      {modal && (
-        <Modal title={modal.item.id ? "Editar proyecto" : "Nuevo proyecto / idea"} onClose={() => setModal(null)}>
-          <ProyectoForm item={modal.item} onSave={(v) => { modal.item.id ? onEdit(modal.item.id, v) : onAdd(v); setModal(null); }} />
+      {/* Ficha del proyecto: panel a la derecha en escritorio (pegado arriba mientras se baja la
+          lista) y pantalla completa en celular. */}
+      {seleccionado && (
+        <div className="w-full lg:w-[420px] xl:w-[460px] shrink-0 lg:sticky lg:top-4">
+          <FichaProyecto
+            p={seleccionado}
+            data={data}
+            contactosVinculados={contactosDe(seleccionado.id)}
+            miNombre={miNombre} miAvatarUrl={miAvatarUrl}
+            tab={fichaTab} onTab={onFichaTab}
+            onCerrar={() => onSeleccionar(null)}
+            onEditar={() => setModal({ item: seleccionado })}
+            onEdit={onEdit}
+            onAddComentario={onAddComentario}
+            onVincularContacto={onVincularContacto}
+            onDesvincularContacto={onDesvincularContacto}
+            onVerContacto={onVerContacto}
+            onVerDetalle={onVerDetalle}
+            onVerTareas={onVerTareasDeProyecto}
+            onIrAVista={onIrAVista}
+            onNuevaTarea={() => setModal({ tarea: true, proyectoId: seleccionado.id })}
+            sensibleDesbloqueadoHasta={sensibleDesbloqueadoHasta}
+            onDesbloquear={onDesbloquear}
+          />
+        </div>
+      )}
+
+      {modal?.tarea && (
+        <Modal title="Nueva tarea" onClose={() => setModal(null)}>
+          <PendienteForm
+            item={{ proyectoId: modal.proyectoId, parentId: "", descripcion: "", fechaLimite: todayISO(), fechaRevision: "", prioridad: "Media", estatus: "Pendiente", colaboradorContactoId: null, contactoId: "", precio: "", fechaPagoAprox: "", tiempoEstimado: "", tiempoReal: "", asignadoA: "", avance: "" }}
+            proyectos={data.proyectos} contactos={data.contactos} pendientes={data.pendientes} colaboradores={[]}
+            proyectoFijoId={modal.proyectoId}
+            onCrearContacto={(nombre) => onCrearContacto(nombre, ["Colaborador"])}
+            onEnviarInvitacion={onEnviarInvitacion}
+            onAceptarEnNombre={onAceptarEnNombre}
+            onSave={(v, enviarCorreo) => {
+              const nuevoId = uid();
+              onAddTarea({ ...v, id: nuevoId });
+              if (enviarCorreo) onEnviarInvitacion(nuevoId);
+              setModal(null);
+            }}
+          />
+        </Modal>
+      )}
+
+      {modal && !modal.tarea && (
+        <Modal title={modal.item.id ? "Editar proyecto" : "Nuevo proyecto"} onClose={() => setModal(null)}>
+          <ProyectoForm
+            item={modal.item}
+            contactos={data.contactos}
+            vinculos={(data.contactoProyectos || []).filter((v) => v.proyectoId === modal.item.id)}
+            onVincularContacto={onVincularContacto}
+            onDesvincularContacto={onDesvincularContacto}
+            onSave={(v) => { modal.item.id ? onEdit(modal.item.id, v) : onAdd(v); setModal(null); }}
+          />
+        </Modal>
+      )}
+
+      {importarAbierto && (
+        <Modal title="Importar proyectos" onClose={() => setImportarAbierto(false)}>
+          <Suspense fallback={<p className="text-sm gp-text-muted">Cargando…</p>}>
+            <ImportarExcelModal tipo="proyectos" XLSX={XLSX} onImportarFila={(item) => onAdd(item)} onCerrar={() => setImportarAbierto(false)} />
+          </Suspense>
         </Modal>
       )}
     </div>
   );
 }
 
-function ProyectoForm({ item, onSave }) {
-  const [v, setV] = useState(item);
+/* Piezas de presentación de la ficha del proyecto. Viven FUERA del componente a propósito: si se
+   declararan adentro, React las trataría como un tipo de componente nuevo en cada render y
+   desmontaría su contenido — un input de adentro perdería el foco en cada tecla. */
+function BloqueFicha({ titulo, icono, accion, children }) {
+  return (
+    <div className="gp-panel p-3.5 mb-3">
+      <div className="flex items-center justify-between gap-2 mb-2">
+        <p className="text-sm font-medium flex items-center gap-1.5">{icono} {titulo}</p>
+        {accion}
+      </div>
+      {children}
+    </div>
+  );
+}
+function DatoFicha({ label, valor, icono }) {
+  return (
+    <div className="flex items-start justify-between gap-3 py-1.5">
+      <span className="text-xs gp-text-muted shrink-0 flex items-center gap-1.5">{icono} {label}</span>
+      <span className="text-xs text-right min-w-0">{valor || <span className="gp-text-muted">—</span>}</span>
+    </div>
+  );
+}
+function VacioFicha({ children }) {
+  return <p className="text-xs gp-text-muted py-2">{children}</p>;
+}
+function CandadoFicha({ texto, onDesbloquear }) {
+  return (
+    <button onClick={onDesbloquear} className="text-left w-full py-2">
+      <p className="text-xs gp-text-gold flex items-center gap-1.5"><Lock size={12} /> {texto}</p>
+    </button>
+  );
+}
+
+// Etiquetas del proyecto. Componente aparte para que escribir una etiqueta solo vuelva a dibujar
+// esta caja y no la ficha entera (que es lo que hacía perder el foco al teclear).
+function EtiquetasProyecto({ p, onEdit }) {
+  const [texto, setTexto] = useState("");
+  const [agregando, setAgregando] = useState(false);
+  const etiquetas = p.etiquetas || [];
+  const guardar = () => {
+    const t = texto.trim();
+    if (t && !etiquetas.some((e) => e.toLowerCase() === t.toLowerCase())) onEdit(p.id, { etiquetas: [...etiquetas, t] });
+    setTexto("");
+    setAgregando(false);
+  };
+  return (
+    <BloqueFicha
+      titulo="Etiquetas" icono={<Tag size={14} className="gp-text-gold" />}
+      accion={<button onClick={() => setAgregando(true)} className="text-xs gp-text-gold flex items-center gap-1"><Plus size={12} /> Agregar</button>}
+    >
+      {etiquetas.length === 0 && !agregando && <VacioFicha>Sin etiquetas. Sirven para agrupar proyectos que no comparten categoría.</VacioFicha>}
+      {etiquetas.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {etiquetas.map((e) => (
+            <span key={e} className="text-xs pl-2.5 pr-1.5 py-1 rounded-full flex items-center gap-1" style={{ background: "var(--panel-2)" }}>
+              {e}
+              <button onClick={() => onEdit(p.id, { etiquetas: etiquetas.filter((x) => x !== e) })} className="gp-text-muted" title="Quitar etiqueta"><X size={11} /></button>
+            </span>
+          ))}
+        </div>
+      )}
+      {agregando && (
+        <input
+          className="gp-input text-xs mt-2" autoFocus placeholder="Escribe la etiqueta y Enter"
+          value={texto} onChange={(e) => setTexto(e.target.value)}
+          onBlur={guardar}
+          onKeyDown={(e) => { if (e.key === "Enter") guardar(); if (e.key === "Escape") { setTexto(""); setAgregando(false); } }}
+        />
+      )}
+    </BloqueFicha>
+  );
+}
+
+/* ---------- Ficha del proyecto (panel de detalle) ---------- */
+// Lo que la lista ya NO muestra vive aquí, y siempre como RESUMEN: las tareas son del módulo
+// Tareas, el dinero es de Finanzas, las personas son de Contactos. Esta ficha solo consulta,
+// relaciona y manda al módulo fuente — nunca guarda una copia de esos datos.
+function FichaProyecto({
+  p, data, contactosVinculados, miNombre, miAvatarUrl, tab, onTab,
+  onCerrar, onEditar, onEdit, onAddComentario,
+  onVincularContacto, onDesvincularContacto, onVerContacto,
+  onVerDetalle, onVerTareas, onIrAVista, onNuevaTarea,
+  sensibleDesbloqueadoHasta, onDesbloquear,
+}) {
+  const setTab = onTab;
+  // La ventana de 15 min de los módulos sensibles se vence sola, sin que nada más vuelva a
+  // dibujar la pantalla. Este latido hace que el resumen financiero se vuelva a tapar cuando
+  // caduca, igual que en el centro de proyecto.
+  const [, forceTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => forceTick((t) => t + 1), 15000);
+    return () => clearInterval(id);
+  }, []);
+  const sensibleDesbloqueado = Date.now() < (sensibleDesbloqueadoHasta || 0);
+
+  const tareas = (data.pendientes || []).filter((t) => t.proyectoId === p.id);
+  const tareasAbiertas = tareas.filter((t) => !ESTATUS_TAREA_CERRADOS.includes(t.estatus));
+  const proximas = [...tareasAbiertas]
+    .sort((a, b) => (a.fechaLimite || "9999").localeCompare(b.fechaLimite || "9999"))
+    .slice(0, 5);
+  const avance = avanceProyecto(data, p.id);
+  const r = rentabilidadProyecto(data, p.id);
+  const archivos = (data.comentarios || [])
+    .filter((x) => x.entidadTipo === "proyectos" && x.entidadId === p.id)
+    .reduce((n, x) => n + (x.adjuntos || []).length, 0);
+  // Actividad = bitácora universal del proyecto (comentarios con texto) + las notas rápidas de
+  // avance que ya existían en el campo `notas` del proyecto. Un solo hilo cronológico, no un chat.
+  const actividad = [
+    ...(data.comentarios || [])
+      .filter((x) => x.entidadTipo === "proyectos" && x.entidadId === p.id && (x.texto || "").trim())
+      .map((x) => ({ id: x.id, fecha: (x.createdAt || "").slice(0, 10), texto: x.texto })),
+    ...(p.notas || []).map((n) => ({ id: n.id, fecha: n.fecha, texto: n.texto })),
+  ].sort((a, b) => (b.fecha || "").localeCompare(a.fecha || ""));
+
+  const TABS = [
+    { key: "resumen", label: "Resumen" },
+    { key: "tareas", label: "Tareas", n: tareas.length },
+    { key: "finanzas", label: "Finanzas" },
+    { key: "contactos", label: "Contactos", n: contactosVinculados.length },
+    { key: "archivos", label: "Archivos", n: archivos },
+  ];
+
+  const responsable = p.responsableContactoId ? (data.contactos || []).find((c) => c.id === p.responsableContactoId) : null;
+
+  return (
+    <div className="gp-panel p-4">
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex items-start gap-3 min-w-0">
+          <IconoProyecto p={p} size={56} />
+          <div className="min-w-0">
+            <p className="gp-serif text-lg leading-tight">{p.nombre}</p>
+            {p.descripcion && <p className="text-xs gp-text-muted mt-0.5 line-clamp-2">{p.descripcion}</p>}
+            <div className="flex items-center gap-1.5 flex-wrap mt-1.5">
+              <BadgeEstatusProyecto estatus={p.estatus} />
+              {p.contexto && <BadgeContextoProyecto contexto={p.contexto} />}
+              {p.categoria && <Badge tone="muted">{p.categoria}</Badge>}
+            </div>
+          </div>
+        </div>
+        <div className="flex items-center gap-1 shrink-0">
+          <button onClick={onEditar} className="gp-btn-ghost px-2.5 py-1.5 text-xs rounded flex items-center gap-1"><Pencil size={12} /> Editar</button>
+          <IconBtn title="Cerrar" onClick={onCerrar}><X size={15} /></IconBtn>
+        </div>
+      </div>
+
+      {/* Cambiar el estado es la acción más frecuente sobre un proyecto (el pipeline entero vive
+          de eso), por eso está aquí arriba y no escondida dentro del formulario. */}
+      <div className="grid grid-cols-2 gap-2 mt-3">
+        <select
+          className="gp-input text-xs" value={p.estatus}
+          onChange={(e) => onEdit(p.id, { estatus: e.target.value })}
+          aria-label="Cambiar estado del proyecto"
+        >
+          {ESTATUS_PROYECTO.map((e) => <option key={e} value={e}>{e}</option>)}
+        </select>
+        <button onClick={() => onVerDetalle(p.id)} className="gp-btn-ghost px-2.5 py-1.5 text-xs rounded flex items-center justify-center gap-1.5">
+          <ExternalLink size={12} /> Centro de proyecto
+        </button>
+      </div>
+
+      <div className="flex flex-wrap gap-1 mt-4 mb-3">
+        {TABS.map((t) => (
+          <button
+            key={t.key} onClick={() => setTab(t.key)}
+            className="text-xs px-2.5 py-1.5 rounded-full whitespace-nowrap shrink-0"
+            style={tab === t.key ? { background: "var(--panel-hi)", color: "var(--text)", fontWeight: 600 } : { color: "var(--muted)" }}
+          >
+            {t.label}{t.n === undefined ? "" : ` ${t.n}`}
+          </button>
+        ))}
+      </div>
+
+      {tab === "resumen" && (
+        <>
+          <BloqueFicha titulo="Información general" icono={<Info size={14} className="gp-text-gold" />} accion={<button onClick={onEditar} className="text-xs gp-text-gold">Editar</button>}>
+            <DatoFicha label="Contexto" icono={<Globe size={12} />} valor={p.contexto ? <BadgeContextoProyecto contexto={p.contexto} /> : null} />
+            <DatoFicha label="Categoría" icono={<Tag size={12} />} valor={p.categoria} />
+            <DatoFicha label="Estado" icono={<Rocket size={12} />} valor={<BadgeEstatusProyecto estatus={p.estatus} />} />
+            <DatoFicha label="Inicio" icono={<CalendarClock size={12} />} valor={fmtFechaCorta(p.fechaInicio)} />
+            <DatoFicha label="Fin" icono={<CalendarClock size={12} />} valor={fmtFechaCorta(p.fechaFin)} />
+            <DatoFicha
+              label="Responsable" icono={<User size={12} />}
+              valor={<span className="inline-flex items-center gap-1.5"><AvatarContacto c={responsable || { nombre: miNombre || "Tú", fotoUrl: miAvatarUrl || "" }} size={20} />{responsable ? responsable.nombre : (miNombre || "Tú")}</span>}
+            />
+            {p.descripcion && (
+              <div className="pt-2 mt-1 border-t gp-border">
+                <p className="text-[10px] uppercase tracking-wide gp-text-muted mb-1">Descripción</p>
+                <p className="text-xs">{p.descripcion}</p>
+              </div>
+            )}
+          </BloqueFicha>
+
+          <BloqueFicha
+            titulo="Progreso del proyecto" icono={<BarChart3 size={14} className="gp-text-gold" />}
+            accion={tareas.length > 0 && <button onClick={() => onVerTareas(p.id)} className="text-xs gp-text-gold">Ver todas</button>}
+          >
+            {avance === null
+              ? <VacioFicha>Sin tareas todavía — el progreso se calcula solo cuando el proyecto tiene tareas en el módulo Tareas.</VacioFicha>
+              : (
+                <>
+                  <div className="flex items-center gap-2 mb-3">
+                    <div className="h-2 rounded-full flex-1" style={{ background: "var(--border)" }}>
+                      <div className="h-2 rounded-full" style={{ width: `${avance}%`, background: avance >= 100 ? "var(--teal)" : avance >= 50 ? "#087CF5" : "var(--gold)" }} />
+                    </div>
+                    <span className="gp-mono text-sm shrink-0">{avance}%</span>
+                  </div>
+                  {proximas.length === 0
+                    ? <p className="text-xs gp-text-muted">Sin pendientes abiertos — todo lo registrado está cerrado.</p>
+                    : (
+                      <div className="flex flex-col gap-1.5">
+                        <p className="text-[10px] uppercase tracking-wide gp-text-muted">Próximos pendientes</p>
+                        {proximas.map((t) => {
+                          const vencida = t.fechaLimite && daysUntil(t.fechaLimite) < 0;
+                          return (
+                            <div key={t.id} className="flex items-center justify-between gap-2">
+                              <span className="text-xs truncate">{t.descripcion}</span>
+                              <span className="gp-mono text-[10px] shrink-0" style={{ color: vencida ? "var(--red)" : "var(--muted)" }}>{t.fechaLimite || "—"}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                </>
+              )}
+          </BloqueFicha>
+
+          <BloqueFicha
+            titulo="Contactos relacionados" icono={<Contact size={14} className="gp-text-gold" />}
+            accion={contactosVinculados.length > 0 && <button onClick={() => setTab("contactos")} className="text-xs gp-text-gold">Ver todos ({contactosVinculados.length})</button>}
+          >
+            {contactosVinculados.length === 0
+              ? <VacioFicha>Sin contactos vinculados. Ve a la pestaña Contactos para relacionar personas con este proyecto.</VacioFicha>
+              : (
+                <div className="flex flex-col gap-2">
+                  {contactosVinculados.slice(0, 3).map(({ contacto: c }) => (
+                    <button key={c.id} onClick={() => onVerContacto?.(c.id)} className="flex items-center gap-2.5 w-full text-left">
+                      <AvatarContacto c={c} size={28} />
+                      <div className="min-w-0 flex-1">
+                        <p className="text-xs font-medium truncate">{c.nombre}</p>
+                        <p className="text-[10px] gp-text-muted truncate">{tiposDeContacto(c).join(" · ")}</p>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+          </BloqueFicha>
+
+          <EtiquetasProyecto p={p} onEdit={onEdit} />
+
+          {/* GitHub ya existe como funcionalidad (campos github/githubSubido), así que se muestra
+              aquí dentro del detalle y NUNCA en cada fila de la lista (secc. 24). */}
+          <BloqueFicha titulo="Repositorio" icono={<Github size={14} className="gp-text-gold" />} accion={<button onClick={onEditar} className="text-xs gp-text-gold">{p.github ? "Cambiar" : "Agregar"}</button>}>
+            {p.github
+              ? (
+                <a href={p.github} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-xs py-1.5 px-2 rounded gp-panel-hi">
+                  <Github size={13} className="shrink-0" />
+                  <span className="truncate flex-1">{p.github.replace(/^https?:\/\//, "")}</span>
+                  <ExternalLink size={12} className="gp-text-muted shrink-0" />
+                </a>
+              )
+              : <VacioFicha>Sin repositorio ligado a este proyecto.</VacioFicha>}
+          </BloqueFicha>
+
+          <BloqueFicha titulo="Actividad" icono={<MessageSquare size={14} className="gp-text-gold" />}>
+            {actividad.length === 0
+              ? <VacioFicha>Sin actividad registrada. Los comentarios y avances que escribas en el centro de proyecto aparecen aquí.</VacioFicha>
+              : (
+                <div className="flex flex-col gap-2">
+                  {actividad.slice(0, 6).map((a) => (
+                    <div key={a.id} className="flex gap-2.5">
+                      <span className="gp-mono text-[10px] gp-text-muted shrink-0" style={{ width: 62 }}>{fmtFechaCorta(a.fecha) || "—"}</span>
+                      <span className="text-xs min-w-0">{a.texto}</span>
+                    </div>
+                  ))}
+                  {actividad.length > 6 && (
+                    <button onClick={() => onVerDetalle(p.id)} className="text-xs gp-text-gold text-left">Ver toda la actividad →</button>
+                  )}
+                </div>
+              )}
+          </BloqueFicha>
+        </>
+      )}
+
+      {tab === "tareas" && (
+        <BloqueFicha
+          titulo="Tareas del proyecto" icono={<ListChecks size={14} className="gp-text-gold" />}
+          accion={<button onClick={onNuevaTarea} className="text-xs gp-text-gold flex items-center gap-1"><Plus size={12} /> Agregar tarea</button>}
+        >
+          <p className="text-xs gp-text-muted mb-2">
+            {tareasAbiertas.length} pendiente{tareasAbiertas.length === 1 ? "" : "s"} de {tareas.length} tarea{tareas.length === 1 ? "" : "s"}.
+          </p>
+          {tareas.length === 0
+            ? <VacioFicha>Sin tareas todavía. Las tareas viven en el módulo Tareas — aquí solo se resumen las de este proyecto.</VacioFicha>
+            : (
+              <div className="flex flex-col gap-2">
+                {[...tareas]
+                  .sort((a, b) => (a.fechaLimite || "9999").localeCompare(b.fechaLimite || "9999"))
+                  .slice(0, 8)
+                  .map((t) => {
+                    const cerrada = ESTATUS_TAREA_CERRADOS.includes(t.estatus);
+                    const vencida = !cerrada && t.fechaLimite && daysUntil(t.fechaLimite) < 0;
+                    return (
+                      <div key={t.id} className="flex items-start justify-between gap-2">
+                        <span className={`text-xs min-w-0 ${cerrada ? "gp-text-muted" : ""}`} style={cerrada ? { textDecoration: "line-through" } : undefined}>{t.descripcion}</span>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <Badge tone={toneEstatusTarea(t.estatus)}>{t.estatus}</Badge>
+                          <span className="gp-mono text-[10px]" style={{ color: vencida ? "var(--red)" : "var(--muted)" }}>{t.fechaLimite || ""}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                {tareas.length > 8 && <p className="text-[10px] gp-text-muted">y {tareas.length - 8} más.</p>}
+              </div>
+            )}
+          <button onClick={() => onVerTareas(p.id)} className="text-xs gp-text-gold mt-3 flex items-center gap-1">Ver todas las tareas <ChevronRight size={12} /></button>
+        </BloqueFicha>
+      )}
+
+      {tab === "finanzas" && (
+        <BloqueFicha titulo="Resumen financiero" icono={<Wallet size={14} className="gp-text-gold" />}>
+          {/* Mismo enmascarado que el resto de la app: Finanzas es un módulo sensible, verlo
+              resumido aquí sin candado sería el mismo hueco que ya se cerró en Centro de Mando. */}
+          {!sensibleDesbloqueado
+            ? <CandadoFicha texto="Verifica tu contraseña para ver los números de este proyecto" onDesbloquear={onDesbloquear} />
+            : (
+              <>
+                <div className="grid grid-cols-2 gap-2">
+                  {[
+                    { label: "Ingresos", valor: r.ingresos, color: "var(--teal)" },
+                    { label: "Egresos", valor: r.egresos, color: "var(--red)" },
+                    { label: "Neto", valor: r.neto, color: r.neto >= 0 ? "var(--teal)" : "var(--red)" },
+                    { label: "Costo estimado", valor: r.costoEstimadoTotal, color: "var(--gold)" },
+                  ].map((x) => (
+                    <div key={x.label} className="rounded-lg p-2.5" style={{ background: "var(--panel-2)" }}>
+                      <p className="text-[10px] gp-text-muted">{x.label}</p>
+                      <p className="gp-mono text-sm" style={{ color: x.color }}>{fmtMoney(x.valor)}</p>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-[10px] gp-text-muted mt-2">
+                  Calculado desde los movimientos de Finanzas ligados a este proyecto y el precio pactado de sus tareas. Aquí no se registra dinero: se registra en Finanzas.
+                </p>
+                <button onClick={() => onIrAVista("finanzas")} className="text-xs gp-text-gold mt-3 flex items-center gap-1">Ver finanzas <ChevronRight size={12} /></button>
+              </>
+            )}
+        </BloqueFicha>
+      )}
+
+      {tab === "contactos" && (
+        <BloqueFicha titulo="Contactos relacionados" icono={<Contact size={14} className="gp-text-gold" />}>
+          {/* Contacto ↔ Proyecto es muchos-a-muchos (tabla puente contacto_proyectos): el mismo
+              contacto puede estar en varios proyectos y el proyecto en varios contactos. Aquí solo
+              se crea o se quita el vínculo — la ficha de la persona vive en Contactos. */}
+          {contactosVinculados.length === 0
+            ? <VacioFicha>Sin contactos vinculados todavía.</VacioFicha>
+            : (
+              <div className="flex flex-col gap-2 mb-3">
+                {contactosVinculados.map(({ contacto: c, vinculoId }) => (
+                  <div key={c.id} className="flex items-center gap-2.5">
+                    <AvatarContacto c={c} size={30} />
+                    <button onClick={() => onVerContacto?.(c.id)} className="min-w-0 flex-1 text-left">
+                      <p className="text-xs font-medium truncate">{c.nombre}</p>
+                      <p className="text-[10px] gp-text-muted truncate">{tiposDeContacto(c).join(" · ")}{c.empresa ? ` · ${c.empresa}` : ""}</p>
+                    </button>
+                    <IconBtn title="Quitar del proyecto" onClick={() => onDesvincularContacto(vinculoId)}><X size={13} /></IconBtn>
+                  </div>
+                ))}
+              </div>
+            )}
+          <p className="text-[10px] uppercase tracking-wide gp-text-muted mb-1.5">Vincular contacto</p>
+          <ComboboxMultiBuscar
+            seleccionados={[]}
+            opciones={(data.contactos || [])
+              .filter((c) => !contactosVinculados.some((x) => x.contacto.id === c.id))
+              .map((c) => ({ id: c.id, label: c.nombre }))}
+            onAgregar={(o) => onVincularContacto(o.id, p.id)}
+            onQuitar={() => {}}
+            placeholder="Busca a la persona por su nombre…"
+          />
+        </BloqueFicha>
+      )}
+
+      {tab === "archivos" && (
+        <BloqueFicha titulo="Archivos" icono={<FileText size={14} className="gp-text-gold" />}>
+          <ArchivosEntidad
+            entidadTipo="proyectos" entidadId={p.id} carpeta="proyectos"
+            data={data} onAddComentario={onAddComentario}
+            vacioTexto="Sin archivos todavía. Sube propuestas, contratos, manuales o lo que necesites tener a la mano de este proyecto."
+          />
+        </BloqueFicha>
+      )}
+    </div>
+  );
+}
+
+// Encabezado de una sección del formulario. Va FUERA del componente: declararlo adentro haría
+// que React lo tratara como un tipo nuevo en cada render y desmontara los campos — el input
+// perdería el foco a cada tecla.
+function SeccionForm({ titulo, children }) {
+  return (
+    <div className="mb-4">
+      <p className="text-[10px] uppercase tracking-wide gp-text-muted mb-2">{titulo}</p>
+      {children}
+    </div>
+  );
+}
+
+/* ---------- Formulario de proyecto ---------- */
+// Separado por secciones (secc. 27): lo indispensable arriba, fechas y relaciones después, y los
+// datos secundarios detrás de "Información adicional" para que dar de alta un proyecto no sea un
+// formulario gigantesco.
+function ProyectoForm({ item, contactos, vinculos, onVincularContacto, onDesvincularContacto, onSave }) {
+  // El id se decide desde ahora (no al guardar) para poder vincular contactos antes de que el
+  // proyecto exista como fila — mismo truco que ya usa ContactoForm.
+  const [proyectoId] = useState(() => item.id || uid());
+  const [v, setV] = useState({
+    ...item,
+    contexto: item.contexto || "Personal",
+    categoria: item.categoria || CATS[0],
+    estatus: item.estatus || "Idea",
+    responsableContactoId: item.responsableContactoId || "",
+    fechaInicio: item.fechaInicio || "",
+    fechaFin: item.fechaFin || "",
+    etiquetas: item.etiquetas || [],
+  });
   const [error, setError] = useState("");
+  const [adicionalAbierto, setAdicionalAbierto] = useState(false);
+  const [etiquetaTexto, setEtiquetaTexto] = useState("");
+
+  // Igual que en ContactoForm: si el proyecto YA existe, vincular/desvincular se guarda al
+  // momento (esperar al botón Guardar hacía que se perdieran al cerrar con la X); si es nuevo, se
+  // acumulan en memoria y se crean al guardar, porque la llave foránea rechazaría una fila que
+  // todavía no existe.
+  const esNuevo = !item.id;
+  const [contactosSeleccionados, setContactosSeleccionados] = useState(() =>
+    (vinculos || []).map((vinc) => ({ id: vinc.contactoId, label: contactos.find((c) => c.id === vinc.contactoId)?.nombre || "—" }))
+  );
+  const agregarContacto = (o) => {
+    setContactosSeleccionados((prev) => (prev.some((c) => c.id === o.id) ? prev : [...prev, o]));
+    if (!esNuevo) onVincularContacto?.(o.id, proyectoId);
+  };
+  const quitarContacto = (contactoId) => {
+    setContactosSeleccionados((prev) => prev.filter((c) => c.id !== contactoId));
+    if (!esNuevo) {
+      const vinculo = (vinculos || []).find((vv) => vv.contactoId === contactoId);
+      if (vinculo) onDesvincularContacto?.(vinculo.id);
+    }
+  };
+
+  const agregarEtiqueta = () => {
+    const t = etiquetaTexto.trim();
+    if (!t) return;
+    if (!v.etiquetas.some((e) => e.toLowerCase() === t.toLowerCase())) setV({ ...v, etiquetas: [...v.etiquetas, t] });
+    setEtiquetaTexto("");
+  };
+
+  const guardar = () => {
+    if (!v.nombre?.toString().trim()) { setError("El nombre del proyecto es obligatorio."); return; }
+    if (v.fechaInicio && v.fechaFin && v.fechaFin < v.fechaInicio) { setError("La fecha de fin no puede ser anterior a la de inicio."); return; }
+    setError("");
+    onSave({ ...v, id: proyectoId, nombre: v.nombre.trim() });
+    if (esNuevo) {
+      for (const c of contactosSeleccionados) onVincularContacto?.(c.id, proyectoId);
+    }
+  };
+
   return (
     <div>
-      <Field label="Nombre"><input className="gp-input" value={v.nombre} onChange={(e) => setV({ ...v, nombre: e.target.value })} /></Field>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <Field label="Categoría"><select className="gp-input" value={v.categoria} onChange={(e) => setV({ ...v, categoria: e.target.value })}>{CATS.map((c) => <option key={c}>{c}</option>)}</select></Field>
-        <Field label="Estatus"><select className="gp-input" value={v.estatus} onChange={(e) => setV({ ...v, estatus: e.target.value })}>{ESTATUS_PROYECTO.map((c) => <option key={c}>{c}</option>)}</select></Field>
-      </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <Field label="Modo">
-          <select className="gp-input" value={v.modo || "Finito"} onChange={(e) => setV({ ...v, modo: e.target.value })}>{MODO_PROYECTO.map((c) => <option key={c}>{c}</option>)}</select>
+      <SeccionForm titulo="Información básica">
+        <Field label="Nombre"><input className="gp-input" autoFocus value={v.nombre || ""} onChange={(e) => setV({ ...v, nombre: e.target.value })} /></Field>
+        <Field label="Descripción"><textarea className="gp-input" rows={2} placeholder="En una línea: de qué se trata." value={v.descripcion || ""} onChange={(e) => setV({ ...v, descripcion: e.target.value })} /></Field>
+        <Field label="Estado">
+          <div className="flex flex-wrap gap-1.5">
+            {ESTATUS_PROYECTO.map((e) => {
+              const color = COLOR_ESTATUS_PROYECTO[e];
+              return (
+                <button
+                  key={e} type="button" onClick={() => setV({ ...v, estatus: e })}
+                  className="text-xs px-2.5 py-1 rounded-full border"
+                  style={v.estatus === e
+                    ? { background: color, color: "#0B2341", borderColor: color, fontWeight: 600 }
+                    : { borderColor: "var(--border)", color: "var(--muted)" }}
+                >
+                  {etiquetaEstatusProyecto(e)}
+                </button>
+              );
+            })}
+          </div>
         </Field>
-        <Field label="Cómo genera valor"><select className="gp-input" value={v.monetizacion} onChange={(e) => setV({ ...v, monetizacion: e.target.value })}>{MONETIZACION.map((c) => <option key={c}>{c}</option>)}</select></Field>
-      </div>
-      <p className="text-xs gp-text-muted -mt-2 mb-3">{v.modo === "Continuo" ? "Continuo: genera flujo de forma constante (ej. renta, agencia de servicios)." : "Finito: tiene un punto claro de terminado (ej. lanzar un sitio, un show específico)."}</p>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <Field label="Prioridad"><select className="gp-input" value={v.prioridad || "Media"} onChange={(e) => setV({ ...v, prioridad: e.target.value })}>{PRIORIDADES.map((c) => <option key={c}>{c}</option>)}</select></Field>
-        <Field label="Fecha de revisión"><input type="date" className="gp-input" value={v.fechaRevision || ""} onChange={(e) => setV({ ...v, fechaRevision: e.target.value })} /></Field>
-      </div>
-      <Field label="Descripción"><textarea className="gp-input" rows={3} value={v.descripcion} onChange={(e) => setV({ ...v, descripcion: e.target.value })} /></Field>
-      {error && <p className="text-xs gp-text-red mb-2">{error}</p>}
+        <Field label="Contexto">
+          <div className="flex flex-wrap gap-1.5">
+            {CONTEXTOS_PROYECTO.map((c) => {
+              const color = COLOR_CONTEXTO_PROYECTO[c];
+              return (
+                <button
+                  key={c} type="button" onClick={() => setV({ ...v, contexto: c })}
+                  className="text-xs px-2.5 py-1 rounded-full border"
+                  style={v.contexto === c
+                    ? { background: color, color: "#0B2341", borderColor: color, fontWeight: 600 }
+                    : { borderColor: "var(--border)", color: "var(--muted)" }}
+                >
+                  {c}
+                </button>
+              );
+            })}
+          </div>
+        </Field>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <Field label="Categoría">
+            <select className="gp-input" value={v.categoria} onChange={(e) => setV({ ...v, categoria: e.target.value })}>{CATS.map((c) => <option key={c}>{c}</option>)}</select>
+          </Field>
+          <Field label="Responsable">
+            {/* El responsable es un Contacto real: no se escribe un nombre suelto, se apunta a la
+                ficha que ya existe en Contactos. */}
+            <select className="gp-input" value={v.responsableContactoId || ""} onChange={(e) => setV({ ...v, responsableContactoId: e.target.value })}>
+              <option value="">Tú</option>
+              {[...contactos].sort((a, b) => (a.nombre || "").localeCompare(b.nombre || "", "es")).map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+            </select>
+          </Field>
+        </div>
+      </SeccionForm>
 
-      <button className="gp-btn w-full py-2 text-sm mt-2" onClick={() => { if (!v.nombre?.toString().trim()) { setError("El nombre del proyecto es obligatorio."); return; } setError(""); onSave(v); }}>Guardar</button>
+      <SeccionForm titulo="Fechas">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <Field label="Inicio"><input type="date" className="gp-input" value={v.fechaInicio || ""} onChange={(e) => setV({ ...v, fechaInicio: e.target.value })} /></Field>
+          <Field label="Fin"><input type="date" className="gp-input" value={v.fechaFin || ""} onChange={(e) => setV({ ...v, fechaFin: e.target.value })} /></Field>
+        </div>
+      </SeccionForm>
+
+      <SeccionForm titulo="Relaciones">
+        <Field label="Contactos relacionados (puede ser varios)">
+          <ComboboxMultiBuscar
+            seleccionados={contactosSeleccionados}
+            opciones={contactos.map((c) => ({ id: c.id, label: c.nombre }))}
+            onAgregar={agregarContacto}
+            onQuitar={quitarContacto}
+            placeholder="Busca a la persona por su nombre…"
+          />
+        </Field>
+      </SeccionForm>
+
+      <button
+        type="button" onClick={() => setAdicionalAbierto((x) => !x)}
+        className="text-xs gp-text-gold flex items-center gap-1 mb-3"
+      >
+        {adicionalAbierto ? <ChevronDown size={12} /> : <ChevronRight size={12} />} Información adicional (opcional)
+      </button>
+
+      {adicionalAbierto && (
+        <SeccionForm titulo="Opcional">
+          <Field label="Etiquetas">
+            {v.etiquetas.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mb-2">
+                {v.etiquetas.map((e) => (
+                  <span key={e} className="text-xs pl-2.5 pr-1.5 py-1 rounded-full flex items-center gap-1" style={{ background: "var(--panel-2)" }}>
+                    {e}
+                    <button type="button" onClick={() => setV({ ...v, etiquetas: v.etiquetas.filter((x) => x !== e) })} className="gp-text-muted"><X size={11} /></button>
+                  </span>
+                ))}
+              </div>
+            )}
+            <input
+              className="gp-input" placeholder="Escribe una etiqueta y Enter"
+              value={etiquetaTexto} onChange={(e) => setEtiquetaTexto(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); agregarEtiqueta(); } }}
+            />
+          </Field>
+          <Field label="Repositorio (opcional)">
+            <input className="gp-input" placeholder="https://github.com/…" value={v.github || ""} onChange={(e) => setV({ ...v, github: e.target.value })} />
+          </Field>
+          <label className="flex items-center gap-2 text-xs gp-text-muted mb-3">
+            <input type="checkbox" checked={!!v.githubSubido} onChange={(e) => setV({ ...v, githubSubido: e.target.checked })} />
+            Ya está subido a GitHub
+          </label>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <Field label="Prioridad">
+              <select className="gp-input" value={v.prioridad || "Media"} onChange={(e) => setV({ ...v, prioridad: e.target.value })}>{PRIORIDADES.map((c) => <option key={c}>{c}</option>)}</select>
+            </Field>
+            <Field label="Fecha de revisión">
+              <input type="date" className="gp-input" value={v.fechaRevision || ""} onChange={(e) => setV({ ...v, fechaRevision: e.target.value })} />
+            </Field>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <Field label="Modo">
+              <select className="gp-input" value={v.modo || "Finito"} onChange={(e) => setV({ ...v, modo: e.target.value })}>{MODO_PROYECTO.map((c) => <option key={c}>{c}</option>)}</select>
+            </Field>
+            <Field label="Cómo genera valor">
+              <select className="gp-input" value={v.monetizacion || MONETIZACION[0]} onChange={(e) => setV({ ...v, monetizacion: e.target.value })}>{MONETIZACION.map((c) => <option key={c}>{c}</option>)}</select>
+            </Field>
+          </div>
+          <p className="text-xs gp-text-muted -mt-2 mb-1">
+            {v.modo === "Continuo" ? "Continuo: genera flujo de forma constante (ej. renta, agencia de servicios)." : "Finito: tiene un punto claro de terminado (ej. lanzar un sitio, un show específico)."}
+          </p>
+        </SeccionForm>
+      )}
+
+      {error && <p className="text-xs gp-text-red mb-2">{error}</p>}
+      <button className="gp-btn w-full py-2 text-sm mt-2" onClick={guardar}>Guardar</button>
     </div>
   );
 }
@@ -6138,19 +7067,26 @@ function MindMapPendientes({ proyecto, tareas, onNodoClick, onAgregar, onElimina
   );
 }
 
-function Pendientes({ data, activeOwnerId, onAdd, onEdit, onRemove, onAddComentario, onRemoveComentario, onAsignar, onCrearContacto, onEnviarInvitacion, onAceptarEnNombre, crearAlEntrar, onConsumirCrearAlEntrar }) {
+function Pendientes({ data, activeOwnerId, onAdd, onEdit, onRemove, onAddComentario, onRemoveComentario, onAsignar, onCrearContacto, onEnviarInvitacion, onAceptarEnNombre, crearAlEntrar, onConsumirCrearAlEntrar, filtroProyectoInicial, onConsumirFiltroProyecto }) {
   const [modal, setModal] = useState(null);
   const [comentariosDe, setComentariosDe] = useState(null);
   const [orden, setOrden] = useState("default");
   const [vista, setVista] = useState("lista"); // "lista" | "mindmap"
   const [proyectoMindMap, setProyectoMindMap] = useState("");
-  const [filtroProyecto, setFiltroProyecto] = useState(""); // "" = todos los proyectos, en la vista de lista
+  // Se entra aquí ya filtrado cuando vienes de "Ver todas las tareas" en la ficha de un proyecto.
+  const [filtroProyecto, setFiltroProyecto] = useState(filtroProyectoInicial || ""); // "" = todos los proyectos, en la vista de lista
   const [colaboradores, setColaboradores] = useState([]);
   const empty = { proyectoId: "", parentId: "", descripcion: "", fechaLimite: todayISO(), fechaRevision: "", prioridad: "Media", estatus: "Pendiente", colaboradorContactoId: null, contactoId: "", precio: "", fechaPagoAprox: "", tiempoEstimado: "", tiempoReal: "", asignadoA: "" };
 
   useEffect(() => {
     if (crearAlEntrar) { setModal({ item: { ...empty, ...(crearAlEntrar.preset || {}) } }); onConsumirCrearAlEntrar(); }
   }, [crearAlEntrar]);
+
+  // El filtro que llega desde la ficha de un proyecto se consume una sola vez: si no, volver a
+  // Tareas por el menú te dejaría filtrado sin que lo hayas pedido.
+  useEffect(() => {
+    if (filtroProyectoInicial) { setFiltroProyecto(filtroProyectoInicial); onConsumirFiltroProyecto?.(); }
+  }, [filtroProyectoInicial]);
 
   useEffect(() => {
     if (!activeOwnerId) return;
@@ -7994,7 +8930,7 @@ function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
       {/* Banner de la pantalla (mockup de Angel, 24 sept 2026): foto + título + bajada, con un
           degradado direccional para que el texto se lea sin apagar toda la foto. */}
       <div className="relative overflow-hidden rounded-2xl mb-4">
-        <img src={bannerContactos} alt="" className="absolute inset-0 w-full h-full object-cover" style={{ objectPosition: "50% 45%" }} />
+        <img src={bannerMontanas} alt="" className="absolute inset-0 w-full h-full object-cover" style={{ objectPosition: "50% 45%" }} />
         <div className="absolute inset-0" style={{ background: "linear-gradient(100deg, rgba(11,35,72,.88) 0%, rgba(11,35,72,.6) 45%, rgba(11,35,72,.12) 80%, rgba(11,35,72,0) 100%)" }} />
         <div className="relative z-10 p-5 md:px-8 md:py-7">
           <h2 className="gp-serif text-white text-2xl md:text-4xl font-extrabold" style={{ textShadow: "0 2px 8px rgba(0,0,0,.45)" }}>Contactos</h2>
@@ -8217,16 +9153,18 @@ function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
   );
 }
 
-// Archivos del contacto. NO crea una tabla nueva: reutiliza el sistema universal de comentarios
-// y adjuntos que ya existe desde la migración 0006 (entidad_tipo/entidad_id + adjuntos jsonb),
-// el mismo que usa la Bitácora. Aquí solo se muestran los adjuntos, sin el texto, y subir un
-// archivo crea un comentario que únicamente lleva el adjunto.
-function ArchivosContacto({ c, data, onAddComentario }) {
+// Archivos de una entidad (contacto, proyecto…). NO crea una tabla nueva: reutiliza el sistema
+// universal de comentarios y adjuntos que ya existe desde la migración 0006 (entidad_tipo/
+// entidad_id + adjuntos jsonb), el mismo que usa la Bitácora. Aquí solo se muestran los adjuntos,
+// sin el texto, y subir un archivo crea un comentario que únicamente lleva el adjunto.
+// `carpeta` es el prefijo dentro del bucket de Storage, para que los archivos de cada módulo
+// queden separados (contactos/<id>/…, proyectos/<id>/…).
+function ArchivosEntidad({ entidadTipo, entidadId, carpeta, data, onAddComentario, vacioTexto }) {
   const [subiendo, setSubiendo] = useState(false);
   const [error, setError] = useState("");
 
   const archivos = (data.comentarios || [])
-    .filter((x) => x.entidadTipo === "contactos" && x.entidadId === c.id)
+    .filter((x) => x.entidadTipo === entidadTipo && x.entidadId === entidadId)
     .flatMap((x) => (x.adjuntos || []).map((a) => ({ ...a, comentarioId: x.id, fecha: x.createdAt })))
     .sort((a, b) => (b.fecha || "").localeCompare(a.fecha || ""));
 
@@ -8240,14 +9178,14 @@ function ArchivosContacto({ c, data, onAddComentario }) {
     const nuevos = [];
     for (const file of files) {
       if (file.size > 25 * 1024 * 1024) { setError(`"${file.name}" pesa más de 25 MB, se omitió.`); continue; }
-      const path = `contactos/${c.id}/${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
+      const path = `${carpeta}/${entidadId}/${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
       const { error: upErr } = await supabase.storage.from("adjuntos").upload(path, file);
       if (upErr) { setError(`No se pudo subir "${file.name}": ${upErr.message}`); continue; }
       const { data: pub } = supabase.storage.from("adjuntos").getPublicUrl(path);
       const tipo = file.type.startsWith("image/") ? "imagen" : file.type.startsWith("video/") ? "video" : file.type.startsWith("audio/") ? "audio" : "documento";
       nuevos.push({ tipo, nombre: file.name, url: pub.publicUrl });
     }
-    if (nuevos.length > 0) onAddComentario({ entidadTipo: "contactos", entidadId: c.id, texto: "", adjuntos: nuevos });
+    if (nuevos.length > 0) onAddComentario({ entidadTipo, entidadId, texto: "", adjuntos: nuevos });
     setSubiendo(false);
     e.target.value = "";
   };
@@ -8255,7 +9193,7 @@ function ArchivosContacto({ c, data, onAddComentario }) {
   return (
     <>
       {archivos.length === 0
-        ? <p className="text-xs gp-text-muted py-2">Sin archivos todavía. Sube contratos, identificaciones, cotizaciones o lo que necesites tener a la mano de esta persona.</p>
+        ? <p className="text-xs gp-text-muted py-2">{vacioTexto || "Sin archivos todavía."}</p>
         : (
           <div className="flex flex-col gap-1.5 mb-3">
             {archivos.map((a, i) => (
@@ -8707,7 +9645,11 @@ function FichaContacto({ c, data, proyectosVinculados, onCerrar, onEditar, onVer
 
       {tab === "archivos" && (
         <Bloque titulo="Archivos" icono={<FileText size={14} className="gp-text-gold" />}>
-          <ArchivosContacto c={c} data={data} onAddComentario={onAddComentario} />
+          <ArchivosEntidad
+            entidadTipo="contactos" entidadId={c.id} carpeta="contactos"
+            data={data} onAddComentario={onAddComentario}
+            vacioTexto="Sin archivos todavía. Sube contratos, identificaciones, cotizaciones o lo que necesites tener a la mano de esta persona."
+          />
         </Bloque>
       )}
     </div>
