@@ -28,7 +28,7 @@ import {
   Target, Contact, BarChart3, FileText, Flame, HeartPulse, Check, Menu, PieChart as PieChartIcon, User, Home,
   PiggyBank, Camera, Film, Upload, MapPin, Clock, Mic, Gift, Receipt, Megaphone, ChevronUp, Gem, Download, Sun, Moon, Shield, LogOut, ChevronLeft, Lock, Pill, CalendarClock, Zap, StickyNote, Search, Sparkles, Send, Bot, Square, Settings, CalendarRange, Palette, Eye, EyeOff, Sliders, Volume2, VolumeX, Play, Copy, Phone, MessageSquare, MoreHorizontal,
   Heart, Code2, Music, Tag, Archive, ExternalLink, ListChecks, Info,
-  ChevronsDownUp, ChevronsUpDown,
+  ChevronsDownUp, ChevronsUpDown, Briefcase, Building2, ArrowRight,
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
@@ -39,6 +39,9 @@ const PersonalizarPanelModal = lazy(() => import("./components/CentroMando/Perso
 // Perezoso: solo trae la UI de importar (mapeo de columnas/vista previa) cuando el usuario abre
 // "Importar desde Excel" en Contactos o Finanzas — xlsx en sí ya está cargado (se usa para exportar).
 const ImportarExcelModal = lazy(() => import("./components/import/ImportarExcelModal"));
+// Perezoso: el onboarding se ve una sola vez por cuenta — no tiene por qué pesar en el arranque
+// de todos los días.
+const OnboardingContextos = lazy(() => import("./components/onboarding/OnboardingContextos"));
 
 /* ---------- estilos y tokens ---------- */
 const Tokens = ({ tema = "oscuro" }) => (
@@ -172,6 +175,38 @@ const COLOR_ESTATUS_PROYECTO = {
 // lo del negocio sin duplicar pantallas.
 const CONTEXTOS_PROYECTO = ["Personal", "Profesional", "Empresarial"];
 const COLOR_CONTEXTO_PROYECTO = { Personal: "#8B5CF6", Profesional: "#087CF5", Empresarial: "#16A36A" };
+// Los mismos tres contextos, con la cara que se les pone en el onboarding y en Configuración.
+// Se reutilizan los colores de arriba a propósito: el chip "Empresarial" de un proyecto y la
+// tarjeta "Empresarial" del onboarding tienen que ser el mismo verde, o parecen cosas distintas.
+const CONTEXTOS_USO = [
+  {
+    id: "Personal", icono: Heart,
+    descripcion: "Organiza tu vida personal: hábitos, salud, agenda, finanzas y proyectos.",
+  },
+  {
+    id: "Profesional", icono: Briefcase,
+    descripcion: "Organiza tu actividad profesional: clientes, proyectos, tareas, agenda y relaciones.",
+  },
+  {
+    id: "Empresarial", icono: Building2,
+    descripcion: "Administra una o varias empresas: proyectos, finanzas, clientes, equipo y operación.",
+  },
+];
+// Qué widgets del Centro de Mando se encienden para cada contexto. Esto NO quita módulos del
+// sistema (secc. 10 del documento): el menú lateral sigue completo y el usuario puede prender
+// cualquier widget después desde "Personalizar panel". Solo define con qué arranca.
+const WIDGETS_POR_CONTEXTO = {
+  Personal: ["miDia", "requiereAtencion", "calendario", "progreso", "proyectos", "tareas", "finanzas", "resumenFinanciero", "habitos", "salud", "notasRapidas", "accesosRapidos", "arki"],
+  Profesional: ["miDia", "requiereAtencion", "calendario", "progreso", "proyectos", "tareas", "finanzas", "resumenFinanciero", "notasRapidas", "accesosRapidos", "arki"],
+  Empresarial: ["miDia", "requiereAtencion", "calendario", "progreso", "empresas", "proyectos", "tareas", "finanzas", "resumenFinanciero", "notasRapidas", "accesosRapidos", "arki"],
+};
+// Traduce los contextos elegidos al formato que ya usa preferencias.dashboard_widgets (el mismo
+// que escribe "Personalizar panel"), en vez de inventar una segunda forma de guardar lo mismo.
+const widgetsParaContextos = (contextos) => {
+  if (!contextos || contextos.length === 0) return null;
+  const encendidos = new Set(contextos.flatMap((c) => WIDGETS_POR_CONTEXTO[c] || []));
+  return DASHBOARD_WIDGETS_CATALOGO.map((w) => ({ id: w.id, visible: encendidos.has(w.id) }));
+};
 // Ícono y color del proyecto: se DERIVAN de su categoría, no se guardan como campo. Así cada
 // proyecto se reconoce de un vistazo en la lista sin pedirle a nadie que elija un ícono.
 const ICONO_CATEGORIA_PROYECTO = {
@@ -297,6 +332,7 @@ const DASHBOARD_WIDGETS_CATALOGO = [
   { id: "requiereAtencion", label: "Requiere tu atención" },
   { id: "calendario", label: "Calendario" },
   { id: "progreso", label: "Tu progreso" },
+  { id: "empresas", label: "Mis empresas" },
   { id: "proyectos", label: "Proyectos" },
   { id: "tareas", label: "Tareas" },
   { id: "finanzas", label: "Finanzas" },
@@ -310,6 +346,35 @@ const DASHBOARD_WIDGETS_CATALOGO = [
 // Reconcilia el orden guardado del usuario (preferencias.dashboard_widgets) con el catálogo
 // actual: widgets guardados van en su orden; widgets del catálogo que aún no existían cuando
 // el usuario guardó (o que nunca ha personalizado) se agregan al final, visibles por default.
+// Filtra los datos del Centro de Mando al contexto activo ("todos" | "ctx:<Contexto>" |
+// "emp:<id>"). Es una VISTA: no oculta módulos ni borra nada, y el dato sigue existiendo una sola
+// vez en su módulo.
+//
+// Solo se filtra lo que de verdad lleva contexto: Proyectos (tiene la columna) y Tareas (heredan
+// el de su proyecto). Finanzas todavía NO distingue contexto por sí misma — un movimiento sin
+// proyecto no sabe a qué ámbito pertenece — así que el dinero se muestra completo y el widget lo
+// dice, en vez de enseñar un número recortado que parecería el total.
+function filtrarDatosPorContexto(data, activo) {
+  if (!data || !activo || activo === "todos") return data;
+  const esEmpresa = activo.startsWith("emp:");
+  const valor = activo.slice(4);
+  const proyectos = (data.proyectos || []).filter((p) => (esEmpresa ? p.empresaId === valor : (p.contexto || "") === valor));
+  const idsProyectos = new Set(proyectos.map((p) => p.id));
+  // Una tarea suelta (sin proyecto) no tiene contexto propio, y se cuenta como Personal: en un
+  // "sistema operativo personal" lo que anotas suelto es de tu vida, no de una empresa. Sin esta
+  // regla, filtrar por Personal dejaría la pantalla casi vacía y parecería que algo se rompió.
+  const sueltasSonDeEsteContexto = !esEmpresa && valor === "Personal";
+  return {
+    ...data,
+    proyectos,
+    pendientes: (data.pendientes || []).filter((t) => (t.proyectoId ? idsProyectos.has(t.proyectoId) : sueltasSonDeEsteContexto)),
+  };
+}
+
+// Qué widgets tienen sentido en cada contexto. Hábitos y Salud son de la vida personal; Mis
+// empresas solo existe si administras alguna. El resto aplica siempre.
+const CONTEXTO_DE_WIDGET = { habitos: ["Personal"], salud: ["Personal"], empresas: ["Empresarial"] };
+
 const resolverOrdenWidgets = (guardado) => {
   const porId = Object.fromEntries(DASHBOARD_WIDGETS_CATALOGO.map((w) => [w.id, w]));
   const enOrden = (guardado || []).filter((g) => porId[g.id]).map((g) => ({ ...porId[g.id], visible: g.visible !== false }));
@@ -511,7 +576,7 @@ const categoriaIMC = (imc) => {
 };
 
 /* ---------- persistencia relacional ---------- */
-const TABLES = ["proyectos", "pendientes", "equipo", "finanzas", "actividades", "activos", "metas", "contactos", "redesMetricas", "documentos", "habitos", "salud", "apartados", "apartadosMovimientos", "eventos", "comentarios", "saldoInicial", "regalos", "facturas", "campanas", "campanaActividades", "patrimonio", "patrimonioValuaciones", "medicamentos", "citas", "notas", "pagosFinanzas", "rutinasEjercicio", "rutinaEjercicioItems", "sesionesEjercicio", "sesionEjercicioItems", "medidasCorporales", "recetas", "dietaDias", "presupuestos"];
+const TABLES = ["empresas", "proyectos", "pendientes", "equipo", "finanzas", "actividades", "activos", "metas", "contactos", "redesMetricas", "documentos", "habitos", "salud", "apartados", "apartadosMovimientos", "eventos", "comentarios", "saldoInicial", "regalos", "facturas", "campanas", "campanaActividades", "patrimonio", "patrimonioValuaciones", "medicamentos", "citas", "notas", "pagosFinanzas", "rutinasEjercicio", "rutinaEjercicioItems", "sesionesEjercicio", "sesionEjercicioItems", "medidasCorporales", "recetas", "dietaDias", "presupuestos"];
 // Deudas ya NO es una tabla propia (Documento Maestro v1.2, secc. 23.11/40): es una vista
 // calculada sobre Finanzas (egresos no recurrentes con saldo pendiente). Esta función se usa
 // en cualquier lugar que antes leía `data.deudas`.
@@ -650,7 +715,7 @@ function BarraListaEstandar({ busqueda, onBusqueda, placeholder, onExportExcel, 
 
 
 const ETIQUETA_TABLA = {
-  proyectos: "Proyecto", pendientes: "Pendiente", equipo: "Equipo", finanzas: "Movimiento financiero",
+  empresas: "Empresa", proyectos: "Proyecto", pendientes: "Pendiente", equipo: "Equipo", finanzas: "Movimiento financiero",
   actividades: "Actividad", activos: "Activo digital", metas: "Meta",
   contactos: "Contacto", redesMetricas: "Métrica de red social", documentos: "Documento",
   habitos: "Hábito", salud: "Registro de salud", apartados: "Apartado", apartadosMovimientos: "Movimiento de apartado", eventos: "Evento",
@@ -694,6 +759,7 @@ function exportarExcel(data, nombreCuenta) {
 
 function labelFor(key, item) {
   switch (key) {
+    case "empresas":
     case "proyectos": case "equipo": case "actividades": case "activos": case "contactos":
     case "documentos": case "apartados": case "eventos": case "campanas": case "patrimonio":
     case "habitos":
@@ -1791,7 +1857,7 @@ export default function App() {
 }
 
 const VIEW_TO_MODULO = {
-  proyectos: "proyectos", metas: "metas", pendientes: "pendientes",
+  empresas: "empresas", proyectos: "proyectos", metas: "metas", pendientes: "pendientes",
   finanzas: "finanzas", facturas: "facturas", deudas: "deudas", apartados: "apartados",
   presupuesto: "presupuestos",
   patrimonio: "patrimonio", activos: "activos", documentos: "documentos",
@@ -2271,7 +2337,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
       const { data: colabs } = await supabase.from("colaboradores").select("*, colaborador_dependientes(contacto_id)").eq("colaborador_user_id", misId).eq("estatus", "Activo");
       setMisColaboraciones((colabs || []).map((c) => ({ propietarioId: c.propietario_id, propietarioEmail: c.propietario_email, modulos: c.modulos, dependientes: (c.colaborador_dependientes || []).map((d) => d.contacto_id) })));
 
-      const { data: pref } = await supabase.from("preferencias").select("tema, alertas_correo_activas, notif_tipos_desactivados, notif_silencio_activo, notif_silencio_inicio, notif_silencio_fin, notif_anticipacion_citas_min, dashboard_widgets, nombre_mostrar, avatar_url, presupuesto_mensual, ciudad, clima_lat, clima_lon, perfil_bio, perfil_estudios, perfil_habilidades, perfil_redes").eq("user_id", misId).maybeSingle();
+      const { data: pref } = await supabase.from("preferencias").select("tema, alertas_correo_activas, notif_tipos_desactivados, notif_silencio_activo, notif_silencio_inicio, notif_silencio_fin, notif_anticipacion_citas_min, dashboard_widgets, nombre_mostrar, avatar_url, presupuesto_mensual, ciudad, clima_lat, clima_lon, perfil_bio, perfil_estudios, perfil_habilidades, perfil_redes, contextos, actividad_profesional, onboarding_completado").eq("user_id", misId).maybeSingle();
       const temaGuardado = normalizarTema(pref?.tema);
       if (temaGuardado !== tema) setTema(temaGuardado);
       if (pref && pref.alertas_correo_activas === false) setAlertasCorreoActivas(false);
@@ -2291,6 +2357,9 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
       if (pref?.perfil_estudios) setPerfilEstudios(pref.perfil_estudios);
       if (pref?.perfil_habilidades) setPerfilHabilidades(pref.perfil_habilidades);
       if (pref?.perfil_redes) setPerfilRedes(pref.perfil_redes);
+      if (pref?.contextos) setContextos(pref.contextos);
+      if (pref?.actividad_profesional) setActividadProfesional(pref.actividad_profesional);
+      setOnboardingCompletado(!!pref?.onboarding_completado);
 
       let result = await loadAllTables(misId);
       result = await migrateFromOldBlobIfNeeded(result, misId);
@@ -2391,6 +2460,52 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
   const [perfilEstudios, setPerfilEstudios] = useState([]);
   const [perfilHabilidades, setPerfilHabilidades] = useState([]);
   const [perfilRedes, setPerfilRedes] = useState([]);
+  // --- Contextos de uso (Personal / Profesional / Empresarial) ---------------------------------
+  // Viven en la misma fila de `preferencias` que el tema y los widgets: son configuración del
+  // usuario, no una entidad. `contextos` vacío = cuenta sin configurar, y la app se comporta
+  // exactamente como antes de que existiera el onboarding (sin filtro, todos los widgets).
+  const [contextos, setContextos] = useState([]);
+  const [actividadProfesional, setActividadProfesional] = useState("");
+  const [onboardingCompletado, setOnboardingCompletado] = useState(true); // optimista: no parpadea el wizard mientras cargan las preferencias
+  const [onboardingForzado, setOnboardingForzado] = useState(false); // se abre a mano desde Configuración
+  // Filtro del Centro de Mando: "todos" | "ctx:<Contexto>" | "emp:<id>".
+  const [contextoActivo, setContextoActivo] = useState("todos");
+
+  const guardarContextos = async ({ contextos: nuevos, actividadProfesional: actividad, empresas: empresasNuevas, aplicarWidgets }) => {
+    setContextos(nuevos);
+    setActividadProfesional(actividad || "");
+    setOnboardingCompletado(true);
+    setOnboardingForzado(false);
+    setContextoActivo("todos");
+
+    // Las empresas capturadas en el onboarding se crean con addItem para que pasen por el mismo
+    // camino que cualquier otra entidad (id, user_id, cola offline, estado local).
+    for (const emp of empresasNuevas || []) {
+      if ((data?.empresas || []).some((x) => x.id === emp.id)) continue;
+      await addItem("empresas", { id: emp.id, nombre: emp.nombre.trim(), descripcion: emp.descripcion || "", logoUrl: emp.logoUrl || "" });
+    }
+
+    // Los widgets se traducen al formato que ya usa "Personalizar panel". Solo se sobreescriben
+    // cuando el usuario viene del onboarding inicial: si ya acomodó su panel a mano, cambiar de
+    // contexto después no debe tirarle ese acomodo.
+    const widgets = aplicarWidgets ? widgetsParaContextos(nuevos) : null;
+    if (widgets) setOrdenWidgetsDashboard(widgets);
+
+    await supabase.from("preferencias").upsert({
+      user_id: misId,
+      contextos: nuevos,
+      actividad_profesional: (actividad || "").trim() || null,
+      onboarding_completado: true,
+      ...(widgets ? { dashboard_widgets: widgets } : {}),
+    }, { onConflict: "user_id" });
+  };
+
+  const saltarOnboarding = async () => {
+    setOnboardingCompletado(true);
+    setOnboardingForzado(false);
+    await supabase.from("preferencias").upsert({ user_id: misId, onboarding_completado: true }, { onConflict: "user_id" });
+  };
+
   const guardarPerfil = async ({ bio, estudios, habilidades, redes }) => {
     setPerfilBio(bio); setPerfilEstudios(estudios); setPerfilHabilidades(habilidades); setPerfilRedes(redes);
     await supabase.from("preferencias").upsert({
@@ -2855,6 +2970,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
       { id: "activos", label: "Activos digitales", icon: Globe },
     ]},
     { label: "Módulos", items: [
+      { id: "empresas", label: "Mis empresas", icon: Building2 },
       { id: "marketing", label: "Marketing", icon: Megaphone },
       { id: "documentos", label: "Documentos", icon: FileText },
     ]},
@@ -2893,6 +3009,34 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
             || (esCuidadorSinModuloCompleto && it.id === "salud")) }))
           .filter((g) => g.items.length > 0),
       ];
+
+  // El onboarding solo se muestra en una cuenta que de verdad acaba de nacer: preferencia sin
+  // marcar Y sin un solo dato cargado. Una cuenta con historia jamás debe recibir un wizard de
+  // bienvenida por una preferencia que se quedó en false. Desde Configuración se puede abrir a
+  // mano en cualquier momento (onboardingForzado).
+  const cuentaRecienCreada = !!data && ["proyectos", "contactos", "finanzas", "pendientes", "habitos", "citas", "notas", "empresas"]
+    .every((k) => (data[k] || []).length === 0);
+  const mostrarOnboarding = !loading && !!data && (onboardingForzado || (!onboardingCompletado && cuentaRecienCreada));
+
+  if (mostrarOnboarding) {
+    return (
+      <div className={`gp-root ${claseTema(tema)}`} style={{ minHeight: "100vh" }}>
+        <Tokens tema={tema} />
+        <Suspense fallback={<div style={{ minHeight: "100vh", background: "var(--bg)" }} />}>
+          <OnboardingContextos
+            catalogo={CONTEXTOS_USO}
+            colorPorContexto={COLOR_CONTEXTO_PROYECTO}
+            widgetsPorContexto={WIDGETS_POR_CONTEXTO}
+            etiquetaWidget={(id) => DASHBOARD_WIDGETS_CATALOGO.find((w) => w.id === id)?.label || id}
+            yaConfigurado={onboardingForzado}
+            valorInicial={{ contextos, actividadProfesional, empresas: (data.empresas || []).map((e) => ({ id: e.id, nombre: e.nombre, descripcion: e.descripcion || "", logoUrl: e.logoUrl || "" })) }}
+            onTerminar={(v) => guardarContextos({ ...v, aplicarWidgets: !onboardingForzado })}
+            onSaltar={onboardingForzado ? () => setOnboardingForzado(false) : saltarOnboarding}
+          />
+        </Suspense>
+      </div>
+    );
+  }
 
   return (
     <div className={`gp-root overflow-hidden ${claseTema(tema)}`} style={{ minHeight: "100vh" }}>
@@ -3106,6 +3250,10 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
               onCrearRapido={irACrear}
               ordenWidgetsDashboard={ordenWidgetsDashboard}
               onGuardarOrdenWidgets={guardarOrdenWidgetsDashboard}
+              empresas={data.empresas || []}
+              contextos={contextos}
+              contextoActivo={contextoActivo}
+              onContextoActivo={setContextoActivo}
               avatarUrl={avatarUrl}
               onAbrirConfiguracion={() => irAVista("configuracion")}
               onCerrarSesion={cerrarSesion}
@@ -3148,7 +3296,15 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
               subirAvatar={subirAvatar}
               ciudad={ciudad}
               guardarCiudad={guardarCiudad}
+              contextos={contextos}
+              actividadProfesional={actividadProfesional}
+              onAbrirContextos={() => setOnboardingForzado(true)}
             />
+          )}
+          {view === "empresas" && (
+            <MisEmpresas data={data}
+              onAdd={(i) => addItem("empresas", i)} onEdit={(id, e) => editItem("empresas", id, e)} onRemove={(id) => askDelete("empresas", id)}
+              onVerProyecto={irADetalleProyecto} onIrAVista={irAVista} />
           )}
           {view === "proyectos" && (
             <Proyectos
@@ -3595,6 +3751,7 @@ function Configuracion({
   notifTiposDesactivados, notifSilencioActivo, notifSilencioInicio, notifSilencioFin, notifAnticipacionCitasMin, guardarPreferenciasNotif,
   nombreMostrar, guardarNombreMostrar, avatarUrl, subirAvatar,
   ciudad, guardarCiudad,
+  contextos, actividadProfesional, onAbrirContextos,
 }) {
   const [prefsAbierto, setPrefsAbierto] = useState(false);
   const [nombreModalAbierto, setNombreModalAbierto] = useState(false);
@@ -3618,6 +3775,18 @@ function Configuracion({
         />
         <FilaConfig icon={Contact} label="Nombre para mostrar" sublabel={nombreMostrar ? `Te llamamos "${nombreMostrar}"` : "Usando tu correo — toca para elegir un nombre"} onClick={() => setNombreModalAbierto(true)} />
         <FilaConfig icon={MapPin} label="Ciudad" sublabel={ciudad ? `${ciudad} — para el clima del Centro de mando` : "Sin configurar — toca para elegir tu ciudad"} onClick={() => setCiudadModalAbierto(true)} />
+      </div>
+
+      <p className="text-xs gp-text-muted uppercase tracking-wide mb-2">Cómo usas ARKEYONE</p>
+      <div className="space-y-2 mb-5">
+        <FilaConfig
+          icon={Sparkles}
+          label="Contextos y personalización"
+          sublabel={(contextos || []).length
+            ? `${contextos.join(" · ")}${actividadProfesional ? ` — ${actividadProfesional}` : ""}`
+            : "Sin configurar — elige si usas ARKEYONE para lo personal, lo profesional o tus empresas"}
+          onClick={onAbrirContextos}
+        />
       </div>
 
       <p className="text-xs gp-text-muted uppercase tracking-wide mb-2">Apariencia</p>
@@ -4561,10 +4730,21 @@ function Papelera({ onRestore, onPermanentDelete, ownerId }) {
   );
 }
 
-function Dashboard({ data, setView, onAddSaldo, onVerProyecto, onEditPendiente, sensibleDesbloqueadoHasta, onDesbloquear, miEmail, notifNoLeidas, onBuscar, onNotificaciones, onAddNota, onEditHabito, modulosPermitidos, onCrearRapido, ordenWidgetsDashboard, onGuardarOrdenWidgets, avatarUrl, onAbrirConfiguracion, onCerrarSesion, presupuestoMensual, onGuardarPresupuestoMensual, ciudad, climaLat, climaLon }) {
+function Dashboard({ data: datosCompletos, empresas = [], contextos = [], contextoActivo = "todos", onContextoActivo, setView, onAddSaldo, onVerProyecto, onEditPendiente, sensibleDesbloqueadoHasta, onDesbloquear, miEmail, notifNoLeidas, onBuscar, onNotificaciones, onAddNota, onEditHabito, modulosPermitidos, onCrearRapido, ordenWidgetsDashboard, onGuardarOrdenWidgets, avatarUrl, onAbrirConfiguracion, onCerrarSesion, presupuestoMensual, onGuardarPresupuestoMensual, ciudad, climaLat, climaLon }) {
   const [saldoModal, setSaldoModal] = useState(false);
   const [presupuestoModal, setPresupuestoModal] = useState(false);
   const [personalizarModal, setPersonalizarModal] = useState(false);
+  // Todo el Centro de Mando lee `data` ya filtrada al contexto activo. Se hace aquí arriba, una
+  // sola vez, para que ningún widget tenga que acordarse de filtrar por su cuenta.
+  const data = useMemo(() => filtrarDatosPorContexto(datosCompletos, contextoActivo), [datosCompletos, contextoActivo]);
+  const filtrandoContexto = contextoActivo !== "todos";
+  // Chips de contexto: solo tienen sentido si hay más de un ámbito o al menos una empresa. Con un
+  // solo contexto y sin empresas no hay nada entre qué escoger.
+  const opcionesContexto = [
+    ...contextos.map((c) => ({ key: `ctx:${c}`, label: c, color: COLOR_CONTEXTO_PROYECTO[c] })),
+    ...empresas.map((e) => ({ key: `emp:${e.id}`, label: e.nombre, color: "#16A36A" })),
+  ];
+  const mostrarChipsContexto = opcionesContexto.length > 1;
   const saldo = calcularSaldo(data);
   const hoy = todayISO();
   const mesActual = hoy.slice(0, 7);
@@ -4857,6 +5037,12 @@ function Dashboard({ data, setView, onAddSaldo, onVerProyecto, onEditPendiente, 
           <div className="flex items-center gap-2"><PieChartIcon size={14} className="gp-text-teal" /><h3 className="text-sm font-medium">Resumen financiero</h3></div>
           <button onClick={() => setView("reportes")} className="text-xs gp-text-gold">Ver reportes →</button>
         </div>
+        {/* Honestidad por encima de la estética: Finanzas todavía no distingue contexto por sí
+            misma, así que estos montos son los de TODA tu actividad aunque arriba haya un filtro
+            puesto. Vale más decirlo que enseñar un número recortado que parece el total. */}
+        {filtrandoContexto && (
+          <p className="text-[10px] gp-text-muted mb-1">Muestra todo tu dinero — Finanzas aún no separa por contexto.</p>
+        )}
         {!sensibleDesbloqueado ? (
           <button onClick={onDesbloquear} className="text-left w-full mt-2">
             <p className="text-sm gp-text-gold">🔒 Verifica tu contraseña para ver este resumen</p>
@@ -4907,11 +5093,23 @@ function Dashboard({ data, setView, onAddSaldo, onVerProyecto, onEditPendiente, 
       </div>
     ),
 
+    empresas: <EmpresasWidget empresas={empresas} proyectos={datosCompletos.proyectos || []} onVerTodas={() => setView("empresas")} />,
     notasRapidas: <NotasRapidasWidget onAddNota={onAddNota} />,
     accesosRapidos: <AccesosRapidosWidget onCrear={onCrearRapido} modulosPermitidos={modulosPermitidos} />,
   };
 
-  const widgetsVisibles = resolverOrdenWidgets(ordenWidgetsDashboard).filter((w) => w.visible && widgetContenido[w.id]);
+  // Además de lo que el usuario dejó visible, se respeta a qué contexto pertenece cada widget:
+  // filtrando por "Profesional" no tiene por qué seguir ahí el bloque de Salud.
+  const contextoSeleccionado = contextoActivo.startsWith("ctx:") ? contextoActivo.slice(4) : contextoActivo.startsWith("emp:") ? "Empresarial" : null;
+  const widgetsVisibles = resolverOrdenWidgets(ordenWidgetsDashboard).filter((w) => {
+    if (!w.visible || !widgetContenido[w.id]) return false;
+    const suyos = CONTEXTO_DE_WIDGET[w.id];
+    if (!suyos) return true;
+    if (contextoSeleccionado) return suyos.includes(contextoSeleccionado);
+    // Sin filtro activo, un widget de contexto solo aparece si ese contexto es de los que usas
+    // (o si nunca configuraste contextos, en cuyo caso la app se comporta como siempre).
+    return contextos.length === 0 || suyos.some((c) => contextos.includes(c));
+  });
 
   return (
     <div>
@@ -4929,6 +5127,27 @@ function Dashboard({ data, setView, onAddSaldo, onVerProyecto, onEditPendiente, 
         climaLon={climaLon}
       />
       <DashboardSaludo primerNombre={primerNombre} />
+
+      {/* Filtro de contexto (secc. 12 y 13): un contacto, un proyecto o un movimiento siguen
+          existiendo una sola vez — esto solo cambia por cuál de tus ámbitos estás mirando. */}
+      {mostrarChipsContexto && (
+        <div className="flex flex-wrap gap-1.5 mb-4">
+          {[{ key: "todos", label: "Todos", color: "var(--gold)" }, ...opcionesContexto].map((o) => {
+            const activo = contextoActivo === o.key;
+            return (
+              <button
+                key={o.key} onClick={() => onContextoActivo?.(o.key)}
+                className="text-xs px-3 py-1.5 rounded-full border"
+                style={activo
+                  ? { background: o.color, color: "#0B2341", borderColor: o.color, fontWeight: 600 }
+                  : { borderColor: "var(--border)", color: "var(--muted)" }}
+              >
+                {o.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
       <ResumenCards
         activos={activos}
         tareasPendientes={tareasPendientesTotal}
@@ -5100,6 +5319,193 @@ function repartoCostosProyecto(data, proyectoId) {
     if (t.estatus === "Completada") grupos[key].generado += precio; else grupos[key].pendiente += precio;
   }
   return Object.values(grupos).sort((a, b) => (a.esYo ? -1 : b.esYo ? 1 : a.nombre.localeCompare(b.nombre)));
+}
+
+/* ---------- Mis empresas ---------- */
+// "Mis empresas" es una PERSPECTIVA del contexto Empresarial, no una segunda aplicación: aquí
+// solo viven la empresa y su identidad. Sus proyectos, tareas, dinero, contactos y documentos
+// siguen en sus módulos de siempre, relacionados con la empresa — nunca duplicados por empresa.
+
+function LogoEmpresa({ e, size = 40 }) {
+  if (e.logoUrl) {
+    return <img src={e.logoUrl} alt="" className="rounded-xl object-cover shrink-0" style={{ width: size, height: size, border: "1px solid var(--border)" }} />;
+  }
+  return (
+    <div className="rounded-xl flex items-center justify-center shrink-0" style={{ width: size, height: size, background: "rgba(22,163,106,.16)", color: "#16A36A" }}>
+      <Building2 size={Math.round(size * 0.5)} />
+    </div>
+  );
+}
+
+function MisEmpresas({ data, onAdd, onEdit, onRemove, onVerProyecto, onIrAVista }) {
+  const [modal, setModal] = useState(null);
+  const [busqueda, setBusqueda] = useState("");
+  const empresas = data.empresas || [];
+
+  const proyectosDe = (empresaId) => (data.proyectos || []).filter((p) => p.empresaId === empresaId);
+  const tareasAbiertasDe = (empresaId) => {
+    const ids = new Set(proyectosDe(empresaId).map((p) => p.id));
+    return (data.pendientes || []).filter((t) => ids.has(t.proyectoId) && !ESTATUS_TAREA_CERRADOS.includes(t.estatus)).length;
+  };
+
+  const visibles = ordenarLista(
+    filtrarPorBusqueda(empresas, busqueda, [(e) => e.nombre, (e) => e.descripcion]),
+    "alfabetico", { alfabetico: { get: (e) => e.nombre, tipo: "texto" } }
+  );
+  const columnasExport = [
+    { label: "Nombre", get: (e) => e.nombre },
+    { label: "Descripción", get: (e) => e.descripcion || "" },
+    { label: "Proyectos", get: (e) => proyectosDe(e.id).length },
+  ];
+
+  return (
+    <div>
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-1">
+        <h2 className="gp-serif text-2xl">Mis empresas</h2>
+        <button onClick={() => setModal({ item: { nombre: "", descripcion: "", logoUrl: "" } })} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm w-full sm:w-auto"><Plus size={14} /> Nueva empresa</button>
+      </div>
+      <p className="text-sm gp-text-muted mb-3">
+        Las empresas que administras. Sus proyectos, tareas y dinero viven en sus módulos de siempre — aquí se relacionan, no se duplican.
+      </p>
+
+      <BarraListaEstandar busqueda={busqueda} onBusqueda={setBusqueda} placeholder="Buscar empresa por nombre o descripción…"
+        onExportExcel={() => exportarFilasExcel(visibles, columnasExport, "empresas")}
+        onExportPDF={() => exportarFilasPDF(visibles, columnasExport, "empresas", "Mis empresas", busqueda ? `búsqueda: "${busqueda}"` : "")} />
+
+      {visibles.length === 0 ? (
+        <div className="gp-panel p-8 text-center">
+          <Building2 size={28} className="gp-text-muted mx-auto mb-3" />
+          <p className="text-sm gp-text-muted">
+            {empresas.length === 0
+              ? "Todavía no registras ninguna empresa. Agrega la primera para poder ligarle proyectos."
+              : "Ninguna empresa coincide con la búsqueda."}
+          </p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {visibles.map((e) => {
+            const proys = proyectosDe(e.id);
+            const abiertas = tareasAbiertasDe(e.id);
+            return (
+              <div key={e.id} className="gp-panel p-4">
+                <div className="flex items-start gap-3">
+                  <LogoEmpresa e={e} size={44} />
+                  <div className="min-w-0 flex-1">
+                    <p className="font-medium truncate">{e.nombre}</p>
+                    {e.descripcion && <p className="text-xs gp-text-muted line-clamp-2 mt-0.5">{e.descripcion}</p>}
+                  </div>
+                  <div className="flex gap-1 shrink-0">
+                    <IconBtn title="Editar" onClick={() => setModal({ item: e })}><Pencil size={13} /></IconBtn>
+                    <IconBtn title="Eliminar" onClick={() => onRemove(e.id)}><Trash2 size={13} /></IconBtn>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 mt-3">
+                  <div className="rounded-lg p-2.5" style={{ background: "var(--panel-2)" }}>
+                    <p className="text-[10px] gp-text-muted">Proyectos</p>
+                    <p className="gp-serif text-lg">{proys.length}</p>
+                  </div>
+                  <div className="rounded-lg p-2.5" style={{ background: "var(--panel-2)" }}>
+                    <p className="text-[10px] gp-text-muted">Tareas abiertas</p>
+                    <p className="gp-serif text-lg">{abiertas}</p>
+                  </div>
+                </div>
+
+                {proys.length > 0 && (
+                  <div className="mt-3 pt-3 border-t gp-border flex flex-col gap-1.5">
+                    {proys.slice(0, 3).map((p) => (
+                      <button key={p.id} onClick={() => onVerProyecto(p.id)} className="flex items-center justify-between gap-2 w-full text-left">
+                        <span className="text-xs truncate">{p.nombre}</span>
+                        <BadgeEstatusProyecto estatus={p.estatus} />
+                      </button>
+                    ))}
+                    {proys.length > 3 && (
+                      <button onClick={() => onIrAVista("proyectos")} className="text-xs gp-text-gold text-left">Ver los {proys.length} proyectos →</button>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {modal && (
+        <Modal title={modal.item.id ? "Editar empresa" : "Nueva empresa"} onClose={() => setModal(null)}>
+          <EmpresaForm item={modal.item} onSave={(v) => { modal.item.id ? onEdit(modal.item.id, v) : onAdd(v); setModal(null); }} />
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+function EmpresaForm({ item, onSave }) {
+  const [empresaId] = useState(() => item.id || uid());
+  const [v, setV] = useState({ ...item, nombre: item.nombre || "", descripcion: item.descripcion || "", logoUrl: item.logoUrl || "" });
+  const [error, setError] = useState("");
+  return (
+    <div>
+      <div className="flex flex-col items-center mb-3">
+        <AvatarForm
+          avatarUrl={v.logoUrl}
+          forma="cuadro"
+          textoBoton="Elegir logo…"
+          iconoVacio={<Building2 size={32} className="gp-text-muted" />}
+          helpText="Logo de la empresa (opcional)."
+          subirAvatar={async (file) => {
+            const path = `empresas/${empresaId}/${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
+            const { error: upErr } = await supabase.storage.from("adjuntos").upload(path, file);
+            if (upErr) return { error: upErr.message };
+            const { data: pub } = supabase.storage.from("adjuntos").getPublicUrl(path);
+            setV((prev) => ({ ...prev, logoUrl: pub.publicUrl }));
+            return { url: pub.publicUrl };
+          }}
+        />
+        {v.logoUrl && (
+          <button type="button" onClick={() => setV({ ...v, logoUrl: "" })} className="text-xs gp-text-muted mt-2">Quitar logo</button>
+        )}
+      </div>
+      <Field label="Nombre de la empresa"><input className="gp-input" autoFocus value={v.nombre} onChange={(e) => setV({ ...v, nombre: e.target.value })} /></Field>
+      <Field label="Descripción (opcional)"><textarea className="gp-input" rows={2} value={v.descripcion} onChange={(e) => setV({ ...v, descripcion: e.target.value })} /></Field>
+      {error && <p className="text-xs gp-text-red mb-2">{error}</p>}
+      <button
+        className="gp-btn w-full py-2 text-sm mt-2"
+        onClick={() => {
+          if (!v.nombre.trim()) { setError("El nombre de la empresa es obligatorio."); return; }
+          setError("");
+          onSave({ ...v, id: empresaId, nombre: v.nombre.trim() });
+        }}
+      >Guardar</button>
+    </div>
+  );
+}
+
+// Widget del Centro de Mando para el contexto Empresarial.
+function EmpresasWidget({ empresas, proyectos, onVerTodas }) {
+  return (
+    <div className="gp-panel p-4 h-full flex flex-col">
+      <div className="flex items-center gap-2 mb-3"><Building2 size={14} style={{ color: "#16A36A" }} /><h3 className="text-sm font-medium">Mis empresas</h3></div>
+      <div className="flex-1">
+        {empresas.length === 0 ? (
+          <p className="text-xs gp-text-muted">Todavía no registras empresas.</p>
+        ) : (
+          <ul className="space-y-2">
+            {empresas.slice(0, 4).map((e) => {
+              const n = proyectos.filter((p) => p.empresaId === e.id).length;
+              return (
+                <li key={e.id} className="flex items-center gap-2.5">
+                  <LogoEmpresa e={e} size={26} />
+                  <span className="text-sm truncate flex-1">{e.nombre}</span>
+                  <span className="text-xs gp-text-muted shrink-0">{n} proyecto{n === 1 ? "" : "s"}</span>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+      <button onClick={onVerTodas} className="text-xs gp-text-gold mt-3 text-left">Ir a Mis empresas →</button>
+    </div>
+  );
 }
 
 /* ---------- Proyectos e ideas — piezas compartidas entre la lista y la ficha ---------- */
@@ -5586,6 +5992,7 @@ function Proyectos({
           <ProyectoForm
             item={modal.item}
             contactos={data.contactos}
+            empresas={data.empresas || []}
             vinculos={(data.contactoProyectos || []).filter((v) => v.proyectoId === modal.item.id)}
             onVincularContacto={onVincularContacto}
             onDesvincularContacto={onDesvincularContacto}
@@ -5822,6 +6229,12 @@ function FichaProyecto({
           <BloqueFicha titulo="Información general" icono={<Info size={14} className="gp-text-gold" />} accion={<button onClick={onEditar} className="text-xs gp-text-gold">Editar</button>}>
             <DatoFicha label="Contexto" icono={<Globe size={12} />} valor={p.contexto ? <BadgeContextoProyecto contexto={p.contexto} /> : null} />
             <DatoFicha label="Categoría" icono={<Tag size={12} />} valor={p.categoria} />
+            {p.contexto === "Empresarial" && (
+              <DatoFicha
+                label="Empresa" icono={<Building2 size={12} />}
+                valor={(data.empresas || []).find((e) => e.id === p.empresaId)?.nombre}
+              />
+            )}
             <DatoFicha label="Estado" icono={<Rocket size={12} />} valor={<BadgeEstatusProyecto estatus={p.estatus} />} />
             <DatoFicha label="Inicio" icono={<CalendarClock size={12} />} valor={fmtFechaCorta(p.fechaInicio)} />
             <DatoFicha
@@ -6078,7 +6491,7 @@ function SeccionForm({ titulo, children }) {
 // Separado por secciones (secc. 27): lo indispensable arriba, fechas y relaciones después, y los
 // datos secundarios detrás de "Información adicional" para que dar de alta un proyecto no sea un
 // formulario gigantesco.
-function ProyectoForm({ item, contactos, vinculos, onVincularContacto, onDesvincularContacto, onSave }) {
+function ProyectoForm({ item, contactos, empresas = [], vinculos, onVincularContacto, onDesvincularContacto, onSave }) {
   // El id se decide desde ahora (no al guardar) para poder vincular contactos antes de que el
   // proyecto exista como fila — mismo truco que ya usa ContactoForm.
   const [proyectoId] = useState(() => item.id || uid());
@@ -6092,6 +6505,7 @@ function ProyectoForm({ item, contactos, vinculos, onVincularContacto, onDesvinc
     fechaFin: item.fechaFin || "",
     etiquetas: item.etiquetas || [],
     imagenUrl: item.imagenUrl || "",
+    empresaId: item.empresaId || "",
   });
   const [error, setError] = useState("");
   const [adicionalAbierto, setAdicionalAbierto] = useState(false);
@@ -6185,7 +6599,7 @@ function ProyectoForm({ item, contactos, vinculos, onVincularContacto, onDesvinc
               const color = COLOR_CONTEXTO_PROYECTO[c];
               return (
                 <button
-                  key={c} type="button" onClick={() => setV({ ...v, contexto: c })}
+                  key={c} type="button" onClick={() => setV({ ...v, contexto: c, empresaId: c === "Empresarial" ? v.empresaId : "" })}
                   className="text-xs px-2.5 py-1 rounded-full border"
                   style={v.contexto === c
                     ? { background: color, color: "#0B2341", borderColor: color, fontWeight: 600 }
@@ -6197,6 +6611,20 @@ function ProyectoForm({ item, contactos, vinculos, onVincularContacto, onDesvinc
             })}
           </div>
         </Field>
+        {/* La empresa solo aplica al contexto Empresarial: un proyecto personal no es de nadie
+            más que tuyo, y dejar el campo visible invitaría a llenarlo sin sentido. */}
+        {v.contexto === "Empresarial" && (
+          <Field label={empresas.length ? "Empresa" : "Empresa"}>
+            {empresas.length === 0
+              ? <p className="text-xs gp-text-muted">Todavía no registras empresas. Créalas en "Mis empresas" y podrás ligar este proyecto a una.</p>
+              : (
+                <select className="gp-input" value={v.empresaId || ""} onChange={(e) => setV({ ...v, empresaId: e.target.value })}>
+                  <option value="">— sin asignar —</option>
+                  {[...empresas].sort((a, b) => (a.nombre || "").localeCompare(b.nombre || "", "es")).map((emp) => <option key={emp.id} value={emp.id}>{emp.nombre}</option>)}
+                </select>
+              )}
+          </Field>
+        )}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Field label="Categoría">
             <select className="gp-input" value={v.categoria} onChange={(e) => setV({ ...v, categoria: e.target.value })}>{CATS.map((c) => <option key={c}>{c}</option>)}</select>
@@ -14249,14 +14677,14 @@ function CitaForm({ item, contactos, tagsExistentes, onCrearContacto, onSave }) 
 // Deliberadamente NO incluye "comentarios", "saldoInicial" ni "patrimonioValuaciones": no tienen
 // pantalla propia a la que navegar, así que un resultado ahí no le serviría de nada al usuario.
 const ICONO_MODULO_BUSQUEDA = {
-  proyectos: FolderKanban, pendientes: CheckSquare, equipo: Users, finanzas: Wallet,
+  empresas: Building2, proyectos: FolderKanban, pendientes: CheckSquare, equipo: Users, finanzas: Wallet,
   actividades: Activity, activos: Globe, metas: Target, contactos: Contact, redesMetricas: BarChart3,
   documentos: FileText, habitos: Flame, salud: HeartPulse, apartados: PiggyBank, eventos: Camera,
   regalos: Gift, facturas: Receipt, campanas: Megaphone, patrimonio: Gem, medicamentos: Pill,
   citas: CalendarClock, notas: StickyNote,
 };
 const KEY_TO_VIEW_BUSQUEDA = {
-  proyectos: "proyectos", pendientes: "pendientes", equipo: "equipo", finanzas: "finanzas",
+  empresas: "empresas", proyectos: "proyectos", pendientes: "pendientes", equipo: "equipo", finanzas: "finanzas",
   actividades: "actividades", activos: "activos", metas: "metas", contactos: "contactos", redesMetricas: "redes",
   documentos: "documentos", habitos: "habitos", salud: "salud", apartados: "apartados", eventos: "eventos",
   regalos: "regalos", facturas: "facturas", campanas: "marketing", patrimonio: "patrimonio", medicamentos: "medicamentos",
