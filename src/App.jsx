@@ -8535,8 +8535,10 @@ function FichaContacto({ c, data, proyectosVinculados, onCerrar, onEditar, onVer
             <Dato label="Cumpleaños" valor={c.fechaNacimiento} />
             <Dato label="Parentesco" valor={c.parentesco} />
             <Dato label="Dónde lo conociste" valor={c.contexto} />
-            <Dato label="Notas" valor={c.notas} />
-            {!c.nombres && !c.fechaNacimiento && !c.contexto && !c.notas && <Vacio>Sin datos personales capturados todavía.</Vacio>}
+            {/* La nota del contacto ya NO se muestra aquí: vive en su propia pestaña de Notas,
+                para no tener dos lugares distintos donde escribir sobre la misma persona
+                (pedido de Angel, 24 sept 2026). */}
+            {!c.nombres && !c.fechaNacimiento && !c.contexto && <Vacio>Sin datos personales capturados todavía.</Vacio>}
           </Bloque>
 
           <Bloque titulo="Contacto" icono={<Contact size={14} className="gp-text-gold" />}>
@@ -8624,6 +8626,14 @@ function FichaContacto({ c, data, proyectosVinculados, onCerrar, onEditar, onVer
 
       {tab === "notas" && (
         <Bloque titulo="Notas" icono={<StickyNote size={14} className="gp-text-gold" />}>
+          {/* La nota corta que se captura en la ficha del contacto (campo `notas`), que antes
+              salía perdida dentro de Información general. */}
+          {c.notas && (
+            <div className="mb-3 pb-2.5 border-b gp-border">
+              <p className="text-[10px] uppercase tracking-wide gp-text-muted mb-1">Nota del contacto</p>
+              <p className="text-xs">{c.notas}</p>
+            </div>
+          )}
           {notas.length === 0
             ? <Vacio>Sin notas ligadas a este contacto. Las que crees aquí quedan también en el módulo de Notas.</Vacio>
             : (
@@ -8712,12 +8722,26 @@ function ContactoForm({ item, proyectos, vinculos, onVincularProyecto, onDesvinc
   });
   const [error, setError] = useState("");
   const [otroParentesco, setOtroParentesco] = useState(() => !!item.parentesco && !PARENTESCOS.includes(item.parentesco));
-  // Proyectos vinculados: se editan solo en memoria aquí (como el resto del formulario) y se
-  // reconcilian contra la tabla puente hasta que se da Guardar — así "Cancelar" no deja vínculos
-  // sueltos a medio guardar.
+  // Proyectos vinculados. Si el contacto YA existe, vincular/desvincular se guarda al momento:
+  // esperar al botón Guardar hacía que se perdieran si el formulario se cerraba de cualquier otra
+  // forma (la X, un clic fuera, "descartar cambios") — que es justo lo que reportó Angel el 24
+  // sept 2026. Para un contacto NUEVO no se puede guardar todavía (la fila no existe y la llave
+  // foránea lo rechazaría), así que ahí sí se acumulan en memoria y se crean al guardar.
+  const esNuevo = !item.id;
   const [proyectosSeleccionados, setProyectosSeleccionados] = useState(() =>
     (vinculos || []).map((vinc) => ({ id: vinc.proyectoId, label: proyectos.find((p) => p.id === vinc.proyectoId)?.nombre || "—" }))
   );
+  const agregarProyecto = (o) => {
+    setProyectosSeleccionados((prev) => (prev.some((p) => p.id === o.id) ? prev : [...prev, o]));
+    if (!esNuevo) onVincularProyecto?.(contactoId, o.id);
+  };
+  const quitarProyecto = (proyectoId) => {
+    setProyectosSeleccionados((prev) => prev.filter((p) => p.id !== proyectoId));
+    if (!esNuevo) {
+      const vinculo = (vinculos || []).find((vv) => vv.proyectoId === proyectoId);
+      if (vinculo) onDesvincularProyecto?.(vinculo.id);
+    }
+  };
   const toggleTipo = (t) => setV((prev) => ({ ...prev, tipos: prev.tipos.includes(t) ? prev.tipos.filter((x) => x !== t) : [...prev.tipos, t] }));
 
   const guardar = () => {
@@ -8732,13 +8756,9 @@ function ContactoForm({ item, proyectos, vinculos, onVincularProyecto, onDesvinc
     // antes de la migración, para no mandar una columna que Supabase ya no tiene.
     const { proyectoId: _proyectoIdViejo, ...vLimpio } = v;
     onSave({ ...vLimpio, id: contactoId, nombres, apellidoPaterno, apellidoMaterno, nombre: armarNombreContacto(nombres, apellidoPaterno, apellidoMaterno) });
-    const idsOriginales = new Set((vinculos || []).map((vv) => vv.proyectoId));
-    const idsActuales = new Set(proyectosSeleccionados.map((p) => p.id));
-    for (const p of proyectosSeleccionados) {
-      if (!idsOriginales.has(p.id)) onVincularProyecto?.(contactoId, p.id);
-    }
-    for (const vv of (vinculos || [])) {
-      if (!idsActuales.has(vv.proyectoId)) onDesvincularProyecto?.(vv.id);
+    // Solo el contacto nuevo trae vínculos pendientes; al editar ya se guardaron al momento.
+    if (esNuevo) {
+      for (const p of proyectosSeleccionados) onVincularProyecto?.(contactoId, p.id);
     }
   };
 
@@ -8808,10 +8828,11 @@ function ContactoForm({ item, proyectos, vinculos, onVincularProyecto, onDesvinc
         <ComboboxMultiBuscar
           seleccionados={proyectosSeleccionados}
           opciones={proyectos.map((p) => ({ id: p.id, label: p.nombre }))}
-          onAgregar={(o) => setProyectosSeleccionados((prev) => [...prev, o])}
-          onQuitar={(id) => setProyectosSeleccionados((prev) => prev.filter((p) => p.id !== id))}
+          onAgregar={agregarProyecto}
+          onQuitar={quitarProyecto}
           placeholder="Buscar proyecto…"
         />
+        {!esNuevo && <p className="text-[10px] gp-text-muted -mt-2 mb-2">Los proyectos se guardan al momento, no hace falta dar Guardar.</p>}
       </Field>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Field label="WhatsApp"><input className="gp-input" value={v.whatsapp} onChange={(e) => setV({ ...v, whatsapp: e.target.value })} /></Field>
