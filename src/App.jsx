@@ -49,9 +49,10 @@ const Tokens = ({ tema = "oscuro" }) => (
     @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');
     .gp-root{ --bg:#0B2341; --panel:#12304F; --panel-hi:#1A3D63; --border:#234A70;
       --text:#EAF1FA; --muted:#93A7C4; --gold:#F59E0B; --teal:#5FBF8B; --teal-tint:#DCF5E6; --teal-text:#1D6B42; --panel-2:rgba(255,255,255,.12); --red:#EF4444;
-      /* Fila de una tarea ya completada. Sobre el azul oscuro hace falta un verde con algo de
-         luz propia para que se note sin gritar; el tema claro lo redefine más abajo. */
-      --hecho-bg:rgba(95,191,139,.16); --hecho-bg-hi:rgba(95,191,139,.26); --hecho-borde:#5FBF8B;
+      /* Fila de una tarea ya completada. Sobre el azul oscuro hace falta un verde con bastante
+         luz propia para que se lea como "hecho" de un vistazo; el tema claro lo redefine abajo. */
+      --hecho-bg:rgba(95,191,139,.28); --hecho-bg-hi:rgba(95,191,139,.38); --hecho-borde:#5FBF8B;
+      --hecho-texto:#C6EFD9; --hecho-muted:#AECFC6;
       background:var(--bg); color:var(--text); font-family:'IBM Plex Sans',sans-serif; }
     /* Tema Claro — el único claro que queda (ARKEYONE es solo Oscuro/Claro, sin color
        personalizado ni temas adicionales). --panel-2 se redefine con un tinte OSCURO (no blanco)
@@ -64,8 +65,9 @@ const Tokens = ({ tema = "oscuro" }) => (
        "azul-claro" se queda igual para no migrar la preferencia guardada de nadie. */
     .gp-root.tema-azul-claro{ --bg:#F5F7FB; --panel:#FFFFFF; --panel-hi:#EDF1F7; --border:#DDE3EC; --text:#14213D; --muted:#667085; --panel-2:rgba(20,33,61,.06);
       /* Sobre blanco el mismo verde se ve lavado: aquí se usa el verde sólido de ARKEYONE con
-         poca opacidad, que sí contrasta contra #FFFFFF. */
-      --hecho-bg:rgba(22,163,106,.10); --hecho-bg-hi:rgba(22,163,106,.18); --hecho-borde:#16A36A; }
+         más cuerpo, que sí contrasta contra #FFFFFF sin tapar el texto. */
+      --hecho-bg:rgba(22,163,106,.20); --hecho-bg-hi:rgba(22,163,106,.30); --hecho-borde:#16A36A;
+      --hecho-texto:#0F5F3D; --hecho-muted:#455C52; }
     .gp-serif{ font-family:'Poppins',sans-serif; font-weight:600; }
     .gp-mono{ font-family:'IBM Plex Mono',monospace; }
     .gp-panel{ background:var(--panel); border:1px solid var(--border); border-radius:14px; }
@@ -99,12 +101,23 @@ const Tokens = ({ tema = "oscuro" }) => (
     table.gp-table th{ text-align:left; color:var(--muted); font-weight:500; padding:8px 10px; border-bottom:1px solid var(--border); font-size:11px; letter-spacing:.02em; }
     table.gp-table td{ padding:8px 10px; border-bottom:1px solid var(--border); vertical-align:top; }
     table.gp-table tr:hover td{ background:var(--panel-hi); }
-    /* Tarea completada: la fila entera se tiñe de verde y lleva una guía a la izquierda, para
+    /* Tarea completada: la fila entera se tiñe de verde y lleva una barra a la izquierda, para
        distinguirla de las pendientes de un vistazo en los dos temas. Va DESPUÉS de la regla de
        :hover para que también se note al pasar el mouse encima. */
+    /* Solo el fondo: si además se tiñera todo el texto de la fila, lo ya hecho gritaría más que
+       lo pendiente y se invertiría la jerarquía. El verde va en la descripción (.gp-texto-hecho),
+       que es lo que identifica la tarea. */
     table.gp-table tr.gp-fila-hecha td{ background:var(--hecho-bg); }
     table.gp-table tr.gp-fila-hecha:hover td{ background:var(--hecho-bg-hi); }
-    table.gp-table tr.gp-fila-hecha td:first-child{ box-shadow: inset 3px 0 0 var(--hecho-borde); }
+    table.gp-table tr.gp-fila-hecha td:first-child{ box-shadow: inset 4px 0 0 var(--hecho-borde); }
+    /* La descripción de una tarea hecha NO debe ir en gris apagado: sobre el verde se ve sucia.
+       Este es su color, y sirve igual dentro y fuera de una tabla (la ficha del proyecto no usa
+       tabla y necesita el mismo tratamiento). */
+    .gp-texto-hecho{ color:var(--hecho-texto); }
+    /* El tinte verde aclara la fila y dejaría el texto secundario (proyecto, cliente,
+       responsable) por debajo del contraste mínimo. En vez de bajarle al verde, se le sube a ese
+       texto: así la fila se nota más Y se sigue leyendo. Medido en los dos temas. */
+    table.gp-table tr.gp-fila-hecha .gp-text-muted{ color:var(--hecho-muted); }
     .gp-badge{ display:inline-block; padding:2px 8px; border-radius:3px; font-size:11px; font-weight:500; }
     .gp-scroll::-webkit-scrollbar{ width:6px; height:6px; }
     .gp-scroll::-webkit-scrollbar-thumb{ background:var(--border); border-radius:3px; }
@@ -6198,7 +6211,7 @@ function FichaProyecto({
           aun así se cierran. Lo que sí queda registrado siempre es CUÁNDO se completó. */}
       <label
         className="flex items-center gap-2 mt-2 px-2.5 py-2 rounded cursor-pointer"
-        style={completado ? { background: "var(--hecho-bg)", boxShadow: "inset 3px 0 0 var(--hecho-borde)" } : { background: "var(--panel-2)" }}
+        style={completado ? { background: "var(--hecho-bg)", boxShadow: "inset 4px 0 0 var(--hecho-borde)" } : { background: "var(--panel-2)" }}
       >
         <input
           type="checkbox" checked={completado}
@@ -6374,12 +6387,17 @@ function FichaProyecto({
                   const vencida = !cerrada && t.fechaLimite && daysUntil(t.fechaLimite) < 0;
                   const colapsada = colapsadasTareas.has(t.id);
                   return (
-                    <div key={t.id} className="flex items-start justify-between gap-2" style={{ paddingLeft: nivel * 14 }}>
+                    <div
+                      key={t.id} className="flex items-start justify-between gap-2 rounded-lg"
+                      style={cerrada
+                        ? { paddingLeft: nivel * 14 + 8, paddingRight: 8, paddingTop: 5, paddingBottom: 5, background: "var(--hecho-bg)", boxShadow: "inset 4px 0 0 var(--hecho-borde)" }
+                        : { paddingLeft: nivel * 14 }}
+                    >
                       <span className="flex items-start gap-1.5 min-w-0">
                         <CheckTareaHecha tarea={t} size={14} onCompletar={pedirCompletarTarea} onReabrir={(x) => reabrirTarea(x, onEditTarea)} />
                         {nivel > 0 && <span className="gp-text-muted shrink-0 text-xs">└</span>}
                         <ToggleArbolTarea nodo={t} colapsada={colapsada} onToggle={toggleRamaFicha} />
-                        <span className={`text-xs min-w-0 ${cerrada ? "gp-text-muted" : ""}`} style={cerrada ? { textDecoration: "line-through" } : undefined}>{t.descripcion}</span>
+                        <span className={`text-xs min-w-0 ${cerrada ? "gp-texto-hecho" : ""}`} style={cerrada ? { textDecoration: "line-through" } : undefined}>{t.descripcion}</span>
                         <ContadorRamaColapsada nodo={t} colapsada={colapsada} />
                       </span>
                       <div className="flex items-center gap-1.5 shrink-0">
@@ -6948,7 +6966,7 @@ function ProyectoDetalle({ data, proyectoId, onVolver, onAddTarea, onEditTarea, 
                         <span style={{ paddingLeft: nivel * 18 }} className="flex items-center gap-1">
                           {nivel > 0 && <span className="gp-text-muted shrink-0">└</span>}
                           <ToggleArbolTarea nodo={p} colapsada={colapsada} onToggle={toggleRama} />
-                          <span className={hecha ? "gp-text-muted" : ""} style={hecha ? { textDecoration: "line-through" } : undefined}>{p.descripcion}</span>
+                          <span className={hecha ? "gp-texto-hecho" : ""} style={hecha ? { textDecoration: "line-through" } : undefined}>{p.descripcion}</span>
                           <ContadorRamaColapsada nodo={p} colapsada={colapsada} />
                         </span>
                       </td>
@@ -7975,7 +7993,7 @@ function Pendientes({ data, activeOwnerId, onAdd, onEdit, onEditProyecto, onRemo
                     <span style={{ paddingLeft: nivel * 18 }} className="flex items-start gap-1">
                       {nivel > 0 && <span className="gp-text-muted shrink-0">└</span>}
                       <ToggleArbolTarea nodo={p} colapsada={colapsada} onToggle={toggleRama} />
-                      <span className={`line-clamp-2 md:line-clamp-none ${hecha ? "gp-text-muted" : ""}`} style={hecha ? { textDecoration: "line-through" } : undefined}>{p.descripcion}</span>
+                      <span className={`line-clamp-2 md:line-clamp-none ${hecha ? "gp-texto-hecho" : ""}`} style={hecha ? { textDecoration: "line-through" } : undefined}>{p.descripcion}</span>
                       <ContadorRamaColapsada nodo={p} colapsada={colapsada} />
                     </span>
                   </td>
