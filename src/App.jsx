@@ -165,7 +165,31 @@ const claseTema = (tema) => (tema && tema !== "actual" ? `tema-${tema}` : "");
 
 
 /* ---------- datos base ---------- */
-const CATS = ["Fundación", "Software", "Música", "Renta", "Marketing", "Chatbots", "Personal", "Otro"];
+/* ---------- Orden de los catálogos ----------
+   Regla transversal (pedido de Angel, 28 sept 2026): los combos se ordenan alfabéticamente, para
+   no tener que recordar en qué renglón quedó cada opción. Se aplica aquí, en la definición del
+   catálogo, y no en cada <select>: así vale para todos los lugares donde se use la lista.
+
+   "Otro"/"Otros" queda SIEMPRE al final aunque alfabéticamente caiga en medio — es el cajón de
+   sastre, no una opción más, y siempre se busca al último.
+
+   NO se ordenan alfabéticamente las listas que ya tienen un orden propio con significado, porque
+   alfabetizarlas las rompería: los estatus (que son un pipeline: Idea -> Validación -> ... ->
+   Archivado), las prioridades (Alta/Media/Baja), las frecuencias y todo lo cronológico (horas,
+   duraciones, rangos de reporte, tipos de comida). Ahí el orden ES la información. */
+// `get` permite ordenar una lista de objetos por el texto que de verdad se ve en pantalla (la
+// etiqueta), no por su id interno: si el id es "Proveedor" pero el combo dice "Proveedores", lo
+// que tiene que quedar alfabético es lo segundo.
+const ordenAlfabetico = (lista, get = (x) => x) => {
+  const esCajonDeSastre = (x) => /^otros?$/i.test(String(x).trim());
+  return [...lista].sort((a, b) => {
+    const ka = String(get(a)), kb = String(get(b));
+    if (esCajonDeSastre(ka) !== esCajonDeSastre(kb)) return esCajonDeSastre(ka) ? 1 : -1;
+    return ka.localeCompare(kb, "es");
+  });
+};
+
+const CATS = ordenAlfabetico(["Fundación", "Software", "Música", "Renta", "Marketing", "Chatbots", "Personal", "Otro"]);
 const ESTATUS_PROYECTO = ["Idea", "En validación", "En desarrollo", "Activo", "Finalizado", "Pausado", "Archivado"];
 // Etiqueta corta SOLO para dibujar (chips de filtro, badges): el valor guardado en Supabase sigue
 // siendo el de ESTATUS_PROYECTO. No son estados nuevos — es el mismo estado escrito más corto para
@@ -231,7 +255,7 @@ const COLOR_CATEGORIA_PROYECTO = {
   "Marketing": "#F59E0B", "Chatbots": "#06B6D4", "Personal": "#64748B", "Otro": "#64748B",
 };
 const MODO_PROYECTO = ["Finito", "Continuo"];
-const MONETIZACION = ["Dinero", "Especie", "Intercambio", "No genera dinero"];
+const MONETIZACION = ordenAlfabetico(["Dinero", "Especie", "Intercambio", "No genera dinero"]);
 const PRIORIDADES = ["Alta", "Media", "Baja"];
 // 7 estados según el documento maestro v0.1 (antes eran solo 3: Pendiente/En progreso/Hecho).
 const ESTATUS_TAREA = ["Borrador", "No iniciada", "Pendiente", "En proceso", "En espera", "Completada", "Cancelada"];
@@ -246,17 +270,17 @@ const toneEstatusTarea = (estatus) => (
   "muted" // Borrador, No iniciada, Pendiente
 );
 const TIPO_FIN = ["Ingreso", "Egreso"];
-const FORMA_PAGO = ["Efectivo", "Transferencia", "Especie", "Intercambio"];
-const OCASIONES_REGALO = ["Cumpleaños", "Navidad", "Aniversario", "Felicitación", "Otro"];
+const FORMA_PAGO = ordenAlfabetico(["Efectivo", "Transferencia", "Especie", "Intercambio"]);
+const OCASIONES_REGALO = ordenAlfabetico(["Cumpleaños", "Navidad", "Aniversario", "Felicitación", "Otro"]);
 const ESTATUS_REGALO = ["Por comprar", "Comprado", "Envuelto", "Entregado"];
 // Tipo de atención: distinto de la ocasión (Cumpleaños/Navidad/…). La ocasión es CUÁNDO/POR QUÉ;
 // el tipo es QUÉ clase de atención se dio o se dará.
-const TIPOS_ATENCION = ["Regalo", "Felicitación", "Condolencia", "Agradecimiento", "Llamada", "Visita", "Mensaje", "Otro"];
+const TIPOS_ATENCION = ordenAlfabetico(["Regalo", "Felicitación", "Condolencia", "Agradecimiento", "Llamada", "Visita", "Mensaje", "Otro"]);
 
 // Roles de un contacto. Un contacto puede tener varios a la vez (anexo de arquitectura). "Personal"
 // y "Familia" se agregaron el 24 sept 2026 con el rediseño de la pantalla, calcados del mockup de
 // Angel — la columna `tipos` es text[], así que ampliar el catálogo no requiere migración.
-const TIPOS_CONTACTO = ["Cliente", "Proveedor", "Colaborador", "Personal", "Familia", "Otro"];
+const TIPOS_CONTACTO = ordenAlfabetico(["Cliente", "Proveedor", "Colaborador", "Personal", "Familia", "Otro"]);
 // Cómo se nombra cada rol en las pastillas de filtro (en plural, como el mockup).
 const FILTRO_PLURAL = { Cliente: "Clientes", Proveedor: "Proveedores", Colaborador: "Colaboradores", Personal: "Personal", Familia: "Familia", Otro: "Otros" };
 // Un color propio por rol, para distinguirlos de un vistazo en la lista (mockup 24 sept 2026).
@@ -273,19 +297,19 @@ const CATEGORIA_POR_TIPO_NOTIF = {
   cumpleanos: "Recordatorios", regalo: "Recordatorios", evento: "Agenda", factura: "Finanzas",
   campana: "Proyectos", asignacion: "Colaboradores",
 };
-const PARENTESCOS = ["Papá", "Mamá", "Hermano/a", "Hijo/a", "Esposo/a", "Abuelo/a", "Tío/a", "Primo/a", "Sobrino/a", "Cuñado/a", "Suegro/a", "Compadre/Comadre", "Amigo cercano", "Conocido"];
+const PARENTESCOS = ordenAlfabetico(["Papá", "Mamá", "Hermano/a", "Hijo/a", "Esposo/a", "Abuelo/a", "Tío/a", "Primo/a", "Sobrino/a", "Cuñado/a", "Suegro/a", "Compadre/Comadre", "Amigo cercano", "Conocido"]);
 const TIPO_FACTURA = ["Emitida", "Recibida"];
 const ESTATUS_FACTURA = ["Pendiente", "Pagada", "Cancelada"];
 const TASA_IVA = 0.16;
-const PLATAFORMAS_CAMPANA = ["Meta", "Google Ads", "TikTok", "Email", "Orgánico", "Otro"];
+const PLATAFORMAS_CAMPANA = ordenAlfabetico(["Meta", "Google Ads", "TikTok", "Email", "Orgánico", "Otro"]);
 const ESTATUS_CAMPANA = ["Planeada", "Activa", "Pausada", "Finalizada"];
-const CATEGORIAS_PATRIMONIO = ["Inmueble", "Auto", "Joyería", "Equipo de audio", "Electrónica", "Muebles", "Otro"];
+const CATEGORIAS_PATRIMONIO = ordenAlfabetico(["Inmueble", "Auto", "Joyería", "Equipo de audio", "Electrónica", "Muebles", "Otro"]);
 const FRECUENCIA = ["Semanal", "Quincenal", "Mensual", "Anual"];
-const TIPO_ACTIVIDAD = ["Gym", "Evento", "Capacitación", "Otro"];
-const TIPO_ACTIVO = ["Dominio", "Hosting", "Marca (IMPI)", "Red social", "Otro"];
+const TIPO_ACTIVIDAD = ordenAlfabetico(["Gym", "Evento", "Capacitación", "Otro"]);
+const TIPO_ACTIVO = ordenAlfabetico(["Dominio", "Hosting", "Marca (IMPI)", "Red social", "Otro"]);
 const ESTATUS_META = ["No iniciada", "En progreso", "Cumplida"];
-const PLATAFORMAS = ["Facebook", "Instagram", "TikTok", "YouTube", "WhatsApp Business"];
-const TIPO_DOCUMENTO = ["Contrato", "Registro de marca (IMPI)", "Acta constitutiva", "Otro"];
+const PLATAFORMAS = ordenAlfabetico(["Facebook", "Instagram", "TikTok", "YouTube", "WhatsApp Business"]);
+const TIPO_DOCUMENTO = ordenAlfabetico(["Contrato", "Registro de marca (IMPI)", "Acta constitutiva", "Otro"]);
 
 const seed = () => ({
   proyectos: [
@@ -5680,9 +5704,9 @@ function Proyectos({
   const toggleOrden = (key) => { if (orden === key) setOrdenDir((d) => (d === "asc" ? "desc" : "asc")); else { setOrden(key); setOrdenDir("asc"); } };
 
   const empty = {
-    nombre: "", descripcion: "", estatus: "Idea", contexto: "Personal", categoria: CATS[0],
+    nombre: "", descripcion: "", estatus: "Idea", contexto: "Personal", categoria: "Otro",
     responsableContactoId: "", fechaInicio: "", fechaFin: "", etiquetas: [], imagenUrl: "",
-    modo: "Finito", monetizacion: MONETIZACION[0], prioridad: "Media", fechaRevision: "",
+    modo: "Finito", monetizacion: "Dinero", prioridad: "Media", fechaRevision: "",
     github: "", githubSubido: false, notas: [],
   };
 
@@ -6516,7 +6540,7 @@ function ProyectoForm({ item, contactos, empresas = [], vinculos, onVincularCont
   const [v, setV] = useState({
     ...item,
     contexto: item.contexto || "Personal",
-    categoria: item.categoria || CATS[0],
+    categoria: item.categoria || "Otro",
     estatus: item.estatus || "Idea",
     responsableContactoId: item.responsableContactoId || "",
     fechaInicio: item.fechaInicio || "",
@@ -6723,7 +6747,7 @@ function ProyectoForm({ item, contactos, empresas = [], vinculos, onVincularCont
               <select className="gp-input" value={v.modo || "Finito"} onChange={(e) => setV({ ...v, modo: e.target.value })}>{MODO_PROYECTO.map((c) => <option key={c}>{c}</option>)}</select>
             </Field>
             <Field label="Cómo genera valor">
-              <select className="gp-input" value={v.monetizacion || MONETIZACION[0]} onChange={(e) => setV({ ...v, monetizacion: e.target.value })}>{MONETIZACION.map((c) => <option key={c}>{c}</option>)}</select>
+              <select className="gp-input" value={v.monetizacion || "Dinero"} onChange={(e) => setV({ ...v, monetizacion: e.target.value })}>{MONETIZACION.map((c) => <option key={c}>{c}</option>)}</select>
             </Field>
           </div>
           <p className="text-xs gp-text-muted -mt-2 mb-1">
@@ -9736,12 +9760,15 @@ function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
   // "Todos" no es un tipo de contacto, así que no está en COLOR_TIPO_CONTACTO: lleva el ámbar de
   // ARKEYONE en hex (y no var(--gold)) porque el color se usa también para armar el tinte suave
   // de las opciones no seleccionadas, y sobre una variable CSS no se puede concatenar el alfa.
-  const opcionesFiltroContacto = FILTROS.map((t) => ({
-    id: t,
-    label: t === "Todos" ? "Todos" : (FILTRO_PLURAL[t] || t),
-    color: t === "Todos" ? "#F59E0B" : COLOR_TIPO_CONTACTO[t],
-    n: contarFiltro(t),
-  }));
+  // "Todos" va fijo hasta arriba: no es una categoría, es "sin filtro". El resto va alfabético
+  // por la etiqueta que se lee, y "Otros" se va al final (ver ordenAlfabetico).
+  const opcionesFiltroContacto = [
+    { id: "Todos", label: "Todos", color: "#F59E0B", n: contarFiltro("Todos") },
+    ...ordenAlfabetico(
+      TIPOS_CONTACTO.map((t) => ({ id: t, label: FILTRO_PLURAL[t] || t, color: COLOR_TIPO_CONTACTO[t], n: contarFiltro(t) })),
+      (o) => o.label,
+    ),
+  ];
 
   const filtrados = filtroTipo === "Todos" ? data.contactos : data.contactos.filter((c) => tiposDe(c).includes(filtroTipo));
   const buscados = filtrarPorBusqueda(filtrados, busqueda, [(c) => c.nombre, (c) => c.empresa, (c) => c.puesto, (c) => c.contexto, (c) => c.whatsapp, (c) => c.telefono, (c) => c.correo, (c) => c.parentesco, (c) => c.notas]);
@@ -10793,7 +10820,7 @@ function RedesSociales({ data, onAdd, onEdit, onRemove }) {
   const [orden, setOrden] = useState("default");
   const [ordenDir, setOrdenDir] = useState("asc");
   const toggleOrden = (key) => { if (orden === key) setOrdenDir((d) => (d === "asc" ? "desc" : "asc")); else { setOrden(key); setOrdenDir("asc"); } };
-  const empty = { proyectoId: "", plataforma: PLATAFORMAS[0], fecha: todayISO(), seguidores: "", alcance: "" };
+  const empty = { proyectoId: "", plataforma: "Facebook", fecha: todayISO(), seguidores: "", alcance: "" };
   const camposOrden = {
     fecha: { get: (r) => r.fecha, tipo: "fecha" },
     registro: { get: (r) => r.createdAt, tipo: "fecha" },
