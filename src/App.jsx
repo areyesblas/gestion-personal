@@ -9630,6 +9630,66 @@ function MenuFilaContacto({ c, abierto, onToggle, onCerrar, onEditar, onComentar
   );
 }
 
+// Combo de filtro por tipo de contacto. A propósito NO es un <select> nativo: los navegadores
+// —Safari e iOS sobre todo— ignoran el estilo de <option>, así que no hay forma de darle a cada
+// categoría su color. Usa el mismo patrón de menú desplegable que el "···" de cada fila.
+// Cada opción trae su color y cuántos registros tiene; la cerrada muestra la seleccionada.
+function ComboFiltroContacto({ opciones, valor, onCambiar }) {
+  const [abierto, setAbierto] = useState(false);
+  const sel = opciones.find((o) => o.id === valor) || opciones[0];
+  if (!sel) return null;
+  return (
+    <div className="relative">
+      <button
+        onClick={() => setAbierto((v) => !v)}
+        onKeyDown={(e) => { if (e.key === "Escape") setAbierto(false); }}
+        aria-haspopup="listbox" aria-expanded={abierto}
+        className="gp-btn-ghost rounded-full pl-1.5 pr-2.5 py-1.5 flex items-center gap-2"
+      >
+        <span
+          className="text-xs px-2.5 py-1 rounded-full whitespace-nowrap"
+          style={{ background: sel.color, color: "#0B2341", fontWeight: 600 }}
+        >
+          {sel.label}
+        </span>
+        <span className="gp-mono text-xs gp-text-muted">{sel.n}</span>
+        <ChevronDown size={14} className="gp-text-muted" />
+      </button>
+
+      {abierto && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={() => setAbierto(false)} />
+          <div className="absolute left-0 top-11 z-20 gp-panel py-1" style={{ minWidth: 240 }} role="listbox">
+            {opciones.map((o) => {
+              const activo = o.id === valor;
+              return (
+                <button
+                  key={o.id} role="option" aria-selected={activo}
+                  onClick={() => { onCambiar(o.id); setAbierto(false); }}
+                  className="w-full px-2.5 py-2 gp-panel-hi flex items-center justify-between gap-3"
+                >
+                  <span
+                    className="text-xs px-2.5 py-1 rounded-full whitespace-nowrap"
+                    style={activo
+                      ? { background: o.color, color: "#0B2341", fontWeight: 600 }
+                      : { background: `${o.color}22`, color: o.color, fontWeight: 600 }}
+                  >
+                    {o.label}
+                  </span>
+                  <span className="flex items-center gap-2 shrink-0">
+                    <span className="gp-mono text-xs gp-text-muted">{o.n}</span>
+                    {activo ? <Check size={13} style={{ color: o.color }} /> : <span style={{ width: 13 }} />}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveComentario, onVerRegalos, onVincularProyecto, onDesvincularProyecto, onAddNota, onAddCita, onIrAVista, onVerProyecto, contactoSel, onSeleccionar, fichaTab, onFichaTab }) {
   const [modal, setModal] = useState(null);
   const [importarAbierto, setImportarAbierto] = useState(false);
@@ -9673,6 +9733,15 @@ function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
 
   const FILTROS = ["Todos", ...TIPOS_CONTACTO];
   const contarFiltro = (t) => (t === "Todos" ? data.contactos.length : data.contactos.filter((c) => tiposDe(c).includes(t)).length);
+  // "Todos" no es un tipo de contacto, así que no está en COLOR_TIPO_CONTACTO: lleva el ámbar de
+  // ARKEYONE en hex (y no var(--gold)) porque el color se usa también para armar el tinte suave
+  // de las opciones no seleccionadas, y sobre una variable CSS no se puede concatenar el alfa.
+  const opcionesFiltroContacto = FILTROS.map((t) => ({
+    id: t,
+    label: t === "Todos" ? "Todos" : (FILTRO_PLURAL[t] || t),
+    color: t === "Todos" ? "#F59E0B" : COLOR_TIPO_CONTACTO[t],
+    n: contarFiltro(t),
+  }));
 
   const filtrados = filtroTipo === "Todos" ? data.contactos : data.contactos.filter((c) => tiposDe(c).includes(filtroTipo));
   const buscados = filtrarPorBusqueda(filtrados, busqueda, [(c) => c.nombre, (c) => c.empresa, (c) => c.puesto, (c) => c.contexto, (c) => c.whatsapp, (c) => c.telefono, (c) => c.correo, (c) => c.parentesco, (c) => c.notas]);
@@ -9727,23 +9796,8 @@ function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
       </div>
 
       <div className="flex flex-wrap items-center gap-2 mb-3">
-        <div className="flex flex-wrap gap-1.5 flex-1 min-w-0">
-          {FILTROS.map((t) => {
-            const activo = filtroTipo === t;
-            const color = t === "Todos" ? "var(--gold)" : COLOR_TIPO_CONTACTO[t];
-            return (
-              <button
-                key={t} onClick={() => setFiltroTipo(t)}
-                className="text-xs px-3 py-1.5 rounded-full border inline-flex items-center gap-1.5"
-                style={activo
-                  ? { background: color, color: "#0B2341", borderColor: color, fontWeight: 600 }
-                  : { borderColor: "var(--border)", color: "var(--muted)" }}
-              >
-                {t === "Todos" ? "Todos" : (FILTRO_PLURAL[t] || t)}
-                <span style={{ opacity: activo ? 0.75 : 1 }}>{contarFiltro(t)}</span>
-              </button>
-            );
-          })}
+        <div className="flex-1 min-w-0">
+          <ComboFiltroContacto opciones={opcionesFiltroContacto} valor={filtroTipo} onCambiar={setFiltroTipo} />
         </div>
         <div className="flex gap-2 shrink-0">
           <button onClick={() => setImportarAbierto(true)} className="gp-btn-ghost flex items-center justify-center gap-1 px-3 py-1.5 text-sm"><Upload size={14} /> Importar</button>
