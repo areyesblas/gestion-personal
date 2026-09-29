@@ -15,6 +15,8 @@ import AccesosRapidosWidget from "./components/CentroMando/AccesosRapidosWidget"
 import HabitosHoyWidget from "./components/CentroMando/HabitosHoyWidget";
 import MotivationalCard from "./components/CentroMando/MotivationalCard";
 import ArkiWidget from "./components/CentroMando/ArkiWidget";
+import TarjetaRapidaAgenda from "./components/agenda/TarjetaRapidaAgenda";
+import ToastDeshacer from "./components/agenda/ToastDeshacer";
 import BottomNav from "./components/nav/BottomNav";
 import BotonRegresar from "./components/nav/BotonRegresar";
 // Mismo banner para Contactos y Proyectos e ideas (cada pantalla lo recorta distinto) hasta que
@@ -2279,6 +2281,22 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
     return nid;
   };
 
+  // Avisa por push a quien acaba de quedar asignado a una tarea. Antes vivía suelta dentro de
+  // las props de Pendientes; ahora la comparten Pendientes y la Agenda (que también puede
+  // reasignar desde su formulario de edición), así que es una sola función.
+  const notificarAsignacionTarea = async (pendienteId) => {
+    try {
+      const { data: sesion } = await supabase.auth.getSession();
+      await fetch(`${supabase.supabaseUrl}/functions/v1/notificar-asignacion`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${sesion.session.access_token}` },
+        body: JSON.stringify({ pendienteId }),
+      });
+    } catch (err) {
+      console.error("Error al notificar la asignación:", err);
+    }
+  };
+
   // Envía (o reenvía) el correo de invitación de una tarea a su colaborador asignado — Edge
   // Function notificar-tarea-asignada, que además marca estado_aceptacion="pendiente" e
   // invitacion_enviada_en si es el primer envío.
@@ -3412,18 +3430,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
               onCrearContacto={crearContactoRapido}
               onEnviarInvitacion={enviarInvitacionTarea}
               onAceptarEnNombre={aceptarTareaEnNombre}
-              onAsignar={async (pendienteId) => {
-                try {
-                  const { data: sesion } = await supabase.auth.getSession();
-                  await fetch(`${supabase.supabaseUrl}/functions/v1/notificar-asignacion`, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json", Authorization: `Bearer ${sesion.session.access_token}` },
-                    body: JSON.stringify({ pendienteId }),
-                  });
-                } catch (err) {
-                  console.error("Error al notificar la asignación:", err);
-                }
-              }}
+              onAsignar={notificarAsignacionTarea}
               crearAlEntrar={accionRapidaCrear?.modulo === "pendientes" ? accionRapidaCrear : null}
               onConsumirCrearAlEntrar={consumirAccionRapidaCrear}
             />
@@ -3524,7 +3531,20 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
             <Agenda data={data} misId={misId}
               onEditPendiente={(id, p) => editItem("pendientes", id, p)}
               onAddCita={(c) => addItem("citas", c)}
+              onRemoveCita={(id) => askDelete("citas", id)}
+              onRemovePendiente={(id) => askDelete("pendientes", id)}
               onCrearContacto={(nombre) => { const nid = uid(); addItem("contactos", { id: nid, nombre, tipos: ["Otro"] }); return nid; }}
+              onEnviarInvitacion={enviarInvitacionTarea}
+              onAceptarEnNombre={aceptarTareaEnNombre}
+              onAsignar={notificarAsignacionTarea}
+              onAbrirOrigen={(tabla, id) => {
+                // No duplica el dato: lleva al registro real que generó la tarea. Proyecto y
+                // contacto abren su ficha exacta; el resto usa el mismo deep link que ya usan
+                // las notificaciones push (llega al módulo correspondiente).
+                if (tabla === "proyectos" && id) irACentroProyecto(id);
+                else if (tabla === "contactos" && id) irAFichaContacto(id);
+                else irADeepLink(tabla);
+              }}
               onEditCita={async (id, p) => {
                 await editItem("citas", id, p);
                 // Etapa 6 (Agenda interactiva, secc. 23.6): "al mover una tarea deben actualizarse
@@ -7395,10 +7415,14 @@ function MiCalendario({ misId }) {
     })();
   }, [misId]);
 
-  const conFecha = (tareas || []).filter((t) => t.fecha_limite);
-  const sinFecha = (tareas || []).filter((t) => !t.fecha_limite);
+  // Desde la separación de fechas (migración 20261002) una tarea puede estar programada un día
+  // distinto al de su entrega: aquí manda el día en que se va a HACER, que es de lo que sirve un
+  // calendario. Si no está programada, se agrupa por su fecha límite, como siempre.
+  const diaDe = (t) => t.fecha_programada || t.fecha_limite;
+  const conFecha = (tareas || []).filter((t) => diaDe(t));
+  const sinFecha = (tareas || []).filter((t) => !diaDe(t));
   const grupos = {};
-  for (const t of conFecha) { (grupos[t.fecha_limite] = grupos[t.fecha_limite] || []).push(t); }
+  for (const t of conFecha) { (grupos[diaDe(t)] = grupos[diaDe(t)] || []).push(t); }
   const fechasOrdenadas = Object.keys(grupos).sort();
 
   const etiquetaFecha = (f) => {
@@ -7430,6 +7454,9 @@ function MiCalendario({ misId }) {
                     <div className="flex flex-wrap gap-2 mt-1">
                       {proyectosPorId[t.proyecto_id] && <Badge tone="gold">{proyectosPorId[t.proyecto_id]}</Badge>}
                       {t.prioridad && <Badge tone={t.prioridad === "Alta" ? "red" : "muted"}>{t.prioridad}</Badge>}
+                      {t.fecha_programada && t.fecha_limite && t.fecha_programada !== t.fecha_limite && (
+                        <span className="text-[10px] gp-text-muted">Vence {t.fecha_limite}</span>
+                      )}
                     </div>
                   </div>
                   {t.hora_inicio && <span className="gp-mono text-xs gp-text-muted shrink-0">{String(t.hora_inicio).slice(0, 5)}</span>}
@@ -8190,6 +8217,21 @@ function PendienteForm({ item, proyectos, contactos, pendientes, colaboradores, 
         <Field label="Prioridad"><select className="gp-input" value={v.prioridad} onChange={(e) => setV({ ...v, prioridad: e.target.value })}>{PRIORIDADES.map((c) => <option key={c}>{c}</option>)}</select></Field>
       </div>
       <Field label="Fecha de revisión (opcional)"><input type="date" className="gp-input" value={v.fechaRevision || ""} onChange={(e) => setV({ ...v, fechaRevision: e.target.value })} /></Field>
+
+      {/* Cuándo la vas a HACER, que no es lo mismo que para cuándo debe estar lista (migración
+          20261002). Normalmente esto se llena arrastrando la tarea en la Agenda; aquí está para
+          poder verlo y corregirlo sin salir del formulario. Sin día programado, la tarea vive en
+          la franja "Tareas del día" de la Agenda en vez de ocupar una hora del horario. */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <Field label="Día en que la harás (opcional)">
+          <input type="date" className="gp-input" value={v.fechaProgramada || ""}
+            onChange={(e) => setV({ ...v, fechaProgramada: e.target.value, horaInicio: e.target.value ? v.horaInicio : "" })} />
+        </Field>
+        <Field label="Hora de inicio (opcional)">
+          <input type="time" className="gp-input" value={v.horaInicio || ""} disabled={!v.fechaProgramada}
+            onChange={(e) => setV({ ...v, horaInicio: e.target.value })} />
+        </Field>
+      </div>
 
       <Field label="Colaborador (opcional — se le puede pagar y le llega correo para aceptar)">
         <ComboboxMultiBuscar
@@ -14246,12 +14288,38 @@ function horaDecimalAHHMM(dec) {
 }
 
 // --- Agenda visual (día/semana) ---------------------------------------------------------------
-// Muestra en una cuadrícula de horario las citas (bloques fijos, a su hora) y los pendientes con
-// fecha límite en el rango visible (auto-acomodados en los huecos libres del día, respetando la
-// jornada laboral configurable). No mueve ni cambia nada en Citas/Pendientes — solo los organiza
-// visualmente aquí; si algo no cupo en el horario visible, se omite del dibujo pero sigue
-// existiendo normal en su módulo.
+// Rediseño del 28 sept 2026. La Agenda ya no "acomoda sola" todo lo que tenga fecha: ahora
+// distingue PARA CUÁNDO es algo (fecha límite, el compromiso) de CUÁNDO lo voy a hacer
+// (fecha programada + hora, el plan). Reglas:
+//
+//   1. Citas: siempre en la cuadrícula horaria, a su hora.
+//   2. Tarea con horario programado (fechaProgramada + horaInicio): también en la cuadrícula, pero
+//      con borde punteado y más tenue que una cita, para distinguirlas de un vistazo, y con
+//      checkbox visible.
+//   3. Tarea con solo fecha límite: NO entra a la cuadrícula. Vive en la franja "Tareas del día"
+//      de su columna; al arrastrarla a una hora se le llena el horario programado.
+//   4. Tarea sin ninguna fecha: no aparece en la Agenda (sigue en Tareas).
+//   5. Interruptor "Mostrar tareas", guardado en preferencias.agenda_mostrar_tareas.
+//   6. Lo delegado a otra persona no es mío y no se muestra aquí; lo que me asignaron sí, venga de
+//      la cuenta que venga — misma consulta cross-cuenta que usa "Mi trabajo".
+//
+// Mover o redimensionar un bloque cambia SU HORARIO, nunca la fecha límite (ese fue justo el
+// motivo de separar los campos), y borra el recordatorio ya disparado de ese registro para que el
+// motor de recordatorios lo vuelva a evaluar con el horario nuevo.
+//
+// Si la migración 20261002 todavía no se aplicó, `soportaProgramacion` queda en false y la
+// pantalla sigue funcionando con el modelo viejo (la hora se ancla al día de la fecha límite), sin
+// tronar y sin mandar columnas que no existen.
 const DIA_ISO_LABEL = { 1: "Lun", 2: "Mar", 3: "Mié", 4: "Jue", 5: "Vie", 6: "Sáb", 7: "Dom" };
+
+// De qué módulo puede venir una tarea creada desde otro lado (origenTabla), para el botón "Abrir
+// registro origen" de la tarjeta rápida. El texto es el complemento de "Abrir …".
+const ETIQUETA_ORIGEN = {
+  finanzas: "el movimiento", facturas: "la factura", eventos: "el evento", medicamentos: "el medicamento",
+  activos: "el activo digital", documentos: "el documento", proyectos: "el proyecto", apartados: "el apartado",
+  patrimonio: "el bien", campanas: "la campaña", salud: "el registro de salud", contactos: "el contacto",
+  regalos: "el regalo", metas: "la meta",
+};
 
 function lunesDeSemana(fecha) {
   const d = new Date(fecha);
@@ -14265,18 +14333,73 @@ function sumarDias(fecha, n) {
   d.setDate(d.getDate() + n);
   return d;
 }
-function dateStr(d) { return d.toISOString().slice(0, 10); }
+function dateStr(d) {
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+function hhmmADecimal(hhmm) {
+  const [h, m] = String(hhmm || "").split(":").map(Number);
+  if (Number.isNaN(h)) return null;
+  return h + (m || 0) / 60;
+}
+// La duración del bloque de una tarea es su tiempo estimado — no se inventa un campo nuevo para
+// no duplicar el mismo dato en dos lugares. Sin estimación, una hora.
+function duracionDeTarea(t) {
+  const n = Number(t.tiempoEstimado);
+  return n > 0 ? n : 1;
+}
 
-function calcularBloquesAgenda({ dias, citas, pendientes, horaInicio, horasDiarias, comida }) {
+// Reparte en columnas los bloques que se encimen dentro de un mismo día, para que una tarea
+// programada a la misma hora que una cita no quede escondida debajo. Los que no se encimen con
+// nadie siguen ocupando todo el ancho.
+function colocarEnColumnas(bloques) {
+  const ordenados = [...bloques].sort((a, b) => a.inicio - b.inicio || b.duracion - a.duracion);
+  const salida = [];
+  let grupo = [];
+  let finGrupo = -Infinity;
+  const cerrarGrupo = () => {
+    if (!grupo.length) return;
+    const columnas = [];
+    const conCol = grupo.map((b) => {
+      let idx = columnas.findIndex((col) => col.fin <= b.inicio + 0.0001);
+      if (idx === -1) { columnas.push({ fin: b.inicio + b.duracion }); idx = columnas.length - 1; }
+      else columnas[idx].fin = b.inicio + b.duracion;
+      return { ...b, col: idx };
+    });
+    conCol.forEach((b) => salida.push({ ...b, totalCols: columnas.length }));
+    grupo = [];
+    finGrupo = -Infinity;
+  };
+  for (const b of ordenados) {
+    if (grupo.length && b.inicio >= finGrupo - 0.0001) cerrarGrupo();
+    grupo.push(b);
+    finGrupo = Math.max(finGrupo, b.inicio + b.duracion);
+  }
+  cerrarGrupo();
+  return salida;
+}
+
+// Primer hueco libre de al menos `duracion` horas dentro de la jornada. null si ya no cabe.
+function buscarHueco(ocupados, desde, hasta, duracion) {
+  const orden = [...ocupados].sort((a, b) => a[0] - b[0]);
+  let cursor = desde;
+  for (const [ini, fin] of orden) {
+    if (cursor + duracion <= ini) return cursor;
+    cursor = Math.max(cursor, fin);
+  }
+  return cursor + duracion <= hasta ? cursor : null;
+}
+
+// Arma los bloques de la cuadrícula: comida (fijo, informativo), citas y SOLO las tareas que ya
+// tienen horario programado. Las tareas que solo tienen fecha límite no pasan por aquí — van a la
+// franja de su día, que se calcula aparte.
+function calcularBloquesAgenda({ dias, citas, tareasProgramadas, comida, diaProgramadoDe }) {
   const bloquesPorDia = {};
   dias.forEach((d) => (bloquesPorDia[dateStr(d)] = []));
 
-  // La comida se agrega primero como un bloque más (ocupado), así los pendientes automáticos
-  // ya no se acomodan encima — se trata igual que una cita fija todos los días visibles.
   if (comida) {
     dias.forEach((d) => {
-      const key = dateStr(d);
-      bloquesPorDia[key].push({ tipo: "comida", inicio: comida.inicio, duracion: comida.duracion });
+      bloquesPorDia[dateStr(d)].push({ tipo: "comida", inicio: comida.inicio, duracion: comida.duracion });
     });
   }
 
@@ -14285,92 +14408,75 @@ function calcularBloquesAgenda({ dias, citas, pendientes, horaInicio, horasDiari
     const d = new Date(c.fechaHora);
     const key = dateStr(d);
     if (!bloquesPorDia[key]) return;
-    const horaDecimal = d.getHours() + d.getMinutes() / 60;
     const duracion = Number(c.duracionHoras) > 0 ? Number(c.duracionHoras) : 1;
-    bloquesPorDia[key].push({ tipo: "cita", inicio: horaDecimal, duracion, item: c });
+    bloquesPorDia[key].push({ tipo: "cita", inicio: d.getHours() + d.getMinutes() / 60, duracion, item: c });
   });
 
-  // Etapa 6 (Agenda interactiva): una tarea con horaInicio ya fue anclada a mano (arrastrada o
-  // asignada manualmente) — se coloca directo ahí, sin pasar por el acomodo automático de huecos
-  // libres. Las que no tienen horaInicio siguen el comportamiento de siempre (bin-packing).
-  const pendientesFijos = pendientes.filter((p) => p.horaInicio);
-  const pendientesAuto = pendientes.filter((p) => !p.horaInicio);
-
-  pendientesFijos.forEach((p) => {
-    if (!p.fechaLimite || !bloquesPorDia[p.fechaLimite]) return;
-    const [hh, mm] = String(p.horaInicio).split(":").map(Number);
-    const inicio = hh + (mm || 0) / 60;
-    const duracion = Number(p.tiempoEstimado) > 0 ? Number(p.tiempoEstimado) : 1;
-    bloquesPorDia[p.fechaLimite].push({ tipo: "pendiente", inicio, duracion, item: p });
+  tareasProgramadas.forEach((t) => {
+    const key = diaProgramadoDe(t);
+    const inicio = hhmmADecimal(t.horaInicio);
+    if (!key || inicio == null || !bloquesPorDia[key]) return;
+    bloquesPorDia[key].push({ tipo: "tarea", inicio, duracion: duracionDeTarea(t), item: t });
   });
 
-  const pendientesOrdenados = [...pendientesAuto].sort((a, b) =>
-    (PRIORIDAD_ORDEN[a.prioridad] ?? 1) - (PRIORIDAD_ORDEN[b.prioridad] ?? 1) ||
-    (a.fechaLimite || "").localeCompare(b.fechaLimite || "")
-  );
-  const clavesDias = dias.map(dateStr);
-
-  pendientesOrdenados.forEach((p) => {
-    const duracion = Number(p.tiempoEstimado) > 0 ? Number(p.tiempoEstimado) : 1;
-    let candidatos = clavesDias;
-    if (p.fechaLimite && clavesDias.includes(p.fechaLimite)) {
-      candidatos = [p.fechaLimite, ...clavesDias.filter((k) => k !== p.fechaLimite)];
-    } else if (!p.fechaLimite) {
-      return; // sin fecha límite: no se agenda automáticamente, sigue viviendo en Pendientes
-    } else {
-      return; // fecha límite fuera del rango visible
-    }
-    for (const key of candidatos) {
-      const ocupados = bloquesPorDia[key].map((b) => [b.inicio, b.inicio + b.duracion]).sort((a, b) => a[0] - b[0]);
-      let cursor = horaInicio;
-      let cabe = false;
-      for (const [ini, fin] of ocupados) {
-        if (cursor + duracion <= ini) { cabe = true; break; }
-        cursor = Math.max(cursor, fin);
-      }
-      if (!cabe && cursor + duracion <= horaInicio + horasDiarias) cabe = true;
-      if (cabe) {
-        bloquesPorDia[key].push({ tipo: "pendiente", inicio: cursor, duracion, item: p });
-        bloquesPorDia[key].sort((a, b) => a.inicio - b.inicio);
-        break;
-      }
-    }
+  Object.keys(bloquesPorDia).forEach((k) => {
+    bloquesPorDia[k] = colocarEnColumnas(bloquesPorDia[k]).sort((a, b) => a.inicio - b.inicio);
   });
-
-  Object.values(bloquesPorDia).forEach((arr) => arr.sort((a, b) => a.inicio - b.inicio));
   return bloquesPorDia;
 }
 
-function Agenda({ data, onEditPendiente, onAddCita, onEditCita, onCrearContacto, misId }) {
+function Agenda({
+  data, misId, onEditPendiente, onAddCita, onEditCita, onRemoveCita, onRemovePendiente,
+  onCrearContacto, onAsignar, onEnviarInvitacion, onAceptarEnNombre, onAbrirOrigen,
+}) {
   const [vista, setVista] = useState("semana"); // "dia" | "semana"
   const [base, setBase] = useState(() => new Date());
   const [config, setConfig] = useState({
     horasLaboralesDiarias: 8, horaInicioLaboral: "09:00", diasLaborales: [1, 2, 3, 4, 5],
-    horaInicioComida: "", duracionComidaMin: 60,
+    horaInicioComida: "", duracionComidaMin: 60, mostrarTareas: true,
   });
   const [configAbierta, setConfigAbierta] = useState(false);
   const [cargando, setCargando] = useState(true);
   const [modalAgregar, setModalAgregar] = useState(null); // null | "nueva" | "existente"
-  // El acomodo automático de pendientes no corre solo — hay que confirmarlo con este botón cada
-  // vez que se entra a la Agenda. Los que el usuario asigna a mano desde el "+" (pestaña "Desde
-  // lo guardado") se muestran de inmediato sin esperar esa confirmación, porque elegirlos a mano
-  // YA es la confirmación. Una tarea con horaInicio (arrastrada, o asignada a mano) es manual para
-  // siempre, aunque se recargue la página — a diferencia de idsManualesSesion, que solo dura la sesión.
-  const [acomodoConfirmado, setAcomodoConfirmado] = useState(false);
-  const [idsManualesSesion, setIdsManualesSesion] = useState(() => new Set());
-  const esManual = (p) => idsManualesSesion.has(p.id) || !!p.horaInicio;
+  const [edicion, setEdicion] = useState(null);           // { tipo:"cita"|"tarea", item }
+  const [tarjeta, setTarjeta] = useState(null);           // { tipo, item, rect }
+  const [toast, setToast] = useState(null);               // { clave, texto, deshacer }
+  // Columnas nuevas de la migración 20261002. null = todavía no se sabe (se está probando).
+  const [soportaProgramacion, setSoportaProgramacion] = useState(null);
+  const [soportaPrefTareas, setSoportaPrefTareas] = useState(true);
+  const [soportaRealizada, setSoportaRealizada] = useState(true);
+  // Tareas que me asignaron desde OTRAS cuentas (misma consulta que "Mi trabajo"): no vienen en
+  // `data`, que solo trae la cuenta activa.
+  const [tareasAsignadas, setTareasAsignadas] = useState([]);
 
-  // --- Etapa 6: Agenda interactiva (arrastrar para mover, arrastrar el borde para redimensionar) ---
+  // Pantalla chica o dedo: decide hoja inferior vs popover y el tamaño de los objetivos táctiles.
+  // Detección real de viewport con matchMedia, no una bandera compartida con el escritorio.
+  const [esMovil, setEsMovil] = useState(() =>
+    typeof window !== "undefined" && (window.matchMedia("(max-width: 767px)").matches || window.matchMedia("(pointer: coarse)").matches));
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 767px), (pointer: coarse)");
+    const alCambiar = (e) => setEsMovil(e.matches);
+    mq.addEventListener("change", alCambiar);
+    return () => mq.removeEventListener("change", alCambiar);
+  }, []);
+
   const PX_POR_HORA = 56;
   const SNAP_HORAS = 0.25; // 15 minutos
+  const ALTO_MIN_BLOQUE = esMovil ? 44 : 22; // 44 px es el mínimo táctil de iPhone
+  const ALTO_FRANJA = 66;
   const colRefs = useRef([]);
-  const huboMovimientoRef = useRef(false);
-  const [drag, setDrag] = useState(null); // { tipo, id, modo: 'mover'|'redimensionar', inicioOrig, duracionOrig, diaIdxOrig, startX, startY, curInicio, curDuracion, curDiaIdx }
+  const gestoRef = useRef(null);
+  const [drag, setDrag] = useState(null); // espejo del gesto activo, solo para dibujar el fantasma
 
   useEffect(() => {
     (async () => {
-      const { data: pref } = await supabase.from("preferencias")
-        .select("horas_laborales_diarias, hora_inicio_laboral, dias_laborales, hora_inicio_comida, duracion_comida_min").eq("user_id", misId).maybeSingle();
+      const columnas = "horas_laborales_diarias, hora_inicio_laboral, dias_laborales, hora_inicio_comida, duracion_comida_min";
+      let { data: pref, error } = await supabase.from("preferencias")
+        .select(`${columnas}, agenda_mostrar_tareas`).eq("user_id", misId).maybeSingle();
+      if (error) {
+        setSoportaPrefTareas(false);
+        ({ data: pref } = await supabase.from("preferencias").select(columnas).eq("user_id", misId).maybeSingle());
+      }
       if (pref) {
         setConfig({
           horasLaboralesDiarias: Number(pref.horas_laborales_diarias) || 8,
@@ -14378,22 +14484,41 @@ function Agenda({ data, onEditPendiente, onAddCita, onEditCita, onCrearContacto,
           diasLaborales: pref.dias_laborales?.length ? pref.dias_laborales : [1, 2, 3, 4, 5],
           horaInicioComida: pref.hora_inicio_comida ? pref.hora_inicio_comida.slice(0, 5) : "",
           duracionComidaMin: pref.duracion_comida_min || 60,
+          mostrarTareas: pref.agenda_mostrar_tareas ?? true,
         });
       }
+      // ¿Ya existen las columnas nuevas? Si la migración no se ha aplicado, la Agenda sigue
+      // funcionando con el modelo viejo en vez de romperse.
+      const prog = await supabase.from("pendientes").select("fecha_programada").limit(1);
+      setSoportaProgramacion(!prog.error);
+      const real = await supabase.from("citas").select("realizada_en").limit(1);
+      setSoportaRealizada(!real.error);
       setCargando(false);
+    })();
+  }, [misId]);
+
+  // Lo que me asignaron desde otras cuentas. RLS ya permite leerlas y actualizarlas al ejecutor
+  // (política "ejecutor ve y actualiza sus tareas asignadas"), no se debilita nada.
+  useEffect(() => {
+    (async () => {
+      const { data: filas } = await supabase.from("pendientes").select("*")
+        .eq("asignado_a", misId).is("deleted_at", null);
+      setTareasAsignadas((filas || []).map(rowToJs));
     })();
   }, [misId]);
 
   const guardarConfig = async (nuevo) => {
     setConfig(nuevo);
-    await supabase.from("preferencias").upsert({
+    const fila = {
       user_id: misId,
       horas_laborales_diarias: nuevo.horasLaboralesDiarias,
       hora_inicio_laboral: nuevo.horaInicioLaboral,
       dias_laborales: nuevo.diasLaborales,
       hora_inicio_comida: nuevo.horaInicioComida || null,
       duracion_comida_min: nuevo.duracionComidaMin || null,
-    }, { onConflict: "user_id" });
+    };
+    if (soportaPrefTareas) fila.agenda_mostrar_tareas = nuevo.mostrarTareas;
+    await supabase.from("preferencias").upsert(fila, { onConflict: "user_id" });
   };
 
   const lunes = lunesDeSemana(base);
@@ -14405,147 +14530,374 @@ function Agenda({ data, onEditPendiente, onAddCita, onEditCita, onCrearContacto,
     });
   }, [vista, base, lunes, config.diasLaborales]);
 
-  const horaInicioDec = useMemo(() => {
-    const [h, m] = config.horaInicioLaboral.split(":").map(Number);
-    return h + (m || 0) / 60;
-  }, [config.horaInicioLaboral]);
+  const horaInicioDec = useMemo(() => hhmmADecimal(config.horaInicioLaboral) ?? 9, [config.horaInicioLaboral]);
+  const jornadaFin = horaInicioDec + config.horasLaboralesDiarias;
 
   const comidaDec = useMemo(() => {
     if (!config.horaInicioComida) return null;
-    const [h, m] = config.horaInicioComida.split(":").map(Number);
-    return { inicio: h + (m || 0) / 60, duracion: (config.duracionComidaMin || 60) / 60 };
+    const inicio = hhmmADecimal(config.horaInicioComida);
+    return inicio == null ? null : { inicio, duracion: (config.duracionComidaMin || 60) / 60 };
   }, [config.horaInicioComida, config.duracionComidaMin]);
 
-  const rangoStr = { desde: dateStr(diasVisibles[0]), hasta: dateStr(diasVisibles[diasVisibles.length - 1]) };
-  const citasEnRango = (data.citas || []).filter((c) => c.fechaHora && dateStr(new Date(c.fechaHora)) >= rangoStr.desde && dateStr(new Date(c.fechaHora)) <= rangoStr.hasta);
-  const pendientesEnRango = (data.pendientes || []).filter((p) => p.fechaLimite && p.fechaLimite >= rangoStr.desde && p.fechaLimite <= rangoStr.hasta);
-  const pendientesHechos = pendientesEnRango.filter((p) => p.estatus === "Completada");
-  const pendientesPendientesDeAcomodo = pendientesEnRango.filter((p) => p.estatus !== "Completada" && !esManual(p));
-  const pendientesManuales = pendientesEnRango.filter((p) => p.estatus !== "Completada" && esManual(p));
-  // Lo que sí se manda a acomodar en el horario: los ya hechos (se quedan visibles siempre), los
-  // que el usuario agregó a mano, y el resto SOLO si ya se confirmó el acomodo automático.
-  const pendientesParaBloques = [
-    ...pendientesHechos,
-    ...pendientesManuales,
-    ...(acomodoConfirmado ? pendientesPendientesDeAcomodo : []),
-  ];
+  // Qué día está programada una tarea. Con las columnas nuevas es fechaProgramada; sin ellas
+  // (migración pendiente) se conserva el comportamiento viejo: si tiene hora, va en su fecha límite.
+  const diaProgramadoDe = (t) =>
+    (soportaProgramacion ? t.fechaProgramada : (t.horaInicio ? t.fechaLimite : null)) || null;
+  const patchProgramar = (dia, hora) =>
+    soportaProgramacion ? { fechaProgramada: dia, horaInicio: hora } : { fechaLimite: dia, horaInicio: hora };
+
+  const rango = {
+    desde: dateStr(diasVisibles[0]),
+    hasta: dateStr(diasVisibles[diasVisibles.length - 1]),
+  };
+  const enRango = (iso) => !!iso && iso >= rango.desde && iso <= rango.hasta;
+
+  const citasEnRango = useMemo(
+    () => (data.citas || []).filter((c) => c.fechaHora && enRango(dateStr(new Date(c.fechaHora)))),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [data.citas, rango.desde, rango.hasta]);
+
+  // Regla 6: lo que delegué a alguien más no es mío (no se dibuja); lo que me asignaron sí, aunque
+  // viva en la cuenta de quien me lo asignó.
+  const tareasVisibles = useMemo(() => {
+    const propias = (data.pendientes || []).filter((p) => !p.asignadoA || p.asignadoA === misId);
+    const ajenas = tareasAsignadas.filter((t) => !propias.some((p) => p.id === t.id));
+    return [...propias, ...ajenas].filter((t) => t.estatus !== "Cancelada");
+  }, [data.pendientes, tareasAsignadas, misId]);
+
+  const tareasProgramadas = useMemo(
+    () => (config.mostrarTareas ? tareasVisibles.filter((t) => t.horaInicio && enRango(diaProgramadoDe(t))) : []),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [tareasVisibles, config.mostrarTareas, rango.desde, rango.hasta, soportaProgramacion]);
+
+  // Franja "Tareas del día": lo que tiene fecha pero todavía no tiene hora. Se agrupa por el día
+  // programado si ya lo tiene, y si no por su fecha límite.
+  const tareasPorFranja = useMemo(() => {
+    const porDia = {};
+    diasVisibles.forEach((d) => (porDia[dateStr(d)] = []));
+    if (!config.mostrarTareas) return porDia;
+    tareasVisibles.forEach((t) => {
+      if (t.horaInicio) return;
+      const dia = diaProgramadoDe(t) || t.fechaLimite;
+      if (!enRango(dia) || !porDia[dia]) return;
+      porDia[dia].push(t);
+    });
+    Object.values(porDia).forEach((arr) => arr.sort((a, b) =>
+      (PRIORIDAD_ORDEN[a.prioridad] ?? 1) - (PRIORIDAD_ORDEN[b.prioridad] ?? 1) ||
+      (a.descripcion || "").localeCompare(b.descripcion || "")));
+    return porDia;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tareasVisibles, diasVisibles, config.mostrarTareas, soportaProgramacion]);
 
   const bloques = useMemo(() => calcularBloquesAgenda({
-    dias: diasVisibles, citas: citasEnRango, pendientes: pendientesParaBloques,
-    horaInicio: horaInicioDec, horasDiarias: config.horasLaboralesDiarias, comida: comidaDec,
-  }), [diasVisibles, citasEnRango, pendientesParaBloques, horaInicioDec, config.horasLaboralesDiarias, comidaDec]);
+    dias: diasVisibles, citas: citasEnRango, tareasProgramadas, comida: comidaDec, diaProgramadoDe,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [diasVisibles, citasEnRango, tareasProgramadas, comidaDec, soportaProgramacion]);
 
-  const alternarHecho = (p) => onEditPendiente(p.id, { estatus: p.estatus === "Completada" ? "Pendiente" : "Completada" });
+  const hayEnFranja = Object.values(tareasPorFranja).some((a) => a.length > 0);
 
-  const asignarPendienteExistente = (id, fechaLimite) => {
-    onEditPendiente(id, { fechaLimite });
-    setIdsManualesSesion((prev) => new Set(prev).add(id));
-    setModalAgregar(null);
+  /* ---------- escrituras ---------- */
+
+  // Una tarea que me asignaron desde otra cuenta no vive en `data`: se actualiza directo contra
+  // Supabase (RLS del ejecutor) y se refleja en el estado local de esta pantalla.
+  const esTareaAjena = (t) => !(data.pendientes || []).some((p) => p.id === t.id);
+
+  const limpiarRecordatorio = async (tabla, id) => {
+    try {
+      await supabase.from("recordatorios").delete().eq("tabla_origen", tabla).eq("registro_origen_id", id);
+    } catch (err) {
+      console.error("No se pudo limpiar el recordatorio:", err);
+    }
   };
 
-  // Arranca un arrastre. modo "mover" viene del cuerpo del bloque; modo "redimensionar" viene de
-  // la franja inferior (el "borde" que se jala para cambiar la duración, secc. 23.6).
-  const iniciarDrag = (e, tipo, item, bloque, diaIdxOrig, modo) => {
-    if (tipo === "comida") return; // la comida no se arrastra, es un bloque fijo informativo
+  const editarTarea = async (t, patch, reprogramada = false) => {
+    if (esTareaAjena(t)) {
+      const fila = Object.fromEntries(Object.entries(patch)
+        .filter(([k]) => k !== "createdAt") // lo controla el servidor, nunca se reescribe desde aquí
+        .map(([k, v]) => [camelToSnake(k), v === "" ? null : v]));
+      await supabase.from("pendientes").update(fila).eq("id", t.id);
+      setTareasAsignadas((prev) => prev.map((x) => (x.id === t.id ? { ...x, ...patch } : x)));
+    } else {
+      await onEditPendiente(t.id, patch);
+    }
+    // "Al mover una tarea deben actualizarse los recordatorios relacionados": se borra el
+    // recordatorio ya generado para que el motor lo vuelva a crear con el horario nuevo.
+    if (reprogramada) await limpiarRecordatorio("pendientes", t.id);
+  };
+
+  const editarCita = async (c, patch, reprogramada = false) => {
+    await onEditCita(c.id, patch);
+    if (reprogramada) await limpiarRecordatorio("citas", c.id);
+  };
+
+  const completar = (tipo, item) => {
+    if (tipo === "tarea") {
+      const estatusPrevio = item.estatus || "Pendiente";
+      const yaHecha = item.estatus === "Completada";
+      editarTarea(item, yaHecha
+        ? { estatus: "Pendiente", completadaEn: null }
+        : { estatus: "Completada", completadaEn: new Date().toISOString() });
+      setToast({
+        clave: `${item.id}-${Date.now()}`,
+        texto: yaHecha ? `"${item.descripcion}" vuelve a pendiente` : `"${item.descripcion}" marcada como realizada`,
+        deshacer: () => {
+          editarTarea(item, yaHecha
+            ? { estatus: estatusPrevio, completadaEn: item.completadaEn || new Date().toISOString() }
+            : { estatus: estatusPrevio, completadaEn: null });
+          setToast(null);
+        },
+      });
+    } else {
+      if (!soportaRealizada) return;
+      const previo = item.realizadaEn || null;
+      editarCita(item, { realizadaEn: previo ? null : new Date().toISOString() });
+      setToast({
+        clave: `${item.id}-${Date.now()}`,
+        texto: previo ? `"${item.titulo}" vuelve a pendiente` : `"${item.titulo}" marcada como realizada`,
+        deshacer: () => { editarCita(item, { realizadaEn: previo }); setToast(null); },
+      });
+    }
+  };
+
+  /* ---------- gestos: mover, redimensionar y programar desde la franja ---------- */
+
+  const ajustar = (v) => Math.round(v / SNAP_HORAS) * SNAP_HORAS;
+
+  // Qué día y qué hora hay bajo el dedo/cursor. Se usa al arrastrar desde la franja, donde el
+  // arrastre empieza FUERA de la cuadrícula y no sirve calcular por desplazamiento.
+  const posicionDesdePuntero = (clientX, clientY) => {
+    for (let i = 0; i < diasVisibles.length; i++) {
+      const el = colRefs.current[i];
+      if (!el) continue;
+      const r = el.getBoundingClientRect();
+      if (clientX >= r.left && clientX <= r.right) {
+        const cruda = (clientY - r.top) / PX_POR_HORA + horaInicioDec;
+        return { diaIdx: i, inicio: Math.max(horaInicioDec, Math.min(ajustar(cruda), jornadaFin - SNAP_HORAS)) };
+      }
+    }
+    return null;
+  };
+
+  const espejo = (g) => setDrag({
+    tipo: g.tipo, id: g.item.id, modo: g.modo,
+    curInicio: g.curInicio, curDuracion: g.curDuracion, curDiaIdx: g.curDiaIdx, valido: g.valido,
+  });
+
+  const activarGesto = (g) => {
+    g.activo = true;
+    if (navigator.vibrate) { try { navigator.vibrate(8); } catch { /* no todos los navegadores */ } }
+    espejo(g);
+  };
+
+  // En celular el arrastre se activa manteniendo presionado (350 ms): así un toque sigue abriendo
+  // la tarjeta rápida y el dedo puede desplazar la pantalla sin mover bloques por accidente.
+  const LARGO_MS = 350;
+  const iniciarGesto = (e, { tipo, item, modo, inicio, duracion, diaIdx }) => {
+    if (e.button != null && e.button !== 0) return;
     e.stopPropagation();
-    e.preventDefault();
-    huboMovimientoRef.current = false;
-    const clientX = e.clientX ?? e.touches?.[0]?.clientX;
-    const clientY = e.clientY ?? e.touches?.[0]?.clientY;
-    setDrag({
-      tipo, id: item.id, modo, diaIdxOrig,
-      inicioOrig: bloque.inicio, duracionOrig: bloque.duracion,
-      startX: clientX, startY: clientY,
-      curInicio: bloque.inicio, curDuracion: bloque.duracion, curDiaIdx: diaIdxOrig,
-    });
+    e.preventDefault(); // sin esto el mouse arrastra el texto del bloque en vez del bloque
+    const tactil = e.pointerType !== "mouse";
+    const g = {
+      tipo, item, modo, tactil, diaIdxOrig: diaIdx, inicioOrig: inicio, duracionOrig: duracion,
+      curInicio: inicio, curDuracion: duracion, curDiaIdx: diaIdx, valido: modo !== "programar",
+      startX: e.clientX, startY: e.clientY, activo: false, timer: null,
+      rect: e.currentTarget.getBoundingClientRect(),
+    };
+    gestoRef.current = g;
+    // El borde de redimensionar se agarra a propósito: arranca de inmediato en cualquier aparato.
+    // Con el dedo, mover y programar esperan a que se mantenga presionado, para que un toque siga
+    // abriendo la tarjeta y para no pelearse con el desplazamiento de la pantalla. Con mouse no
+    // hay espera pero sí umbral: el gesto se activa hasta que el cursor se mueve (ver alMover),
+    // así un clic sin mover sigue siendo un clic.
+    if (modo === "redimensionar") activarGesto(g);
+    else if (tactil) g.timer = setTimeout(() => { g.timer = null; activarGesto(g); }, LARGO_MS);
+  };
+
+  const abrirTarjeta = (g) => setTarjeta({ tipo: g.tipo, item: g.item, rect: g.rect });
+
+  const aplicarGesto = async (g) => {
+    const dia = diasVisibles[g.curDiaIdx];
+    if (!dia) return;
+    const nuevoDia = dateStr(dia);
+    const cambioHorario = g.curInicio !== g.inicioOrig || g.curDiaIdx !== g.diaIdxOrig || g.modo === "programar";
+    const cambioDuracion = g.curDuracion !== g.duracionOrig;
+    if (!cambioHorario && !cambioDuracion) return;
+
+    if (g.tipo === "cita") {
+      if (g.modo === "redimensionar") await editarCita(g.item, { duracionHoras: g.curDuracion });
+      else await editarCita(g.item, { fechaHora: localInputsAFechaHora(nuevoDia, horaDecimalAHHMM(g.curInicio)) }, true);
+    } else {
+      if (g.modo === "redimensionar") await editarTarea(g.item, { tiempoEstimado: g.curDuracion });
+      else await editarTarea(g.item, patchProgramar(nuevoDia, horaDecimalAHHMM(g.curInicio)), true);
+    }
   };
 
   useEffect(() => {
-    if (!drag) return;
-    const onMove = (e) => {
-      const clientX = e.clientX ?? e.touches?.[0]?.clientX;
-      const clientY = e.clientY ?? e.touches?.[0]?.clientY;
-      if (clientX == null || clientY == null) return;
-      const deltaY = clientY - drag.startY;
-      const deltaHoras = deltaY / PX_POR_HORA;
-      const jornadaFin = horaInicioDec + config.horasLaboralesDiarias;
-      if (Math.abs(deltaY) > 4 || Math.abs(clientX - drag.startX) > 4) huboMovimientoRef.current = true;
-
-      if (drag.modo === "redimensionar") {
-        let nuevaDuracion = Math.round((drag.duracionOrig + deltaHoras) / SNAP_HORAS) * SNAP_HORAS;
-        nuevaDuracion = Math.max(SNAP_HORAS, Math.min(nuevaDuracion, jornadaFin - drag.inicioOrig));
-        setDrag((d) => (d ? { ...d, curDuracion: nuevaDuracion } : d));
-      } else {
-        let nuevoInicio = Math.round((drag.inicioOrig + deltaHoras) / SNAP_HORAS) * SNAP_HORAS;
-        nuevoInicio = Math.max(horaInicioDec, Math.min(nuevoInicio, jornadaFin - drag.duracionOrig));
-        const colWidth = colRefs.current[0]?.getBoundingClientRect().width || 1;
-        const deltaX = clientX - drag.startX;
-        const deltaCols = vista === "semana" ? Math.round(deltaX / colWidth) : 0;
-        const nuevoIdx = Math.max(0, Math.min(diasVisibles.length - 1, drag.diaIdxOrig + deltaCols));
-        setDrag((d) => (d ? { ...d, curInicio: nuevoInicio, curDiaIdx: nuevoIdx } : d));
-      }
-    };
-    const onUp = () => {
-      setDrag((d) => {
-        if (!d) return null;
-        const cambioReal = d.curInicio !== d.inicioOrig || d.curDuracion !== d.duracionOrig || d.curDiaIdx !== d.diaIdxOrig;
-        if (cambioReal) {
-          const nuevoDiaKey = dateStr(diasVisibles[d.curDiaIdx]);
-          if (d.tipo === "cita") {
-            if (d.modo === "redimensionar") onEditCita(d.id, { duracionHoras: d.curDuracion });
-            else onEditCita(d.id, { fechaHora: localInputsAFechaHora(nuevoDiaKey, horaDecimalAHHMM(d.curInicio)) });
-          } else if (d.tipo === "pendiente") {
-            if (d.modo === "redimensionar") onEditPendiente(d.id, { tiempoEstimado: d.curDuracion });
-            else onEditPendiente(d.id, { fechaLimite: nuevoDiaKey, horaInicio: horaDecimalAHHMM(d.curInicio) });
-          }
+    const alMover = (e) => {
+      const g = gestoRef.current;
+      if (!g) return;
+      const dx = e.clientX - g.startX;
+      const dy = e.clientY - g.startY;
+      if (!g.activo) {
+        // Esperando el "mantén presionado": si el dedo se desplaza, era scroll, no un arrastre.
+        if (g.timer) {
+          if (Math.abs(dx) > 10 || Math.abs(dy) > 10) { clearTimeout(g.timer); gestoRef.current = null; }
+          return;
         }
-        return null;
-      });
+        if (!g.tactil && (Math.abs(dx) > 4 || Math.abs(dy) > 4)) activarGesto(g);
+        else return;
+      }
+      if (g.modo === "redimensionar") {
+        const cruda = g.duracionOrig + dy / PX_POR_HORA;
+        g.curDuracion = Math.max(SNAP_HORAS, Math.min(ajustar(cruda), jornadaFin - g.inicioOrig));
+      } else if (g.modo === "programar") {
+        const pos = posicionDesdePuntero(e.clientX, e.clientY);
+        if (pos) {
+          g.curDiaIdx = pos.diaIdx;
+          g.curInicio = Math.min(pos.inicio, Math.max(horaInicioDec, jornadaFin - g.duracionOrig));
+          g.valido = true;
+        } else g.valido = false;
+      } else {
+        const cruda = g.inicioOrig + dy / PX_POR_HORA;
+        g.curInicio = Math.max(horaInicioDec, Math.min(ajustar(cruda), jornadaFin - g.duracionOrig));
+        const ancho = colRefs.current[0]?.getBoundingClientRect().width || 1;
+        const saltos = vista === "semana" ? Math.round(dx / ancho) : 0;
+        g.curDiaIdx = Math.max(0, Math.min(diasVisibles.length - 1, g.diaIdxOrig + saltos));
+      }
+      espejo(g);
     };
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
-    window.addEventListener("pointercancel", onUp);
+    const alSoltar = () => {
+      const g = gestoRef.current;
+      if (!g) return;
+      gestoRef.current = null;
+      if (g.timer) { clearTimeout(g.timer); abrirTarjeta(g); return; } // fue un toque, no un arrastre
+      if (!g.activo) { abrirTarjeta(g); return; }                     // clic con mouse sin mover
+      setDrag(null);
+      if (g.valido) aplicarGesto(g);
+    };
+    window.addEventListener("pointermove", alMover);
+    window.addEventListener("pointerup", alSoltar);
+    window.addEventListener("pointercancel", alSoltar);
     return () => {
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-      window.removeEventListener("pointercancel", onUp);
+      window.removeEventListener("pointermove", alMover);
+      window.removeEventListener("pointerup", alSoltar);
+      window.removeEventListener("pointercancel", alSoltar);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [drag, horaInicioDec, config.horasLaboralesDiarias, vista, diasVisibles]);
+  }, [diasVisibles, horaInicioDec, jornadaFin, vista, soportaProgramacion, data.pendientes]);
+
+  /* ---------- acciones ---------- */
+
+  // Programa en huecos libres las tareas que hoy solo tienen fecha límite. A diferencia del
+  // acomodo viejo (que solo las dibujaba y se perdía al recargar), esto SÍ les guarda su horario.
+  const acomodarEnHuecos = async () => {
+    const ocupado = {};
+    diasVisibles.forEach((d) => {
+      const k = dateStr(d);
+      ocupado[k] = (bloques[k] || []).map((b) => [b.inicio, b.inicio + b.duracion]);
+    });
+    const claves = diasVisibles.map(dateStr);
+    for (const k of claves) {
+      for (const t of tareasPorFranja[k] || []) {
+        if (t.estatus === "Completada") continue;
+        const dur = duracionDeTarea(t);
+        const candidatos = [k, ...claves.filter((x) => x !== k)];
+        for (const dia of candidatos) {
+          const hueco = buscarHueco(ocupado[dia], horaInicioDec, jornadaFin, dur);
+          if (hueco == null) continue;
+          ocupado[dia].push([hueco, hueco + dur]);
+          await editarTarea(t, patchProgramar(dia, horaDecimalAHHMM(hueco)), true);
+          break;
+        }
+      }
+    }
+  };
+
+  const reprogramar = async (tipo, item, opcion) => {
+    const baseFecha = () => {
+      if (tipo === "cita") return new Date(item.fechaHora);
+      const dia = diaProgramadoDe(item) || item.fechaLimite || todayISO();
+      return new Date(`${dia}T${item.horaInicio || config.horaInicioLaboral}:00`);
+    };
+    let destino;
+    if (opcion.tipo === "mas1h") { destino = baseFecha(); destino.setHours(destino.getHours() + 1); }
+    else if (opcion.tipo === "manana") { destino = baseFecha(); destino.setDate(destino.getDate() + 1); }
+    else destino = new Date(`${opcion.fecha}T${opcion.hora || "09:00"}:00`);
+
+    const dia = dateStr(destino);
+    const hora = `${String(destino.getHours()).padStart(2, "0")}:${String(destino.getMinutes()).padStart(2, "0")}`;
+    if (tipo === "cita") await editarCita(item, { fechaHora: destino.toISOString() }, true);
+    else await editarTarea(item, patchProgramar(dia, hora), true);
+    setTarjeta(null);
+  };
+
+  // Quita el horario programado y devuelve la tarea a la franja de "Tareas del día", sin tocar su
+  // fecha límite.
+  const quitarHorario = async (t) => {
+    await editarTarea(t, soportaProgramacion ? { fechaProgramada: null, horaInicio: null } : { horaInicio: null }, true);
+    setTarjeta(null);
+  };
+
+  const asignarPendienteExistente = (id, fecha, hora) => {
+    const t = (data.pendientes || []).find((p) => p.id === id);
+    if (!t) return;
+    editarTarea(t, hora ? patchProgramar(fecha, hora) : (soportaProgramacion ? { fechaProgramada: fecha } : { fechaLimite: fecha }), true);
+    setModalAgregar(null);
+  };
+
+  /* ---------- datos para la tarjeta rápida ---------- */
+
+  const nombreProyectoDe = (id) => (data.proyectos || []).find((p) => p.id === id)?.nombre || "";
+  const nombreContactoDe = (id) => (data.contactos || []).find((c) => c.id === id)?.nombre || "";
+  const nombreResponsableDe = (t) => {
+    if (t.asignadoA && t.asignadoA === misId) return "Yo";
+    if (t.colaboradorContactoId) return nombreContactoDe(t.colaboradorContactoId);
+    if (t.responsableId) return (data.equipo || []).find((e) => e.id === t.responsableId)?.nombre || "";
+    return "";
+  };
 
   const horas = Array.from({ length: Math.ceil(config.horasLaboralesDiarias) + 1 }, (_, i) => horaInicioDec + i);
 
   if (cargando) return <p className="text-sm gp-text-muted">Cargando tu agenda…</p>;
 
+  const altoCuadricula = PX_POR_HORA * config.horasLaboralesDiarias;
+
   return (
     <div>
       <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
         <h1 className="text-2xl font-bold">Agenda</h1>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <label className="flex items-center gap-1.5 text-xs cursor-pointer select-none" style={{ minHeight: esMovil ? 44 : undefined }}>
+            <input type="checkbox" checked={config.mostrarTareas}
+              onChange={(e) => guardarConfig({ ...config, mostrarTareas: e.target.checked })}
+              style={{ width: 16, height: 16, accentColor: "var(--gold)", cursor: "pointer" }} />
+            Mostrar tareas
+          </label>
           <button className="gp-btn flex items-center gap-1 px-2.5 py-1.5 text-xs" onClick={() => setModalAgregar("nueva")}>
             <Plus size={14} /> Agregar
           </button>
           <button className="gp-btn-ghost px-2 py-1 text-xs rounded" onClick={() => setVista((v) => (v === "dia" ? "semana" : "dia"))}>
             {vista === "dia" ? "Ver semana" : "Ver día"}
           </button>
-          <button className="gp-btn-ghost p-1.5 rounded" onClick={() => setBase((b) => sumarDias(b, vista === "dia" ? -1 : -7))}><ChevronLeft size={16} /></button>
+          <button className="gp-btn-ghost p-1.5 rounded" onClick={() => setBase((b) => sumarDias(b, vista === "dia" ? -1 : -7))} aria-label="Anterior"><ChevronLeft size={16} /></button>
           <button className="gp-btn-ghost px-2 py-1 text-xs rounded" onClick={() => setBase(new Date())}>Hoy</button>
-          <button className="gp-btn-ghost p-1.5 rounded" onClick={() => setBase((b) => sumarDias(b, vista === "dia" ? 1 : 7))}><ChevronRight size={16} /></button>
+          <button className="gp-btn-ghost p-1.5 rounded" onClick={() => setBase((b) => sumarDias(b, vista === "dia" ? 1 : 7))} aria-label="Siguiente"><ChevronRight size={16} /></button>
           <button className="gp-btn-ghost p-1.5 rounded" onClick={() => setConfigAbierta(true)} title="Configurar jornada"><Settings size={16} /></button>
         </div>
       </div>
 
-      {/* Barra de confirmación del acomodo automático — no se acomoda nada hasta que se presiona. */}
-      {!acomodoConfirmado && pendientesPendientesDeAcomodo.length > 0 && (
-        <div className="gp-panel-hi p-3 mb-4 text-sm flex items-center justify-between gap-3 flex-wrap">
-          <span>Tienes {pendientesPendientesDeAcomodo.length} pendiente{pendientesPendientesDeAcomodo.length === 1 ? "" : "s"} con fecha en este rango que no se ha{pendientesPendientesDeAcomodo.length === 1 ? "" : "n"} acomodado en el horario todavía.</span>
-          <button className="gp-btn px-3 py-1.5 text-xs shrink-0" onClick={() => setAcomodoConfirmado(true)}>Acomodar en huecos libres</button>
+      {soportaProgramacion === false && (
+        <div className="gp-panel-hi p-3 mb-4 text-xs" style={{ borderLeft: "3px solid var(--gold)" }}>
+          La base de datos todavía no tiene la columna <span className="gp-mono">fecha_programada</span>. La Agenda
+          funciona con el modelo anterior: mover una tarea cambia su fecha límite. Al aplicar la migración
+          20261002 se separan los dos conceptos, sin perder nada de lo que ya está capturado.
         </div>
       )}
-      {acomodoConfirmado && (
-        <div className="p-2 mb-4 text-xs gp-text-muted flex items-center justify-between gap-3 flex-wrap">
-          <span>Los pendientes con fecha se están acomodando solos en los huecos libres.</span>
-          <button className="gp-btn-ghost px-2 py-1 rounded" onClick={() => setAcomodoConfirmado(false)}>Quitar acomodo automático</button>
+
+      {config.mostrarTareas && hayEnFranja && (
+        <div className="flex items-center justify-between gap-3 flex-wrap mb-3 text-xs gp-text-muted">
+          <span>Las tareas de la franja de arriba solo tienen fecha límite. Arrástralas a una hora para programarlas.</span>
+          <button className="gp-btn-ghost px-2.5 py-1.5 rounded shrink-0" onClick={acomodarEnHuecos}>Acomodar en huecos libres</button>
         </div>
       )}
 
@@ -14567,7 +14919,47 @@ function Agenda({ data, onEditPendiente, onAddCita, onEditCita, onCrearContacto,
               onSave={(v) => { onAddCita({ ...v, id: uid() }); setModalAgregar(null); }} />
           )}
           {modalAgregar === "existente" && (
-            <PendienteExistenteForm pendientes={(data.pendientes || []).filter((p) => p.estatus !== "Completada")} onAsignar={asignarPendienteExistente} />
+            <PendienteExistenteForm
+              pendientes={(data.pendientes || []).filter((p) => p.estatus !== "Completada" && !p.horaInicio)}
+              horaSugerida={config.horaInicioLaboral}
+              onAsignar={asignarPendienteExistente} />
+          )}
+        </Modal>
+      )}
+
+      {edicion && (
+        <Modal title={edicion.tipo === "cita" ? "Editar cita" : "Editar tarea"} onClose={() => setEdicion(null)}>
+          {edicion.tipo === "cita" ? (
+            <>
+              <CitaForm item={edicion.item} contactos={data.contactos} tagsExistentes={tagsUnicos(data.citas)}
+                onCrearContacto={onCrearContacto}
+                onSave={(v) => { editarCita(edicion.item, v, true); setEdicion(null); }} />
+              <button className="w-full mt-3 py-2 text-sm rounded gp-btn-ghost gp-text-red flex items-center justify-center gap-2"
+                style={{ minHeight: esMovil ? 44 : undefined }}
+                onClick={() => { onRemoveCita(edicion.item.id); setEdicion(null); }}>
+                <Trash2 size={15} /> Eliminar cita
+              </button>
+            </>
+          ) : (
+            <>
+              <PendienteForm item={edicion.item} proyectos={data.proyectos} contactos={data.contactos}
+                pendientes={data.pendientes} colaboradores={[]}
+                onCrearContacto={(nombre) => onCrearContacto(nombre)}
+                onEnviarInvitacion={onEnviarInvitacion}
+                onAceptarEnNombre={onAceptarEnNombre}
+                onSave={(v) => {
+                  editarTarea(edicion.item, v, true);
+                  if (v.asignadoA && v.asignadoA !== edicion.item.asignadoA && onAsignar) onAsignar(edicion.item.id);
+                  setEdicion(null);
+                }} />
+              {!esTareaAjena(edicion.item) && (
+                <button className="w-full mt-3 py-2 text-sm rounded gp-btn-ghost gp-text-red flex items-center justify-center gap-2"
+                  style={{ minHeight: esMovil ? 44 : undefined }}
+                  onClick={() => { onRemovePendiente(edicion.item.id); setEdicion(null); }}>
+                  <Trash2 size={15} /> Eliminar tarea
+                </button>
+              )}
+            </>
           )}
         </Modal>
       )}
@@ -14621,6 +15013,7 @@ function Agenda({ data, onEditPendiente, onAddCita, onEditCita, onCrearContacto,
         <div className="flex" style={{ minWidth: vista === "semana" ? 720 : 320 }}>
           <div style={{ width: 44 }}>
             <div style={{ height: 28 }} />
+            {config.mostrarTareas && <div style={{ height: ALTO_FRANJA }} className="text-[9px] gp-text-muted pr-1 text-right pt-1">Del día</div>}
             {horas.map((h) => (
               <div key={h} style={{ height: PX_POR_HORA }} className="text-[10px] gp-text-muted text-right pr-1 -mt-2">
                 {String(Math.floor(h)).padStart(2, "0")}:{h % 1 ? "30" : "00"}
@@ -14635,38 +15028,103 @@ function Agenda({ data, onEditPendiente, onAddCita, onEditCita, onCrearContacto,
                 <div className="text-center text-xs mb-1 pb-1" style={{ height: 28, fontWeight: esHoy ? 700 : 400, color: esHoy ? "var(--gold)" : undefined }}>
                   {DIA_ISO_LABEL[d.getDay() === 0 ? 7 : d.getDay()]} {d.getDate()}
                 </div>
-                <div ref={(el) => (colRefs.current[di] = el)} className="relative" style={{ height: PX_POR_HORA * config.horasLaboralesDiarias, borderLeft: "1px solid var(--border)" }}>
+
+                {/* Franja "Tareas del día": lo que tiene fecha límite pero todavía no tiene hora. */}
+                {config.mostrarTareas && (
+                  <div className="gp-scroll" style={{
+                    height: ALTO_FRANJA, overflowY: "auto", borderLeft: "1px solid var(--border)",
+                    borderBottom: "1px solid var(--border)", padding: 2, display: "flex", flexDirection: "column", gap: 2,
+                  }}>
+                    {(tareasPorFranja[key] || []).map((t) => {
+                      const hecha = t.estatus === "Completada";
+                      const vencida = !hecha && t.fechaLimite && daysUntil(t.fechaLimite) < 0;
+                      return (
+                        <div key={t.id}
+                          role="button" tabIndex={0}
+                          onKeyDown={(e) => { if (e.key === "Enter") setTarjeta({ tipo: "tarea", item: t, rect: e.currentTarget.getBoundingClientRect() }); }}
+                          onPointerDown={(e) => iniciarGesto(e, { tipo: "tarea", item: t, modo: "programar", inicio: horaInicioDec, duracion: duracionDeTarea(t), diaIdx: di })}
+                          title={`${t.descripcion} — mantén presionado y arrastra a una hora para programarla`}
+                          className="rounded flex items-center gap-1.5 px-1.5"
+                          style={{
+                            minHeight: esMovil ? 34 : 22, fontSize: 10.5, cursor: "grab", touchAction: "none",
+                            background: "var(--panel-2)", border: `1px dashed ${vencida ? "var(--red)" : "var(--border)"}`,
+                            opacity: hecha ? 0.65 : 1, textDecoration: hecha ? "line-through" : "none",
+                          }}>
+                          <button
+                            onPointerDown={(e) => e.stopPropagation()}
+                            onClick={(e) => { e.stopPropagation(); completar("tarea", t); }}
+                            aria-label={hecha ? "Marcar como pendiente" : "Marcar como realizada"}
+                            className="flex items-center justify-center shrink-0 rounded"
+                            style={{ width: esMovil ? 30 : 16, height: esMovil ? 30 : 16, border: "1px solid var(--border)", background: hecha ? "var(--teal)" : "transparent" }}>
+                            {hecha && <Check size={11} color="#0B2341" />}
+                          </button>
+                          <span className="truncate">{t.descripcion}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                <div ref={(el) => (colRefs.current[di] = el)} className="relative"
+                  style={{ height: altoCuadricula, borderLeft: "1px solid var(--border)" }}>
                   {horas.slice(0, -1).map((h) => (
                     <div key={h} style={{ position: "absolute", top: (h - horaInicioDec) * PX_POR_HORA, left: 0, right: 0, borderTop: "1px solid var(--border)" }} />
                   ))}
                   {(bloques[key] || []).map((b, i) => {
-                    const hecho = b.tipo === "pendiente" && b.item.estatus === "Completada";
-                    const arrastrable = b.tipo === "cita" || b.tipo === "pendiente";
-                    const siendoArrastrado = !!(drag && b.item && drag.tipo === b.tipo && drag.id === b.item.id);
+                    const esCita = b.tipo === "cita";
+                    const esTarea = b.tipo === "tarea";
+                    const hecho = (esTarea && b.item.estatus === "Completada") || (esCita && !!b.item.realizadaEn);
+                    const arrastrable = esCita || esTarea;
+                    const enMovimiento = !!(drag && b.item && drag.tipo === b.tipo && drag.id === b.item.id);
+                    const alto = Math.max(b.duracion * PX_POR_HORA - 2, ALTO_MIN_BLOQUE);
+                    const total = b.totalCols || 1;
+                    const ancho = 100 / total;
+                    const titulo = esCita ? b.item.titulo : esTarea ? b.item.descripcion : "Comida";
                     return (
-                      <div key={i}
-                        className="absolute rounded px-1.5 py-0.5 text-[11px] overflow-hidden"
+                      <div key={`${b.tipo}-${b.item?.id || i}`}
+                        role={arrastrable ? "button" : undefined}
+                        tabIndex={arrastrable ? 0 : undefined}
+                        onKeyDown={(e) => { if (arrastrable && e.key === "Enter") setTarjeta({ tipo: b.tipo, item: b.item, rect: e.currentTarget.getBoundingClientRect() }); }}
+                        className="absolute rounded px-1 py-0.5 text-[11px] overflow-hidden flex items-start gap-1"
                         style={{
                           top: (b.inicio - horaInicioDec) * PX_POR_HORA + 1,
-                          height: Math.max(b.duracion * PX_POR_HORA - 2, 18),
-                          left: 2, right: 2,
-                          background: b.tipo === "cita" ? "var(--gold)" : b.tipo === "comida" ? "var(--border)" : hecho ? "var(--teal-tint)" : "var(--panel-2)",
-                          color: b.tipo === "cita" ? "#0B2341" : hecho ? "var(--teal-text)" : "inherit",
-                          border: b.tipo === "pendiente" ? `1px solid ${hecho ? "var(--teal)" : "var(--border)"}` : "none",
+                          height: alto,
+                          left: `calc(${b.col * ancho}% + 2px)`,
+                          width: `calc(${ancho}% - 4px)`,
+                          // Una cita es un compromiso con alguien más: va sólida y en dorado. Una
+                          // tarea programada es plan propio: más tenue y con borde punteado.
+                          background: esCita ? "var(--gold)" : b.tipo === "comida" ? "var(--border)" : hecho ? "var(--teal-tint)" : "var(--panel-2)",
+                          color: esCita ? "#0B2341" : hecho && esTarea ? "var(--teal-text)" : "inherit",
+                          border: esTarea ? `1px dashed ${hecho ? "var(--teal)" : "var(--border)"}` : "none",
                           textDecoration: hecho ? "line-through" : "none",
-                          opacity: siendoArrastrado ? 0.3 : b.tipo === "comida" ? 0.7 : 1,
+                          opacity: enMovimiento ? 0.3 : b.tipo === "comida" ? 0.7 : esTarea && !hecho ? 0.92 : 1,
                           cursor: arrastrable ? "grab" : "default",
                           touchAction: arrastrable ? "none" : undefined,
                         }}
-                        title={b.tipo === "cita" ? `${b.item.titulo} — mantén presionado para mover, jala el borde inferior para cambiar la duración` : b.tipo === "comida" ? "Comida" : `${b.item.descripcion} — mantén presionado para mover, jala el borde inferior para cambiar la duración`}
-                        onPointerDown={(e) => arrastrable && iniciarDrag(e, b.tipo, b.item, b, di, "mover")}
-                        onClick={() => { if (huboMovimientoRef.current) { huboMovimientoRef.current = false; return; } if (b.tipo === "pendiente") alternarHecho(b.item); }}
+                        title={arrastrable
+                          ? `${titulo} — toca para ver opciones, mantén presionado para mover, jala el borde inferior para cambiar la duración`
+                          : "Comida"}
+                        onPointerDown={(e) => arrastrable && iniciarGesto(e, { tipo: b.tipo, item: b.item, modo: "mover", inicio: b.inicio, duracion: b.duracion, diaIdx: di })}
                       >
-                        <span className="font-medium">{b.tipo === "cita" ? b.item.titulo : b.tipo === "comida" ? "Comida" : b.item.descripcion}</span>
+                        {arrastrable && alto >= 26 && (esTarea || soportaRealizada) && (
+                          <button
+                            onPointerDown={(e) => e.stopPropagation()}
+                            onClick={(e) => { e.stopPropagation(); completar(b.tipo, b.item); }}
+                            aria-label={hecho ? "Marcar como pendiente" : "Marcar como realizada"}
+                            className="flex items-center justify-center shrink-0 rounded mt-0.5"
+                            style={{
+                              width: esMovil ? 26 : 15, height: esMovil ? 26 : 15,
+                              border: `1px solid ${esCita ? "rgba(11,35,65,.5)" : "var(--border)"}`,
+                              background: hecho ? "var(--teal)" : "transparent",
+                            }}>
+                            {hecho && <Check size={11} color="#0B2341" />}
+                          </button>
+                        )}
+                        <span className="font-medium min-w-0 break-words" style={{ lineHeight: 1.15 }}>{titulo}</span>
                         {arrastrable && (
                           <div
-                            onPointerDown={(e) => iniciarDrag(e, b.tipo, b.item, b, di, "redimensionar")}
-                            style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: 6, cursor: "ns-resize", touchAction: "none" }}
+                            onPointerDown={(e) => iniciarGesto(e, { tipo: b.tipo, item: b.item, modo: "redimensionar", inicio: b.inicio, duracion: b.duracion, diaIdx: di })}
+                            style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: esMovil ? 12 : 6, cursor: "ns-resize", touchAction: "none" }}
                           />
                         )}
                       </div>
@@ -14678,18 +15136,21 @@ function Agenda({ data, onEditPendiente, onAddCita, onEditCita, onCrearContacto,
           })}
         </div>
       </div>
-      {drag && (() => {
+
+      {drag && drag.valido && (() => {
         const colEl = colRefs.current[drag.curDiaIdx];
         if (!colEl) return null;
         const rect = colEl.getBoundingClientRect();
-        const item = drag.tipo === "cita" ? data.citas.find((c) => c.id === drag.id) : data.pendientes.find((p) => p.id === drag.id);
+        const item = drag.tipo === "cita"
+          ? (data.citas || []).find((c) => c.id === drag.id)
+          : tareasVisibles.find((p) => p.id === drag.id);
         const diaGhost = diasVisibles[drag.curDiaIdx];
         const etiquetaDia = diaGhost ? `${DIA_ISO_LABEL[diaGhost.getDay() === 0 ? 7 : diaGhost.getDay()]} ${diaGhost.getDate()}` : "";
         return (
           <div style={{
             position: "fixed", left: rect.left + 2, width: Math.max(rect.width - 4, 40),
             top: rect.top + (drag.curInicio - horaInicioDec) * PX_POR_HORA,
-            height: Math.max(drag.curDuracion * PX_POR_HORA - 2, 18),
+            height: Math.max(drag.curDuracion * PX_POR_HORA - 2, 22),
             background: drag.tipo === "cita" ? "var(--gold)" : "var(--panel-2)",
             color: drag.tipo === "cita" ? "#0B2341" : "inherit",
             border: "2px dashed var(--teal)", borderRadius: 4, zIndex: 90, pointerEvents: "none",
@@ -14702,30 +15163,78 @@ function Agenda({ data, onEditPendiente, onAddCita, onEditCita, onCrearContacto,
           </div>
         );
       })()}
-      <p className="text-xs gp-text-muted mt-2">Mantén presionada una tarea o cita para moverla a otro día u horario; jala su borde inferior para cambiar la duración. Toca una tarea (sin arrastrar) para marcarla hecha. Lo que no cupo sigue en Tareas normal.</p>
+
+      {tarjeta && (() => {
+        const esCita = tarjeta.tipo === "cita";
+        const t = tarjeta.item;
+        const diaProg = esCita ? null : diaProgramadoDe(t);
+        const cuando = esCita
+          ? fmtFechaHora(t.fechaHora)
+          : [diaProg ? `Programada ${diaProg}${t.horaInicio ? ` ${t.horaInicio}` : ""}` : null,
+             t.fechaLimite ? `Vence ${t.fechaLimite}` : null].filter(Boolean).join(" · ") || "Sin fecha";
+        const origen = !esCita && t.origenTabla && t.origenId ? t.origenTabla : null;
+        return (
+          <TarjetaRapidaAgenda
+            tipo={tarjeta.tipo}
+            titulo={esCita ? t.titulo : t.descripcion}
+            cuando={cuando}
+            proyecto={esCita ? "" : nombreProyectoDe(t.proyectoId)}
+            contacto={esCita ? (t.contactoIds || []).map(nombreContactoDe).filter(Boolean).join(", ") : nombreContactoDe(t.contactoId)}
+            responsable={esCita ? "" : nombreResponsableDe(t)}
+            completada={esCita ? !!t.realizadaEn : t.estatus === "Completada"}
+            esMovil={esMovil}
+            rect={tarjeta.rect}
+            onCerrar={() => setTarjeta(null)}
+            onRealizada={() => { completar(tarjeta.tipo, t); setTarjeta(null); }}
+            onEditar={() => { setEdicion({ tipo: tarjeta.tipo, item: t }); setTarjeta(null); }}
+            onReprogramar={(opcion) => reprogramar(tarjeta.tipo, t, opcion)}
+            onAbrirOrigen={origen ? () => { setTarjeta(null); onAbrirOrigen(t.origenTabla, t.origenId); } : null}
+            etiquetaOrigen={origen ? ETIQUETA_ORIGEN[origen] : null}
+          />
+        );
+      })()}
+
+      {toast && (
+        <ToastDeshacer clave={toast.clave} texto={toast.texto} onDeshacer={toast.deshacer} onCerrar={() => setToast(null)} />
+      )}
+
+      <p className="text-xs gp-text-muted mt-2">
+        Toca una cita o tarea para ver sus opciones; su checkbox la marca como realizada de un toque.
+        Mantén presionado para moverla de día u hora, y jala el borde inferior para cambiar cuánto dura.
+        Mover un bloque cambia cuándo lo vas a hacer, nunca su fecha límite.
+      </p>
     </div>
   );
 }
 
-// Elegir un pendiente que ya existe (guardado en el sistema) y asignarle cuándo va, sin salir
-// de la Agenda ni tener que ir al módulo de Tareas.
-function PendienteExistenteForm({ pendientes, onAsignar }) {
+// Elegir una tarea que ya existe y programarla sin salir de la Agenda. Guarda el horario (día +
+// hora); si no se pone hora, la tarea se queda en la franja "Tareas del día" de ese día.
+function PendienteExistenteForm({ pendientes, horaSugerida, onAsignar }) {
   const [pendienteId, setPendienteId] = useState("");
   const [fecha, setFecha] = useState(todayISO());
+  const [hora, setHora] = useState(horaSugerida || "09:00");
+  const [conHora, setConHora] = useState(true);
   return (
     <div>
       <Field label="Tarea guardada">
         <select className="gp-input" value={pendienteId} onChange={(e) => setPendienteId(e.target.value)}>
           <option value="">— elige una —</option>
-          {pendientes.map((p) => <option key={p.id} value={p.id}>{p.descripcion}{p.fechaLimite ? ` (actual: ${p.fechaLimite})` : ""}</option>)}
+          {pendientes.map((p) => <option key={p.id} value={p.id}>{p.descripcion}{p.fechaLimite ? ` (vence: ${p.fechaLimite})` : ""}</option>)}
         </select>
       </Field>
-      {pendientes.length === 0 && <p className="text-xs gp-text-muted mb-2">No tienes tareas guardadas sin marcar como hechas.</p>}
-      <Field label="Fecha en la que va">
-        <input type="date" className="gp-input" value={fecha} onChange={(e) => setFecha(e.target.value)} />
-      </Field>
-      <button className="gp-btn w-full py-2 mt-2 text-sm" disabled={!pendienteId} onClick={() => onAsignar(pendienteId, fecha)}>
-        Agregar a la Agenda
+      {pendientes.length === 0 && <p className="text-xs gp-text-muted mb-2">No tienes tareas guardadas sin programar.</p>}
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Día en que la harás"><input type="date" className="gp-input" value={fecha} onChange={(e) => setFecha(e.target.value)} /></Field>
+        <Field label="Hora de inicio"><input type="time" className="gp-input" value={hora} onChange={(e) => setHora(e.target.value)} disabled={!conHora} /></Field>
+      </div>
+      <label className="flex items-center gap-2 text-xs mb-2 cursor-pointer">
+        <input type="checkbox" checked={conHora} onChange={(e) => setConHora(e.target.checked)}
+          style={{ width: 15, height: 15, accentColor: "var(--gold)" }} />
+        Ponerle hora (si no, se queda en “Tareas del día”)
+      </label>
+      <p className="text-xs gp-text-muted mb-3">Esto define cuándo la vas a hacer. Su fecha límite no se toca.</p>
+      <button className="gp-btn w-full py-2 mt-1 text-sm" disabled={!pendienteId} onClick={() => onAsignar(pendienteId, fecha, conHora ? hora : null)}>
+        Programar en la Agenda
       </button>
     </div>
   );
