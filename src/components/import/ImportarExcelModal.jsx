@@ -19,7 +19,7 @@
 // camino de bulk-insert nuevo) mostrando progreso → resumen final.
 
 import { useState } from 'react';
-import { Upload, CheckCircle2, XCircle } from 'lucide-react';
+import { Upload, CheckCircle2, XCircle, Download } from 'lucide-react';
 
 // Mismo criterio que normalizarTexto en App.jsx (minúsculas, sin acentos) — se duplica aquí
 // porque App.jsx no exporta nada; es un one-liner, no vale la pena crear una exportación solo
@@ -57,13 +57,18 @@ const CONFIGS = {
   contactos: {
     etiqueta: 'contactos',
     columnas: [
-      { campo: 'nombres', etiqueta: 'Nombre(s)', alias: ['nombre(s)', 'nombres', 'nombre'], requerido: true },
-      { campo: 'apellidoPaterno', etiqueta: 'Apellido paterno', alias: ['apellido paterno'], requerido: false },
-      { campo: 'apellidoMaterno', etiqueta: 'Apellido materno', alias: ['apellido materno'], requerido: false },
-      { campo: 'tipo', etiqueta: 'Tipo', alias: ['tipo'], requerido: false },
-      { campo: 'whatsapp', etiqueta: 'WhatsApp', alias: ['whatsapp', 'telefono', 'teléfono'], requerido: false },
-      { campo: 'correo', etiqueta: 'Correo', alias: ['correo', 'email', 'correo electronico'], requerido: false },
-      { campo: 'notas', etiqueta: 'Notas', alias: ['notas'], requerido: false },
+      { campo: 'nombres', etiqueta: 'Nombre(s)', alias: ['nombre(s)', 'nombres', 'nombre'], requerido: true, ejemplo: 'María Fernanda', ayuda: 'Solo el nombre de pila. Los apellidos van en sus propias columnas.' },
+      { campo: 'apellidoPaterno', etiqueta: 'Apellido paterno', alias: ['apellido paterno', 'apellidos'], requerido: false, ejemplo: 'Quintana' },
+      { campo: 'apellidoMaterno', etiqueta: 'Apellido materno', alias: ['apellido materno'], requerido: false, ejemplo: 'Ríos' },
+      { campo: 'tipo', etiqueta: 'Tipo', alias: ['tipo', 'rol', 'categoria', 'categoría'], requerido: false, ejemplo: 'Cliente', ayuda: 'Cliente, Proveedor, Colaborador, Personal, Familia u Otro. Lo que no coincida entra como Otro.' },
+      { campo: 'empresa', etiqueta: 'Empresa / Organización', alias: ['empresa', 'organizacion', 'organización', 'compañia', 'compañía'], requerido: false, ejemplo: 'Constructora Quintana' },
+      { campo: 'puesto', etiqueta: 'Puesto', alias: ['puesto', 'cargo'], requerido: false, ejemplo: 'Directora de obra' },
+      { campo: 'whatsapp', etiqueta: 'WhatsApp', alias: ['whatsapp', 'celular', 'movil', 'móvil'], requerido: false, ejemplo: '5215512345678', ayuda: 'Con lada de país y sin espacios ni guiones, para que el botón de WhatsApp funcione.' },
+      { campo: 'telefono', etiqueta: 'Teléfono', alias: ['telefono', 'teléfono', 'tel', 'fijo'], requerido: false, ejemplo: '5555123456', ayuda: 'El de llamada normal. Si solo tienes uno, déjalo en WhatsApp y esta columna vacía.' },
+      { campo: 'correo', etiqueta: 'Correo', alias: ['correo', 'email', 'e-mail', 'correo electronico', 'correo electrónico'], requerido: false, ejemplo: 'maria@constructora.com' },
+      { campo: 'fechaNacimiento', etiqueta: 'Cumpleaños', alias: ['cumpleanos', 'cumpleaños', 'fecha de nacimiento', 'nacimiento'], requerido: false, ejemplo: '1985-03-14', ayuda: 'AAAA-MM-DD o DD/MM/AAAA. Sirve para los avisos de cumpleaños.' },
+      { campo: 'direccion', etiqueta: 'Dirección', alias: ['direccion', 'dirección', 'domicilio'], requerido: false, ejemplo: 'Av. Reforma 123, CDMX' },
+      { campo: 'notas', etiqueta: 'Notas', alias: ['notas', 'observaciones', 'comentarios'], requerido: false, ejemplo: 'Prefiere que le escriban por WhatsApp' },
     ],
     validar: (m) => {
       const nombres = (m.nombres || '').toString().trim();
@@ -71,14 +76,22 @@ const CONFIGS = {
       const apellidoPaterno = (m.apellidoPaterno || '').toString().trim();
       const apellidoMaterno = (m.apellidoMaterno || '').toString().trim();
       const nombre = [nombres, apellidoPaterno, apellidoMaterno].filter(Boolean).join(' ');
-      const tiposValidos = { cliente: 'Cliente', proveedor: 'Proveedor', colaborador: 'Colaborador', otro: 'Otro' };
+      const tiposValidos = {
+        cliente: 'Cliente', clientes: 'Cliente', proveedor: 'Proveedor', proveedores: 'Proveedor',
+        colaborador: 'Colaborador', colaboradores: 'Colaborador', personal: 'Personal',
+        familia: 'Familia', familiar: 'Familia', otro: 'Otro',
+      };
       const tipo = tiposValidos[norm(m.tipo)] || 'Otro';
+      const texto = (x) => (x ?? '').toString().trim();
       return {
         ok: true,
         item: {
           nombres, apellidoPaterno, apellidoMaterno, nombre, tipos: [tipo],
-          whatsapp: (m.whatsapp || '').toString().trim(), correo: (m.correo || '').toString().trim(),
-          notas: (m.notas || '').toString().trim(), contexto: '', parentesco: '', fechaNacimiento: '', direccion: '',
+          empresa: texto(m.empresa), puesto: texto(m.puesto),
+          whatsapp: texto(m.whatsapp), telefono: texto(m.telefono), correo: texto(m.correo),
+          fechaNacimiento: parseFecha(m.fechaNacimiento) || '',
+          direccion: texto(m.direccion), notas: texto(m.notas),
+          contexto: '', parentesco: '',
         },
       };
     },
@@ -91,14 +104,16 @@ const CONFIGS = {
   proyectos: {
     etiqueta: 'proyectos',
     columnas: [
-      { campo: 'nombre', etiqueta: 'Nombre', alias: ['nombre', 'proyecto'], requerido: true },
-      { campo: 'descripcion', etiqueta: 'Descripción', alias: ['descripcion', 'descripción'], requerido: false },
-      { campo: 'estatus', etiqueta: 'Estado', alias: ['estado', 'estatus'], requerido: false },
-      { campo: 'contexto', etiqueta: 'Contexto', alias: ['contexto'], requerido: false },
-      { campo: 'categoria', etiqueta: 'Categoría', alias: ['categoria', 'categoría'], requerido: false },
-      { campo: 'fechaInicio', etiqueta: 'Inicio', alias: ['inicio', 'fecha de inicio', 'fecha inicio'], requerido: false },
-      { campo: 'fechaFin', etiqueta: 'Fin', alias: ['fin', 'fecha de fin', 'fecha fin'], requerido: false },
-      { campo: 'etiquetas', etiqueta: 'Etiquetas', alias: ['etiquetas', 'tags'], requerido: false },
+      { campo: 'nombre', etiqueta: 'Nombre', alias: ['nombre', 'proyecto'], requerido: true, ejemplo: 'Casa Quintana', ayuda: 'Es el único dato obligatorio.' },
+      { campo: 'descripcion', etiqueta: 'Descripción', alias: ['descripcion', 'descripción'], requerido: false, ejemplo: 'Remodelación de planta baja' },
+      { campo: 'estatus', etiqueta: 'Estado', alias: ['estado', 'estatus', 'etapa'], requerido: false, ejemplo: 'En desarrollo', ayuda: 'Idea, Validación, Desarrollo, Activo, Finalizado, En pausa o Archivado. Lo que no coincida entra como Idea.' },
+      { campo: 'contexto', etiqueta: 'Contexto', alias: ['contexto'], requerido: false, ejemplo: 'Profesional', ayuda: 'Personal, Profesional o Empresarial. Por omisión, Personal.' },
+      { campo: 'categoria', etiqueta: 'Categoría', alias: ['categoria', 'categoría'], requerido: false, ejemplo: 'Software', ayuda: 'Fundación, Software, Música, Renta, Marketing, Chatbots, Personal u Otro.' },
+      { campo: 'prioridad', etiqueta: 'Prioridad', alias: ['prioridad'], requerido: false, ejemplo: 'Alta', ayuda: 'Alta, Media o Baja. Por omisión, Media.' },
+      { campo: 'fechaInicio', etiqueta: 'Fecha de arranque', alias: ['inicio', 'arranque', 'fecha de arranque', 'fecha de inicio', 'fecha inicio'], requerido: false, ejemplo: '2026-01-15', ayuda: 'AAAA-MM-DD o DD/MM/AAAA.' },
+      { campo: 'fechaRevision', etiqueta: 'Fecha de revisión', alias: ['revision', 'revisión', 'fecha de revision', 'fecha de revisión'], requerido: false, ejemplo: '2026-03-01' },
+      { campo: 'fechaFin', etiqueta: 'Fecha de entrega', alias: ['fin', 'entrega', 'liberacion', 'liberación', 'fecha de entrega', 'fecha de fin', 'fecha fin'], requerido: false, ejemplo: '2026-06-30', ayuda: 'Es la fecha de liberación: de ahí salen los días que faltan.' },
+      { campo: 'etiquetas', etiqueta: 'Etiquetas', alias: ['etiquetas', 'tags'], requerido: false, ejemplo: 'obra; 2026', ayuda: 'Varias separadas por coma o punto y coma.' },
     ],
     validar: (m) => {
       const nombre = (m.nombre || '').toString().trim();
@@ -127,9 +142,11 @@ const CONFIGS = {
           categoria,
           fechaInicio: parseFecha(m.fechaInicio) || '',
           fechaFin: parseFecha(m.fechaFin) || '',
+          fechaRevision: parseFecha(m.fechaRevision) || '',
           etiquetas,
+          prioridad: ({ alta: 'Alta', media: 'Media', baja: 'Baja' })[norm(m.prioridad)] || 'Media',
           responsableContactoId: '', modo: 'Finito', monetizacion: 'Dinero',
-          prioridad: 'Media', fechaRevision: '', github: '', githubSubido: false, notas: [],
+          github: '', githubSubido: false, notas: [],
         },
       };
     },
@@ -220,6 +237,33 @@ export default function ImportarExcelModal({ tipo, proyectos, XLSX, onImportarFi
   const conError = filasProcesadas.filter((f) => !f.ok);
   const faltaRequerido = config.columnas.some((c) => c.requerido && !mapeo[c.campo]);
 
+  // Plantilla de Excel derivada de la propia configuración del importador: encabezados exactos,
+  // un renglón de ejemplo y una hoja aparte con qué es obligatorio y qué valores se aceptan.
+  const descargarPlantilla = () => {
+    try {
+      const encabezados = config.columnas.map((c) => c.etiqueta);
+      const ejemplo = Object.fromEntries(config.columnas.map((c) => [c.etiqueta, c.ejemplo || '']));
+      const hojaDatos = XLSX.utils.json_to_sheet([ejemplo], { header: encabezados });
+      hojaDatos['!cols'] = encabezados.map((h) => ({ wch: Math.max(14, h.length + 4) }));
+
+      const hojaAyuda = XLSX.utils.json_to_sheet(config.columnas.map((c) => ({
+        Columna: c.etiqueta,
+        '¿Obligatoria?': c.requerido ? 'Sí' : 'No',
+        Ejemplo: c.ejemplo || '',
+        'Cómo llenarla': c.ayuda || 'Texto libre.',
+      })));
+      hojaAyuda['!cols'] = [{ wch: 24 }, { wch: 14 }, { wch: 28 }, { wch: 70 }];
+
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, hojaDatos, 'Datos');
+      XLSX.utils.book_append_sheet(wb, hojaAyuda, 'Instrucciones');
+      XLSX.writeFile(wb, `arkeyone_plantilla_${tipo}.xlsx`);
+    } catch (err) {
+      console.error('Error al generar la plantilla:', err);
+      setError(`No se pudo generar la plantilla: ${err?.message || err}`);
+    }
+  };
+
   const confirmarImportacion = async () => {
     setPaso('importando');
     setProgreso({ hechas: 0, total: validas.length, errores: 0 });
@@ -239,15 +283,35 @@ export default function ImportarExcelModal({ tipo, proyectos, XLSX, onImportarFi
   if (paso === 'elegir') {
     return (
       <div>
-        <p className="text-sm gp-text-muted mb-4">
+        <p className="text-sm gp-text-muted mb-3">
           Sube un archivo Excel (.xlsx) o CSV con tus {config.etiqueta}. En el siguiente paso vas a poder revisar qué columna de tu archivo corresponde a cada dato antes de importar nada.
         </p>
+
+        {/* La plantilla se arma con las MISMAS columnas que lee el importador, así que nunca se
+            desfasa de lo que el sistema acepta (pedido de Angel, 29 sept 2026: necesita un layout
+            que mandarle a los usuarios). Trae una hoja "Datos" con los encabezados y un renglón de
+            ejemplo, y una hoja "Instrucciones" que dice qué es obligatorio y qué valores valen. */}
+        <div className="gp-panel-hi p-3 mb-3 flex items-start justify-between gap-3 flex-wrap" style={{ borderLeft: '3px solid var(--gold)' }}>
+          <div className="min-w-0">
+            <p className="text-sm font-medium">¿No sabes cómo armar el archivo?</p>
+            <p className="text-xs gp-text-muted">Baja la plantilla, llénala y súbela. Trae los encabezados exactos, un ejemplo y las instrucciones de cada columna.</p>
+          </div>
+          <button onClick={descargarPlantilla} className="gp-btn flex items-center gap-1.5 px-3 py-1.5 text-xs shrink-0">
+            <Download size={13} /> Descargar plantilla
+          </button>
+        </div>
+
         <label className="gp-panel p-6 flex flex-col items-center gap-2 text-center cursor-pointer" style={{ borderStyle: 'dashed' }}>
           <Upload size={24} className="gp-text-gold" />
           <span className="text-sm font-medium">Elegir archivo…</span>
           <span className="text-xs gp-text-muted">.xlsx, .xls o .csv</span>
           <input type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={onArchivo} />
         </label>
+
+        <p className="text-xs gp-text-muted mt-3">
+          Columnas que reconoce: {config.columnas.map((c) => c.etiqueta + (c.requerido ? ' (obligatoria)' : '')).join(', ')}.
+          El orden no importa y las que sobren se ignoran.
+        </p>
         {error && <p className="text-xs gp-text-red mt-3">{error}</p>}
       </div>
     );
