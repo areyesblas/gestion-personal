@@ -47,23 +47,33 @@ const OnboardingContextos = lazy(() => import("./components/onboarding/Onboardin
 const Tokens = ({ tema = "oscuro" }) => (
   <style>{`
     @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');
+    /* --panel-2 es el fondo de los BLOQUES INTERNOS: lo que va DENTRO de una tarjeta .gp-panel
+       (sub-bloques de dato, filas de lista, chips). 28 sept 2026, decisión de Angel después de
+       comparar niveles: se aclara y se tiñe de azul en vez de blanco. Subirle al blanco
+       transparente aclara pero lava el color hacia el gris; este azul claro aclara lo mismo sin
+       salirse de la identidad. Se queda como alpha y no como hex fijo para que un bloque apoyado
+       sobre algo que no es --panel (el fondo de la app, el menú lateral) siga siendo
+       proporcionalmente sutil, igual que antes. Sobre --panel el color efectivo es ~#2B5076. */
     .gp-root{ --bg:#0B2341; --panel:#12304F; --panel-hi:#1A3D63; --border:#234A70;
-      --text:#EAF1FA; --muted:#93A7C4; --gold:#F59E0B; --teal:#5FBF8B; --teal-tint:#DCF5E6; --teal-text:#1D6B42; --panel-2:rgba(255,255,255,.12); --red:#EF4444;
+      --text:#EAF1FA; --muted:#93A7C4; --gold:#F59E0B; --teal:#5FBF8B; --teal-tint:#DCF5E6; --teal-text:#1D6B42; --panel-2:rgba(130,195,255,.22); --muted-bloque:#B3C5DC; --red:#EF4444;
       /* Fila de una tarea ya completada. Sobre el azul oscuro hace falta un verde con bastante
          luz propia para que se lea como "hecho" de un vistazo; el tema claro lo redefine abajo. */
       --hecho-bg:rgba(95,191,139,.28); --hecho-bg-hi:rgba(95,191,139,.38); --hecho-borde:#5FBF8B;
       --hecho-texto:#C6EFD9; --hecho-muted:#AECFC6;
       background:var(--bg); color:var(--text); font-family:'IBM Plex Sans',sans-serif; }
     /* Tema Claro — el único claro que queda (ARKEYONE es solo Oscuro/Claro, sin color
-       personalizado ni temas adicionales). --panel-2 se redefine con un tinte OSCURO (no blanco)
-       porque el de arriba (blanco a 12%) es invisible sobre fondo claro. El menú lateral SÍ seguía
+       personalizado ni temas adicionales). --panel-2 se redefine porque el de arriba está pensado
+       para fondo oscuro y sobre blanco no se ve. Era un gris neutro al 6%; el 28 sept 2026 se
+       aclaró y se pasó al azul ARKEYONE muy diluido, junto con el del tema oscuro — sobre la
+       tarjeta blanca da ~#F3F9FF, un bloque limpio en vez de gris sucio, y de paso el texto gris
+       encima gana contraste (4.4:1 → 4.7:1). El menú lateral SÍ seguía
        este tema desde acá (ver .gp-sidebar-area más abajo — esa clase se quedó solo para las
        pantallas de login/verificación, que sí se quedan siempre oscuras a propósito). */
     /* 24 sept 2026: los valores se alinearon a la paleta oficial del documento de diseño de
        ARKEYONE (fondo #F5F7FB, superficie BLANCA, borde #DDE3EC, texto #14213D, secundario
        #667085) — antes era un azulado propio que no coincidía con los mockups. El id interno
        "azul-claro" se queda igual para no migrar la preferencia guardada de nadie. */
-    .gp-root.tema-azul-claro{ --bg:#F5F7FB; --panel:#FFFFFF; --panel-hi:#EDF1F7; --border:#DDE3EC; --text:#14213D; --muted:#667085; --panel-2:rgba(20,33,61,.06);
+    .gp-root.tema-azul-claro{ --bg:#F5F7FB; --panel:#FFFFFF; --panel-hi:#EDF1F7; --border:#DDE3EC; --text:#14213D; --muted:#667085; --muted-bloque:#667085; --panel-2:rgba(8,124,245,.05);
       /* Sobre blanco el mismo verde se ve lavado: aquí se usa el verde sólido de ARKEYONE con
          más cuerpo, que sí contrasta contra #FFFFFF sin tapar el texto. */
       --hecho-bg:rgba(22,163,106,.20); --hecho-bg-hi:rgba(22,163,106,.30); --hecho-borde:#16A36A;
@@ -72,6 +82,19 @@ const Tokens = ({ tema = "oscuro" }) => (
     .gp-mono{ font-family:'IBM Plex Mono',monospace; }
     .gp-panel{ background:var(--panel); border:1px solid var(--border); border-radius:14px; }
     .gp-panel-hi:hover{ background:var(--panel-hi); }
+    /* Bloque interno: el sub-contenedor que vive DENTRO de una tarjeta (.gp-panel). Además del
+       fondo --panel-2 lleva un borde fino que lo despega de la tarjeta sin tener que ensuciarlo
+       con más color. El borde va como box-shadow inset, no como border, para no cambiar el tamaño
+       de la caja ni desajustar el padding ya calibrado de cada uso. No se aplica a superficies que
+       cambian de color según su estado (botones activos/inactivos, burbujas del chat, bloques de
+       la agenda): esas ya manejan su propio borde y su propio color. */
+    .gp-bloque{ background:var(--panel-2); box-shadow:inset 0 0 0 1px var(--border); }
+    /* Mismo problema que la fila de tarea completada, misma solución: al aclarar el bloque, el
+       texto secundario gris queda por debajo del contraste mínimo encima de él (en oscuro ya
+       estaba en 3.8:1 antes de este cambio, y aclarar lo deja en 3.3:1). En vez de renunciar al
+       bloque claro, se le sube al texto SOLO dentro del bloque — 4.7:1 medido. En el tema claro el
+       bloque es casi blanco y el gris de siempre ya cumple, así que ahí --muted-bloque = --muted. */
+    .gp-bloque .gp-text-muted{ color:var(--muted-bloque); }
     .gp-border{ border-color:var(--border); }
     .gp-input{ background:var(--bg); border:1px solid var(--border); color:var(--text);
       border-radius:4px; padding:6px 10px; font-size:13px; width:100%; box-sizing:border-box; }
@@ -128,12 +151,12 @@ const Tokens = ({ tema = "oscuro" }) => (
     /* --muted más claro que el resto de la app (22 sept 2026, pedido de Angel: "letra de color
        más fuerte") -- el menú lateral necesita más contraste que un texto secundario normal
        porque ES la navegación principal, no un dato de apoyo. */
-    .gp-sidebar-area{ --bg:#0B2341; --panel:#12304F; --panel-hi:#1A3D63; --border:#234A70; --text:#EAF1FA; --muted:#C3D6EE; }
+    .gp-sidebar-area{ --bg:#0B2341; --panel:#12304F; --panel-hi:#1A3D63; --border:#234A70; --text:#EAF1FA; --muted:#C3D6EE; --muted-bloque:#C3D6EE; }
     /* Fondo "blanco hueso" para paneles puntuales (chat del Asistente, calendario de Agenda)
        que deben verse claros aunque el resto de la app esté en un tema oscuro. Redefine las
        variables de color solo dentro de este panel, así todo lo de adentro (texto, badges,
        bloques) se ajusta automáticamente sin tocar el resto de la app. */
-    .gp-hueso{ --panel:#F7F3EA; --panel-2:#E9E1CC; --border:#DDD3BA; --text:#3A2F22; --muted:#8A7E68;
+    .gp-hueso{ --panel:#F7F3EA; --panel-2:#E9E1CC; --border:#DDD3BA; --text:#3A2F22; --muted:#8A7E68; --muted-bloque:#8A7E68;
       background:var(--panel); color:var(--text); }
   `}</style>
 );
@@ -1136,7 +1159,7 @@ function ComboboxMultiBuscar({ seleccionados, opciones, onAgregar, onQuitar, onC
       {seleccionados.length > 0 && (
         <div className="flex flex-wrap gap-1.5 mb-2">
           {seleccionados.map((s) => (
-            <span key={s.id} className="text-xs pl-2.5 pr-1.5 py-1 rounded-full flex items-center gap-1" style={{ background: "var(--panel-2)" }}>
+            <span key={s.id} className="gp-bloque text-xs pl-2.5 pr-1.5 py-1 rounded-full flex items-center gap-1">
               {s.label}
               <button type="button" onClick={() => onQuitar(s.id)} className="gp-text-muted"><X size={11} /></button>
             </span>
@@ -3764,7 +3787,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
 function FilaConfig({ icon: Icon, label, sublabel, onClick, extra, chevron = true }) {
   return (
     <button onClick={onClick} className="gp-panel w-full flex items-center gap-3 p-3.5 text-left hover:opacity-90">
-      <div className="p-2 rounded shrink-0" style={{ background: "var(--panel-2)" }}><Icon size={17} className="gp-text-gold" /></div>
+      <div className="gp-bloque p-2 rounded shrink-0"><Icon size={17} className="gp-text-gold" /></div>
       <div className="flex-1 min-w-0">
         <p className="text-sm font-medium">{label}</p>
         {sublabel && <p className="text-xs gp-text-muted mt-0.5">{sublabel}</p>}
@@ -5438,11 +5461,11 @@ function MisEmpresas({ data, onAdd, onEdit, onRemove, onVerProyecto, onIrAVista 
                 </div>
 
                 <div className="grid grid-cols-2 gap-2 mt-3">
-                  <div className="rounded-lg p-2.5" style={{ background: "var(--panel-2)" }}>
+                  <div className="gp-bloque rounded-lg p-2.5">
                     <p className="text-[10px] gp-text-muted">Proyectos</p>
                     <p className="gp-serif text-lg">{proys.length}</p>
                   </div>
-                  <div className="rounded-lg p-2.5" style={{ background: "var(--panel-2)" }}>
+                  <div className="gp-bloque rounded-lg p-2.5">
                     <p className="text-[10px] gp-text-muted">Tareas abiertas</p>
                     <p className="gp-serif text-lg">{abiertas}</p>
                   </div>
@@ -6103,7 +6126,7 @@ function EtiquetasProyecto({ p, onEdit }) {
       {etiquetas.length > 0 && (
         <div className="flex flex-wrap gap-1.5">
           {etiquetas.map((e) => (
-            <span key={e} className="text-xs pl-2.5 pr-1.5 py-1 rounded-full flex items-center gap-1" style={{ background: "var(--panel-2)" }}>
+            <span key={e} className="gp-bloque text-xs pl-2.5 pr-1.5 py-1 rounded-full flex items-center gap-1">
               {e}
               <button onClick={() => onEdit(p.id, { etiquetas: etiquetas.filter((x) => x !== e) })} className="gp-text-muted" title="Quitar etiqueta"><X size={11} /></button>
             </span>
@@ -6235,7 +6258,7 @@ function FichaProyecto({
           aun así se cierran. Lo que sí queda registrado siempre es CUÁNDO se completó. */}
       <label
         className="flex items-center gap-2 mt-2 px-2.5 py-2 rounded cursor-pointer"
-        style={completado ? { background: "var(--hecho-bg)", boxShadow: "inset 4px 0 0 var(--hecho-borde)" } : { background: "var(--panel-2)" }}
+        style={completado ? { background: "var(--hecho-bg)", boxShadow: "inset 4px 0 0 var(--hecho-borde)" } : { background: "var(--panel-2)", boxShadow: "inset 0 0 0 1px var(--border)" }}
       >
         <input
           type="checkbox" checked={completado}
@@ -6453,7 +6476,7 @@ function FichaProyecto({
                     { label: "Neto", valor: r.neto, color: r.neto >= 0 ? "var(--teal)" : "var(--red)" },
                     { label: "Costo estimado", valor: r.costoEstimadoTotal, color: "var(--gold)" },
                   ].map((x) => (
-                    <div key={x.label} className="rounded-lg p-2.5" style={{ background: "var(--panel-2)" }}>
+                    <div key={x.label} className="gp-bloque rounded-lg p-2.5">
                       <p className="text-[10px] gp-text-muted">{x.label}</p>
                       <p className="gp-mono text-sm" style={{ color: x.color }}>{fmtMoney(x.valor)}</p>
                     </div>
@@ -6714,7 +6737,7 @@ function ProyectoForm({ item, contactos, empresas = [], vinculos, onVincularCont
             {v.etiquetas.length > 0 && (
               <div className="flex flex-wrap gap-1.5 mb-2">
                 {v.etiquetas.map((e) => (
-                  <span key={e} className="text-xs pl-2.5 pr-1.5 py-1 rounded-full flex items-center gap-1" style={{ background: "var(--panel-2)" }}>
+                  <span key={e} className="gp-bloque text-xs pl-2.5 pr-1.5 py-1 rounded-full flex items-center gap-1">
                     {e}
                     <button type="button" onClick={() => setV({ ...v, etiquetas: v.etiquetas.filter((x) => x !== e) })} className="gp-text-muted"><X size={11} /></button>
                   </span>
@@ -7605,7 +7628,7 @@ function ContadorRamaColapsada({ nodo, colapsada }) {
   if (!colapsada) return null;
   const n = contarDescendientesTarea(nodo);
   if (n === 0) return null;
-  return <span className="gp-badge shrink-0" style={{ color: "var(--muted)", background: "var(--panel-2)" }}>+{n}</span>;
+  return <span className="gp-bloque gp-badge shrink-0" style={{ color: "var(--muted-bloque)" }}>+{n}</span>;
 }
 
 // "Colapsar todo / Expandir todo". Un solo botón que alterna: si ya está todo cerrado, abre; si
