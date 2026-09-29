@@ -2323,6 +2323,20 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
     return nid;
   };
 
+  // Crear un proyecto sin salir de donde estás (por ahora, desde el formulario de tarea). Nace
+  // como Idea con los mismos valores por omisión que "Nuevo proyecto"; los detalles se completan
+  // después en Proyectos e ideas. Devuelve el id para dejarlo ya seleccionado.
+  const crearProyectoRapido = (nombre) => {
+    const nid = uid();
+    addItem("proyectos", {
+      id: nid, nombre, descripcion: "", estatus: "Idea", contexto: "Personal", categoria: "Otro",
+      responsableContactoId: "", fechaInicio: "", fechaFin: "", etiquetas: [], imagenUrl: "",
+      modo: "Finito", monetizacion: "Dinero", prioridad: "Media", fechaRevision: "",
+      github: "", githubSubido: false, notas: [],
+    });
+    return nid;
+  };
+
   // Avisa por push a quien acaba de quedar asignado a una tarea. Antes vivía suelta dentro de
   // las props de Pendientes; ahora la comparten Pendientes y la Agenda (que también puede
   // reasignar desde su formulario de edición), así que es una sola función.
@@ -3468,6 +3482,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
           {view === "pendientes" && (
             <Pendientes data={data} activeOwnerId={activeOwnerId} onAdd={(i) => addItem("pendientes", i)} onEdit={(id, p) => editItem("pendientes", id, p)} onRemove={(id, extraIds, mensaje) => askDelete("pendientes", id, { extraIds, mensaje })} onAddComentario={(i) => addItem("comentarios", i)} onRemoveComentario={(id) => askDelete("comentarios", id)}
               filtroProyectoInicial={pendientesFiltroProyecto} onConsumirFiltroProyecto={() => setPendientesFiltroProyecto("")}
+              onCrearProyecto={crearProyectoRapido}
               onEditProyecto={(id, patch) => editItem("proyectos", id, patch)}
               onCrearContacto={crearContactoRapido}
               onEnviarInvitacion={enviarInvitacionTarea}
@@ -3576,7 +3591,8 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
               onAddCita={(c) => addItem("citas", c)}
               onRemoveCita={(id) => askDelete("citas", id)}
               onRemovePendiente={(id) => askDelete("pendientes", id)}
-              onCrearContacto={(nombre) => { const nid = uid(); addItem("contactos", { id: nid, nombre, tipos: ["Otro"] }); return nid; }}
+              onCrearContacto={(nombre, tipos) => crearContactoRapido(nombre, tipos)}
+              onCrearProyecto={crearProyectoRapido}
               onEnviarInvitacion={enviarInvitacionTarea}
               onAceptarEnNombre={aceptarTareaEnNombre}
               onAsignar={notificarAsignacionTarea}
@@ -4041,6 +4057,12 @@ function Configuracion({
 function AvatarForm({ avatarUrl, subirAvatar, onSaved, helpText, forma = "circulo", iconoVacio, textoBoton }) {
   const [archivoElegido, setArchivoElegido] = useState(null); // File recién elegido, pendiente de recortar
   const [previa, setPrevia] = useState(avatarUrl || "");
+
+  // La vista previa se inicializaba con la imagen y después vivía por su cuenta: si el formulario
+  // de arriba borraba la imagen ("Quitar imagen"), aquí se seguía viendo la anterior y parecía que
+  // el botón no hacía nada. Ahora sigue lo que diga el formulario. Durante una subida no estorba:
+  // avatarUrl no cambia hasta que termina, y cuando cambia trae justo la imagen recién subida.
+  useEffect(() => { setPrevia(avatarUrl || ""); }, [avatarUrl]);
   const [estado, setEstado] = useState("idle"); // idle | subiendo | listo
   const [error, setError] = useState("");
 
@@ -5711,7 +5733,27 @@ function ResponsableProyecto({ p, data, miNombre, miAvatarUrl, size = 24 }) {
 // resto de la tabla (secc. 14).
 const primerNombreYApellido = (nombre) => (nombre || "").trim().split(/\s+/).slice(0, 2).join(" ") || "—";
 
-// Rango de fechas del proyecto, en dos renglones como el mockup.
+// Cuánto falta para la entrega, dicho en palabras y no en una fecha que haya que restar de
+// cabeza (pedido de Angel, 29 sept 2026). Un proyecto ya cerrado no cuenta días: no le falta nada.
+// Devuelve null cuando no hay nada que decir, para que quien lo use no dibuje un hueco.
+function diasParaEntrega(p) {
+  if (!p.fechaFin) return null;
+  if (p.estatus === "Finalizado" || p.estatus === "Archivado") return null;
+  const d = daysUntil(p.fechaFin);
+  if (d < 0) return { dias: d, texto: `Vencido por ${Math.abs(d)} día${Math.abs(d) === 1 ? "" : "s"}`, color: "var(--red)" };
+  if (d === 0) return { dias: 0, texto: "Se entrega hoy", color: "var(--gold)" };
+  if (d === 1) return { dias: 1, texto: "Falta 1 día", color: "var(--gold)" };
+  return { dias: d, texto: `Faltan ${d} días`, color: d <= 7 ? "var(--gold)" : "var(--muted)" };
+}
+
+function EtiquetaDiasEntrega({ p, className = "" }) {
+  const info = diasParaEntrega(p);
+  if (!info) return null;
+  return <span className={`text-[11px] whitespace-nowrap ${className}`} style={{ color: info.color }}>{info.texto}</span>;
+}
+
+// Rango de fechas del proyecto, en dos renglones como el mockup, más los días que faltan para la
+// entrega debajo.
 function RangoFechasProyecto({ p }) {
   if (!p.fechaInicio && !p.fechaFin) return <span className="gp-text-muted text-xs">—</span>;
   const vencido = p.fechaFin && p.estatus !== "Finalizado" && p.estatus !== "Archivado" && daysUntil(p.fechaFin) < 0;
@@ -5719,6 +5761,7 @@ function RangoFechasProyecto({ p }) {
     <div className="gp-mono text-xs leading-snug">
       <div className="gp-text-muted">{fmtFechaCorta(p.fechaInicio) || "—"}</div>
       <div style={{ color: vencido ? "var(--red)" : "var(--muted)" }}>{fmtFechaCorta(p.fechaFin) || "—"}</div>
+      <EtiquetaDiasEntrega p={p} className="gp-serif" />
     </div>
   );
 }
@@ -6018,9 +6061,12 @@ function Proyectos({
               </div>
               <div className="flex items-center justify-between gap-3 mt-2 pt-2 border-t gp-border">
                 <BarraProgresoProyecto pct={avanceProyecto(data, p.id)} ancho={70} />
-                <span className="gp-mono text-xs gp-text-muted text-right">
-                  {p.fechaInicio || p.fechaFin ? `${fmtFechaCorta(p.fechaInicio) || "—"} — ${fmtFechaCorta(p.fechaFin) || "—"}` : ""}
-                </span>
+                <div className="text-right">
+                  <span className="gp-mono text-xs gp-text-muted block">
+                    {p.fechaInicio || p.fechaFin ? `${fmtFechaCorta(p.fechaInicio) || "—"} — ${fmtFechaCorta(p.fechaFin) || "—"}` : ""}
+                  </span>
+                  <EtiquetaDiasEntrega p={p} />
+                </div>
               </div>
             </div>
           ))}
@@ -6093,7 +6139,7 @@ function Proyectos({
             item={{ proyectoId: modal.proyectoId, parentId: "", descripcion: "", fechaLimite: todayISO(), fechaRevision: "", prioridad: "Media", estatus: "Pendiente", colaboradorContactoId: null, contactoId: "", precio: "", fechaPagoAprox: "", tiempoEstimado: "", tiempoReal: "", asignadoA: "", avance: "" }}
             proyectos={data.proyectos} contactos={data.contactos} pendientes={data.pendientes} colaboradores={[]}
             proyectoFijoId={modal.proyectoId}
-            onCrearContacto={(nombre) => onCrearContacto(nombre, ["Colaborador"])}
+            onCrearContacto={(nombre, tipos) => onCrearContacto(nombre, tipos || ["Colaborador"])}
             onEnviarInvitacion={onEnviarInvitacion}
             onAceptarEnNombre={onAceptarEnNombre}
             onSave={(v, enviarCorreo) => {
@@ -6692,7 +6738,7 @@ function ProyectoForm({ item, contactos, empresas = [], vinculos, onVincularCont
         />
         {v.imagenUrl && (
           <button type="button" onClick={() => setV({ ...v, imagenUrl: "" })} className="text-xs gp-text-muted mt-2">
-            Quitar imagen y volver al ícono
+            Quitar imagen
           </button>
         )}
       </div>
@@ -6765,9 +6811,13 @@ function ProyectoForm({ item, contactos, empresas = [], vinculos, onVincularCont
       </SeccionForm>
 
       <SeccionForm titulo="Fechas">
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <Field label="Inicio"><input type="date" className="gp-input" value={v.fechaInicio || ""} onChange={(e) => setV({ ...v, fechaInicio: e.target.value })} /></Field>
-          <Field label="Fin"><input type="date" className="gp-input" value={v.fechaFin || ""} onChange={(e) => setV({ ...v, fechaFin: e.target.value })} /></Field>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          {/* Las tres fechas del proyecto, con el nombre con el que Angel las usa (29 sept 2026).
+              Son las columnas que ya existían: fecha_inicio, fecha_revision y fecha_fin — no se
+              crean campos nuevos, solo se nombran bien y la de revisión se deja de esconder. */}
+          <Field label="Fecha de arranque"><input type="date" className="gp-input" value={v.fechaInicio || ""} onChange={(e) => setV({ ...v, fechaInicio: e.target.value })} /></Field>
+          <Field label="Fecha de revisión"><input type="date" className="gp-input" value={v.fechaRevision || ""} onChange={(e) => setV({ ...v, fechaRevision: e.target.value })} /></Field>
+          <Field label="Fecha de entrega (liberación)"><input type="date" className="gp-input" value={v.fechaFin || ""} onChange={(e) => setV({ ...v, fechaFin: e.target.value })} /></Field>
         </div>
       </SeccionForm>
 
@@ -6949,6 +6999,8 @@ function ProyectoDetalle({ data, proyectoId, onVolver, onAddTarea, onEditTarea, 
             <Badge tone="muted">{proyecto.categoria}</Badge>
             <Badge tone={proyecto.modo === "Continuo" ? "teal" : "muted"}>{proyecto.modo || "Finito"}</Badge>
             {proyecto.prioridad && <Badge tone={proyecto.prioridad === "Alta" ? "red" : proyecto.prioridad === "Media" ? "gold" : "muted"}>{proyecto.prioridad}</Badge>}
+            {/* Lo primero que quieres saber al abrir un proyecto: cuánto falta para entregarlo. */}
+            <EtiquetaDiasEntrega p={proyecto} />
           </div>
         </div>
         <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm w-full sm:w-auto"><Plus size={14} /> Nueva tarea</button>
@@ -7300,7 +7352,7 @@ function ProyectoDetalle({ data, proyectoId, onVolver, onAddTarea, onEditTarea, 
       {modal && (
         <Modal title={modal.item.id ? "Editar tarea" : modal.item.parentId ? "Nueva subtarea" : "Nueva tarea"} onClose={() => setModal(null)}>
           <PendienteForm item={modal.item} proyectos={data.proyectos} contactos={data.contactos} pendientes={data.pendientes} colaboradores={[]} proyectoFijoId={proyectoId}
-            onCrearContacto={(nombre) => onCrearContacto(nombre, ["Colaborador"])}
+            onCrearContacto={(nombre, tipos) => onCrearContacto(nombre, tipos || ["Colaborador"])}
             onEnviarInvitacion={onEnviarInvitacion}
             onAceptarEnNombre={onAceptarEnNombre}
             onSave={(v, enviarCorreo) => {
@@ -7941,7 +7993,7 @@ function MindMapPendientes({ proyecto, tareas, onNodoClick, onAgregar, onElimina
   );
 }
 
-function Pendientes({ data, activeOwnerId, onAdd, onEdit, onEditProyecto, onRemove, onAddComentario, onRemoveComentario, onAsignar, onCrearContacto, onEnviarInvitacion, onAceptarEnNombre, crearAlEntrar, onConsumirCrearAlEntrar, filtroProyectoInicial, onConsumirFiltroProyecto }) {
+function Pendientes({ data, activeOwnerId, onAdd, onEdit, onEditProyecto, onRemove, onAddComentario, onRemoveComentario, onAsignar, onCrearContacto, onCrearProyecto, onEnviarInvitacion, onAceptarEnNombre, crearAlEntrar, onConsumirCrearAlEntrar, filtroProyectoInicial, onConsumirFiltroProyecto }) {
   const [modal, setModal] = useState(null);
   const [comentariosDe, setComentariosDe] = useState(null);
   const [orden, setOrden] = useState("default");
@@ -7953,7 +8005,10 @@ function Pendientes({ data, activeOwnerId, onAdd, onEdit, onEditProyecto, onRemo
   const [colapsadas, setColapsadas] = useState(() => new Set());
   const [confirmacion, setConfirmacion] = useState(null);
   const [colaboradores, setColaboradores] = useState([]);
-  const empty = { proyectoId: "", parentId: "", descripcion: "", fechaLimite: todayISO(), fechaRevision: "", prioridad: "Media", estatus: "Pendiente", colaboradorContactoId: null, contactoId: "", precio: "", fechaPagoAprox: "", tiempoEstimado: "", tiempoReal: "", asignadoA: "" };
+  // Si la lista está filtrada por un proyecto, la tarea nueva ya nace en ese proyecto: es de
+  // donde viene el usuario y volver a elegirlo a mano era un paso de más (pedido de Angel,
+  // 29 sept 2026). Se recalcula en cada render, así que siempre refleja el filtro actual.
+  const empty = { proyectoId: filtroProyecto || "", parentId: "", descripcion: "", fechaLimite: todayISO(), fechaRevision: "", prioridad: "Media", estatus: "Pendiente", colaboradorContactoId: null, contactoId: "", precio: "", fechaPagoAprox: "", tiempoEstimado: "", tiempoReal: "", asignadoA: "" };
 
   useEffect(() => {
     if (crearAlEntrar) { setModal({ item: { ...empty, ...(crearAlEntrar.preset || {}) } }); onConsumirCrearAlEntrar(); }
@@ -8167,7 +8222,8 @@ function Pendientes({ data, activeOwnerId, onAdd, onEdit, onEditProyecto, onRemo
       {modal && (
         <Modal title={modal.item.id ? "Editar tarea" : modal.item.parentId ? "Nueva subtarea" : "Nueva tarea"} onClose={() => setModal(null)}>
           <PendienteForm item={modal.item} proyectos={data.proyectos} contactos={data.contactos} pendientes={data.pendientes} colaboradores={colaboradores}
-            onCrearContacto={(nombre) => onCrearContacto(nombre, ["Colaborador"])}
+            onCrearContacto={(nombre, tipos) => onCrearContacto(nombre, tipos || ["Colaborador"])}
+            onCrearProyecto={onCrearProyecto}
             onEnviarInvitacion={onEnviarInvitacion}
             onAceptarEnNombre={onAceptarEnNombre}
             onSave={(v, enviarCorreo) => {
@@ -8195,7 +8251,7 @@ function Pendientes({ data, activeOwnerId, onAdd, onEdit, onEditProyecto, onRemo
   );
 }
 
-function PendienteForm({ item, proyectos, contactos, pendientes, colaboradores, onCrearContacto, onEnviarInvitacion, onAceptarEnNombre, onSave, proyectoFijoId }) {
+function PendienteForm({ item, proyectos, contactos, pendientes, colaboradores, onCrearContacto, onCrearProyecto, onEnviarInvitacion, onAceptarEnNombre, onSave, proyectoFijoId }) {
   const [v, setV] = useState({ ...item, colaboradorContactoId: item.colaboradorContactoId || null, fechaPagoAprox: item.fechaPagoAprox || "" });
   const [error, setError] = useState("");
   const [enviarCorreo, setEnviarCorreo] = useState(!item.id);
@@ -8217,6 +8273,11 @@ function PendienteForm({ item, proyectos, contactos, pendientes, colaboradores, 
   const proyectoHeredado = v.parentId ? proyectos.find((p) => p.id === v.proyectoId) : null;
   const proyectoFijo = proyectoFijoId ? proyectos.find((p) => p.id === proyectoFijoId) : null;
   const colaboradorElegido = v.colaboradorContactoId ? contactos.find((c) => c.id === v.colaboradorContactoId) : null;
+  const clienteElegido = v.contactoId ? (contactos || []).find((c) => c.id === v.contactoId) : null;
+  const proyectoElegido = v.proyectoId ? (proyectos || []).find((x) => x.id === v.proyectoId) : null;
+  const porNombre = (a, b) => (a.nombre || "").localeCompare(b.nombre || "", "es", { sensitivity: "base" });
+  const contactosOrdenados = useMemo(() => [...(contactos || [])].sort(porNombre), [contactos]);
+  const proyectosOrdenados = useMemo(() => [...(proyectos || [])].sort(porNombre), [proyectos]);
 
   return (
     <div>
@@ -8239,17 +8300,32 @@ function PendienteForm({ item, proyectos, contactos, pendientes, colaboradores, 
             <p className="text-xs gp-text-muted mt-1">Hereda el proyecto de su tarea principal. Si necesitas cambiarlo, cambia el proyecto de esa tarea principal.</p>
           </div>
         ) : (
-          <select className="gp-input" value={v.proyectoId} onChange={(e) => setV({ ...v, proyectoId: e.target.value })}>
-            <option value="">— sin proyecto —</option>
-            {proyectos.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
-          </select>
+          /* Buscador en vez de lista larga, y si el proyecto no existe todavía se crea desde aquí
+             mismo (pedido de Angel, 29 sept 2026): el proyecto queda creado de verdad en Proyectos
+             e ideas, como Idea, y luego se le completan los detalles allá. */
+          <ComboboxMultiBuscar
+            max={1}
+            seleccionados={proyectoElegido ? [{ id: proyectoElegido.id, label: proyectoElegido.nombre }] : []}
+            opciones={proyectosOrdenados.map((x) => ({ id: x.id, label: x.nombre }))}
+            onAgregar={(o) => setV({ ...v, proyectoId: o.id })}
+            onQuitar={() => setV({ ...v, proyectoId: "" })}
+            onCrear={onCrearProyecto ? (nombre) => setV({ ...v, proyectoId: onCrearProyecto(nombre) }) : undefined}
+            placeholder="Buscar proyecto… (opcional)"
+            crearLabel={(t) => `Crear proyecto "${t}"`}
+          />
         )}
       </Field>
       <Field label="Cliente (a quién se le entrega)">
-        <select className="gp-input" value={v.contactoId || ""} onChange={(e) => setV({ ...v, contactoId: e.target.value })}>
-          <option value="">— sin cliente —</option>
-          {contactos.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
-        </select>
+        <ComboboxMultiBuscar
+          max={1}
+          seleccionados={clienteElegido ? [{ id: clienteElegido.id, label: clienteElegido.nombre }] : []}
+          opciones={contactosOrdenados.map((c) => ({ id: c.id, label: c.nombre }))}
+          onAgregar={(o) => setV({ ...v, contactoId: o.id })}
+          onQuitar={() => setV({ ...v, contactoId: "" })}
+          onCrear={onCrearContacto ? (nombre) => setV({ ...v, contactoId: onCrearContacto(nombre, ["Cliente"]) }) : undefined}
+          placeholder="Buscar cliente… (opcional)"
+          crearLabel={(t) => `Crear contacto "${t}"`}
+        />
       </Field>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Field label="Fecha límite"><input type="date" className="gp-input" value={v.fechaLimite} onChange={(e) => setV({ ...v, fechaLimite: e.target.value })} /></Field>
@@ -8279,7 +8355,7 @@ function PendienteForm({ item, proyectos, contactos, pendientes, colaboradores, 
           opciones={contactos.map((c) => ({ id: c.id, label: c.nombre }))}
           onAgregar={(o) => setV({ ...v, colaboradorContactoId: o.id })}
           onQuitar={() => setV({ ...v, colaboradorContactoId: null })}
-          onCrear={(nombre) => setV({ ...v, colaboradorContactoId: onCrearContacto(nombre) })}
+          onCrear={(nombre) => setV({ ...v, colaboradorContactoId: onCrearContacto(nombre, ["Colaborador"]) })}
           placeholder="Buscar o agregar colaborador…"
           crearLabel={(texto) => `Crear contacto "${texto}"`}
         />
@@ -14535,7 +14611,7 @@ function calcularBloquesAgenda({ dias, citas, tareasProgramadas, comida, diaProg
 
 function Agenda({
   data, misId, onEditPendiente, onAddCita, onEditCita, onRemoveCita, onRemovePendiente,
-  onCrearContacto, onAsignar, onEnviarInvitacion, onAceptarEnNombre, onAbrirOrigen,
+  onCrearContacto, onCrearProyecto, onAsignar, onEnviarInvitacion, onAceptarEnNombre, onAbrirOrigen,
 }) {
   const [vista, setVista] = useState("semana"); // "dia" | "semana"
   const [base, setBase] = useState(() => new Date());
@@ -15052,7 +15128,8 @@ function Agenda({
             <>
               <PendienteForm item={edicion.item} proyectos={data.proyectos} contactos={data.contactos}
                 pendientes={data.pendientes} colaboradores={[]}
-                onCrearContacto={(nombre) => onCrearContacto(nombre)}
+                onCrearContacto={(nombre, tipos) => onCrearContacto(nombre, tipos)}
+                onCrearProyecto={onCrearProyecto}
                 onEnviarInvitacion={onEnviarInvitacion}
                 onAceptarEnNombre={onAceptarEnNombre}
                 onSave={(v) => {
