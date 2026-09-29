@@ -117,7 +117,14 @@ const Tokens = ({ tema = "oscuro" }) => (
     .gp-btn-ghost:hover{ background:var(--panel-hi); }
     .gp-navitem{ color:var(--muted); border-radius:4px; font-weight:500; }
     .gp-navitem:hover{ background:var(--panel-hi); color:var(--text); }
-    .gp-navitem-active{ background:var(--panel-hi); color:var(--text); border-left:2px solid var(--gold); }
+    /* La sección abierta tiene que gritar cuál es (pedido de Angel, 29 sept 2026): antes solo
+       cambiaba a un azul apenas más claro y se perdía entre las demás. Ahora lleva el dorado de
+       la marca —fondo teñido, barra gruesa a la izquierda, texto en negritas y el ícono en
+       dorado—, sin llenarla de sólido para que el texto siga siendo lo que más se lee. */
+    .gp-navitem-active{ background:rgba(245,158,11,.16); color:var(--text); font-weight:600;
+      border-left:4px solid var(--gold); box-shadow:inset 0 0 0 1px rgba(245,158,11,.25); }
+    .gp-navitem-active svg{ color:var(--gold); }
+    .gp-navitem-active:hover{ background:rgba(245,158,11,.22); }
     .gp-navitem-drop{ box-shadow: inset 0 2px 0 var(--gold); }
     .gp-dot-teal{ background:var(--teal); } .gp-dot-red{ background:var(--red); } .gp-dot-gold{ background:var(--gold); }
     .gp-text-muted{ color:var(--muted); }
@@ -664,37 +671,72 @@ const filtrarPorBusqueda = (lista, query, getters) => {
   return lista.filter((item) => getters.some((get) => normalizarTexto(get(item)).includes(q)));
 };
 
+// La app instalada en iPhone (PWA en modo standalone) no deja que una página dispare una descarga:
+// el archivo se genera pero no pasa nada visible, que es justo el "no hace nada" que se reportó.
+// Ahí el PDF se abre en una pestaña nueva, desde donde iOS sí ofrece Compartir/Guardar en Archivos.
+const esPWAStandalone = () => {
+  try {
+    return window.navigator.standalone === true ||
+      (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches);
+  } catch { return false; }
+};
+
 // Exporta una lista YA filtrada/ordenada tal como el usuario la está viendo (secc. 23.5: la
 // exportación debe respetar exactamente los filtros, búsqueda y orden actuales).
 function exportarFilasExcel(filas, columnas, nombreArchivo) {
   if (filas.length === 0) { alert("No hay filas para exportar con los filtros actuales."); return; }
-  const limpias = filas.map((item) => Object.fromEntries(columnas.map((c) => [c.label, c.get(item) ?? ""])));
-  const hoja = XLSX.utils.json_to_sheet(limpias);
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, hoja, "Datos".slice(0, 31));
-  XLSX.writeFile(wb, `arkeyone_${nombreArchivo}_${todayISO()}.xlsx`);
+  try {
+    const limpias = filas.map((item) => Object.fromEntries(columnas.map((c) => [c.label, c.get(item) ?? ""])));
+    const hoja = XLSX.utils.json_to_sheet(limpias);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, hoja, "Datos".slice(0, 31));
+    XLSX.writeFile(wb, `arkeyone_${nombreArchivo}_${todayISO()}.xlsx`);
+  } catch (err) {
+    // Antes esto se perdía en la consola y la pantalla se quedaba igual, sin decir nada.
+    console.error("Error al exportar a Excel:", err);
+    alert(`No se pudo generar el Excel: ${err?.message || err}`);
+  }
 }
 
 // Mismo criterio que exportarFilasExcel, pero a PDF (tabla con jspdf-autotable), incluyendo
 // fecha de generación y el resumen de filtros aplicados, como pide la secc. 23.5.
 async function exportarFilasPDF(filas, columnas, nombreArchivo, titulo, resumenFiltros) {
   if (filas.length === 0) { alert("No hay filas para exportar con los filtros actuales."); return; }
-  const { jsPDF } = await import("jspdf");
-  const autoTable = (await import("jspdf-autotable")).default;
-  const doc = new jsPDF({ orientation: columnas.length > 5 ? "landscape" : "portrait" });
-  doc.setFontSize(14);
-  doc.text(titulo, 14, 15);
-  doc.setFontSize(9);
-  doc.setTextColor(120);
-  doc.text(`Generado el ${new Date().toLocaleString("es-MX")}${resumenFiltros ? ` · ${resumenFiltros}` : ""}`, 14, 21);
-  autoTable(doc, {
-    startY: 26,
-    head: [columnas.map((c) => c.label)],
-    body: filas.map((item) => columnas.map((c) => String(c.get(item) ?? ""))),
-    styles: { fontSize: 8 },
-    headStyles: { fillColor: [11, 35, 65] },
-  });
-  doc.save(`arkeyone_${nombreArchivo}_${todayISO()}.pdf`);
+  // Todo va dentro de un try: jsPDF se carga de forma perezosa y cualquier tropiezo (la carga del
+  // trozo, una columna que revienta al leer un dato) dejaba la promesa rechazada en silencio y la
+  // pantalla sin reaccionar — el usuario solo veía que el botón "no hacía nada".
+  try {
+    const { jsPDF } = await import("jspdf");
+    const autoTable = (await import("jspdf-autotable")).default;
+    const doc = new jsPDF({ orientation: columnas.length > 5 ? "landscape" : "portrait" });
+    doc.setFontSize(14);
+    doc.text(titulo, 14, 15);
+    doc.setFontSize(9);
+    doc.setTextColor(120);
+    doc.text(`Generado el ${new Date().toLocaleString("es-MX")}${resumenFiltros ? ` · ${resumenFiltros}` : ""}`, 14, 21);
+    autoTable(doc, {
+      startY: 26,
+      head: [columnas.map((c) => c.label)],
+      body: filas.map((item) => columnas.map((c) => {
+        let v;
+        try { v = c.get(item); } catch { v = ""; }
+        return String(v ?? "");
+      })),
+      styles: { fontSize: 8 },
+      headStyles: { fillColor: [11, 35, 65] },
+    });
+    const archivo = `arkeyone_${nombreArchivo}_${todayISO()}.pdf`;
+    if (esPWAStandalone()) {
+      const url = doc.output("bloburl");
+      const ventana = window.open(url, "_blank");
+      if (!ventana) { doc.save(archivo); return; } // si el navegador bloqueó la pestaña, al menos intentar la descarga
+      return;
+    }
+    doc.save(archivo);
+  } catch (err) {
+    console.error("Error al exportar a PDF:", err);
+    alert(`No se pudo generar el PDF: ${err?.message || err}`);
+  }
 }
 
 // Barra reutilizable: campo de búsqueda por contenido (independiente del buscador global) +
@@ -3482,12 +3524,13 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
             <Contactos data={data} onAdd={(i) => addItem("contactos", i)} onEdit={(id, p) => editItem("contactos", id, p)} onRemove={(id) => askDelete("contactos", id)} onAddComentario={(i) => addItem("comentarios", i)} onRemoveComentario={(id) => askDelete("comentarios", id)} onVerRegalos={(c) => { setRegalosFiltroContacto(c.id); setView("regalos"); }}
               onVincularProyecto={vincularProyectoContacto} onDesvincularProyecto={desvincularProyectoContacto}
               onAddNota={(i) => addItem("notas", i)} onAddCita={(i) => addItem("citas", i)} onIrAVista={irAVista}
+              onAddEvento={(i) => addItem("eventos", i)}
               onVerProyecto={irADetalleProyecto}
               contactoSel={contactoSelId} onSeleccionar={(id) => { setContactoSelId(id); setContactoSelTab("informacion"); }}
               fichaTab={contactoSelTab} onFichaTab={setContactoSelTab} />
           )}
           {view === "regalos" && (
-            <Regalos data={data} onAdd={(i) => addItem("regalos", i)} onEdit={(id, p) => editItem("regalos", id, p)} onRemove={(id) => askDelete("regalos", id)} filtroContactoInicial={regalosFiltroContacto} onLimpiarFiltro={() => setRegalosFiltroContacto("")} />
+            <Regalos data={data} onAdd={(i) => addItem("regalos", i)} onEdit={(id, p) => editItem("regalos", id, p)} onRemove={(id) => askDelete("regalos", id)} filtroContactoInicial={regalosFiltroContacto} onLimpiarFiltro={() => setRegalosFiltroContacto("")} onVerContacto={irAFichaContacto} />
           )}
           {(view === "marketing" || view === "redes") && (
             <MarketingYRedes
@@ -5788,6 +5831,13 @@ function Proyectos({
 
   const FILTROS = ["Todos", ...ESTATUS_PROYECTO];
   const contarFiltro = (t) => (t === "Todos" ? data.proyectos.length : data.proyectos.filter((p) => p.estatus === t).length);
+  // Opciones del combo de etapa: id, etiqueta corta, color y cuántos proyectos hay en cada una.
+  const opcionesFiltroEstatus = FILTROS.map((t) => ({
+    id: t,
+    label: t === "Todos" ? "Todas las etapas" : etiquetaEstatusProyecto(t),
+    color: t === "Todos" ? "var(--gold)" : COLOR_ESTATUS_PROYECTO[t],
+    n: contarFiltro(t),
+  }));
 
   const porEstatus = filtroEstatus === "Todos" ? data.proyectos : data.proyectos.filter((p) => p.estatus === filtroEstatus);
   const porContexto = filtroContexto === "Todos" ? porEstatus : porEstatus.filter((p) => (p.contexto || "") === filtroContexto);
@@ -5865,23 +5915,12 @@ function Proyectos({
         </div>
 
         <div className="flex flex-wrap items-center gap-2 mb-3">
-          <div className="flex flex-wrap gap-1.5 flex-1 min-w-0">
-            {FILTROS.map((t) => {
-              const activo = filtroEstatus === t;
-              const color = t === "Todos" ? "var(--gold)" : COLOR_ESTATUS_PROYECTO[t];
-              return (
-                <button
-                  key={t} onClick={() => setFiltroEstatus(t)}
-                  className="text-xs px-3 py-1.5 rounded-full border inline-flex items-center gap-1.5"
-                  style={activo
-                    ? { background: color, color: "#0B2341", borderColor: color, fontWeight: 600 }
-                    : { borderColor: "var(--border)", color: "var(--muted)" }}
-                >
-                  {t === "Todos" ? "Todos" : etiquetaEstatusProyecto(t)}
-                  <span style={{ opacity: activo ? 0.75 : 1 }}>{contarFiltro(t)}</span>
-                </button>
-              );
-            })}
+          {/* Antes era una fila de siete chips que en celular ocupaba media pantalla. Ahora es el
+              mismo combo con color que ya usa Contactos (pedido de Angel, 29 sept 2026): las
+              etapas conservan su color y su conteo, y el orden sigue siendo el del pipeline
+              (Idea → Validación → …), no alfabético. */}
+          <div className="flex-1 min-w-0">
+            <ComboFiltroColor opciones={opcionesFiltroEstatus} valor={filtroEstatus} onCambiar={setFiltroEstatus} />
           </div>
           <div className="flex gap-2 shrink-0">
             <button onClick={() => setImportarAbierto(true)} className="gp-btn-ghost flex items-center justify-center gap-1 px-3 py-1.5 text-sm"><Upload size={14} /> Importar</button>
@@ -9674,13 +9713,32 @@ function BadgeCumpleContacto({ c }) {
   return <Badge tone="gold">🎂 {dc === 0 ? "¡hoy!" : `en ${dc}d`}</Badge>;
 }
 
+// Colores de los botones de comunicación del contacto (pedido de Angel, 29 sept 2026): llamar en
+// verde bandera para no confundirlo con el verde de WhatsApp, correo en el azul ARKEYONE y
+// agendar en el mismo dorado del botón "Nuevo contacto".
+const VERDE_BANDERA = "#006847";
+const AZUL_CORREO = "#087CF5";
+const VERDE_WHATSAPP = "#25D366";
+
+// Ícono de WhatsApp: el de la marca (teléfono dentro del globo), no el bocadillo genérico de
+// lucide, que no trae íconos de marca. Va como SVG inline y relleno (no trazo) para que se vea
+// igual que el original. Verde oficial #25D366.
+function IconoWhatsApp({ size = 14, color = "currentColor" }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill={color} aria-hidden="true" focusable="false">
+      <path d="M12.04 2C6.58 2 2.13 6.45 2.13 11.91c0 1.75.46 3.46 1.32 4.96L2 22l5.25-1.38a9.87 9.87 0 0 0 4.79 1.22h.01c5.46 0 9.91-4.45 9.91-9.91C21.96 6.45 17.5 2 12.04 2zm0 18.15h-.01a8.2 8.2 0 0 1-4.18-1.15l-.3-.18-3.12.82.83-3.04-.2-.31a8.19 8.19 0 0 1-1.26-4.38c0-4.54 3.7-8.23 8.24-8.23 2.2 0 4.27.86 5.82 2.42a8.18 8.18 0 0 1 2.41 5.82c0 4.54-3.69 8.23-8.23 8.23z"/>
+      <path d="M16.6 14.22c-.25-.13-1.47-.72-1.7-.8-.23-.09-.4-.13-.56.12-.17.25-.64.8-.79.97-.14.16-.29.18-.54.06-.25-.13-1.05-.39-2-1.23-.74-.66-1.24-1.47-1.38-1.72-.15-.25-.02-.39.11-.51.11-.11.25-.29.37-.44.13-.15.17-.25.25-.41.08-.17.04-.31-.02-.44-.06-.12-.56-1.35-.77-1.85-.2-.48-.4-.42-.56-.43h-.47c-.17 0-.44.06-.67.31-.23.25-.87.85-.87 2.07 0 1.22.89 2.4 1.02 2.57.12.16 1.76 2.68 4.25 3.76.6.26 1.06.41 1.42.53.6.19 1.14.16 1.57.1.48-.07 1.47-.6 1.68-1.18.21-.58.21-1.08.15-1.18-.06-.11-.23-.17-.48-.29z"/>
+    </svg>
+  );
+}
+
 function AccionesContactoRapidas({ c }) {
   const sinNada = !c.whatsapp && !c.correo && !c.telefono;
   return (
     <div className="flex items-center gap-1">
-      {c.whatsapp && <a href={`https://wa.me/${(c.whatsapp || "").replace(/\D/g, "")}`} target="_blank" rel="noopener noreferrer" title="WhatsApp" className="p-1.5 rounded gp-btn-ghost" style={{ lineHeight: 0, color: "#16A36A" }}><MessageCircle size={14} /></a>}
+      {c.whatsapp && <a href={`https://wa.me/${(c.whatsapp || "").replace(/\D/g, "")}`} target="_blank" rel="noopener noreferrer" title="WhatsApp" className="p-1.5 rounded gp-btn-ghost" style={{ lineHeight: 0, color: "#25D366" }}><IconoWhatsApp size={14} /></a>}
       {c.correo && <a href={`mailto:${c.correo}`} title="Correo" className="p-1.5 rounded gp-btn-ghost" style={{ lineHeight: 0, color: "#087CF5" }}><Mail size={14} /></a>}
-      {(c.telefono || c.whatsapp) && <a href={`tel:${c.telefono || c.whatsapp}`} title="Llamar" className="p-1.5 rounded gp-btn-ghost" style={{ lineHeight: 0 }}><Phone size={14} /></a>}
+      {(c.telefono || c.whatsapp) && <a href={`tel:${c.telefono || c.whatsapp}`} title="Llamar por teléfono" className="p-1.5 rounded gp-btn-ghost" style={{ lineHeight: 0, color: VERDE_BANDERA }}><Phone size={14} /></a>}
       {sinNada && <span className="gp-text-muted text-xs">—</span>}
     </div>
   );
@@ -9719,11 +9777,12 @@ function MenuFilaContacto({ c, abierto, onToggle, onCerrar, onEditar, onComentar
   );
 }
 
-// Combo de filtro por tipo de contacto. A propósito NO es un <select> nativo: los navegadores
-// —Safari e iOS sobre todo— ignoran el estilo de <option>, así que no hay forma de darle a cada
-// categoría su color. Usa el mismo patrón de menú desplegable que el "···" de cada fila.
-// Cada opción trae su color y cuántos registros tiene; la cerrada muestra la seleccionada.
-function ComboFiltroContacto({ opciones, valor, onCambiar }) {
+// Combo de filtro con color por opción, compartido por Contactos (tipo de contacto) y Proyectos
+// e ideas (etapa: Idea, Validación, Desarrollo…). A propósito NO es un <select> nativo: los
+// navegadores —Safari e iOS sobre todo— ignoran el estilo de <option>, así que no hay forma de
+// darle a cada categoría su color. Usa el mismo patrón de menú desplegable que el "···" de cada
+// fila. Cada opción trae su color y cuántos registros tiene; la cerrada muestra la seleccionada.
+function ComboFiltroColor({ opciones, valor, onCambiar }) {
   const [abierto, setAbierto] = useState(false);
   const sel = opciones.find((o) => o.id === valor) || opciones[0];
   if (!sel) return null;
@@ -9779,7 +9838,7 @@ function ComboFiltroContacto({ opciones, valor, onCambiar }) {
   );
 }
 
-function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveComentario, onVerRegalos, onVincularProyecto, onDesvincularProyecto, onAddNota, onAddCita, onIrAVista, onVerProyecto, contactoSel, onSeleccionar, fichaTab, onFichaTab }) {
+function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveComentario, onVerRegalos, onVincularProyecto, onDesvincularProyecto, onAddNota, onAddCita, onAddEvento, onIrAVista, onVerProyecto, contactoSel, onSeleccionar, fichaTab, onFichaTab }) {
   const [modal, setModal] = useState(null);
   const [importarAbierto, setImportarAbierto] = useState(false);
   const [comentariosDe, setComentariosDe] = useState(null);
@@ -9889,7 +9948,7 @@ function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
 
       <div className="flex flex-wrap items-center gap-2 mb-3">
         <div className="flex-1 min-w-0">
-          <ComboFiltroContacto opciones={opcionesFiltroContacto} valor={filtroTipo} onCambiar={setFiltroTipo} />
+          <ComboFiltroColor opciones={opcionesFiltroContacto} valor={filtroTipo} onCambiar={setFiltroTipo} />
         </div>
         <div className="flex gap-2 shrink-0">
           <button onClick={() => setImportarAbierto(true)} className="gp-btn-ghost flex items-center justify-center gap-1 px-3 py-1.5 text-sm"><Upload size={14} /> Importar</button>
@@ -9924,7 +9983,7 @@ function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
               <Th label="Empresa / Organización" sortKey="empresa" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} />
               <th>Proyectos</th>
               <Th label="Última atención" sortKey="ultimaAtencion" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} />
-              <th>Contacto</th>
+              <th>Comunicación</th>
               <th></th>
             </tr>
           </thead>
@@ -10041,6 +10100,7 @@ function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
             onIrAVista={onIrAVista}
             onAddNota={onAddNota}
             onAddCita={onAddCita}
+            onAddEvento={onAddEvento}
             onAddComentario={onAddComentario}
             tab={fichaTab} onTab={onFichaTab}
             onVerProyecto={onVerProyecto}
@@ -10174,6 +10234,40 @@ function NuevaNotaContacto({ c, onAddNota }) {
   );
 }
 
+// Crear un evento ligado a este contacto sin salir de la ficha (pedido de Angel, 29 sept 2026).
+// El evento se guarda en el módulo Eventos con su contacto_id — no se duplica nada aquí, la ficha
+// solo lo consulta. Los detalles (costos, media, proyecto) se completan después en Eventos.
+function NuevoEventoContacto({ c, onAddEvento }) {
+  const [abierto, setAbierto] = useState(false);
+  const [nombre, setNombre] = useState("");
+  const [fecha, setFecha] = useState(todayISO());
+  const [lugar, setLugar] = useState("");
+  const limpiar = () => { setAbierto(false); setNombre(""); setFecha(todayISO()); setLugar(""); };
+  if (!abierto) {
+    return <button onClick={() => setAbierto(true)} className="text-xs gp-text-gold">+ Nuevo evento</button>;
+  }
+  return (
+    <div className="mt-2 pt-2 border-t gp-border">
+      <input className="gp-input text-xs mb-2" autoFocus placeholder="Nombre del evento" value={nombre} onChange={(e) => setNombre(e.target.value)} />
+      <div className="grid grid-cols-2 gap-2">
+        <input type="date" className="gp-input text-xs" value={fecha} onChange={(e) => setFecha(e.target.value)} />
+        <input className="gp-input text-xs" placeholder="Lugar (opcional)" value={lugar} onChange={(e) => setLugar(e.target.value)} />
+      </div>
+      <div className="flex gap-2 mt-2">
+        <button onClick={limpiar} className="gp-btn-ghost flex-1 py-1.5 text-xs">Cancelar</button>
+        <button
+          className="gp-btn flex-1 py-1.5 text-xs"
+          onClick={() => {
+            if (!nombre.trim()) return;
+            onAddEvento({ nombre: nombre.trim(), fecha, lugar: lugar.trim(), contactoId: c.id });
+            limpiar();
+          }}
+        >Guardar</button>
+      </div>
+    </div>
+  );
+}
+
 // Horarios y duraciones en bloques de media hora (pedido de Angel, 24 sept 2026): agendar a las
 // 9, 9:30, 10… y poder apartar más de una hora para una reunión, sin teclear la hora a mano.
 const HORAS_MEDIA_HORA = Array.from({ length: 48 }, (_, i) =>
@@ -10279,8 +10373,8 @@ function AgendaContacto({ c, data, onAddCita, onIrAVista }) {
 
 // Botón de acción de la ficha. Mantiene su color siempre; si el dato que necesita no está
 // capturado, en vez de quedar muerto lleva a capturarlo. `color` vacío = botón neutro (ghost).
-function BotonAccionFicha({ color, icono, label, href, nuevaPestana, onClick, onFalta, faltaTitulo }) {
-  const estilo = color ? { background: color, color: "#fff" } : undefined;
+function BotonAccionFicha({ color, colorTexto, icono, label, href, nuevaPestana, onClick, onFalta, faltaTitulo }) {
+  const estilo = color ? { background: color, color: colorTexto || "#fff" } : undefined;
   const clases = `py-2 text-xs rounded flex items-center justify-center gap-1.5 font-medium ${color ? "" : "gp-btn-ghost"}`;
   if (href) {
     return (
@@ -10300,7 +10394,7 @@ function BotonAccionFicha({ color, icono, label, href, nuevaPestana, onClick, on
 // seleccionar a alguien en la lista. NO duplica datos: Proyectos sale de la tabla puente,
 // Atenciones del módulo Regalos/Atenciones, Eventos del módulo Eventos y Notas del módulo Notas
 // — cada bloque solo consulta y deja abrir el módulo fuente, como pide el documento maestro.
-function FichaContacto({ c, data, proyectosVinculados, onCerrar, onEditar, onVerAtenciones, onIrAVista, onAddNota, onAddCita, onAddComentario, tab, onTab, onVerProyecto }) {
+function FichaContacto({ c, data, proyectosVinculados, onCerrar, onEditar, onVerAtenciones, onIrAVista, onAddNota, onAddCita, onAddEvento, onAddComentario, tab, onTab, onVerProyecto }) {
   const setTab = onTab;
   const citas = (data.citas || []).filter((x) => x.contactoId === c.id);
   const archivos = (data.comentarios || [])
@@ -10371,22 +10465,24 @@ function FichaContacto({ c, data, proyectosVinculados, onCerrar, onEditar, onVer
           abre el formulario para capturarlo. */}
       <div className="grid grid-cols-2 gap-2 mt-3">
         <BotonAccionFicha
-          color="#16A36A" icono={<MessageCircle size={13} />} label="WhatsApp"
+          color={VERDE_WHATSAPP} colorTexto="#0B2341" icono={<IconoWhatsApp size={14} color="#0B2341" />} label="WhatsApp"
           href={c.whatsapp ? `https://wa.me/${(c.whatsapp || "").replace(/\D/g, "")}` : null}
           nuevaPestana onFalta={onEditar} faltaTitulo="Agrega su WhatsApp"
         />
         <BotonAccionFicha
-          color="#087CF5" icono={<Mail size={13} />} label="Enviar correo"
+          color={AZUL_CORREO} icono={<Mail size={13} />} label="Enviar correo"
           href={c.correo ? `mailto:${c.correo}` : null}
           onFalta={onEditar} faltaTitulo="Agrega su correo"
         />
+        {/* Llamada telefónica normal (tel:), no WhatsApp — por eso va en verde bandera y con el
+            ícono de teléfono, para que no se confunda con el botón de arriba. */}
         <BotonAccionFicha
-          icono={<Phone size={13} />} label="Llamar"
+          color={VERDE_BANDERA} icono={<Phone size={13} />} label="Llamar"
           href={(c.telefono || c.whatsapp) ? `tel:${c.telefono || c.whatsapp}` : null}
           onFalta={onEditar} faltaTitulo="Agrega su teléfono"
         />
         <BotonAccionFicha
-          icono={<CalendarClock size={13} />} label="Agendar"
+          color="var(--gold)" colorTexto="#0B2341" icono={<CalendarClock size={13} />} label="Agendar"
           onClick={() => setTab("agenda")}
         />
       </div>
@@ -10420,7 +10516,7 @@ function FichaContacto({ c, data, proyectosVinculados, onCerrar, onEditar, onVer
             {!c.nombres && !c.fechaNacimiento && !c.contexto && <Vacio>Sin datos personales capturados todavía.</Vacio>}
           </Bloque>
 
-          <Bloque titulo="Contacto" icono={<Contact size={14} className="gp-text-gold" />}>
+          <Bloque titulo="Comunicación" icono={<Contact size={14} className="gp-text-gold" />}>
             <Dato label="WhatsApp" valor={c.whatsapp} />
             <Dato label="Teléfono" valor={c.telefono} />
             <Dato label="Correo" valor={c.correo} />
@@ -10531,23 +10627,28 @@ function FichaContacto({ c, data, proyectosVinculados, onCerrar, onEditar, onVer
       )}
 
       {tab === "eventos" && (
-        <Bloque titulo="Eventos" icono={<CalendarClock size={14} className="gp-text-gold" />}>
+        <Bloque
+          titulo="Eventos"
+          icono={<CalendarClock size={14} className="gp-text-gold" />}
+          accion={eventos.length > 0 && <button onClick={() => onIrAVista?.("eventos")} className="text-xs gp-text-gold">Ver en Eventos</button>}
+        >
           {eventos.length === 0
-            ? <Vacio>Sin eventos relacionados con este contacto.</Vacio>
+            ? <Vacio>Sin eventos relacionados con este contacto. Crea uno aquí abajo y queda en el módulo de Eventos.</Vacio>
             : (
               <div className="flex flex-col gap-2">
+                {/* Cada renglón entra al módulo Eventos: la ficha consulta, no duplica. */}
                 {eventos.map((e) => (
-                  <div key={e.id} className="flex items-center justify-between gap-2">
+                  <button key={e.id} onClick={() => onIrAVista?.("eventos")} className="flex items-center justify-between gap-2 w-full text-left gp-panel-hi rounded px-1.5 py-1">
                     <div className="min-w-0">
                       <p className="text-xs font-medium truncate">{e.nombre}</p>
                       {e.lugar && <p className="text-[10px] gp-text-muted truncate">{e.lugar}</p>}
                     </div>
                     <span className="text-[10px] gp-mono gp-text-muted shrink-0">{e.fecha}</span>
-                  </div>
+                  </button>
                 ))}
-                <button onClick={() => onIrAVista?.("eventos")} className="text-xs gp-text-gold text-left">Ver en Eventos →</button>
               </div>
             )}
+          {onAddEvento && <div className="mt-2"><NuevoEventoContacto c={c} onAddEvento={onAddEvento} /></div>}
         </Bloque>
       )}
 
@@ -10734,7 +10835,7 @@ function ContactoForm({ item, proyectos, vinculos, onVincularProyecto, onDesvinc
 }
 
 /* ---------- Regalos (histórico de regalos/felicitaciones, incluye control de Navidad) ---------- */
-function Regalos({ data, onAdd, onEdit, onRemove, filtroContactoInicial, onLimpiarFiltro }) {
+function Regalos({ data, onAdd, onEdit, onRemove, filtroContactoInicial, onLimpiarFiltro, onVerContacto }) {
   const [modal, setModal] = useState(null);
   const [filtroContacto, setFiltroContacto] = useState(filtroContactoInicial || "");
   const [filtroOcasion, setFiltroOcasion] = useState("Todos");
@@ -10776,18 +10877,15 @@ function Regalos({ data, onAdd, onEdit, onRemove, filtroContactoInicial, onLimpi
     { label: "Costo", get: (r) => r.costo }, { label: "Estatus", get: (r) => r.estatus },
   ];
 
-  const verNavidadEsteAnio = () => { setFiltroOcasion("Navidad"); setFiltroAnio(anioActual); setFiltroContacto(""); };
-
   return (
     <div>
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-1">
         <h2 className="gp-serif text-2xl">Atenciones</h2>
         <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm w-full sm:w-auto"><Plus size={14} /> Nuevo</button>
       </div>
-      <p className="text-sm gp-text-muted mb-3">Regalos, felicitaciones, condolencias y agradecimientos a tus contactos — incluye tu lista de Navidad por año.</p>
+      <p className="text-sm gp-text-muted mb-3">Regalos, felicitaciones, condolencias y agradecimientos a tus contactos. Para ver una ocasión concreta —Navidad, cumpleaños— usa el filtro de ocasión y el de año.</p>
 
       <div className="flex flex-wrap items-center gap-2 mb-2">
-        <button onClick={verNavidadEsteAnio} className="gp-btn flex items-center gap-1 px-3 py-1.5 text-xs"><Gift size={13} /> Ver Navidad {anioActual}</button>
         {filtroContacto && (
           <span className="text-xs px-2.5 py-1 rounded-full border flex items-center gap-1">
             {nombreContacto(filtroContacto)}
@@ -10817,7 +10915,12 @@ function Regalos({ data, onAdd, onEdit, onRemove, filtroContactoInicial, onLimpi
           <thead><tr><Th label="Contacto" sortKey="alfabetico" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} /><th>Tipo</th><th>Ocasión</th><th>Año</th><Th label="Fecha" sortKey="fecha" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} /><th>Detalle</th><Th label="Costo" sortKey="costo" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} /><th>Estatus</th><th></th></tr></thead>
           <tbody>
             {ordenados.map((r) => (
-              <tr key={r.id}>
+              // Tocar el renglón abre la ficha completa de esa persona en Contactos — la misma
+              // pantalla, no una copia: Contactos es la entidad maestra de personas.
+              <tr key={r.id}
+                onClick={() => r.contactoId && onVerContacto?.(r.contactoId)}
+                style={{ cursor: r.contactoId ? "pointer" : "default" }}
+                title={r.contactoId ? "Ver la ficha de este contacto" : undefined}>
                 <td>{nombreContacto(r.contactoId)}</td>
                 <td><Badge tone="gold">{r.tipo || "Regalo"}</Badge></td>
                 <td><Badge tone="muted">{r.ocasion}</Badge></td>
@@ -10825,12 +10928,12 @@ function Regalos({ data, onAdd, onEdit, onRemove, filtroContactoInicial, onLimpi
                 <td className="gp-mono">{r.fecha || "—"}</td>
                 <td className="gp-text-muted">{r.descripcion}</td>
                 <td className="gp-mono">{r.costo ? fmtMoney(r.costo) : "—"}</td>
-                <td>
+                <td onClick={(e) => e.stopPropagation()}>
                   <select className="gp-input" style={{ padding: "2px 6px" }} value={r.estatus || "Por comprar"} onChange={(e) => onEdit(r.id, { estatus: e.target.value })}>
                     {ESTATUS_REGALO.map((s) => <option key={s}>{s}</option>)}
                   </select>
                 </td>
-                <td><div className="flex gap-1"><IconBtn onClick={() => setModal({ item: r })}><Pencil size={13} /></IconBtn><IconBtn onClick={() => onRemove(r.id)}><Trash2 size={13} /></IconBtn></div></td>
+                <td onClick={(e) => e.stopPropagation()}><div className="flex gap-1"><IconBtn onClick={() => setModal({ item: r })}><Pencil size={13} /></IconBtn><IconBtn onClick={() => onRemove(r.id)}><Trash2 size={13} /></IconBtn></div></td>
               </tr>
             ))}
             {ordenados.length === 0 && <tr><td colSpan={9} className="text-center gp-text-muted py-6">Sin atenciones registradas con este filtro.</td></tr>}
@@ -10850,12 +10953,17 @@ function Regalos({ data, onAdd, onEdit, onRemove, filtroContactoInicial, onLimpi
 function RegaloForm({ item, contactos, onSave }) {
   const [v, setV] = useState(item);
   const [error, setError] = useState("");
+  // Combo alfabético, como el resto de los combos de la app: la lista llega en orden de captura
+  // y con muchos contactos encontrar a alguien se vuelve una lotería.
+  const contactosOrdenados = useMemo(
+    () => [...(contactos || [])].sort((a, b) => (a.nombre || "").localeCompare(b.nombre || "", "es", { sensitivity: "base" })),
+    [contactos]);
   return (
     <div>
       <Field label="Contacto">
         <select className="gp-input" value={v.contactoId || ""} onChange={(e) => setV({ ...v, contactoId: e.target.value })}>
           <option value="">— selecciona —</option>
-          {contactos.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+          {contactosOrdenados.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
         </select>
       </Field>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
