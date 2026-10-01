@@ -9,8 +9,9 @@
 //
 // 1 oct 2026: era un texto gris de 12 px que se perdía arriba de la pantalla y había que buscarlo.
 // Ahora es un botón de verdad —con caja, flecha en círculo dorado y texto legible— y se pega más
-// arriba, pegado al borde superior del contenido, que es donde la mano lo busca. Mantiene una
-// altura de 44 px para que en iPhone sea un objetivo táctil cómodo.
+// arriba, pegado al borde superior del contenido, que es donde la mano lo busca. Se achicó a 36 px de
+// alto el 1 oct 2026 a pedido de Angel: con el ancho del texto el objetivo táctil sigue siendo
+// cómodo en iPhone, aunque quede por debajo de los 44 px de alto.
 
 import { ChevronLeft } from 'lucide-react';
 
@@ -19,14 +20,14 @@ export default function BotonRegresar({ onRegresar }) {
     <button
       onClick={onRegresar}
       title="Regresar a la pantalla anterior"
-      className="gp-btn-ghost inline-flex items-center gap-2 pl-1.5 pr-3.5 mb-4 -mt-1 text-sm font-medium rounded-full"
-      style={{ minHeight: 44 }}
+      className="gp-btn-ghost inline-flex items-center gap-1.5 pl-1 pr-3 mb-3.5 -mt-1 text-[13px] font-medium rounded-full"
+      style={{ minHeight: 36 }}
     >
       <span
         className="inline-flex items-center justify-center rounded-full shrink-0"
-        style={{ width: 30, height: 30, background: 'var(--gold)', color: '#0B2341' }}
+        style={{ width: 24, height: 24, background: 'var(--gold)', color: '#0B2341' }}
       >
-        <ChevronLeft size={18} />
+        <ChevronLeft size={15} />
       </span>
       Regresar
     </button>

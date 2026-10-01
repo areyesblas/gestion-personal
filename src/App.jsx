@@ -11119,7 +11119,7 @@ function ContactoRapidoModal({ nombreTecleado, onCerrar, onGuardar }) {
       </div>
       <Field label="Correo electrónico (opcional)"><input className="gp-input" type="email" inputMode="email" value={correo} onChange={(e) => setCorreo(e.target.value)} /></Field>
       <Field label="WhatsApp (opcional)">
-        <input className="gp-input" inputMode="tel" placeholder="5215512345678" value={whatsapp} onChange={(e) => setWhatsapp(e.target.value)} />
+        <CampoTelefonoPais valor={whatsapp} onChange={setWhatsapp} placeholderNumero="55 1234 5678" />
       </Field>
       {error && <p className="text-xs gp-text-red mb-2">{error}</p>}
       <div className="flex gap-2 mt-1">
@@ -11127,6 +11127,86 @@ function ContactoRapidoModal({ nombreTecleado, onCerrar, onGuardar }) {
         <button onClick={guardar} className="gp-btn flex-1 py-2 text-sm">Guardar</button>
       </div>
     </Modal>
+  );
+}
+
+// Códigos de país para los campos de teléfono y WhatsApp. No es la lista completa del mundo:
+// son los países de donde realmente salen los contactos de ARKEYONE (América y España), más
+// "Otro" para teclear la lada a mano cuando haga falta. Ordenados alfabéticamente, con México
+// primero por ser el caso dominante.
+// Las banderas son emoji: en Mac, iPhone y Android se dibujan; en Windows se ven como dos letras
+// (WIN no trae glifos de bandera), y por eso la lada siempre va escrita al lado y no solo el icono.
+const PAISES_LADA = [
+  { iso: "MX", nombre: "México", lada: "+52", bandera: "🇲🇽" },
+  { iso: "US", nombre: "Estados Unidos", lada: "+1", bandera: "🇺🇸" },
+  { iso: "CA", nombre: "Canadá", lada: "+1", bandera: "🇨🇦" },
+  { iso: "AR", nombre: "Argentina", lada: "+54", bandera: "🇦🇷" },
+  { iso: "BO", nombre: "Bolivia", lada: "+591", bandera: "🇧🇴" },
+  { iso: "BR", nombre: "Brasil", lada: "+55", bandera: "🇧🇷" },
+  { iso: "CL", nombre: "Chile", lada: "+56", bandera: "🇨🇱" },
+  { iso: "CO", nombre: "Colombia", lada: "+57", bandera: "🇨🇴" },
+  { iso: "CR", nombre: "Costa Rica", lada: "+506", bandera: "🇨🇷" },
+  { iso: "CU", nombre: "Cuba", lada: "+53", bandera: "🇨🇺" },
+  { iso: "EC", nombre: "Ecuador", lada: "+593", bandera: "🇪🇨" },
+  { iso: "SV", nombre: "El Salvador", lada: "+503", bandera: "🇸🇻" },
+  { iso: "ES", nombre: "España", lada: "+34", bandera: "🇪🇸" },
+  { iso: "GT", nombre: "Guatemala", lada: "+502", bandera: "🇬🇹" },
+  { iso: "HN", nombre: "Honduras", lada: "+504", bandera: "🇭🇳" },
+  { iso: "NI", nombre: "Nicaragua", lada: "+505", bandera: "🇳🇮" },
+  { iso: "PA", nombre: "Panamá", lada: "+507", bandera: "🇵🇦" },
+  { iso: "PY", nombre: "Paraguay", lada: "+595", bandera: "🇵🇾" },
+  { iso: "PE", nombre: "Perú", lada: "+51", bandera: "🇵🇪" },
+  { iso: "PR", nombre: "Puerto Rico", lada: "+1", bandera: "🇵🇷" },
+  { iso: "DO", nombre: "República Dominicana", lada: "+1", bandera: "🇩🇴" },
+  { iso: "UY", nombre: "Uruguay", lada: "+598", bandera: "🇺🇾" },
+  { iso: "VE", nombre: "Venezuela", lada: "+58", bandera: "🇻🇪" },
+];
+
+// Separa un número guardado ("+1 213 555 0123") en lada + resto. Los números viejos, capturados
+// sin lada, se quedan tal cual en el campo de número y con el país en blanco: no se les inventa
+// un país, porque adivinarlo mal rompería el enlace de WhatsApp.
+function partirTelefono(valor) {
+  const txt = (valor || "").trim();
+  if (!txt.startsWith("+")) return { iso: "", numero: txt };
+  const candidatos = [...PAISES_LADA].sort((a, b) => b.lada.length - a.lada.length);
+  const p = candidatos.find((x) => txt.startsWith(x.lada));
+  if (!p) return { iso: "", numero: txt };
+  return { iso: p.iso, numero: txt.slice(p.lada.length).trim() };
+}
+
+// Campo de teléfono con código de país. Guarda UN solo string ("+52 55 1234 5678") en la misma
+// columna de siempre: no se parte en dos columnas, porque el número es un dato, no dos. Los
+// enlaces de wa.me y tel: ya limpian lo que no sea dígito, así que el "+" y los espacios no
+// estorban y sí hacen el número legible.
+function CampoTelefonoPais({ valor, onChange, placeholderNumero }) {
+  const { iso, numero } = partirTelefono(valor);
+  const pais = PAISES_LADA.find((p) => p.iso === iso) || null;
+  const emitir = (nuevoIso, nuevoNumero) => {
+    const p = PAISES_LADA.find((x) => x.iso === nuevoIso);
+    const n = (nuevoNumero || "").trim();
+    if (!p) { onChange(n); return; }
+    onChange(n ? `${p.lada} ${n}` : p.lada);
+  };
+  return (
+    <div className="flex gap-2">
+      <select
+        className="gp-input shrink-0" style={{ width: 132 }}
+        value={iso}
+        onChange={(e) => emitir(e.target.value, numero)}
+        aria-label="Código de país"
+      >
+        <option value="">Sin lada</option>
+        {PAISES_LADA.map((p) => (
+          <option key={p.iso} value={p.iso}>{p.bandera} {p.lada} {p.iso}</option>
+        ))}
+      </select>
+      <input
+        className="gp-input" inputMode="tel"
+        placeholder={placeholderNumero}
+        value={numero}
+        onChange={(e) => emitir(iso, e.target.value)}
+      />
+    </div>
   );
 }
 
@@ -11259,10 +11339,15 @@ function ContactoForm({ item, proyectos, vinculos, onVincularProyecto, onDesvinc
         />
         {!esNuevo && <p className="text-[10px] gp-text-muted -mt-2 mb-2">Los proyectos se guardan al momento, no hace falta dar Guardar.</p>}
       </Field>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <Field label="WhatsApp"><input className="gp-input" value={v.whatsapp} onChange={(e) => setV({ ...v, whatsapp: e.target.value })} /></Field>
-        <Field label="Teléfono (opcional)"><input className="gp-input" value={v.telefono} onChange={(e) => setV({ ...v, telefono: e.target.value })} /></Field>
-      </div>
+      {/* El país va aparte para que nadie tenga que acordarse de teclear "+1" o "+52": se elige y
+          ya. Con la lada puesta, el botón de WhatsApp funciona con contactos de cualquier país
+          (antes, un número de EU sin lada abría un chat inexistente). */}
+      <Field label="WhatsApp">
+        <CampoTelefonoPais valor={v.whatsapp} onChange={(x) => setV({ ...v, whatsapp: x })} placeholderNumero="55 1234 5678" />
+      </Field>
+      <Field label="Teléfono (opcional)">
+        <CampoTelefonoPais valor={v.telefono} onChange={(x) => setV({ ...v, telefono: x })} placeholderNumero="55 1234 5678" />
+      </Field>
       <Field label="Correo (opcional)"><input className="gp-input" value={v.correo} onChange={(e) => setV({ ...v, correo: e.target.value })} /></Field>
       <Field label="Dirección (opcional)"><textarea className="gp-input" rows={2} placeholder="Calle, número, colonia, ciudad…" value={v.direccion || ""} onChange={(e) => setV({ ...v, direccion: e.target.value })} /></Field>
       <Field label="Notas"><textarea className="gp-input" rows={2} value={v.notas} onChange={(e) => setV({ ...v, notas: e.target.value })} /></Field>
