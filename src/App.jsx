@@ -78,13 +78,18 @@ const Tokens = ({ tema = "oscuro" }) => (
        ARKEYONE (superficie BLANCA, borde #DDE3EC, texto #14213D, secundario #667085) — antes era
        un azulado propio que no coincidía con los mockups. El id interno "azul-claro" se queda
        igual para no migrar la preferencia guardada de nadie.
-       1 oct 2026: el lienzo baja de #F5F7FB (el valor oficial) a #EBF0F7 por decisión de Angel:
-       el fondo se veía tan claro que las tarjetas blancas no despegaban de él. La superficie
-       sigue siendo blanca, así que la separación tarjeta/fondo crece sin tocar el contraste del
-       texto, que se mide contra el blanco y no contra el lienzo. Es el nivel "Medio" de la
-       prueba que comparamos. Si algún día se vuelve a la paleta del documento, este es el único
-       valor que hay que regresar. */
-    .gp-root.tema-azul-claro{ --bg:#EBF0F7; --panel:#FFFFFF; --panel-hi:#EDF1F7; --border:#DDE3EC; --text:#14213D; --muted:#667085; --muted-bloque:#667085; --panel-2:rgba(8,124,245,.05);
+       1 oct 2026: el lienzo deja de ser el #F5F7FB del documento y pasa a #D7EAFD, elegido por
+       Angel de una escala de azules ("azul 6, marcado"). No es un gris: es el azul ARKEYONE
+       #087CF5 rebajado al 16 % sobre blanco, así que el fondo es de la marca y no un neutro.
+       La superficie sigue blanca, con lo que la tarjeta despega del lienzo (1.23:1) sin tocar el
+       contraste del texto que vive dentro de ella, que se mide contra el blanco.
+       Lo que SÍ hubo que mover es --muted: el texto secundario que va directo sobre el lienzo
+       (los subtítulos de cada pantalla) caía a 4.05:1 con el gris de antes, debajo del mínimo
+       legible. Con #5A6880 queda en 4.58:1 sobre el lienzo, 5.64:1 sobre blanco y 5.31:1 sobre
+       un bloque interno — medido en los tres fondos donde aparece.
+       El borde #DDE3EC se queda: es más oscuro que el lienzo nuevo, así que sigue leyéndose como
+       el filo de la tarjeta y no como un halo. */
+    .gp-root.tema-azul-claro{ --bg:#D7EAFD; --panel:#FFFFFF; --panel-hi:#EDF1F7; --border:#DDE3EC; --text:#14213D; --muted:#5A6880; --muted-bloque:#5A6880; --panel-2:rgba(8,124,245,.05);
       /* Sobre blanco el mismo verde se ve lavado: aquí se usa el verde sólido de ARKEYONE con
          más cuerpo, que sí contrasta contra #FFFFFF sin tapar el texto. */
       --hecho-bg:rgba(22,163,106,.20); --hecho-bg-hi:rgba(22,163,106,.30); --hecho-borde:#16A36A;
