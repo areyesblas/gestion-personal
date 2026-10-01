@@ -6723,12 +6723,13 @@ function MovimientoProyectoForm({ tipo, proyecto, contactos, categoriasUsadas, o
 // crea como una TAREA con precio y responsable, no como un campo nuevo del proyecto. Así entra
 // sola al reparto por persona, al costo comprometido y a "Mis pagos" del colaborador, que es el
 // circuito que ya existe para pagarle a alguien.
-function PagoResponsableForm({ proyecto, contactos, onGuardar, onCancelar }) {
-  const [contactoId, setContactoId] = useState(proyecto.responsableContactoId || "");
-  const [monto, setMonto] = useState("");
-  const [descripcion, setDescripcion] = useState(`Liderar el proyecto — ${proyecto.nombre}`);
-  const [fechaPago, setFechaPago] = useState("");
+function PagoResponsableForm({ proyecto, contactos, existente, onGuardar, onCancelar }) {
+  const [contactoId, setContactoId] = useState(existente?.colaboradorContactoId || proyecto.responsableContactoId || "");
+  const [monto, setMonto] = useState(existente?.precio ?? "");
+  const [descripcion, setDescripcion] = useState(existente?.descripcion || `Liderar el proyecto — ${proyecto.nombre}`);
+  const [fechaPago, setFechaPago] = useState(existente?.fechaPagoAprox || "");
   const [error, setError] = useState("");
+  const [guardando, setGuardando] = useState(false);
   return (
     <div>
       <p className="text-sm gp-text-muted mb-4">
@@ -6736,6 +6737,12 @@ function PagoResponsableForm({ proyecto, contactos, onGuardar, onCancelar }) {
         tarea con precio a nombre del responsable: así aparece en el reparto del proyecto y en los
         pagos del colaborador, sin inventar un lugar nuevo donde guardar dinero.
       </p>
+      {existente && (
+        <p className="gp-bloque rounded-lg p-2.5 text-xs mb-3" style={{ borderLeft: "3px solid var(--gold)" }}>
+          Este proyecto ya tiene un pago por liderarlo. Lo que captures aquí lo <b>reemplaza</b>, no
+          crea otro: para pagar dos veces, agrega una tarea aparte desde Tareas.
+        </p>
+      )}
       <Field label="Responsable">
         <select className="gp-input" value={contactoId} onChange={(e) => setContactoId(e.target.value)}>
           <option value="">— yo —</option>
@@ -6752,18 +6759,25 @@ function PagoResponsableForm({ proyecto, contactos, onGuardar, onCancelar }) {
         <button onClick={onCancelar} className="gp-btn-ghost flex-1 py-2 text-sm">Cancelar</button>
         <button
           className="gp-btn flex-1 py-2 text-sm"
+          disabled={guardando}
+          style={guardando ? { opacity: 0.6 } : undefined}
           onClick={() => {
             if (!(Number(monto) > 0)) { setError("El monto tiene que ser mayor a cero."); return; }
+            // Bloquear el botón al primer clic: sin esto, dos toques seguidos creaban dos pagos.
+            setGuardando(true);
             onGuardar({
-              id: uid(), proyectoId: proyecto.id, parentId: "",
+              id: existente?.id || uid(), proyectoId: proyecto.id, parentId: "",
               descripcion: descripcion.trim() || "Liderar el proyecto",
               fechaLimite: proyecto.fechaFin || "", fechaRevision: "", prioridad: "Media",
-              estatus: "Pendiente", colaboradorContactoId: contactoId || null, contactoId: "",
+              estatus: existente?.estatus || "Pendiente", colaboradorContactoId: contactoId || null, contactoId: "",
               precio: Number(monto), fechaPagoAprox: fechaPago, tiempoEstimado: "", tiempoReal: "",
-              asignadoA: "", avance: "",
-            });
+              asignadoA: "", avance: existente?.avance ?? "",
+              // Marca de nacimiento: con esto la pantalla reconoce cuál es el pago por liderar y
+              // lo edita en vez de crear otro igual.
+              origenTabla: "proyectos", origenId: proyecto.id,
+            }, existente);
           }}
-        >Guardar</button>
+        >{existente ? "Actualizar" : "Guardar"}</button>
       </div>
     </div>
   );
@@ -6805,6 +6819,9 @@ function FichaProyecto({
   const [modalFin, setModalFin] = useState(null); // null | ingreso | egreso | responsable | presupuesto
   const fin = finanzasProyecto(data, p.id);
   const reparto = repartoCostosProyecto(data, p.id);
+  // El pago por liderar se reconoce por su marca de origen, no por el texto de la descripción.
+  const pagoLiderazgo = (data.pendientes || []).find(
+    (t) => t.proyectoId === p.id && t.origenTabla === "proyectos" && t.origenId === p.id) || null;
   const categoriasUsadas = [...new Set((data.finanzas || []).map((f) => f.categoria).filter(Boolean))].sort();
   // Ramas cerradas del árbol de tareas de la pestaña "Tareas" de esta ficha.
   const [colapsadasTareas, setColapsadasTareas] = useState(() => new Set());
@@ -7097,6 +7114,7 @@ function FichaProyecto({
                         <ContadorRamaColapsada nodo={t} colapsada={colapsada} />
                       </span>
                       <div className="flex items-center gap-1.5 shrink-0">
+                        {Number(t.precio) > 0 && <span className="gp-mono text-[10px] gp-text-gold">{fmtMoney(t.precio)}</span>}
                         <Badge tone={toneEstatusTarea(t.estatus)}>{t.estatus}</Badge>
                         <span className="gp-mono text-[10px]" style={{ color: vencida ? "var(--red)" : "var(--muted)" }}>{t.fechaLimite || ""}</span>
                       </div>
@@ -7278,9 +7296,12 @@ function FichaProyecto({
       )}
       {modalFin === "responsable" && (
         <Modal title="Pago al responsable" onClose={() => setModalFin(null)}>
-          <PagoResponsableForm proyecto={p} contactos={data.contactos}
+          <PagoResponsableForm proyecto={p} contactos={data.contactos} existente={pagoLiderazgo}
             onCancelar={() => setModalFin(null)}
-            onGuardar={(tarea) => { onAddTarea(tarea); setModalFin(null); }} />
+            onGuardar={(tarea, previo) => {
+              if (previo) onEditTarea(previo.id, tarea); else onAddTarea(tarea);
+              setModalFin(null);
+            }} />
         </Modal>
       )}
       {modalFin === "presupuesto" && (
