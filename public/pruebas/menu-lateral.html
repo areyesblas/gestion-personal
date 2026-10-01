@@ -1,0 +1,354 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<style>html,body{margin:0;background:#0A1A2E;}img{max-width:100%}</style>
+<title>Menú lateral y logo</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root{
+    --fuera:#0A1A2E;
+    --tinta:#EAF1FA;
+    --tinta-2:#9FB4D0;
+    --acento:#F59E0B;
+    /* Tokens del tema que se está viendo. El JS los cambia al alternar Oscuro/Claro. */
+    --bg:#0B2341; --sidebar-bg:#0B2341; --sidebar-borde:#234A70;
+    --panel-hi:#1A3D63; --texto:#EAF1FA; --muted:#93A7C4;
+  }
+  *{ box-sizing:border-box; }
+  body{
+    margin:0; background:var(--fuera); color:var(--tinta);
+    font-family:'IBM Plex Sans','Segoe UI',system-ui,sans-serif; font-size:14px; line-height:1.5;
+  }
+  .wrap{ max-width:1120px; margin:0 auto; padding-block:32px 56px; padding-left:16px; padding-right:16px; }
+  h1,h2{ font-family:'Poppins','Segoe UI',system-ui,sans-serif; font-weight:600; margin:0; text-wrap:balance; }
+  h1{ font-size:26px; letter-spacing:-.01em; }
+  h2{ font-size:14px; letter-spacing:.07em; text-transform:uppercase; color:var(--tinta-2); font-weight:500; }
+  .intro{ color:var(--tinta-2); max-width:64ch; margin:10px 0 0; }
+  .marca{ font-family:'Poppins',sans-serif; font-size:11px; letter-spacing:.22em; color:var(--acento); text-transform:uppercase; }
+  code{ font-family:'IBM Plex Mono',ui-monospace,monospace; font-size:.92em; background:rgba(255,255,255,.1); padding:1px 5px; border-radius:4px; }
+
+  .controles{ display:flex; flex-wrap:wrap; gap:18px; margin:26px 0 18px; }
+  .grupo{ display:flex; flex-direction:column; gap:7px; }
+  .grupo > span{ font-size:10.5px; letter-spacing:.08em; text-transform:uppercase; color:var(--tinta-2); }
+  .grupo div{ display:flex; gap:6px; flex-wrap:wrap; }
+  .grupo button{
+    font:inherit; font-size:13px; font-weight:500; cursor:pointer;
+    background:rgba(255,255,255,.07); color:var(--tinta-2);
+    border:1px solid rgba(255,255,255,.16); border-radius:9px; padding:8px 13px;
+    transition:background .16s ease, color .16s ease, border-color .16s ease;
+  }
+  .grupo button:hover{ color:var(--tinta); }
+  .grupo button[aria-pressed="true"]{ background:var(--acento); border-color:var(--acento); color:#19130A; }
+  .grupo button:focus-visible{ outline:2px solid var(--acento); outline-offset:2px; }
+
+  /* ---------- los cuatro menús ---------- */
+  .fila-menus{ display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:14px; align-items:start; }
+  .caso{ display:flex; flex-direction:column; gap:8px; min-width:0; }
+  .caso > .rotulo{ display:flex; align-items:baseline; gap:7px; min-width:0; }
+  .caso > .rotulo b{ font-family:'Poppins',sans-serif; font-size:13px; }
+  .caso > .rotulo span{ font-size:11px; color:var(--tinta-2); }
+
+  .menu{
+    background:var(--sidebar-bg);
+    border:1px solid var(--sidebar-borde);
+    border-radius:12px;
+    padding:14px 12px;
+    display:flex; flex-direction:column;
+    min-height:470px;
+    transition:background .2s ease, border-color .2s ease;
+  }
+  .zona-marca{ display:flex; flex-direction:column; align-items:center; gap:3px; text-align:center; }
+  .zona-marca.conBuscar{ flex-direction:row; justify-content:center; align-items:center; gap:8px; }
+  .placa{ display:inline-flex; align-items:center; justify-content:center; border-radius:12px; padding:7px 9px; }
+  .placa.encendida{ background:#FFFFFF; box-shadow:0 1px 3px rgba(0,0,0,.25); }
+  .menu img{ height:34px; width:auto; display:block; }
+  .nombre{ font-family:'Poppins',sans-serif; font-weight:600; font-size:16px; letter-spacing:.3px; color:var(--texto); }
+  .meta{ font-size:9.5px; color:var(--muted); }
+  .correo{ font-size:10.5px; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:100%; }
+
+  .buscar-cuadro{
+    display:flex; align-items:center; justify-content:center;
+    border:1px solid var(--sidebar-borde); border-radius:7px; padding:7px; color:var(--muted);
+  }
+  .buscar-campo{
+    display:flex; align-items:center; gap:7px; font-size:12.5px; color:var(--muted);
+    border:1px solid var(--sidebar-borde); border-radius:9px; padding:8px 10px; background:var(--panel-hi);
+  }
+  .buscar-icono{ display:inline-flex; padding:5px; border-radius:7px; border:1px solid var(--sidebar-borde); color:var(--muted); }
+
+  .item{ display:flex; align-items:center; gap:8px; font-size:12.5px; color:var(--muted); padding:6px 8px; border-radius:5px; }
+  .item.activo{ background:rgba(245,158,11,.16); color:var(--texto); font-weight:600; border-left:4px solid var(--acento); box-shadow:inset 0 0 0 1px rgba(245,158,11,.25); }
+  .item.activo svg{ color:var(--acento); }
+  .titulo-grupo{ font-size:10px; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); font-weight:600; padding:0 8px; margin-bottom:3px; }
+  .grupo-nav + .grupo-nav{ margin-top:10px; }
+  .sistema{ margin-top:auto; padding-top:8px; border-top:1px solid var(--sidebar-borde); }
+  .aire-chico{ height:14px; }
+  .aire-grande{ height:28px; }
+  .regla-aire{ position:relative; }
+  .regla-aire::after{
+    content:attr(data-px); position:absolute; right:2px; top:50%; transform:translateY(-50%);
+    font-family:'IBM Plex Mono',monospace; font-size:8.5px; color:var(--acento); opacity:.85;
+  }
+  body.sin-reglas .regla-aire::after{ display:none; }
+
+  .nota{ color:var(--tinta-2); font-size:12.5px; margin:10px 0 0; max-width:68ch; }
+  .aviso{
+    margin-top:24px; padding:14px 16px; border-radius:12px;
+    background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.14);
+    border-left:3px solid var(--acento); font-size:13px;
+  }
+  .aviso strong{ font-family:'Poppins',sans-serif; font-weight:600; }
+  .aviso p{ margin:8px 0 0; color:var(--tinta-2); }
+  section{ margin-top:38px; }
+
+  table{ border-collapse:collapse; width:100%; font-size:13px; margin-top:10px; }
+  th{ text-align:left; font-weight:500; font-size:10.5px; letter-spacing:.06em; text-transform:uppercase; color:var(--tinta-2); padding:9px 10px; border-bottom:1px solid rgba(255,255,255,.14); }
+  td{ padding:10px; border-bottom:1px solid rgba(255,255,255,.1); vertical-align:top; }
+  td:first-child{ font-family:'Poppins',sans-serif; font-weight:500; white-space:nowrap; }
+  .tabla-caja{ overflow-x:auto; }
+  .si{ color:#5FBF8B; } .no{ color:#FCA5A5; }
+
+  @media (max-width:900px){ .fila-menus{ grid-template-columns:repeat(2,minmax(0,1fr)); } }
+  @media (max-width:460px){ .fila-menus{ grid-template-columns:1fr; } h1{ font-size:22px; } }
+  @media (prefers-reduced-motion:reduce){ *{ transition:none !important; } }
+</style>
+
+<div class="wrap">
+  <p class="marca">ARKEY·ONE — menú lateral</p>
+  <h1>Menú lateral y logo</h1>
+  <p class="intro">
+    Las cuatro distribuciones del panel izquierdo, lado a lado y con el mismo contenido real.
+    Los interruptores de arriba cambian las cuatro a la vez: así comparas la distribución sin que
+    el tema o el tratamiento del logo te confundan.
+  </p>
+
+  <div class="controles">
+    <div class="grupo">
+      <span>Tema</span>
+      <div role="group" aria-label="Tema">
+        <button type="button" data-tema="oscuro" aria-pressed="true">Oscuro</button>
+        <button type="button" data-tema="claro" aria-pressed="false">Claro</button>
+      </div>
+    </div>
+    <div class="grupo">
+      <span>Logo</span>
+      <div role="group" aria-label="Tratamiento del logo">
+        <button type="button" data-logo="actual" aria-pressed="true">Actual</button>
+        <button type="button" data-logo="placa" aria-pressed="false">A · con placa</button>
+        <button type="button" data-logo="blanco" aria-pressed="false">B · variante blanca</button>
+      </div>
+    </div>
+    <div class="grupo">
+      <span>Guías</span>
+      <div role="group" aria-label="Guías">
+        <button type="button" id="btnReglas" aria-pressed="true">Mostrar el aire</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="fila-menus" id="menus"></div>
+
+  <div class="aviso">
+    <strong>Por qué el logo desaparece hoy.</strong>
+    <p>
+      La “A” del logotipo es <code>#031E4A</code> y el fondo del menú en tema oscuro es
+      <code>#0B2341</code>: <b>1.03:1</b> de contraste, o sea el mismo color. Lo único que se ve es
+      el swoosh azul y el punto. En tema claro no pasa nada de esto, por eso el interruptor de arriba
+      lo deja claro de un vistazo.
+    </p>
+    <p>
+      <b>A · con placa</b> no toca el logotipo: le pone detrás el fondo blanco para el que fue
+      diseñado. Respeta al pie de la letra la regla de tu guía de marca de no cambiarle los colores.
+      <b>B · variante blanca</b> sí es un logo nuevo — la “A” en blanco, el swoosh intacto — y por eso
+      necesita que tú la apruebes. La que estás viendo la generé del archivo original para que
+      decidas sobre algo real y no sobre una descripción.
+    </p>
+  </div>
+
+  <section>
+    <h2>Qué cambia en cada distribución</h2>
+    <div class="tabla-caja">
+      <table>
+        <thead>
+          <tr><th>Distribución</th><th>Qué hace</th><th>A favor</th><th>En contra</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Actual</td>
+            <td>Seis bloques con el mismo aire entre todos (16 px).</td>
+            <td>—</td>
+            <td class="no">Nada manda: logo, commit, correo, Buscar, Centro de mando y Principal se leen como una sola lista.</td>
+          </tr>
+          <tr>
+            <td>A · tres zonas</td>
+            <td>Marca / acciones fijas / navegación, con 28 px entre zonas y 4–8 dentro. Buscar se vuelve campo ancho. El correo y el commit bajan a Sistema.</td>
+            <td class="si">Se entiende de un vistazo qué es marca, qué es acción y qué es navegación. El buscador por fin parece buscador.</td>
+            <td>Es la que más cosas mueve de lugar.</td>
+          </tr>
+          <tr>
+            <td>B · compacta</td>
+            <td>Buscar sube junto al logo; “Centro de mando” encabeza la navegación como primer ítem.</td>
+            <td class="si">Gana alto: dos bloques menos. Útil en pantallas chicas.</td>
+            <td>El buscador queda escondido como un ícono más.</td>
+          </tr>
+          <tr>
+            <td>C · mínima</td>
+            <td>Solo sube el aire antes de “Principal”. Nada más se mueve.</td>
+            <td class="si">Resuelve tu queja literal cambiando una línea.</td>
+            <td>El commit y el correo siguen compitiendo con el logo.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="nota">
+      “Mostrar el aire” marca en ámbar los espacios entre bloques, que es justo lo que distingue a
+      una distribución de otra. Apágalo para verlas como se verían de verdad.
+    </p>
+  </section>
+</div>
+
+<script src="logos.js"></script>
+<script>
+  var TEMAS = {
+    oscuro: { '--bg':'#0B2341', '--sidebar-bg':'#0B2341', '--sidebar-borde':'#234A70', '--panel-hi':'#1A3D63', '--texto':'#EAF1FA', '--muted':'#93A7C4' },
+    claro:  { '--bg':'#D7EAFD', '--sidebar-bg':'#FFFFFF', '--sidebar-borde':'#C3D3E6', '--panel-hi':'#EDF1F7', '--texto':'#14213D', '--muted':'#5A6880' }
+  };
+  var tema = 'oscuro', logo = 'actual';
+
+  function ico(d) {
+    return '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + d + '</svg>';
+  }
+  var I = {
+    casa: ico('<path d="M3 10.5 12 3l9 7.5"/><path d="M5 10v10h14V10"/>'),
+    lupa: ico('<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>'),
+    gente: ico('<circle cx="9" cy="8" r="3.5"/><path d="M2 20c0-3.5 3-6 7-6s7 2.5 7 6"/>'),
+    cal: ico('<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>'),
+    carpeta: ico('<path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8l-2-2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2Z"/>'),
+    check: ico('<rect x="3" y="3" width="18" height="18" rx="2"/><path d="m9 12 2 2 4-4"/>'),
+    cartera: ico('<rect x="2" y="6" width="20" height="13" rx="2"/><path d="M16 12h3"/>'),
+    joya: ico('<path d="M6 3h12l4 6-10 12L2 9Z"/>')
+  };
+
+  function bloqueLogo(conNombre) {
+    var src = logo === 'blanco' ? LOGO_CLARO : LOGO_ACTUAL;
+    var placa = (logo === 'placa' && tema === 'oscuro') ? ' encendida' : '';
+    var img = '<span class="placa' + placa + '"><img src="' + src + '" alt="ARKEYONE"></span>';
+    return conNombre ? img + '<span class="nombre">ARKEYONE</span>' : img;
+  }
+
+  function grupo(titulo, items) {
+    return '<div class="grupo-nav"><p class="titulo-grupo">' + titulo + '</p>' +
+      items.map(function (it) {
+        return '<div class="item' + (it[2] ? ' activo' : '') + '">' + it[1] + '<span>' + it[0] + '</span></div>';
+      }).join('') + '</div>';
+  }
+
+  var NAV =
+    grupo('Principal', [['Contactos', I.gente, false], ['Agenda', I.cal, false], ['Proyectos e ideas', I.carpeta, true], ['Tareas', I.check, false]]) +
+    grupo('Dinero', [['Finanzas', I.cartera, false], ['Apartados', I.cartera, false]]) +
+    grupo('Patrimonio', [['Patrimonio', I.joya, false]]);
+
+  function aire(px) {
+    return '<div class="regla-aire" data-px="' + px + 'px" style="height:' + px + 'px"></div>';
+  }
+
+  var CASOS = [
+    {
+      nombre: 'Actual', nota: 'como está hoy',
+      html: function () {
+        return '<div class="zona-marca">' + bloqueLogo(true) +
+          '<p class="meta">commit bb8ce33</p><p class="correo">angelrey.mx@gmail.com</p></div>' +
+          aire(16) +
+          '<div class="buscar-cuadro">' + I.lupa + '</div>' +
+          aire(16) +
+          '<div class="item">' + I.casa + '<span>Centro de mando</span></div>' +
+          aire(16) + NAV +
+          '<div class="sistema"><p class="titulo-grupo">Sistema</p><div class="item">' + I.lupa + '<span>Configuración</span></div></div>';
+      }
+    },
+    {
+      nombre: 'A · tres zonas', nota: 'la recomendada',
+      html: function () {
+        return '<div class="zona-marca">' + bloqueLogo(true) + '</div>' +
+          aire(28) +
+          '<div class="buscar-campo">' + I.lupa + '<span>Buscar…</span></div>' +
+          '<div style="height:6px"></div>' +
+          '<div class="item">' + I.casa + '<span>Centro de mando</span></div>' +
+          aire(28) + NAV +
+          '<div class="sistema"><p class="titulo-grupo">Sistema</p><div class="item">' + I.lupa + '<span>Configuración</span></div>' +
+          '<p class="correo" style="padding:4px 8px 0">angelrey.mx@gmail.com</p><p class="meta" style="padding:0 8px">commit bb8ce33</p></div>';
+      }
+    },
+    {
+      nombre: 'B · compacta', nota: 'gana alto',
+      html: function () {
+        return '<div class="zona-marca conBuscar">' + bloqueLogo(true) + '<span class="buscar-icono">' + I.lupa + '</span></div>' +
+          aire(22) +
+          '<div class="grupo-nav"><p class="titulo-grupo">Principal</p>' +
+          '<div class="item">' + I.casa + '<span>Centro de mando</span></div>' +
+          '<div class="item">' + I.gente + '<span>Contactos</span></div>' +
+          '<div class="item">' + I.cal + '<span>Agenda</span></div>' +
+          '<div class="item activo">' + I.carpeta + '<span>Proyectos e ideas</span></div>' +
+          '<div class="item">' + I.check + '<span>Tareas</span></div></div>' +
+          grupo('Dinero', [['Finanzas', I.cartera, false], ['Apartados', I.cartera, false]]) +
+          grupo('Patrimonio', [['Patrimonio', I.joya, false]]) +
+          '<div class="sistema"><p class="titulo-grupo">Sistema</p><div class="item">' + I.lupa + '<span>Configuración</span></div>' +
+          '<p class="correo" style="padding:4px 8px 0">angelrey.mx@gmail.com</p></div>';
+      }
+    },
+    {
+      nombre: 'C · mínima', nota: 'una línea',
+      html: function () {
+        return '<div class="zona-marca">' + bloqueLogo(true) +
+          '<p class="meta">commit bb8ce33</p><p class="correo">angelrey.mx@gmail.com</p></div>' +
+          aire(16) +
+          '<div class="buscar-cuadro">' + I.lupa + '</div>' +
+          aire(16) +
+          '<div class="item">' + I.casa + '<span>Centro de mando</span></div>' +
+          aire(32) + NAV +
+          '<div class="sistema"><p class="titulo-grupo">Sistema</p><div class="item">' + I.lupa + '<span>Configuración</span></div></div>';
+      }
+    }
+  ];
+
+  function pintar() {
+    document.getElementById('menus').innerHTML = CASOS.map(function (c) {
+      return '<div class="caso"><div class="rotulo"><b>' + c.nombre + '</b><span>' + c.nota + '</span></div>' +
+        '<div class="menu">' + c.html() + '</div></div>';
+    }).join('');
+  }
+
+  function aplicarTema() {
+    var t = TEMAS[tema];
+    Object.keys(t).forEach(function (k) { document.documentElement.style.setProperty(k, t[k]); });
+    pintar();
+  }
+
+  document.querySelectorAll('[data-tema]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      tema = b.dataset.tema;
+      document.querySelectorAll('[data-tema]').forEach(function (x) { x.setAttribute('aria-pressed', String(x === b)); });
+      aplicarTema();
+    });
+  });
+  document.querySelectorAll('[data-logo]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      logo = b.dataset.logo;
+      document.querySelectorAll('[data-logo]').forEach(function (x) { x.setAttribute('aria-pressed', String(x === b)); });
+      pintar();
+    });
+  });
+  var btnReglas = document.getElementById('btnReglas');
+  btnReglas.addEventListener('click', function () {
+    var on = btnReglas.getAttribute('aria-pressed') === 'true';
+    btnReglas.setAttribute('aria-pressed', String(!on));
+    document.body.classList.toggle('sin-reglas', on);
+  });
+
+  aplicarTema();
+</script>
+
+</html>
