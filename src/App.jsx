@@ -6921,6 +6921,20 @@ function PagoResponsableForm({ proyecto, contactos, onGuardar, onCancelar }) {
   );
 }
 
+// Cada cifra del panel de dinero es también la puerta a capturar ese tipo de movimiento. El
+// ícono de la esquina es lo que avisa que se puede tocar — sin él, un número con fondo parece
+// solo un dato.
+function TarjetaDinero({ etiqueta, valor, color, detalle, icono, titulo, onClick }) {
+  return (
+    <button onClick={onClick} title={titulo} className="gp-bloque rounded-lg p-2.5 text-left relative w-full">
+      <span className="absolute gp-text-muted" style={{ top: 6, right: 6 }}>{icono}</span>
+      <p className="text-[10px] gp-text-muted pr-4">{etiqueta}</p>
+      <p className="gp-mono text-sm" style={{ color }}>{fmtMoney(valor)}</p>
+      {detalle && <p className="text-[9px] gp-text-muted">{detalle}</p>}
+    </button>
+  );
+}
+
 // Comprobante de un pago: la foto de la transferencia o el depósito. Se guarda con el mismo
 // mecanismo de adjuntos que ya usa el resto de la app (un comentario con adjuntos ligado al
 // movimiento), así que no hace falta columna nueva ni bucket nuevo.
@@ -7027,6 +7041,9 @@ function FichaProyecto({
     .filter((f) => f.categoria === "Pago a colaborador")
     .sort((a, b) => (b.fecha || "").localeCompare(a.fecha || ""));
   const nombreContactoFicha = (id) => (data.contactos || []).find((c) => c.id === id)?.nombre || "";
+  const movimientosCerrados = fin.movs
+    .filter((f) => f.estatus === "Cobrado")
+    .sort((a, b) => (b.fecha || "").localeCompare(a.fecha || ""));
   // Ramas cerradas del árbol de tareas de la pestaña "Tareas" de esta ficha.
   const [colapsadasTareas, setColapsadasTareas] = useState(() => new Set());
   const [confirmacion, setConfirmacion] = useState(null);
@@ -7354,31 +7371,40 @@ function FichaProyecto({
               <>
                 {/* Dos ejes, no cuatro números sueltos: lo que ENTRA del cliente y lo que SALE
                     al equipo y en gastos. Así se lee de un vistazo si el proyecto deja algo. */}
+                {/* Cada cuadrito ES el botón de su acción (Angel, 1 oct 2026): el ícono de la
+                    esquina dice que se puede tocar, y así desaparecieron los cuatro botones que
+                    estaban hasta abajo repitiendo lo mismo. */}
                 <p className="text-[10px] uppercase tracking-wide gp-text-muted mb-1.5">Entra del cliente</p>
                 <div className="grid grid-cols-2 gap-2 mb-3">
-                  <div className="gp-bloque rounded-lg p-2.5">
-                    <p className="text-[10px] gp-text-muted">Por cobrar</p>
-                    <p className="gp-mono text-sm gp-text-gold">{fmtMoney(fin.porCobrar)}</p>
-                  </div>
-                  <div className="gp-bloque rounded-lg p-2.5">
-                    <p className="text-[10px] gp-text-muted">Ya cobrado</p>
-                    <p className="gp-mono text-sm gp-text-teal">{fmtMoney(fin.cobrado)}</p>
-                  </div>
+                  <TarjetaDinero
+                    etiqueta="Por cobrar" valor={fin.porCobrar} color="var(--gold)"
+                    icono={<Plus size={12} />} titulo="Registrar un cobro al cliente"
+                    onClick={() => setModalFin("ingreso")}
+                  />
+                  <TarjetaDinero
+                    etiqueta="Ya cobrado" valor={fin.cobrado} color="var(--teal)"
+                    icono={<Plus size={12} />} titulo="Registrar un cobro ya recibido"
+                    onClick={() => setModalFin("ingreso")}
+                  />
                 </div>
 
                 <p className="text-[10px] uppercase tracking-wide gp-text-muted mb-1.5">Sale del proyecto</p>
                 <div className="grid grid-cols-2 gap-2 mb-3">
-                  <div className="gp-bloque rounded-lg p-2.5">
-                    <p className="text-[10px] gp-text-muted">Comprometido al equipo</p>
-                    <p className="gp-mono text-sm gp-text-red">{fmtMoney(fin.comprometidoEquipo)}</p>
-                    <p className="text-[9px] gp-text-muted">{fmtMoney(fin.devengadoEquipo)} ya se ganó</p>
-                  </div>
-                  <div className="gp-bloque rounded-lg p-2.5">
-                    <p className="text-[10px] gp-text-muted">Gastos</p>
-                    <p className="gp-mono text-sm gp-text-red">{fmtMoney(fin.gastoReal)}</p>
-                    {fin.pagosAPersonas > 0 && <p className="text-[9px] gp-text-muted">{fmtMoney(fin.pagosAPersonas)} a personas</p>}
-                    {fin.gastoPorPagar > 0 && <p className="text-[9px] gp-text-muted">{fmtMoney(fin.gastoPorPagar)} sin pagar</p>}
-                  </div>
+                  <TarjetaDinero
+                    etiqueta="Comprometido al equipo" valor={fin.comprometidoEquipo} color="var(--red)"
+                    detalle={`${fmtMoney(fin.devengadoEquipo)} ya se ganó`}
+                    icono={<Users size={12} />} titulo="Registrar un pago a un colaborador"
+                    onClick={() => setModalFin("responsable")}
+                  />
+                  <TarjetaDinero
+                    etiqueta="Gastos" valor={fin.gastoReal} color="var(--red)"
+                    detalle={[
+                      fin.pagosAPersonas > 0 ? `${fmtMoney(fin.pagosAPersonas)} a personas` : null,
+                      fin.gastoPorPagar > 0 ? `${fmtMoney(fin.gastoPorPagar)} sin pagar` : null,
+                    ].filter(Boolean).join(" · ")}
+                    icono={<Plus size={12} />} titulo="Registrar un gasto del proyecto"
+                    onClick={() => setModalFin("egreso")}
+                  />
                 </div>
 
                 {/* El número que de verdad dice si conviene: lo que vas a cobrar menos todo lo
@@ -7424,8 +7450,11 @@ function FichaProyecto({
                   <div className="mb-3">
                     <div className="flex items-baseline justify-between gap-2 mb-1">
                       <span className="text-[10px] uppercase tracking-wide gp-text-muted">Presupuesto de gasto</span>
-                      <span className="gp-mono text-[11px]" style={{ color: fin.pctPresupuesto > 100 ? "var(--red)" : "var(--muted)" }}>
-                        {fmtMoney(fin.gastoReal)} de {fmtMoney(fin.topeGasto)} · {fin.pctPresupuesto}%
+                      <span className="flex items-center gap-1.5">
+                        <span className="gp-mono text-[11px]" style={{ color: fin.pctPresupuesto > 100 ? "var(--red)" : "var(--muted)" }}>
+                          {fmtMoney(fin.gastoReal)} de {fmtMoney(fin.topeGasto)} · {fin.pctPresupuesto}%
+                        </span>
+                        <IconBtn title="Cambiar el tope de gasto" onClick={() => setModalFin("presupuesto")}><Pencil size={11} /></IconBtn>
                       </span>
                     </div>
                     <div className="h-2 rounded-full" style={{ background: "var(--border)" }}>
@@ -7479,31 +7508,32 @@ function FichaProyecto({
                   </div>
                 )}
 
-                {/* Movimientos reales ligados al proyecto. */}
-                {fin.movs.length > 0 && (
+                {/* Abajo solo lo que YA pasó: cobros recibidos y pagos hechos. Lo pendiente ya
+                    está contado arriba en "Por cobrar" y en "sin pagar", así que repetirlo aquí
+                    solo alargaba la lista. */}
+                {movimientosCerrados.length > 0 && (
                   <div className="mb-3">
-                    <p className="text-[10px] uppercase tracking-wide gp-text-muted mb-1.5">Movimientos ({fin.movs.length})</p>
+                    <p className="text-[10px] uppercase tracking-wide gp-text-muted mb-1.5">Ya cobrado y ya pagado ({movimientosCerrados.length})</p>
                     <div className="flex flex-col gap-1">
-                      {[...fin.movs].sort((a, b) => (b.fecha || "").localeCompare(a.fecha || "")).slice(0, 8).map((f) => (
+                      {movimientosCerrados.slice(0, 8).map((f) => (
                         <div key={f.id} className="flex items-center justify-between gap-2 text-xs">
-                          <span className="truncate">{f.concepto}</span>
-                          <span className="shrink-0 flex items-center gap-1.5">
-                            <Badge tone={f.estatus === "Cobrado" ? "teal" : "gold"}>{f.estatus}</Badge>
-                            <MontoMovimiento f={f} className="text-[11px]" />
+                          <span className="min-w-0">
+                            <span className="block truncate">{f.concepto}</span>
+                            <span className="block text-[10px] gp-text-muted">{fmtFechaCorta(f.fecha) || "sin fecha"}{f.contactoId ? ` · ${nombreContactoFicha(f.contactoId)}` : ""}</span>
                           </span>
+                          <MontoMovimiento f={f} className="text-[11px] shrink-0" />
                         </div>
                       ))}
-                      {fin.movs.length > 8 && <p className="text-[10px] gp-text-muted">y {fin.movs.length - 8} más.</p>}
+                      {movimientosCerrados.length > 8 && <p className="text-[10px] gp-text-muted">y {movimientosCerrados.length - 8} más.</p>}
                     </div>
                   </div>
                 )}
 
-                <div className="grid grid-cols-2 gap-2">
-                  <button onClick={() => setModalFin("ingreso")} className="gp-btn-ghost py-2 text-xs rounded flex items-center justify-center gap-1.5"><Plus size={13} /> Cobro al cliente</button>
-                  <button onClick={() => setModalFin("egreso")} className="gp-btn-ghost py-2 text-xs rounded flex items-center justify-center gap-1.5"><Plus size={13} /> Gasto del proyecto</button>
-                  <button onClick={() => setModalFin("responsable")} className="gp-btn-ghost py-2 text-xs rounded flex items-center justify-center gap-1.5"><Users size={13} /> Pago al responsable</button>
-                  <button onClick={() => setModalFin("presupuesto")} className="gp-btn-ghost py-2 text-xs rounded flex items-center justify-center gap-1.5"><Target size={13} /> {fin.topeGasto !== null ? "Cambiar tope" : "Poner tope"}</button>
-                </div>
+                {fin.topeGasto === null && (
+                  <button onClick={() => setModalFin("presupuesto")} className="gp-btn-ghost w-full py-2 text-xs rounded flex items-center justify-center gap-1.5 mb-1">
+                    <Target size={13} /> Poner un tope de gasto
+                  </button>
+                )}
 
                 <div className="flex items-center justify-between gap-2 mt-3">
                   <button onClick={() => onIrAVista("finanzas")} className="text-xs gp-text-gold flex items-center gap-1">Ver en Finanzas <ChevronRight size={12} /></button>
@@ -9140,6 +9170,9 @@ function Pendientes({ data, activeOwnerId, onAdd, onEdit, onEditProyecto, onRemo
               const colapsada = colapsadas.has(p.id);
               const hecha = p.estatus === "Completada";
               const avance = tieneHijos ? Math.round(calcAvanceTarea(p)) : null;
+              // Con subtareas el avance es la ponderación; sin ellas, el capturado o el que se
+              // deduce del estatus (0 / 50 / 100). La barrita de la columna usa siempre este.
+              const avanceFila = Math.round(calcAvanceTarea(p));
               return (
                 <tr key={p.id}
                   className={`${hecha ? "gp-fila-hecha" : ""} ${p.id === tareaSelId ? "gp-fila-sel" : ""}`.trim() || undefined}
