@@ -75,10 +75,16 @@ const Tokens = ({ tema = "oscuro" }) => (
        este tema desde acá (ver .gp-sidebar-area más abajo — esa clase se quedó solo para las
        pantallas de login/verificación, que sí se quedan siempre oscuras a propósito). */
     /* 24 sept 2026: los valores se alinearon a la paleta oficial del documento de diseño de
-       ARKEYONE (fondo #F5F7FB, superficie BLANCA, borde #DDE3EC, texto #14213D, secundario
-       #667085) — antes era un azulado propio que no coincidía con los mockups. El id interno
-       "azul-claro" se queda igual para no migrar la preferencia guardada de nadie. */
-    .gp-root.tema-azul-claro{ --bg:#F5F7FB; --panel:#FFFFFF; --panel-hi:#EDF1F7; --border:#DDE3EC; --text:#14213D; --muted:#667085; --muted-bloque:#667085; --panel-2:rgba(8,124,245,.05);
+       ARKEYONE (superficie BLANCA, borde #DDE3EC, texto #14213D, secundario #667085) — antes era
+       un azulado propio que no coincidía con los mockups. El id interno "azul-claro" se queda
+       igual para no migrar la preferencia guardada de nadie.
+       1 oct 2026: el lienzo baja de #F5F7FB (el valor oficial) a #EBF0F7 por decisión de Angel:
+       el fondo se veía tan claro que las tarjetas blancas no despegaban de él. La superficie
+       sigue siendo blanca, así que la separación tarjeta/fondo crece sin tocar el contraste del
+       texto, que se mide contra el blanco y no contra el lienzo. Es el nivel "Medio" de la
+       prueba que comparamos. Si algún día se vuelve a la paleta del documento, este es el único
+       valor que hay que regresar. */
+    .gp-root.tema-azul-claro{ --bg:#EBF0F7; --panel:#FFFFFF; --panel-hi:#EDF1F7; --border:#DDE3EC; --text:#14213D; --muted:#667085; --muted-bloque:#667085; --panel-2:rgba(8,124,245,.05);
       /* Sobre blanco el mismo verde se ve lavado: aquí se usa el verde sólido de ARKEYONE con
          más cuerpo, que sí contrasta contra #FFFFFF sin tapar el texto. */
       --hecho-bg:rgba(22,163,106,.20); --hecho-bg-hi:rgba(22,163,106,.30); --hecho-borde:#16A36A;
