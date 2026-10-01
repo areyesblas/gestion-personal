@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useLayoutEffect, useMemo, useRef, Suspense, lazy } from "react";
+import { createPortal } from "react-dom";
 import { supabase } from "./supabaseClient";
 import LoginScreenNuevo from "./components/auth/LoginScreen";
 import AuthCard, { AuthField, AuthPasswordField, AuthButton, AuthBanner, AuthBackLink } from "./components/auth/AuthCard";
@@ -1532,6 +1533,12 @@ function BarraGuardar({ sucio, onGuardar, onDescartar, etiqueta = "Guardar cambi
   );
 }
 
+// El modal se dibuja en el <body> a través de un portal, no donde está escrito en el árbol.
+// Motivo (bug del 1 oct 2026): la ficha del proyecto vive en una columna con position:sticky,
+// y sticky crea su propio contexto de apilamiento. Un `fixed z-50` dentro de ahí queda atrapado
+// en ese contexto, así que el banner de la pantalla —que lleva un z-10 propio— se dibujaba
+// ENCIMA del modal. Con el portal el modal sale de cualquier contexto heredado y siempre queda
+// arriba, en este y en cualquier otro panel que use sticky o transform.
 function Modal({ title, onClose, children }) {
   const [tocado, setTocado] = useState(false);
   const [confirmando, setConfirmando] = useState(false);
@@ -1541,8 +1548,8 @@ function Modal({ title, onClose, children }) {
     else onClose();
   };
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,.55)" }} onClick={intentarCerrar}>
+  return createPortal(
+    <div className="fixed inset-0 z-[95] flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,.55)" }} onClick={intentarCerrar}>
       <div
         className="gp-panel w-full max-w-lg max-h-[85vh] overflow-y-auto gp-scroll p-5"
         onClick={(e) => e.stopPropagation()}
@@ -1571,7 +1578,8 @@ function Modal({ title, onClose, children }) {
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -6779,15 +6787,20 @@ function EtiquetasProyecto({ p, onEdit }) {
 
 // Alta rápida de un movimiento del proyecto. Sirve para los dos casos: cobrarle al cliente
 // (Ingreso) y registrar un gasto —viáticos, traslados, materiales— (Egreso).
-function MovimientoProyectoForm({ tipo, proyecto, contactos, categoriasUsadas, onGuardar, onCancelar }) {
+function MovimientoProyectoForm({ tipo, proyecto, contactos, categoriasUsadas, estatusInicial, onGuardar, onCancelar }) {
   const esIngreso = tipo === "Ingreso";
   const [concepto, setConcepto] = useState(esIngreso ? `Cobro — ${proyecto.nombre}` : "");
   const [monto, setMonto] = useState("");
+  const [moneda, setMoneda] = useState(MONEDA_BASE);
+  const [tipoCambio, setTipoCambio] = useState(1);
   const [fecha, setFecha] = useState(todayISO());
   const [fechaVencimiento, setFechaVencimiento] = useState("");
   const [categoria, setCategoria] = useState(esIngreso ? "Proyectos" : "Viáticos");
   const [forma, setForma] = useState("Transferencia");
-  const [estatus, setEstatus] = useState(esIngreso ? "Pendiente" : "Cobrado");
+  // El estatus lo decide el cuadrito desde el que se abrió: tocar "Ya cobrado" tiene que
+  // registrar algo ya cobrado. Antes los dos cuadritos abrían el formulario igual, en
+  // "Pendiente", y el dinero se iba a "Por cobrar" aunque hubieras entrado por el otro.
+  const [estatus, setEstatus] = useState(estatusInicial || (esIngreso ? "Pendiente" : "Cobrado"));
   const [contactoId, setContactoId] = useState(esIngreso ? (proyecto.responsableContactoId || "") : "");
   const [error, setError] = useState("");
 
@@ -6803,10 +6816,15 @@ function MovimientoProyectoForm({ tipo, proyecto, contactos, categoriasUsadas, o
           : "Un gasto del proyecto: traslados, viáticos, materiales, lo que sea. Se guarda en Finanzas ligado a este proyecto."}
       </p>
       <Field label="Concepto"><input className="gp-input" autoFocus value={concepto} onChange={(e) => setConcepto(e.target.value)} /></Field>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <Field label="Monto"><MoneyInput value={monto} onChange={setMonto} /></Field>
-        <Field label="Fecha"><input type="date" className="gp-input" value={fecha} onChange={(e) => setFecha(e.target.value)} /></Field>
-      </div>
+      <Field label="Fecha"><input type="date" className="gp-input" value={fecha} onChange={(e) => setFecha(e.target.value)} /></Field>
+      <CamposMoneda
+        monto={monto} moneda={moneda} tipoCambio={tipoCambio} fecha={fecha}
+        onCambiar={(parche) => {
+          if (parche.monto !== undefined) setMonto(parche.monto);
+          if (parche.moneda !== undefined) setMoneda(parche.moneda);
+          if (parche.tipoCambio !== undefined) setTipoCambio(parche.tipoCambio);
+        }}
+      />
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Field label="Categoría">
           <input className="gp-input" list="cats-mov-proyecto" value={categoria} onChange={(e) => setCategoria(e.target.value)} />
@@ -6844,6 +6862,8 @@ function MovimientoProyectoForm({ tipo, proyecto, contactos, categoriasUsadas, o
             if (!(Number(monto) > 0)) { setError("El monto tiene que ser mayor a cero."); return; }
             onGuardar({
               id: uid(), tipo, concepto: concepto.trim(), monto: Number(monto), fecha,
+              // El monto base se congela aquí: es el número con el que suma toda la app.
+              moneda, tipoCambio: Number(tipoCambio) || 1, montoBase: Number(monto) * (Number(tipoCambio) || 1),
               fechaVencimiento: estatus === "Cobrado" ? "" : fechaVencimiento,
               categoria: categoria.trim() || (esIngreso ? "Proyectos" : "Otro"),
               forma, estatus, proyectoId: proyecto.id, contactoId: contactoId || "",
@@ -6924,13 +6944,15 @@ function PagoResponsableForm({ proyecto, contactos, onGuardar, onCancelar }) {
 // Cada cifra del panel de dinero es también la puerta a capturar ese tipo de movimiento. El
 // ícono de la esquina es lo que avisa que se puede tocar — sin él, un número con fondo parece
 // solo un dato.
-function TarjetaDinero({ etiqueta, valor, color, detalle, icono, titulo, onClick }) {
+function TarjetaDinero({ etiqueta, valor, color, detalle, significa, icono, titulo, onClick }) {
   return (
     <button onClick={onClick} title={titulo} className="gp-bloque rounded-lg p-2.5 text-left relative w-full">
       <span className="absolute gp-text-muted" style={{ top: 6, right: 6 }}>{icono}</span>
       <p className="text-[10px] gp-text-muted pr-4">{etiqueta}</p>
       <p className="gp-mono text-sm" style={{ color }}>{fmtMoney(valor)}</p>
-      {detalle && <p className="text-[9px] gp-text-muted">{detalle}</p>}
+      {/* Qué representa el número. Sin esto, cuatro cifras juntas se confunden entre sí. */}
+      {significa && <p className="text-[9px] gp-text-muted leading-tight mt-0.5">{significa}</p>}
+      {detalle && <p className="text-[9px] leading-tight" style={{ color: "var(--muted)" }}>{detalle}</p>}
     </button>
   );
 }
@@ -7378,13 +7400,15 @@ function FichaProyecto({
                 <div className="grid grid-cols-2 gap-2 mb-3">
                   <TarjetaDinero
                     etiqueta="Por cobrar" valor={fin.porCobrar} color="var(--gold)"
-                    icono={<Plus size={12} />} titulo="Registrar un cobro al cliente"
-                    onClick={() => setModalFin("ingreso")}
+                    significa="Lo que le vas a cobrar al cliente y todavía no entra."
+                    icono={<Plus size={12} />} titulo="Registrar algo por cobrar"
+                    onClick={() => setModalFin({ tipo: "ingreso", estatus: "Pendiente" })}
                   />
                   <TarjetaDinero
                     etiqueta="Ya cobrado" valor={fin.cobrado} color="var(--teal)"
+                    significa="Dinero del cliente que ya entró."
                     icono={<Plus size={12} />} titulo="Registrar un cobro ya recibido"
-                    onClick={() => setModalFin("ingreso")}
+                    onClick={() => setModalFin({ tipo: "ingreso", estatus: "Cobrado" })}
                   />
                 </div>
 
@@ -7392,18 +7416,20 @@ function FichaProyecto({
                 <div className="grid grid-cols-2 gap-2 mb-3">
                   <TarjetaDinero
                     etiqueta="Comprometido al equipo" valor={fin.comprometidoEquipo} color="var(--red)"
-                    detalle={`${fmtMoney(fin.devengadoEquipo)} ya se ganó`}
+                    significa="Suma del precio pactado de las tareas, se haya pagado o no."
+                    detalle={`${fmtMoney(fin.devengadoEquipo)} ya se ganó con tareas terminadas`}
                     icono={<Users size={12} />} titulo="Registrar un pago a un colaborador"
                     onClick={() => setModalFin("responsable")}
                   />
                   <TarjetaDinero
                     etiqueta="Gastos" valor={fin.gastoReal} color="var(--red)"
+                    significa="Egresos del proyecto: viáticos, materiales y pagos hechos."
                     detalle={[
                       fin.pagosAPersonas > 0 ? `${fmtMoney(fin.pagosAPersonas)} a personas` : null,
                       fin.gastoPorPagar > 0 ? `${fmtMoney(fin.gastoPorPagar)} sin pagar` : null,
                     ].filter(Boolean).join(" · ")}
                     icono={<Plus size={12} />} titulo="Registrar un gasto del proyecto"
-                    onClick={() => setModalFin("egreso")}
+                    onClick={() => setModalFin({ tipo: "egreso", estatus: "Cobrado" })}
                   />
                 </div>
 
@@ -7568,16 +7594,18 @@ function FichaProyecto({
         </BloqueFicha>
       )}
 
-      {modalFin === "ingreso" && (
-        <Modal title="Cobro del proyecto" onClose={() => setModalFin(null)}>
+      {modalFin?.tipo === "ingreso" && (
+        <Modal title={modalFin.estatus === "Cobrado" ? "Cobro ya recibido" : "Cobro por recibir"} onClose={() => setModalFin(null)}>
           <MovimientoProyectoForm tipo="Ingreso" proyecto={p} contactos={data.contactos} categoriasUsadas={categoriasUsadas}
+            estatusInicial={modalFin.estatus}
             onCancelar={() => setModalFin(null)}
             onGuardar={(mov) => { onAddFinanzas(mov); setModalFin(null); }} />
         </Modal>
       )}
-      {modalFin === "egreso" && (
+      {modalFin?.tipo === "egreso" && (
         <Modal title="Gasto del proyecto" onClose={() => setModalFin(null)}>
           <MovimientoProyectoForm tipo="Egreso" proyecto={p} contactos={data.contactos} categoriasUsadas={categoriasUsadas}
+            estatusInicial={modalFin.estatus}
             onCancelar={() => setModalFin(null)}
             onGuardar={(mov) => { onAddFinanzas(mov); setModalFin(null); }} />
         </Modal>
