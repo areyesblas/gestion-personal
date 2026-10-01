@@ -28,7 +28,7 @@ export default function NotasRapidasWidget({ onAddNota }) {
         </button>
       </div>
       <textarea
-        className="gp-input text-sm w-full flex-1"
+        className="gp-input gp-sin-tope text-sm w-full flex-1"
         rows={2}
         placeholder="Escribe una nota..."
         value={texto}

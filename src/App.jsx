@@ -127,6 +127,21 @@ const Tokens = ({ tema = "oscuro" }) => (
        todos los campos queden alineados — los inputs nativos de fecha/hora traen su propio
        ícono interno que si no se fija la altura, los hace ver más altos/bajos que sus vecinos. */
     input.gp-input, select.gp-input{ height:34px; }
+    /* Las cajas de texto se pueden estirar, pero solo hacia abajo y como mucho 2.5 veces su alto
+       original (Angel, 1 oct 2026). Sin tope, al jalar una caja se empujaban el resto de los
+       campos y el botón de Guardar fuera de la pantalla, y había que buscarlos a ciegas dentro
+       del modal. El tope se calcula con los renglones de cada caja —alto = renglones ×
+       interlineado + padding + borde— y en celular se ajusta solo, porque va en `em` y ahí la
+       letra del campo es de 16 px en vez de 13. Arrastrar a lo ancho queda deshabilitado: eso
+       rompía la rejilla de dos columnas de los formularios. */
+    textarea.gp-input{ resize:vertical; max-height:calc(2.5 * (2 * 1.2em + 14px)); }
+    textarea.gp-input[rows="3"]{ max-height:calc(2.5 * (3 * 1.2em + 14px)); }
+    textarea.gp-input[rows="4"]{ max-height:calc(2.5 * (4 * 1.2em + 14px)); }
+    textarea.gp-input[rows="8"]{ max-height:calc(2.5 * (8 * 1.2em + 14px)); }
+    /* Excepción: la caja de Notas rápidas del Centro de mando no es un campo de formulario, es
+       el contenido del widget y crece para llenarlo. Ponerle tope la dejaría flotando con un
+       hueco debajo. */
+    textarea.gp-sin-tope{ max-height:none; }
     .gp-input:focus{ outline:1px solid var(--gold); border-color:var(--gold); }
     /* Campo de búsqueda: contorno grueso en el dorado de la marca, igual que el buscador del
        Centro de mando (Angel, 1 oct 2026: "que todos los textboxes de buscar sean como ese").
