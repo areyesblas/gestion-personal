@@ -133,6 +133,14 @@ const Tokens = ({ tema = "oscuro" }) => (
     table.gp-table th{ text-align:left; color:var(--muted); font-weight:500; padding:8px 10px; border-bottom:1px solid var(--border); font-size:11px; letter-spacing:.02em; }
     table.gp-table td{ padding:8px 10px; border-bottom:1px solid var(--border); vertical-align:top; }
     table.gp-table tr:hover td{ background:var(--panel-hi); }
+    /* Tareas (pedido de Angel, 29 sept 2026): nada de tinte al pasar el mouse — solo la manita,
+       porque el clic ya hace algo (abre la ficha de la derecha) y el tinte se peleaba con el
+       verde de las filas completadas. Lo que sí se tiñe es la fila seleccionada. */
+    table.gp-table.gp-tabla-tareas tbody tr{ cursor:pointer; }
+    table.gp-table.gp-tabla-tareas tbody tr:hover td{ background:transparent; }
+    table.gp-table.gp-tabla-tareas tbody tr.gp-fila-hecha:hover td{ background:var(--hecho-bg); }
+    table.gp-table.gp-tabla-tareas tbody tr.gp-fila-sel td{ background:var(--panel-hi); }
+    table.gp-table.gp-tabla-tareas tbody tr.gp-fila-sel.gp-fila-hecha td{ background:var(--hecho-bg-hi); }
     /* Tarea completada: la fila entera se tiñe de verde y lleva una barra a la izquierda, para
        distinguirla de las pendientes de un vistazo en los dos temas. Va DESPUÉS de la regla de
        :hover para que también se note al pasar el mouse encima. */
@@ -2328,9 +2336,17 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
   // Crea un contacto solo con el nombre, sin salir del formulario que lo pidió (mismo patrón que
   // ya usan Citas y la captura rápida de Salud). tipos por default: el que se le pida (p.ej.
   // "Colaborador" al asignarlo desde una tarea, "Otro" en los demás casos).
+  // Crear un contacto desde fuera de la pantalla de Contactos (una tarea, una cita, un
+  // formulario de salud). Se crea de inmediato para poder devolver su id y dejarlo seleccionado
+  // donde se pidió —los combos lo necesitan en el momento—, y acto seguido se abre un formulario
+  // corto para completar apellidos, correo y WhatsApp sin tener que ir hasta Contactos
+  // (pedido de Angel, 29 sept 2026). Si se cancela, el contacto se queda solo con el nombre,
+  // que es exactamente lo que pasaba antes.
+  const [contactoRapido, setContactoRapido] = useState(null); // { id, nombre }
   const crearContactoRapido = (nombre, tipos = ["Otro"]) => {
     const nid = uid();
     addItem("contactos", { id: nid, nombre, tipos });
+    setContactoRapido({ id: nid, nombre });
     return nid;
   };
 
@@ -3637,6 +3653,14 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
       </div>
 
       <BottomNav view={view} setView={irAVista} onAbrirMas={() => setMobileNavOpen(true)} />
+
+      {contactoRapido && (
+        <ContactoRapidoModal
+          nombreTecleado={contactoRapido.nombre}
+          onCerrar={() => setContactoRapido(null)}
+          onGuardar={(campos) => { editItem("contactos", contactoRapido.id, campos); setContactoRapido(null); }}
+        />
+      )}
 
       <QuickCapture data={data} onAdd={addItem} onCrearRecordatorio={onCrearRecordatorio} irAVista={irAVista} />
       <VoiceMode
@@ -8017,6 +8041,8 @@ function Pendientes({ data, activeOwnerId, onAdd, onEdit, onEditProyecto, onRemo
   const [proyectoMindMap, setProyectoMindMap] = useState("");
   // Se entra aquí ya filtrado cuando vienes de "Ver todas las tareas" en la ficha de un proyecto.
   const [filtroProyecto, setFiltroProyecto] = useState(filtroProyectoInicial || ""); // "" = todos los proyectos, en la vista de lista
+  const [filtroAvance, setFiltroAvance] = useState("todas"); // todas | sinTerminar | sinEmpezar | enProceso | terminadas
+  const [tareaSelId, setTareaSelId] = useState(null); // ficha abierta en el panel de la derecha
   // Ramas del árbol de tareas que están cerradas (ids de las tareas padre). Vacío = todo abierto.
   const [colapsadas, setColapsadas] = useState(() => new Set());
   const [confirmacion, setConfirmacion] = useState(null);
@@ -8057,7 +8083,20 @@ function Pendientes({ data, activeOwnerId, onAdd, onEdit, onEditProyecto, onRemo
     { key: "prioridad", label: "prioridad" },
   ];
   const nombreProyectoOrden = (t) => (t.proyectoId ? (data.proyectos.find((pr) => pr.id === t.proyectoId)?.nombre || "") : "");
-  const pendientesFiltrados = filtroProyecto ? data.pendientes.filter((t) => t.proyectoId === filtroProyecto) : data.pendientes;
+  const porProyecto = filtroProyecto ? data.pendientes.filter((t) => t.proyectoId === filtroProyecto) : data.pendientes;
+  // Filtro por avance (pedido de Angel, 29 sept 2026). "Sin terminar" es el de todos los días:
+  // todo lo que sigue vivo. Una tarea cuenta como empezada si tiene estatus "En proceso" o si le
+  // pusieron un porcentaje mayor a cero.
+  const empezada = (t) => t.estatus === "En proceso" || (Number(t.avance) > 0 && Number(t.avance) < 100);
+  const pendientesFiltrados = (() => {
+    switch (filtroAvance) {
+      case "sinTerminar": return porProyecto.filter((t) => !ESTATUS_TAREA_CERRADOS.includes(t.estatus));
+      case "sinEmpezar": return porProyecto.filter((t) => !ESTATUS_TAREA_CERRADOS.includes(t.estatus) && !empezada(t));
+      case "enProceso": return porProyecto.filter((t) => !ESTATUS_TAREA_CERRADOS.includes(t.estatus) && empezada(t));
+      case "terminadas": return porProyecto.filter((t) => t.estatus === "Completada");
+      default: return porProyecto;
+    }
+  })();
   // Orden por default: alfabético por proyecto (los que no tienen proyecto van al final), y dentro
   // de cada proyecto por fecha de entrega. Como las subtareas siempre heredan el proyecto de su
   // tarea principal, este orden agrupa cada proyecto junto sin romper la jerarquía de subtareas.
@@ -8102,8 +8141,12 @@ function Pendientes({ data, activeOwnerId, onAdd, onEdit, onEditProyecto, onRemo
     }
   };
 
+  const tareaSel = tareaSelId ? data.pendientes.find((t) => t.id === tareaSelId) : null;
+
   return (
-    <div>
+    <div className="flex flex-col lg:flex-row gap-4 items-start">
+      {/* Lista a la izquierda, ficha de la tarea a la derecha — mismo patrón que Contactos. */}
+      <div className={`min-w-0 flex-1 w-full ${tareaSel ? "hidden lg:block" : ""}`}>
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-1">
         <h2 className="gp-serif text-2xl">Tareas</h2>
         <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm w-full sm:w-auto"><Plus size={14} /> Nueva</button>
@@ -8119,6 +8162,13 @@ function Pendientes({ data, activeOwnerId, onAdd, onEdit, onEditProyecto, onRemo
             <select className="gp-input" style={{ maxWidth: 220 }} value={filtroProyecto} onChange={(e) => setFiltroProyecto(e.target.value)}>
               <option value="">Todos los proyectos</option>
               {ordenadosPorNombre(data.proyectos).map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+            </select>
+            <select className="gp-input" style={{ maxWidth: 190 }} value={filtroAvance} onChange={(e) => setFiltroAvance(e.target.value)} aria-label="Filtrar por avance">
+              <option value="todas">Avance: todas</option>
+              <option value="sinTerminar">Todas menos las terminadas</option>
+              <option value="sinEmpezar">Sin empezar</option>
+              <option value="enProceso">En proceso</option>
+              <option value="terminadas">Terminadas</option>
             </select>
             <OrdenSelector opciones={opcionesOrden} value={orden} onChange={setOrden} />
             <BotonArbolTareas idsRamas={idsRamas} colapsadas={colapsadas} onCambiar={setColapsadas} />
@@ -8146,7 +8196,7 @@ function Pendientes({ data, activeOwnerId, onAdd, onEdit, onEditProyecto, onRemo
         )
       ) : (
       <div className="gp-panel overflow-x-auto">
-        <table className="gp-table">
+        <table className="gp-table gp-tabla-tareas">
           <thead>
             <tr>
               <th style={{ width: 30 }}></th>
@@ -8171,8 +8221,11 @@ function Pendientes({ data, activeOwnerId, onAdd, onEdit, onEditProyecto, onRemo
               const hecha = p.estatus === "Completada";
               const avance = tieneHijos ? Math.round(calcAvanceTarea(p)) : null;
               return (
-                <tr key={p.id} className={hecha ? "gp-fila-hecha" : undefined}>
-                  <td><CheckTareaHecha tarea={p} onCompletar={pedirCompletarTarea} onReabrir={(t) => reabrirTarea(t, onEdit)} /></td>
+                <tr key={p.id}
+                  className={`${hecha ? "gp-fila-hecha" : ""} ${p.id === tareaSelId ? "gp-fila-sel" : ""}`.trim() || undefined}
+                  onClick={() => setTareaSelId(p.id)}
+                  title="Ver el detalle de esta tarea">
+                  <td onClick={(e) => e.stopPropagation()}><CheckTareaHecha tarea={p} onCompletar={pedirCompletarTarea} onReabrir={(t) => reabrirTarea(t, onEdit)} /></td>
                   <td style={{ maxWidth: 220 }}>
                     <span style={{ paddingLeft: nivel * 18 }} className="flex items-start gap-1">
                       {nivel > 0 && <span className="gp-text-muted shrink-0">└</span>}
@@ -8226,6 +8279,24 @@ function Pendientes({ data, activeOwnerId, onAdd, onEdit, onEditProyecto, onRemo
         </table>
       </div>
       )}
+      </div>
+
+      {tareaSel && (
+        <div className="w-full lg:w-[420px] xl:w-[460px] shrink-0 lg:sticky lg:top-4">
+          <FichaTarea
+            t={tareaSel}
+            data={data}
+            onCerrar={() => setTareaSelId(null)}
+            onEditar={() => setModal({ item: paraEditar(tareaSel) })}
+            onAgregarSubtarea={() => setModal({ item: { ...empty, proyectoId: tareaSel.proyectoId, parentId: tareaSel.id } })}
+            onComentarios={() => setComentariosDe(tareaSel)}
+            onEliminar={() => { confirmarBorrado(tareaSel); setTareaSelId(null); }}
+            onCambiarAvance={(valor) => onEdit(tareaSel.id, { avance: valor })}
+            onCambiarEstatus={(nuevo) => cambiarEstatusTarea(tareaSel, nuevo)}
+            nComentarios={nComentarios(tareaSel.id)}
+          />
+        </div>
+      )}
 
       <ConfirmacionModal pregunta={confirmacion} onCerrar={() => setConfirmacion(null)} />
 
@@ -8263,6 +8334,116 @@ function Pendientes({ data, activeOwnerId, onAdd, onEdit, onEditProyecto, onRemo
           />
         </Modal>
       )}
+    </div>
+  );
+}
+
+// Ficha de la tarea: el panel que abre a la derecha al tocar un renglón en Tareas (pedido de
+// Angel, 29 sept 2026). Solo consulta y deja hacer las dos cosas que se hacen a diario sin abrir
+// el formulario completo: mover el porcentaje de avance y cambiar el estatus. Lo demás son
+// atajos a lo que ya existe (editar, subtarea, comentarios, eliminar).
+function FichaTarea({ t, data, onCerrar, onEditar, onAgregarSubtarea, onComentarios, onEliminar, onCambiarAvance, onCambiarEstatus, nComentarios }) {
+  const subtareas = (data.pendientes || []).filter((x) => x.parentId === t.id);
+  const tieneHijos = subtareas.length > 0;
+  // Con subtareas el avance NO se teclea: es la ponderación de los hijos. Teclearlo encima sería
+  // tener dos verdades para el mismo número.
+  const avance = Math.round(calcAvanceTarea(buildTareaTree((data.pendientes || []).filter((x) => x.id === t.id || descendientesDe(t.id, data.pendientes).includes(x.id)))[0] || t));
+  const hecha = t.estatus === "Completada";
+  const vencida = !hecha && t.fechaLimite && daysUntil(t.fechaLimite) < 0;
+  const nombreDe = (lista, id, vacio = "—") => (lista || []).find((x) => x.id === id)?.nombre || vacio;
+  const padre = t.parentId ? (data.pendientes || []).find((x) => x.id === t.parentId) : null;
+
+  const Dato = ({ label, valor, color }) => (
+    valor ? (
+      <div className="flex items-start justify-between gap-3 py-1.5">
+        <span className="text-xs gp-text-muted shrink-0">{label}</span>
+        <span className="text-xs text-right" style={color ? { color } : undefined}>{valor}</span>
+      </div>
+    ) : null
+  );
+
+  return (
+    <div className="gp-panel p-4">
+      <div className="flex items-start justify-between gap-2 mb-3">
+        <div className="min-w-0">
+          <p className="text-[10px] uppercase tracking-wide gp-text-muted">{padre ? "Subtarea" : "Tarea"}</p>
+          <p className="gp-serif text-base leading-tight break-words" style={hecha ? { textDecoration: "line-through" } : undefined}>{t.descripcion}</p>
+          {padre && <p className="text-xs gp-text-muted mt-1">de: {padre.descripcion}</p>}
+        </div>
+        <IconBtn title="Cerrar" onClick={onCerrar}><X size={15} /></IconBtn>
+      </div>
+
+      <div className="gp-bloque rounded-lg p-3 mb-3">
+        <div className="flex items-center justify-between mb-1.5">
+          <span className="text-xs gp-text-muted">Avance</span>
+          <span className="gp-mono text-sm" style={{ color: avance >= 100 ? "var(--teal)" : avance >= 50 ? "#087CF5" : "var(--gold)" }}>{avance}%</span>
+        </div>
+        <div className="h-2 rounded-full mb-2" style={{ background: "var(--border)" }}>
+          <div className="h-2 rounded-full" style={{ width: `${avance}%`, background: avance >= 100 ? "var(--teal)" : avance >= 50 ? "#087CF5" : "var(--gold)" }} />
+        </div>
+        {tieneHijos ? (
+          <p className="text-[10px] gp-text-muted">Se calcula solo: es el promedio del avance de sus {subtareas.length} subtarea{subtareas.length === 1 ? "" : "s"}.</p>
+        ) : (
+          <div className="flex items-center gap-2">
+            <input
+              type="range" min={0} max={100} step={5} className="flex-1"
+              value={Number.isFinite(Number(t.avance)) && t.avance !== null && t.avance !== "" ? Number(t.avance) : avance}
+              onChange={(e) => onCambiarAvance(Number(e.target.value))}
+              style={{ accentColor: "var(--gold)" }}
+              aria-label="Porcentaje de avance"
+            />
+            <input
+              type="number" min={0} max={100} className="gp-input" style={{ width: 72 }}
+              value={t.avance ?? ""} placeholder={String(avance)}
+              onChange={(e) => {
+                const v = e.target.value === "" ? null : Math.max(0, Math.min(100, Number(e.target.value)));
+                onCambiarAvance(v);
+              }}
+            />
+          </div>
+        )}
+      </div>
+
+      <div className="mb-3">
+        <span className="text-xs gp-text-muted">Estatus</span>
+        <select className="gp-input mt-1" value={t.estatus} onChange={(e) => onCambiarEstatus(e.target.value)}>
+          {ESTATUS_TAREA.map((x) => <option key={x}>{x}</option>)}
+        </select>
+      </div>
+
+      <div className="flex flex-col gap-0.5 mb-3">
+        <Dato label="Proyecto" valor={nombreDe(data.proyectos, t.proyectoId, "")} />
+        <Dato label="Cliente" valor={nombreDe(data.contactos, t.contactoId, "")} />
+        <Dato label="Responsable" valor={t.colaboradorContactoId ? nombreDe(data.contactos, t.colaboradorContactoId) : "Tú"} />
+        <Dato label="Prioridad" valor={t.prioridad} />
+        <Dato label="Fecha límite" valor={t.fechaLimite} color={vencida ? "var(--red)" : undefined} />
+        <Dato label="Programada" valor={t.fechaProgramada ? `${t.fechaProgramada}${t.horaInicio ? ` ${t.horaInicio}` : ""}` : ""} />
+        <Dato label="Revisión" valor={t.fechaRevision} />
+        <Dato label="Horas" valor={t.tiempoEstimado ? `${t.tiempoEstimado}h estimadas${t.tiempoReal ? ` · ${t.tiempoReal}h reales` : ""}` : ""} />
+        <Dato label="Precio" valor={t.precio ? fmtMoney(t.precio) : ""} />
+        <Dato label="Completada" valor={t.completadaEn ? fmtFechaCompletado(t.completadaEn) : ""} color="var(--teal)" />
+      </div>
+
+      {tieneHijos && (
+        <div className="mb-3">
+          <p className="text-[10px] uppercase tracking-wide gp-text-muted mb-1.5">Subtareas ({subtareas.length})</p>
+          <div className="flex flex-col gap-1">
+            {subtareas.map((h) => (
+              <div key={h.id} className="flex items-center justify-between gap-2 text-xs">
+                <span className="truncate" style={h.estatus === "Completada" ? { textDecoration: "line-through", color: "var(--muted)" } : undefined}>{h.descripcion}</span>
+                <span className="gp-mono gp-text-muted shrink-0">{h.estatus === "Completada" ? "100%" : `${h.avance ?? 0}%`}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 gap-2">
+        <button onClick={onEditar} className="gp-btn-ghost py-2 text-xs rounded flex items-center justify-center gap-1.5"><Pencil size={13} /> Editar</button>
+        <button onClick={onAgregarSubtarea} className="gp-btn-ghost py-2 text-xs rounded flex items-center justify-center gap-1.5"><Plus size={13} /> Subtarea</button>
+        <button onClick={onComentarios} className="gp-btn-ghost py-2 text-xs rounded flex items-center justify-center gap-1.5"><MessageCircle size={13} /> Comentarios{nComentarios > 0 ? ` (${nComentarios})` : ""}</button>
+        <button onClick={onEliminar} className="gp-btn-ghost py-2 text-xs rounded flex items-center justify-center gap-1.5 gp-text-red"><Trash2 size={13} /> Eliminar</button>
+      </div>
     </div>
   );
 }
@@ -8422,6 +8603,13 @@ function PendienteForm({ item, proyectos, contactos, pendientes, colaboradores, 
         <Field label="Tiempo estimado (horas)"><input type="number" className="gp-input" value={v.tiempoEstimado} onChange={(e) => setV({ ...v, tiempoEstimado: e.target.value })} /></Field>
         <Field label="Tiempo real (horas, cuando termine)"><input type="number" className="gp-input" value={v.tiempoReal} onChange={(e) => setV({ ...v, tiempoReal: e.target.value })} /></Field>
       </div>
+      {/* El % de avance se puede poner aquí, en la ficha de la derecha de Tareas o en el árbol del
+          centro de proyecto — es el mismo campo. Si la tarea tiene subtareas, este número se
+          ignora: ahí el avance es la ponderación de los hijos, para no tener dos verdades. */}
+      <Field label="Avance (%, opcional — se ignora si la tarea tiene subtareas)">
+        <input type="number" min={0} max={100} className="gp-input" value={v.avance ?? ""} placeholder="0"
+          onChange={(e) => setV({ ...v, avance: e.target.value === "" ? "" : Math.max(0, Math.min(100, Number(e.target.value))) })} />
+      </Field>
       {error && <p className="text-xs gp-text-red mb-2">{error}</p>}
 
       <button
@@ -10778,6 +10966,61 @@ function FichaContacto({ c, data, proyectosVinculados, onCerrar, onEditar, onVer
         </Bloque>
       )}
     </div>
+  );
+}
+
+// Formulario corto que aparece justo después de crear un contacto desde otra pantalla. Pide lo
+// mínimo para que la ficha sirva: nombre, los dos apellidos y el correo; el WhatsApp es opcional.
+// Lo demás (empresa, dirección, cumpleaños, foto, proyectos) se completa en Contactos.
+function ContactoRapidoModal({ nombreTecleado, onCerrar, onGuardar }) {
+  // Lo que se tecleó en el combo se reparte como primera propuesta: "María Quintana Ríos" ->
+  // nombre + apellido paterno + apellido materno. Es solo un punto de partida, se puede corregir.
+  const partes = (nombreTecleado || "").trim().split(/\s+/).filter(Boolean);
+  const [nombres, setNombres] = useState(partes[0] || "");
+  const [apellidoPaterno, setApellidoPaterno] = useState(partes[1] || "");
+  const [apellidoMaterno, setApellidoMaterno] = useState(partes.slice(2).join(" "));
+  const [correo, setCorreo] = useState("");
+  const [whatsapp, setWhatsapp] = useState("");
+  const [error, setError] = useState("");
+
+  const guardar = () => {
+    if (!nombres.trim()) { setError("Falta el nombre."); return; }
+    if (!apellidoPaterno.trim()) { setError("Falta el apellido paterno."); return; }
+    if (!apellidoMaterno.trim()) { setError("Falta el apellido materno."); return; }
+    const correoLimpio = correo.trim();
+    if (!correoLimpio) { setError("Falta el correo electrónico."); return; }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(correoLimpio)) { setError("Ese correo no se ve bien escrito."); return; }
+    onGuardar({
+      nombres: nombres.trim(),
+      apellidoPaterno: apellidoPaterno.trim(),
+      apellidoMaterno: apellidoMaterno.trim(),
+      nombre: [nombres.trim(), apellidoPaterno.trim(), apellidoMaterno.trim()].filter(Boolean).join(" "),
+      correo: correoLimpio,
+      whatsapp: whatsapp.trim(),
+    });
+  };
+
+  return (
+    <Modal title="Completa el contacto" onClose={onCerrar}>
+      <p className="text-sm gp-text-muted mb-4">
+        Ya quedó creado y seleccionado donde lo pediste. Completa sus datos para no dejarlo a medias;
+        si lo cierras, se queda solo con el nombre y lo puedes completar después en Contactos.
+      </p>
+      <Field label="Nombre(s)"><input className="gp-input" autoFocus value={nombres} onChange={(e) => setNombres(e.target.value)} /></Field>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <Field label="Apellido paterno"><input className="gp-input" value={apellidoPaterno} onChange={(e) => setApellidoPaterno(e.target.value)} /></Field>
+        <Field label="Apellido materno"><input className="gp-input" value={apellidoMaterno} onChange={(e) => setApellidoMaterno(e.target.value)} /></Field>
+      </div>
+      <Field label="Correo electrónico"><input className="gp-input" type="email" inputMode="email" value={correo} onChange={(e) => setCorreo(e.target.value)} /></Field>
+      <Field label="WhatsApp (opcional)">
+        <input className="gp-input" inputMode="tel" placeholder="5215512345678" value={whatsapp} onChange={(e) => setWhatsapp(e.target.value)} />
+      </Field>
+      {error && <p className="text-xs gp-text-red mb-2">{error}</p>}
+      <div className="flex gap-2 mt-1">
+        <button onClick={onCerrar} className="gp-btn-ghost flex-1 py-2 text-sm">Ahora no</button>
+        <button onClick={guardar} className="gp-btn flex-1 py-2 text-sm">Guardar</button>
+      </div>
+    </Modal>
   );
 }
 
