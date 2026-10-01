@@ -3601,6 +3601,8 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
               onAdd={(i) => addItem("proyectos", i)} onEdit={(id, p) => editItem("proyectos", id, p)} onRemove={(id) => askDelete("proyectos", id)}
               onAddComentario={(i) => addItem("comentarios", i)} onRemoveComentario={(id) => askDelete("comentarios", id)}
               onAddTarea={(i) => addItem("pendientes", i)} onEditTarea={(id, t) => editItem("pendientes", id, t)}
+              onAddFinanzas={(i) => addItem("finanzas", i)}
+              onAddPresupuesto={(i) => addItem("presupuestos", i)} onEditPresupuesto={(id, x) => editItem("presupuestos", id, x)}
               onVerDetalle={irACentroProyecto}
               onVincularContacto={vincularProyectoContacto} onDesvincularContacto={desvincularProyectoContacto}
               onIrAVista={irAVista} onVerTareasDeProyecto={irATareasDeProyecto} onVerContacto={irAFichaContacto}
@@ -5597,6 +5599,58 @@ function Stat({ label, value, tone }) {
 /* ---------- Proyectos ---------- */
 // Ingresos/egresos cobrados y pagos a colaboradores relacionados con un proyecto (se usa en la
 // lista de Proyectos y en la pantalla de detalle, por eso vive fuera de ambos componentes).
+// Categorías típicas de gasto de un proyecto. Son sugerencias para el combo, no una lista
+// cerrada: Finanzas acepta cualquier categoría y el campo deja escribir una nueva.
+const CATEGORIAS_GASTO_PROYECTO = ordenAlfabetico([
+  "Viáticos", "Traslados", "Materiales", "Software", "Subcontratación", "Comidas de trabajo",
+  "Papelería", "Permisos y trámites", "Otro",
+]);
+
+// Foto completa del dinero de un proyecto. TODO sale de donde ya vive: los movimientos reales de
+// Finanzas ligados al proyecto y el precio pactado de sus tareas. Este módulo no guarda ni un
+// importe propio — si lo hiciera, en tres meses habría dos cifras que no cuadran.
+//
+// Dos ejes que conviene no confundir:
+//   · cobrado / por cobrar  -> lo que entra del cliente (ingresos reales vs ingresos pendientes)
+//   · comprometido / pagado -> lo que sale al equipo (precio pactado de tareas vs tareas ya hechas)
+function finanzasProyecto(data, proyectoId) {
+  const movs = (data.finanzas || []).filter((f) => f.proyectoId === proyectoId);
+  const suma = (lista) => lista.reduce((t, f) => t + (Number(f.monto) || 0), 0);
+
+  const ingresos = movs.filter((f) => f.tipo === "Ingreso");
+  const egresos = movs.filter((f) => f.tipo === "Egreso");
+  const cobrado = suma(ingresos.filter((f) => f.estatus === "Cobrado"));
+  const porCobrar = suma(ingresos.filter((f) => f.estatus !== "Cobrado"));
+  const gastado = suma(egresos.filter((f) => f.estatus === "Cobrado"));
+  const gastoPorPagar = suma(egresos.filter((f) => f.estatus !== "Cobrado"));
+
+  const tareas = (data.pendientes || []).filter((t) => t.proyectoId === proyectoId && Number(t.precio) > 0);
+  // Comprometido = todo lo pactado, se haya hecho o no. Devengado = lo de las tareas ya
+  // terminadas, que es lo que de verdad hay que pagar hoy.
+  const comprometidoEquipo = tareas.reduce((t, x) => t + (Number(x.precio) || 0), 0);
+  const devengadoEquipo = tareas
+    .filter((x) => x.estatus === "Completada")
+    .reduce((t, x) => t + (Number(x.precio) || 0), 0);
+
+  const ingresoTotal = cobrado + porCobrar;
+  const costoTotal = comprometidoEquipo + gastado + gastoPorPagar;
+  const margen = ingresoTotal - costoTotal;
+  const margenPct = ingresoTotal > 0 ? Math.round((margen / ingresoTotal) * 100) : null;
+
+  // Presupuesto de gasto del proyecto, si se fijó uno (tabla presupuestos, que ya traía
+  // proyecto_id y nadie estaba usando).
+  const presupuesto = (data.presupuestos || []).find((x) => x.proyectoId === proyectoId) || null;
+  const topeGasto = presupuesto ? Number(presupuesto.monto) || 0 : null;
+  const gastoReal = gastado + gastoPorPagar;
+  const pctPresupuesto = topeGasto ? Math.round((gastoReal / topeGasto) * 100) : null;
+
+  return {
+    movs, cobrado, porCobrar, ingresoTotal, gastado, gastoPorPagar, gastoReal,
+    comprometidoEquipo, devengadoEquipo, costoTotal, margen, margenPct,
+    presupuesto, topeGasto, pctPresupuesto,
+  };
+}
+
 function rentabilidadProyecto(data, proyectoId) {
   const movs = data.finanzas.filter((f) => f.proyectoId === proyectoId && f.estatus === "Cobrado");
   const ingresos = movs.filter((f) => f.tipo === "Ingreso").reduce((s, f) => s + (Number(f.monto) || 0), 0);
@@ -5977,6 +6031,7 @@ function Proyectos({
   data, onAdd, onEdit, onRemove, onAddComentario, onRemoveComentario,
   onVerDetalle, onVincularContacto, onDesvincularContacto,
   onAddTarea, onEditTarea, onIrAVista, onVerTareasDeProyecto, onVerContacto,
+  onAddFinanzas, onAddPresupuesto, onEditPresupuesto,
   onCrearContacto, onEnviarInvitacion, onAceptarEnNombre,
   sensibleDesbloqueadoHasta, onDesbloquear, miNombre, miAvatarUrl,
   proyectoSel, onSeleccionar, fichaTab, onFichaTab,
@@ -6296,6 +6351,14 @@ function Proyectos({
             onVerTareas={onVerTareasDeProyecto}
             onIrAVista={onIrAVista}
             onNuevaTarea={() => setModal({ tarea: true, proyectoId: seleccionado.id })}
+            onAddFinanzas={onAddFinanzas}
+            onAddTarea={onAddTarea}
+            onGuardarPresupuesto={(actual, monto) => {
+              // Un solo tope por proyecto: si ya había uno se edita, si no se crea. El periodo
+              // va vacío a propósito — este presupuesto es del proyecto completo, no mensual.
+              if (actual) onEditPresupuesto(actual.id, { monto });
+              else onAddPresupuesto({ id: uid(), tipo: "Proyecto", categoria: "", proyectoId: seleccionado.id, periodo: "", monto, notas: "" });
+            }}
             sensibleDesbloqueadoHasta={sensibleDesbloqueadoHasta}
             onDesbloquear={onDesbloquear}
           />
@@ -6423,14 +6486,177 @@ function EtiquetasProyecto({ p, onEdit }) {
 // Lo que la lista ya NO muestra vive aquí, y siempre como RESUMEN: las tareas son del módulo
 // Tareas, el dinero es de Finanzas, las personas son de Contactos. Esta ficha solo consulta,
 // relaciona y manda al módulo fuente — nunca guarda una copia de esos datos.
+// --- Finanzas del proyecto (pestaña Finanzas de la ficha) -------------------------------------
+// Todo lo que se captura aquí se guarda en su módulo de siempre: los cobros y gastos son
+// movimientos de Finanzas con proyecto_id, y el pago al responsable es una tarea con precio.
+// Esta pantalla solo es la puerta: ni una cifra vive en la tabla de proyectos.
+
+// Alta rápida de un movimiento del proyecto. Sirve para los dos casos: cobrarle al cliente
+// (Ingreso) y registrar un gasto —viáticos, traslados, materiales— (Egreso).
+function MovimientoProyectoForm({ tipo, proyecto, contactos, categoriasUsadas, onGuardar, onCancelar }) {
+  const esIngreso = tipo === "Ingreso";
+  const [concepto, setConcepto] = useState(esIngreso ? `Cobro — ${proyecto.nombre}` : "");
+  const [monto, setMonto] = useState("");
+  const [fecha, setFecha] = useState(todayISO());
+  const [fechaVencimiento, setFechaVencimiento] = useState("");
+  const [categoria, setCategoria] = useState(esIngreso ? "Proyectos" : "Viáticos");
+  const [forma, setForma] = useState("Transferencia");
+  const [estatus, setEstatus] = useState(esIngreso ? "Pendiente" : "Cobrado");
+  const [contactoId, setContactoId] = useState(esIngreso ? (proyecto.responsableContactoId || "") : "");
+  const [error, setError] = useState("");
+
+  const sugerencias = esIngreso
+    ? [...new Set(["Proyectos", ...(categoriasUsadas || [])])]
+    : [...new Set([...CATEGORIAS_GASTO_PROYECTO, ...(categoriasUsadas || [])])];
+
+  return (
+    <div>
+      <p className="text-sm gp-text-muted mb-4">
+        {esIngreso
+          ? "Lo que vas a cobrar por este proyecto. Déjalo en Pendiente y con fecha de cobro: así cuenta como \u201cpor cobrar\u201d y el motor de recordatorios te avisa cuando se acerque."
+          : "Un gasto del proyecto: traslados, viáticos, materiales, lo que sea. Se guarda en Finanzas ligado a este proyecto."}
+      </p>
+      <Field label="Concepto"><input className="gp-input" autoFocus value={concepto} onChange={(e) => setConcepto(e.target.value)} /></Field>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <Field label="Monto"><input type="number" className="gp-input" inputMode="decimal" value={monto} onChange={(e) => setMonto(e.target.value)} /></Field>
+        <Field label="Fecha"><input type="date" className="gp-input" value={fecha} onChange={(e) => setFecha(e.target.value)} /></Field>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <Field label="Categoría">
+          <input className="gp-input" list="cats-mov-proyecto" value={categoria} onChange={(e) => setCategoria(e.target.value)} />
+          <datalist id="cats-mov-proyecto">{sugerencias.map((c) => <option key={c} value={c} />)}</datalist>
+        </Field>
+        <Field label="Forma de pago">
+          <select className="gp-input" value={forma} onChange={(e) => setForma(e.target.value)}>{FORMA_PAGO.map((f) => <option key={f}>{f}</option>)}</select>
+        </Field>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <Field label="Estatus">
+          <select className="gp-input" value={estatus} onChange={(e) => setEstatus(e.target.value)}>
+            <option value="Cobrado">{esIngreso ? "Ya cobrado" : "Ya pagado"}</option>
+            <option value="Pendiente">{esIngreso ? "Por cobrar" : "Por pagar"}</option>
+            <option value="Parcial">Parcial (anticipo)</option>
+          </select>
+        </Field>
+        <Field label={esIngreso ? "Fecha de cobro (opcional)" : "Fecha de pago (opcional)"}>
+          <input type="date" className="gp-input" value={fechaVencimiento} onChange={(e) => setFechaVencimiento(e.target.value)} disabled={estatus === "Cobrado"} />
+        </Field>
+      </div>
+      <Field label={esIngreso ? "Cliente (opcional)" : "A quién se le paga (opcional)"}>
+        <select className="gp-input" value={contactoId} onChange={(e) => setContactoId(e.target.value)}>
+          <option value="">— ninguno —</option>
+          {ordenadosPorNombre(contactos).map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+        </select>
+      </Field>
+      {error && <p className="text-xs gp-text-red mb-2">{error}</p>}
+      <div className="flex gap-2 mt-1">
+        <button onClick={onCancelar} className="gp-btn-ghost flex-1 py-2 text-sm">Cancelar</button>
+        <button
+          className="gp-btn flex-1 py-2 text-sm"
+          onClick={() => {
+            if (!concepto.trim()) { setError("Captura un concepto."); return; }
+            if (!(Number(monto) > 0)) { setError("El monto tiene que ser mayor a cero."); return; }
+            onGuardar({
+              id: uid(), tipo, concepto: concepto.trim(), monto: Number(monto), fecha,
+              fechaVencimiento: estatus === "Cobrado" ? "" : fechaVencimiento,
+              categoria: categoria.trim() || (esIngreso ? "Proyectos" : "Otro"),
+              forma, estatus, proyectoId: proyecto.id, contactoId: contactoId || "",
+              pautando: false, esRecurrente: false, frecuencia: "Mensual", fechaFin: "",
+            });
+          }}
+        >Guardar</button>
+      </div>
+    </div>
+  );
+}
+
+// Pago al responsable por liderar el proyecto (opción A, elegida por Angel el 1 oct 2026): se
+// crea como una TAREA con precio y responsable, no como un campo nuevo del proyecto. Así entra
+// sola al reparto por persona, al costo comprometido y a "Mis pagos" del colaborador, que es el
+// circuito que ya existe para pagarle a alguien.
+function PagoResponsableForm({ proyecto, contactos, onGuardar, onCancelar }) {
+  const [contactoId, setContactoId] = useState(proyecto.responsableContactoId || "");
+  const [monto, setMonto] = useState("");
+  const [descripcion, setDescripcion] = useState(`Liderar el proyecto — ${proyecto.nombre}`);
+  const [fechaPago, setFechaPago] = useState("");
+  const [error, setError] = useState("");
+  return (
+    <div>
+      <p className="text-sm gp-text-muted mb-4">
+        Un pago por dirigir el proyecto, aparte de las tareas que ejecute. Se registra como una
+        tarea con precio a nombre del responsable: así aparece en el reparto del proyecto y en los
+        pagos del colaborador, sin inventar un lugar nuevo donde guardar dinero.
+      </p>
+      <Field label="Responsable">
+        <select className="gp-input" value={contactoId} onChange={(e) => setContactoId(e.target.value)}>
+          <option value="">— yo —</option>
+          {ordenadosPorNombre(contactos).map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+        </select>
+      </Field>
+      <Field label="Concepto"><input className="gp-input" value={descripcion} onChange={(e) => setDescripcion(e.target.value)} /></Field>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <Field label="Monto"><input type="number" className="gp-input" inputMode="decimal" value={monto} onChange={(e) => setMonto(e.target.value)} /></Field>
+        <Field label="Fecha de pago aprox. (opcional)"><input type="date" className="gp-input" value={fechaPago} onChange={(e) => setFechaPago(e.target.value)} /></Field>
+      </div>
+      {error && <p className="text-xs gp-text-red mb-2">{error}</p>}
+      <div className="flex gap-2 mt-1">
+        <button onClick={onCancelar} className="gp-btn-ghost flex-1 py-2 text-sm">Cancelar</button>
+        <button
+          className="gp-btn flex-1 py-2 text-sm"
+          onClick={() => {
+            if (!(Number(monto) > 0)) { setError("El monto tiene que ser mayor a cero."); return; }
+            onGuardar({
+              id: uid(), proyectoId: proyecto.id, parentId: "",
+              descripcion: descripcion.trim() || "Liderar el proyecto",
+              fechaLimite: proyecto.fechaFin || "", fechaRevision: "", prioridad: "Media",
+              estatus: "Pendiente", colaboradorContactoId: contactoId || null, contactoId: "",
+              precio: Number(monto), fechaPagoAprox: fechaPago, tiempoEstimado: "", tiempoReal: "",
+              asignadoA: "", avance: "",
+            });
+          }}
+        >Guardar</button>
+      </div>
+    </div>
+  );
+}
+
+// Tope de gasto del proyecto. Usa la tabla `presupuestos`, que ya tenía proyecto_id.
+function PresupuestoProyectoForm({ proyecto, actual, onGuardar, onCancelar }) {
+  const [monto, setMonto] = useState(actual ? String(actual.monto ?? "") : "");
+  const [error, setError] = useState("");
+  return (
+    <div>
+      <p className="text-sm gp-text-muted mb-4">
+        Cuánto estás dispuesto a gastar en este proyecto. No bloquea nada: sirve para ver en la
+        barra cuánto llevas consumido y que no te agarre de sorpresa.
+      </p>
+      <Field label="Tope de gasto"><input type="number" className="gp-input" inputMode="decimal" autoFocus value={monto} onChange={(e) => setMonto(e.target.value)} /></Field>
+      {error && <p className="text-xs gp-text-red mb-2">{error}</p>}
+      <div className="flex gap-2 mt-1">
+        <button onClick={onCancelar} className="gp-btn-ghost flex-1 py-2 text-sm">Cancelar</button>
+        <button className="gp-btn flex-1 py-2 text-sm" onClick={() => {
+          if (!(Number(monto) > 0)) { setError("Captura un monto mayor a cero."); return; }
+          onGuardar(Number(monto));
+        }}>Guardar</button>
+      </div>
+    </div>
+  );
+}
+
 function FichaProyecto({
   p, data, contactosVinculados, miNombre, miAvatarUrl, tab, onTab,
   onCerrar, onEditar, onEdit, onEditTarea, onAddComentario,
   onVincularContacto, onDesvincularContacto, onVerContacto,
   onVerDetalle, onVerTareas, onIrAVista, onNuevaTarea,
+  onAddFinanzas, onAddTarea, onGuardarPresupuesto,
   sensibleDesbloqueadoHasta, onDesbloquear,
 }) {
   const setTab = onTab;
+  // Pestaña Finanzas: qué formulario está abierto y los números del proyecto.
+  const [modalFin, setModalFin] = useState(null); // null | ingreso | egreso | responsable | presupuesto
+  const fin = finanzasProyecto(data, p.id);
+  const reparto = repartoCostosProyecto(data, p.id);
+  const categoriasUsadas = [...new Set((data.finanzas || []).map((f) => f.categoria).filter(Boolean))].sort();
   // Ramas cerradas del árbol de tareas de la pestaña "Tareas" de esta ficha.
   const [colapsadasTareas, setColapsadasTareas] = useState(() => new Set());
   const [confirmacion, setConfirmacion] = useState(null);
@@ -6736,33 +6962,185 @@ function FichaProyecto({
       )}
 
       {tab === "finanzas" && (
-        <BloqueFicha titulo="Resumen financiero" icono={<Wallet size={14} className="gp-text-gold" />}>
+        <BloqueFicha titulo="Dinero del proyecto" icono={<Wallet size={14} className="gp-text-gold" />}>
           {/* Mismo enmascarado que el resto de la app: Finanzas es un módulo sensible, verlo
               resumido aquí sin candado sería el mismo hueco que ya se cerró en Centro de Mando. */}
           {!sensibleDesbloqueado
             ? <CandadoFicha texto="Verifica tu contraseña para ver los números de este proyecto" onDesbloquear={onDesbloquear} />
             : (
               <>
-                <div className="grid grid-cols-2 gap-2">
-                  {[
-                    { label: "Ingresos", valor: r.ingresos, color: "var(--teal)" },
-                    { label: "Egresos", valor: r.egresos, color: "var(--red)" },
-                    { label: "Neto", valor: r.neto, color: r.neto >= 0 ? "var(--teal)" : "var(--red)" },
-                    { label: "Costo estimado", valor: r.costoEstimadoTotal, color: "var(--gold)" },
-                  ].map((x) => (
-                    <div key={x.label} className="gp-bloque rounded-lg p-2.5">
-                      <p className="text-[10px] gp-text-muted">{x.label}</p>
-                      <p className="gp-mono text-sm" style={{ color: x.color }}>{fmtMoney(x.valor)}</p>
-                    </div>
-                  ))}
+                {/* Dos ejes, no cuatro números sueltos: lo que ENTRA del cliente y lo que SALE
+                    al equipo y en gastos. Así se lee de un vistazo si el proyecto deja algo. */}
+                <p className="text-[10px] uppercase tracking-wide gp-text-muted mb-1.5">Entra del cliente</p>
+                <div className="grid grid-cols-2 gap-2 mb-3">
+                  <div className="gp-bloque rounded-lg p-2.5">
+                    <p className="text-[10px] gp-text-muted">Por cobrar</p>
+                    <p className="gp-mono text-sm gp-text-gold">{fmtMoney(fin.porCobrar)}</p>
+                  </div>
+                  <div className="gp-bloque rounded-lg p-2.5">
+                    <p className="text-[10px] gp-text-muted">Ya cobrado</p>
+                    <p className="gp-mono text-sm gp-text-teal">{fmtMoney(fin.cobrado)}</p>
+                  </div>
                 </div>
+
+                <p className="text-[10px] uppercase tracking-wide gp-text-muted mb-1.5">Sale del proyecto</p>
+                <div className="grid grid-cols-2 gap-2 mb-3">
+                  <div className="gp-bloque rounded-lg p-2.5">
+                    <p className="text-[10px] gp-text-muted">Comprometido al equipo</p>
+                    <p className="gp-mono text-sm gp-text-red">{fmtMoney(fin.comprometidoEquipo)}</p>
+                    <p className="text-[9px] gp-text-muted">{fmtMoney(fin.devengadoEquipo)} ya se ganó</p>
+                  </div>
+                  <div className="gp-bloque rounded-lg p-2.5">
+                    <p className="text-[10px] gp-text-muted">Gastos</p>
+                    <p className="gp-mono text-sm gp-text-red">{fmtMoney(fin.gastoReal)}</p>
+                    {fin.gastoPorPagar > 0 && <p className="text-[9px] gp-text-muted">{fmtMoney(fin.gastoPorPagar)} sin pagar</p>}
+                  </div>
+                </div>
+
+                {/* El número que de verdad dice si conviene: lo que vas a cobrar menos todo lo
+                    que te va a costar. En rojo cuando el proyecto va a perder dinero. */}
+                <div className="rounded-lg p-3 mb-3" style={{
+                  background: fin.margen >= 0 ? "rgba(95,191,139,.12)" : "rgba(239,68,68,.12)",
+                  border: `1px solid ${fin.margen >= 0 ? "var(--teal)" : "var(--red)"}`,
+                }}>
+                  <div className="flex items-baseline justify-between gap-2">
+                    <span className="text-xs font-medium">Margen</span>
+                    <span className="gp-serif text-lg" style={{ color: fin.margen >= 0 ? "var(--teal)" : "var(--red)" }}>
+                      {fmtMoney(fin.margen)}{fin.margenPct !== null ? ` · ${fin.margenPct}%` : ""}
+                    </span>
+                  </div>
+                  <p className="text-[10px] gp-text-muted mt-1">
+                    {fin.ingresoTotal === 0
+                      ? "Todavía no registras cuánto vas a cobrar por este proyecto."
+                      : fin.margen >= 0
+                        ? `${fmtMoney(fin.ingresoTotal)} por cobrar menos ${fmtMoney(fin.costoTotal)} de costos.`
+                        : `Vas a gastar ${fmtMoney(Math.abs(fin.margen))} más de lo que vas a cobrar.`}
+                  </p>
+                </div>
+
+                {/* Tope de gasto, si se fijó uno. */}
+                {fin.topeGasto !== null && (
+                  <div className="mb-3">
+                    <div className="flex items-baseline justify-between gap-2 mb-1">
+                      <span className="text-[10px] uppercase tracking-wide gp-text-muted">Presupuesto de gasto</span>
+                      <span className="gp-mono text-[11px]" style={{ color: fin.pctPresupuesto > 100 ? "var(--red)" : "var(--muted)" }}>
+                        {fmtMoney(fin.gastoReal)} de {fmtMoney(fin.topeGasto)} · {fin.pctPresupuesto}%
+                      </span>
+                    </div>
+                    <div className="h-2 rounded-full" style={{ background: "var(--border)" }}>
+                      <div className="h-2 rounded-full" style={{
+                        width: `${Math.min(100, fin.pctPresupuesto)}%`,
+                        background: fin.pctPresupuesto > 100 ? "var(--red)" : fin.pctPresupuesto > 80 ? "var(--gold)" : "var(--teal)",
+                      }} />
+                    </div>
+                  </div>
+                )}
+
+                {/* A quién le toca qué, con lo que ya se ganó por tareas terminadas. */}
+                {reparto.length > 0 && (
+                  <div className="mb-3">
+                    <p className="text-[10px] uppercase tracking-wide gp-text-muted mb-1.5">A quién le toca</p>
+                    <div className="flex flex-col gap-1">
+                      {reparto.map((x) => (
+                        <div key={x.key} className="flex items-center justify-between gap-2 text-xs">
+                          <span className="truncate">{x.nombre}{x.esYo ? " (tú)" : ""}</span>
+                          <span className="shrink-0 gp-mono text-[11px]">
+                            <span className="gp-text-teal">{fmtMoney(x.generado)}</span>
+                            <span className="gp-text-muted"> de {fmtMoney(x.total)}</span>
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Movimientos reales ligados al proyecto. */}
+                {fin.movs.length > 0 && (
+                  <div className="mb-3">
+                    <p className="text-[10px] uppercase tracking-wide gp-text-muted mb-1.5">Movimientos ({fin.movs.length})</p>
+                    <div className="flex flex-col gap-1">
+                      {[...fin.movs].sort((a, b) => (b.fecha || "").localeCompare(a.fecha || "")).slice(0, 8).map((f) => (
+                        <div key={f.id} className="flex items-center justify-between gap-2 text-xs">
+                          <span className="truncate">{f.concepto}</span>
+                          <span className="shrink-0 flex items-center gap-1.5">
+                            <Badge tone={f.estatus === "Cobrado" ? "teal" : "gold"}>{f.estatus}</Badge>
+                            <span className="gp-mono text-[11px]" style={{ color: f.tipo === "Ingreso" ? "var(--teal)" : "var(--red)" }}>
+                              {f.tipo === "Ingreso" ? "+" : "−"}{fmtMoney(f.monto)}
+                            </span>
+                          </span>
+                        </div>
+                      ))}
+                      {fin.movs.length > 8 && <p className="text-[10px] gp-text-muted">y {fin.movs.length - 8} más.</p>}
+                    </div>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-2 gap-2">
+                  <button onClick={() => setModalFin("ingreso")} className="gp-btn-ghost py-2 text-xs rounded flex items-center justify-center gap-1.5"><Plus size={13} /> Cobro al cliente</button>
+                  <button onClick={() => setModalFin("egreso")} className="gp-btn-ghost py-2 text-xs rounded flex items-center justify-center gap-1.5"><Plus size={13} /> Gasto del proyecto</button>
+                  <button onClick={() => setModalFin("responsable")} className="gp-btn-ghost py-2 text-xs rounded flex items-center justify-center gap-1.5"><Users size={13} /> Pago al responsable</button>
+                  <button onClick={() => setModalFin("presupuesto")} className="gp-btn-ghost py-2 text-xs rounded flex items-center justify-center gap-1.5"><Target size={13} /> {fin.topeGasto !== null ? "Cambiar tope" : "Poner tope"}</button>
+                </div>
+
+                <div className="flex items-center justify-between gap-2 mt-3">
+                  <button onClick={() => onIrAVista("finanzas")} className="text-xs gp-text-gold flex items-center gap-1">Ver en Finanzas <ChevronRight size={12} /></button>
+                  <button
+                    onClick={() => exportarFilasPDF(
+                      [...fin.movs].sort((a, b) => (a.fecha || "").localeCompare(b.fecha || "")),
+                      [
+                        { label: "Fecha", get: (f) => f.fecha },
+                        { label: "Concepto", get: (f) => f.concepto },
+                        { label: "Tipo", get: (f) => f.tipo },
+                        { label: "Categoría", get: (f) => f.categoria },
+                        { label: "Estatus", get: (f) => f.estatus },
+                        { label: "Monto", get: (f) => fmtMoney(f.monto) },
+                      ],
+                      `proyecto_${p.nombre}`,
+                      `Estado financiero — ${p.nombre}`,
+                      `Por cobrar ${fmtMoney(fin.porCobrar)} · Cobrado ${fmtMoney(fin.cobrado)} · Equipo ${fmtMoney(fin.comprometidoEquipo)} · Gastos ${fmtMoney(fin.gastoReal)} · Margen ${fmtMoney(fin.margen)}`
+                    )}
+                    className="text-xs gp-text-muted flex items-center gap-1"
+                  >
+                    <Download size={12} /> PDF
+                  </button>
+                </div>
+
                 <p className="text-[10px] gp-text-muted mt-2">
-                  Calculado desde los movimientos de Finanzas ligados a este proyecto y el precio pactado de sus tareas. Aquí no se registra dinero: se registra en Finanzas.
+                  Todo sale de Finanzas y del precio pactado de las tareas. Lo que capturas aquí se
+                  guarda allá, ligado a este proyecto: este módulo no almacena ni un importe propio.
                 </p>
-                <button onClick={() => onIrAVista("finanzas")} className="text-xs gp-text-gold mt-3 flex items-center gap-1">Ver finanzas <ChevronRight size={12} /></button>
               </>
             )}
         </BloqueFicha>
+      )}
+
+      {modalFin === "ingreso" && (
+        <Modal title="Cobro del proyecto" onClose={() => setModalFin(null)}>
+          <MovimientoProyectoForm tipo="Ingreso" proyecto={p} contactos={data.contactos} categoriasUsadas={categoriasUsadas}
+            onCancelar={() => setModalFin(null)}
+            onGuardar={(mov) => { onAddFinanzas(mov); setModalFin(null); }} />
+        </Modal>
+      )}
+      {modalFin === "egreso" && (
+        <Modal title="Gasto del proyecto" onClose={() => setModalFin(null)}>
+          <MovimientoProyectoForm tipo="Egreso" proyecto={p} contactos={data.contactos} categoriasUsadas={categoriasUsadas}
+            onCancelar={() => setModalFin(null)}
+            onGuardar={(mov) => { onAddFinanzas(mov); setModalFin(null); }} />
+        </Modal>
+      )}
+      {modalFin === "responsable" && (
+        <Modal title="Pago al responsable" onClose={() => setModalFin(null)}>
+          <PagoResponsableForm proyecto={p} contactos={data.contactos}
+            onCancelar={() => setModalFin(null)}
+            onGuardar={(tarea) => { onAddTarea(tarea); setModalFin(null); }} />
+        </Modal>
+      )}
+      {modalFin === "presupuesto" && (
+        <Modal title="Tope de gasto del proyecto" onClose={() => setModalFin(null)}>
+          <PresupuestoProyectoForm proyecto={p} actual={fin.presupuesto}
+            onCancelar={() => setModalFin(null)}
+            onGuardar={(monto) => { onGuardarPresupuesto(fin.presupuesto, monto); setModalFin(null); }} />
+        </Modal>
       )}
 
       {tab === "contactos" && (
