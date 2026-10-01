@@ -11039,9 +11039,11 @@ function ContactoRapidoModal({ nombreTecleado, onCerrar, onGuardar }) {
     if (!nombres.trim()) { setError("Falta el nombre."); return; }
     if (!apellidoPaterno.trim()) { setError("Falta el apellido paterno."); return; }
     if (!apellidoMaterno.trim()) { setError("Falta el apellido materno."); return; }
+    // El correo es opcional (Angel, 30 sept 2026): mucha gente a la que se le registra algo no
+    // tiene o no se sabe su correo, y bloquear por eso dejaba el contacto a medias. Si sí se
+    // captura, se revisa que esté bien escrito.
     const correoLimpio = correo.trim();
-    if (!correoLimpio) { setError("Falta el correo electrónico."); return; }
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(correoLimpio)) { setError("Ese correo no se ve bien escrito."); return; }
+    if (correoLimpio && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(correoLimpio)) { setError("Ese correo no se ve bien escrito."); return; }
     onGuardar({
       nombres: nombres.trim(),
       apellidoPaterno: apellidoPaterno.trim(),
@@ -11063,7 +11065,7 @@ function ContactoRapidoModal({ nombreTecleado, onCerrar, onGuardar }) {
         <Field label="Apellido paterno"><input className="gp-input" value={apellidoPaterno} onChange={(e) => setApellidoPaterno(e.target.value)} /></Field>
         <Field label="Apellido materno"><input className="gp-input" value={apellidoMaterno} onChange={(e) => setApellidoMaterno(e.target.value)} /></Field>
       </div>
-      <Field label="Correo electrónico"><input className="gp-input" type="email" inputMode="email" value={correo} onChange={(e) => setCorreo(e.target.value)} /></Field>
+      <Field label="Correo electrónico (opcional)"><input className="gp-input" type="email" inputMode="email" value={correo} onChange={(e) => setCorreo(e.target.value)} /></Field>
       <Field label="WhatsApp (opcional)">
         <input className="gp-input" inputMode="tel" placeholder="5215512345678" value={whatsapp} onChange={(e) => setWhatsapp(e.target.value)} />
       </Field>
