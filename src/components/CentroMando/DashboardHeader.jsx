@@ -23,13 +23,11 @@ export default function DashboardHeader({ primerNombre, avatarUrl, onBuscar, onN
   const iniciales = (primerNombre || '').slice(0, 2).toUpperCase();
   return (
     <div className="flex items-center justify-between gap-3 mb-5 flex-wrap">
-      {/* El buscador global es la acción principal de esta barra, así que lleva contorno propio
-          —más grueso y en el dorado de la marca— en vez del borde delgado de un campo normal
-          (pedido de Angel, 1 oct 2026): con el lienzo claro se perdía entre el fondo. */}
+      {/* El contorno dorado vive en la clase .gp-buscador (App.jsx), compartida con el buscador
+          del menú lateral y el de todas las listas: un solo lugar donde cambiarlo. */}
       <button
         onClick={onBuscar}
-        className="gp-input flex items-center gap-2.5 px-3.5 py-2.5 text-sm text-left flex-1 min-w-[220px] max-w-md"
-        style={{ border: '2px solid var(--gold)', borderRadius: 10, background: 'var(--panel)' }}
+        className="gp-input gp-buscador flex items-center gap-2.5 px-3.5 py-2.5 text-sm text-left flex-1 min-w-[220px] max-w-md"
       >
         <Search size={16} className="gp-text-muted shrink-0" />
         <span className="gp-text-muted flex-1 truncate">Buscar en ARKEYONE... (tareas, proyectos, contactos, etc.)</span>

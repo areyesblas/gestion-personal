@@ -128,6 +128,11 @@ const Tokens = ({ tema = "oscuro" }) => (
        ícono interno que si no se fija la altura, los hace ver más altos/bajos que sus vecinos. */
     input.gp-input, select.gp-input{ height:34px; }
     .gp-input:focus{ outline:1px solid var(--gold); border-color:var(--gold); }
+    /* Campo de búsqueda: contorno grueso en el dorado de la marca, igual que el buscador del
+       Centro de mando (Angel, 1 oct 2026: "que todos los textboxes de buscar sean como ese").
+       Buscar es la acción que más se usa y con un borde de 1 px se perdía contra el fondo. */
+    .gp-buscador{ border:2px solid var(--gold) !important; border-radius:10px !important; background:var(--panel) !important; }
+    .gp-buscador:focus{ outline:none; box-shadow:0 0 0 3px rgba(245,158,11,.25); }
     /* En celular, un input con letra menor a 16px hace que iOS/Android le hagan zoom
        automático al enfocarlo (y a veces no regresa bien al tamaño normal al desenfocar).
        Por eso en pantallas chicas los inputs usan 16px; en escritorio se quedan en 13px. */
@@ -155,6 +160,9 @@ const Tokens = ({ tema = "oscuro" }) => (
        porque ahí sí cambia la naturaleza de lo que viene abajo. */
     .gp-nav-grupo + .gp-nav-grupo{ margin-top:10px; }
     .gp-nav-separador{ border-top:1px solid var(--sidebar-borde); }
+    /* Placa del logo: blanca siempre, porque el logotipo está hecho para fondo claro. Sobre el
+       menú blanco del tema claro es invisible (blanco sobre blanco) y no estorba. */
+    .gp-placa-logo{ background:#FFFFFF; border-radius:12px; padding:6px 9px; }
     /* El título de cada sección también se lee más: es el rótulo que ordena todo el menú. */
     .gp-nav-titulo{ font-weight:600; letter-spacing:.06em; }
     .gp-dot-teal{ background:var(--teal); } .gp-dot-red{ background:var(--red); } .gp-dot-gold{ background:var(--gold); }
@@ -861,7 +869,7 @@ function BarraListaEstandar({ busqueda, onBusqueda, placeholder, onExportExcel, 
     <div className="flex flex-wrap items-center gap-2 mb-4">
       <div className="relative flex-1" style={{ minWidth: 180, maxWidth: 320 }}>
         <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 gp-text-muted" style={{ pointerEvents: "none" }} />
-        <input className="gp-input text-sm" style={{ paddingLeft: 32 }} placeholder={placeholder || "Buscar en esta lista…"} value={busqueda} onChange={(e) => onBusqueda(e.target.value)} />
+        <input className="gp-input gp-buscador text-sm" style={{ paddingLeft: 32 }} placeholder={placeholder || "Buscar en esta lista…"} value={busqueda} onChange={(e) => onBusqueda(e.target.value)} />
       </div>
       {extra}
       <button onClick={() => setConfirmando("excel")} className={`text-xs px-2.5 py-1.5 rounded gp-btn-ghost flex items-center gap-1 ${extra ? "ml-auto" : ""}`}><Download size={12} /> Excel</button>
@@ -3326,7 +3334,14 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
             >
               {sidebarColapsado ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}
             </button>
-            <img src="/icono-arkeyone.png" alt="ARKEY·ONE" style={{ height: 34 }} />
+            {/* El logotipo tiene la "A" en navy (#031E4A) y sobre el menú oscuro (#0B2341) queda
+                en 1.03:1 de contraste: literalmente invisible. En vez de recolorear el logo —que
+                la guía de marca prohíbe— se le pone detrás el fondo blanco para el que fue
+                diseñado. En tema claro el menú ya es blanco, así que la placa no se nota.
+                Elegido por Angel el 1 oct 2026 (opción "A · con placa"). */}
+            <span className="gp-placa-logo inline-flex items-center justify-center">
+              <img src="/icono-arkeyone.png" alt="ARKEY·ONE" style={{ height: 34, display: "block" }} />
+            </span>
             {/* El nombre va con punto medio, igual que el lockup de la pantalla de login. */}
             <span className={`gp-serif text-lg font-semibold ${sidebarColapsado ? "md:hidden" : ""}`} style={{ letterSpacing: "0.3px" }}>ARKEY·ONE</span>
           </div>
@@ -3339,7 +3354,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
             <button
               onClick={() => setBusquedaAbierta(true)}
               title="Buscar en todo ARKEYONE"
-              className={`gp-input hidden md:flex items-center gap-2 px-3 py-2 text-left ${sidebarColapsado ? "md:justify-center md:px-0" : ""}`}
+              className={`gp-input gp-buscador hidden md:flex items-center gap-2 px-3 py-2 text-left ${sidebarColapsado ? "md:justify-center md:px-0" : ""}`}
             >
               <Search size={16} className="shrink-0" />
               {/* Con texto, no solo el ícono: así se lee como campo de búsqueda y no como un
@@ -3448,12 +3463,12 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
               style={cerrandoSesion ? { opacity: 0.6 } : undefined}>
               <LogOut size={15} /> <span className={sidebarColapsado ? "md:hidden" : ""}>{cerrandoSesion ? "Cerrando sesión…" : "Cerrar sesión"}</span>
             </button>
-            <p className={`text-[11px] gp-text-muted truncate px-3 pt-1.5 ${sidebarColapsado ? "md:hidden" : ""}`}>
-              {activeOwnerId === misId ? miEmail : `Viendo: ${activeOwnerEmail}`}
-            </p>
+            {/* El correo salió de aquí (Angel, 1 oct 2026). Cuando se está viendo la cuenta de
+                otra persona eso lo sigue diciendo el selector de cuenta de arriba, que es donde
+                de verdad importa. */}
             {/* Temporal, mientras depuramos los bugs de voz en Android/iOS: confirma de un
                 vistazo si un dispositivo ya cargó el último deploy. Quitar cuando ya no haga falta. */}
-            <p className={`text-[10px] gp-text-muted px-3 ${sidebarColapsado ? "md:hidden" : ""}`}>commit {__COMMIT_HASH__}</p>
+            <p className={`text-[10px] gp-text-muted px-3 pt-1.5 ${sidebarColapsado ? "md:hidden" : ""}`}>commit {__COMMIT_HASH__}</p>
           </div>
         </div>
 
@@ -6881,23 +6896,16 @@ function ProyectoForm({ item, contactos, empresas = [], vinculos, onVincularCont
       <SeccionForm titulo="Información básica">
         <Field label="Nombre"><input className="gp-input" autoFocus value={v.nombre || ""} onChange={(e) => setV({ ...v, nombre: e.target.value })} /></Field>
         <Field label="Descripción"><textarea className="gp-input" rows={2} placeholder="En una línea: de qué se trata." value={v.descripcion || ""} onChange={(e) => setV({ ...v, descripcion: e.target.value })} /></Field>
+        {/* Un proyecto tiene UN estado, así que va en combo y no en una fila de siete pastillas
+            que parecían de selección múltiple (Angel, 1 oct 2026). Es el mismo combo con color
+            del filtro de la lista, sin el conteo: aquí no hay nada que contar. El orden sigue
+            siendo el del pipeline (Idea → Validación → …), no alfabético. */}
         <Field label="Estado">
-          <div className="flex flex-wrap gap-1.5">
-            {ESTATUS_PROYECTO.map((e) => {
-              const color = COLOR_ESTATUS_PROYECTO[e];
-              return (
-                <button
-                  key={e} type="button" onClick={() => setV({ ...v, estatus: e })}
-                  className="text-xs px-2.5 py-1 rounded-full border"
-                  style={v.estatus === e
-                    ? { background: color, color: "#0B2341", borderColor: color, fontWeight: 600 }
-                    : { borderColor: "var(--border)", color: "var(--muted)" }}
-                >
-                  {etiquetaEstatusProyecto(e)}
-                </button>
-              );
-            })}
-          </div>
+          <ComboFiltroColor
+            opciones={ESTATUS_PROYECTO.map((e) => ({ id: e, label: etiquetaEstatusProyecto(e), color: COLOR_ESTATUS_PROYECTO[e] }))}
+            valor={v.estatus}
+            onCambiar={(e) => setV({ ...v, estatus: e })}
+          />
         </Field>
         <Field label="Contexto">
           <div className="flex flex-wrap gap-1.5">
@@ -10176,7 +10184,7 @@ function ComboFiltroColor({ opciones, valor, onCambiar }) {
         >
           {sel.label}
         </span>
-        <span className="gp-mono text-xs gp-text-muted">{sel.n}</span>
+        {sel.n !== undefined && <span className="gp-mono text-xs gp-text-muted">{sel.n}</span>}
         <ChevronDown size={14} className="gp-text-muted" />
       </button>
 
@@ -10201,7 +10209,7 @@ function ComboFiltroColor({ opciones, valor, onCambiar }) {
                     {o.label}
                   </span>
                   <span className="flex items-center gap-2 shrink-0">
-                    <span className="gp-mono text-xs gp-text-muted">{o.n}</span>
+                    {o.n !== undefined && <span className="gp-mono text-xs gp-text-muted">{o.n}</span>}
                     {activo ? <Check size={13} style={{ color: o.color }} /> : <span style={{ width: 13 }} />}
                   </span>
                 </button>
