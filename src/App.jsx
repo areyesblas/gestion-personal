@@ -22,6 +22,9 @@ import BotonRegresar from "./components/nav/BotonRegresar";
 // Mismo banner para Contactos y Proyectos e ideas (cada pantalla lo recorta distinto) hasta que
 // haya una foto propia para cada una.
 import bannerMontanas from "./assets/dashboard-banner-montanas-nevadas.jpg";
+// Logo de la marca para el encabezado de los PDF exportados (son reportes que salen de la app
+// y se comparten; deben verse de ARKEYONE).
+import logoArkeyone from "./assets/arkeyone-lockup.png";
 import * as XLSX from "xlsx";
 import {
   FolderKanban, CheckSquare, Wallet, AlertTriangle,
@@ -715,6 +718,29 @@ function exportarFilasExcel(filas, columnas, nombreArchivo) {
   }
 }
 
+// jsPDF necesita los bytes de la imagen, no una URL, así que el logo se pasa a dataURL una sola
+// vez por sesión y se reutiliza en todos los reportes. Si por lo que sea no se puede cargar, el
+// PDF se genera igual, solo que sin logo: nunca vale la pena tronar una exportación por un adorno.
+const LOGO_PDF_PROPORCION = 900 / 396; // tamaño real del archivo
+let logoPdfCache; // undefined = no se ha intentado; "" = se intentó y no se pudo
+async function logoParaPDF() {
+  if (logoPdfCache !== undefined) return logoPdfCache;
+  try {
+    const resp = await fetch(logoArkeyone);
+    const blob = await resp.blob();
+    logoPdfCache = await new Promise((resolve, reject) => {
+      const fr = new FileReader();
+      fr.onload = () => resolve(fr.result);
+      fr.onerror = reject;
+      fr.readAsDataURL(blob);
+    });
+  } catch (err) {
+    console.error("No se pudo cargar el logo para el PDF:", err);
+    logoPdfCache = "";
+  }
+  return logoPdfCache;
+}
+
 // Mismo criterio que exportarFilasExcel, pero a PDF (tabla con jspdf-autotable), incluyendo
 // fecha de generación y el resumen de filtros aplicados, como pide la secc. 23.5.
 async function exportarFilasPDF(filas, columnas, nombreArchivo, titulo, resumenFiltros) {
@@ -725,14 +751,39 @@ async function exportarFilasPDF(filas, columnas, nombreArchivo, titulo, resumenF
   try {
     const { jsPDF } = await import("jspdf");
     const autoTable = (await import("jspdf-autotable")).default;
+    const logo = await logoParaPDF();
     const doc = new jsPDF({ orientation: columnas.length > 5 ? "landscape" : "portrait" });
-    doc.setFontSize(14);
-    doc.text(titulo, 14, 15);
-    doc.setFontSize(9);
-    doc.setTextColor(120);
-    doc.text(`Generado el ${new Date().toLocaleString("es-MX")}${resumenFiltros ? ` · ${resumenFiltros}` : ""}`, 14, 21);
+    const anchoPag = doc.internal.pageSize.getWidth();
+    const altoPag = doc.internal.pageSize.getHeight();
+    const generado = `Generado el ${new Date().toLocaleString("es-MX")}${resumenFiltros ? ` · ${resumenFiltros}` : ""}`;
+    const ANCHO_LOGO = 32;
+
+    // Se dibuja en CADA página (gancho didDrawPage de autotable), no una sola vez: un reporte de
+    // varias hojas tiene que traer el logo y el pie en todas.
+    const marcaDeAgua = () => {
+      if (logo) {
+        try { doc.addImage(logo, "PNG", anchoPag - 14 - ANCHO_LOGO, 9, ANCHO_LOGO, ANCHO_LOGO / LOGO_PDF_PROPORCION); } catch { /* el PDF va igual sin logo */ }
+      }
+      doc.setFontSize(14);
+      doc.setTextColor(11, 35, 65);
+      doc.text(titulo, 14, 16);
+      doc.setFontSize(9);
+      doc.setTextColor(120);
+      doc.text(generado, 14, 21.5);
+      doc.setDrawColor(221, 227, 236);
+      doc.line(14, 24.5, anchoPag - 14, 24.5);
+
+      const pagina = doc.internal.getNumberOfPages();
+      doc.setFontSize(8);
+      doc.setTextColor(150);
+      doc.text("ARKEYONE · arkeyone.com", 14, altoPag - 8);
+      doc.text(`Página ${pagina}`, anchoPag - 14, altoPag - 8, { align: "right" });
+    };
+
     autoTable(doc, {
-      startY: 26,
+      startY: 29,
+      margin: { top: 29, bottom: 14 },
+      didDrawPage: marcaDeAgua,
       head: [columnas.map((c) => c.label)],
       body: filas.map((item) => columnas.map((c) => {
         let v;
@@ -3620,6 +3671,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
           {view === "agenda" && (
             <Agenda data={data} misId={misId}
               onEditPendiente={(id, p) => editItem("pendientes", id, p)}
+              onAddPendiente={(t) => addItem("pendientes", t)}
               onAddCita={(c) => addItem("citas", c)}
               onRemoveCita={(id) => askDelete("citas", id)}
               onRemovePendiente={(id) => askDelete("pendientes", id)}
@@ -14911,6 +14963,7 @@ function calcularBloquesAgenda({ dias, citas, tareasProgramadas, comida, diaProg
 function Agenda({
   data, misId, onEditPendiente, onAddCita, onEditCita, onRemoveCita, onRemovePendiente,
   onCrearContacto, onCrearProyecto, onAsignar, onEnviarInvitacion, onAceptarEnNombre, onAbrirOrigen,
+  onAddPendiente,
 }) {
   const [vista, setVista] = useState("semana"); // "dia" | "semana"
   const [base, setBase] = useState(() => new Date());
@@ -14921,6 +14974,11 @@ function Agenda({
   const [configAbierta, setConfigAbierta] = useState(false);
   const [cargando, setCargando] = useState(true);
   const [modalAgregar, setModalAgregar] = useState(null); // null | "nueva" | "existente"
+  // Clic en un hueco de la cuadrícula: menú para crear ahí mismo, con el día y la hora que se
+  // tocaron ya puestos (pedido de Angel, 29 sept 2026).
+  const [menuHueco, setMenuHueco] = useState(null);   // { x, y, dia, hora }
+  const [nuevaCitaEn, setNuevaCitaEn] = useState(null); // { dia, hora }
+  const [nuevaTareaEn, setNuevaTareaEn] = useState(null); // { dia, hora }
   const [edicion, setEdicion] = useState(null);           // { tipo:"cita"|"tarea", item }
   const [tarjeta, setTarjeta] = useState(null);           // { tipo, item, rect }
   const [toast, setToast] = useState(null);               // { clave, texto, deshacer }
@@ -15550,7 +15608,15 @@ function Agenda({
                 )}
 
                 <div ref={(el) => (colRefs.current[di] = el)} className="relative"
-                  style={{ height: altoCuadricula, borderLeft: "1px solid var(--border)" }}>
+                  style={{ height: altoCuadricula, borderLeft: "1px solid var(--border)" }}
+                  title="Toca un hueco para agendar algo a esa hora"
+                  onClick={(e) => {
+                    // Solo los huecos: los clics que vienen de un bloque ya los corta el bloque.
+                    const r = e.currentTarget.getBoundingClientRect();
+                    const cruda = (e.clientY - r.top) / PX_POR_HORA + horaInicioDec;
+                    const hora = Math.max(horaInicioDec, Math.min(ajustar(cruda), jornadaFin - SNAP_HORAS));
+                    setMenuHueco({ x: e.clientX, y: e.clientY, dia: key, hora: horaDecimalAHHMM(hora) });
+                  }}>
                   {horas.slice(0, -1).map((h) => (
                     <div key={h} style={{ position: "absolute", top: (h - horaInicioDec) * PX_POR_HORA, left: 0, right: 0, borderTop: "1px solid var(--border)" }} />
                   ))}
@@ -15588,6 +15654,7 @@ function Agenda({
                         title={arrastrable
                           ? `${titulo} — toca para ver opciones, mantén presionado para mover, jala el borde inferior para cambiar la duración`
                           : "Comida"}
+                        onClick={(e) => e.stopPropagation()}
                         onPointerDown={(e) => arrastrable && iniciarGesto(e, { tipo: b.tipo, item: b.item, modo: "mover", inicio: b.inicio, duracion: b.duracion, diaIdx: di })}
                       >
                         {arrastrable && alto >= 26 && (esTarea || soportaRealizada) && (
@@ -15677,6 +15744,72 @@ function Agenda({
           />
         );
       })()}
+
+      {menuHueco && (
+        <div className="fixed inset-0 z-[75]" onClick={() => setMenuHueco(null)}>
+          <div
+            className="gp-panel py-1 text-sm absolute"
+            style={{
+              minWidth: 190,
+              left: Math.min(menuHueco.x, window.innerWidth - 210),
+              top: Math.min(menuHueco.y, window.innerHeight - 160),
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p className="px-3 py-1.5 text-[11px] gp-text-muted border-b gp-border">
+              {fmtFechaCorta(menuHueco.dia)} · {menuHueco.hora}
+            </p>
+            <button
+              className="w-full text-left px-3 gp-panel-hi flex items-center gap-2"
+              style={{ minHeight: esMovil ? 44 : 36 }}
+              onClick={() => { setNuevaCitaEn({ dia: menuHueco.dia, hora: menuHueco.hora }); setMenuHueco(null); }}
+            >
+              <CalendarClock size={14} className="gp-text-gold" /> Agregar cita
+            </button>
+            <button
+              className="w-full text-left px-3 gp-panel-hi flex items-center gap-2"
+              style={{ minHeight: esMovil ? 44 : 36 }}
+              onClick={() => { setNuevaTareaEn({ dia: menuHueco.dia, hora: menuHueco.hora }); setMenuHueco(null); }}
+            >
+              <CheckSquare size={14} className="gp-text-teal" /> Agregar tarea
+            </button>
+          </div>
+        </div>
+      )}
+
+      {nuevaCitaEn && (
+        <Modal title={`Nueva cita — ${fmtFechaCorta(nuevaCitaEn.dia)} ${nuevaCitaEn.hora}`} onClose={() => setNuevaCitaEn(null)}>
+          <CitaForm
+            item={{ titulo: "", fechaHora: localInputsAFechaHora(nuevaCitaEn.dia, nuevaCitaEn.hora), lugar: "", contactoIds: [], tags: [], notas: "" }}
+            contactos={data.contactos} tagsExistentes={tagsUnicos(data.citas)} onCrearContacto={onCrearContacto}
+            onSave={(v) => { onAddCita({ ...v, id: uid() }); setNuevaCitaEn(null); }} />
+        </Modal>
+      )}
+
+      {nuevaTareaEn && (
+        <Modal title={`Nueva tarea — ${fmtFechaCorta(nuevaTareaEn.dia)} ${nuevaTareaEn.hora}`} onClose={() => setNuevaTareaEn(null)}>
+          {/* Nace programada justo en el hueco que se tocó. La fecha límite arranca igual al día
+              elegido, pero son campos distintos: cambiar una no mueve la otra. */}
+          <PendienteForm
+            item={{
+              proyectoId: "", parentId: "", descripcion: "", fechaLimite: nuevaTareaEn.dia, fechaRevision: "",
+              prioridad: "Media", estatus: "Pendiente", colaboradorContactoId: null, contactoId: "",
+              precio: "", fechaPagoAprox: "", tiempoEstimado: 1, tiempoReal: "", asignadoA: "", avance: "",
+              ...(soportaProgramacion ? { fechaProgramada: nuevaTareaEn.dia } : {}), horaInicio: nuevaTareaEn.hora,
+            }}
+            proyectos={data.proyectos} contactos={data.contactos} pendientes={data.pendientes} colaboradores={[]}
+            onCrearContacto={(nombre, tipos) => onCrearContacto(nombre, tipos)}
+            onCrearProyecto={onCrearProyecto}
+            onEnviarInvitacion={onEnviarInvitacion}
+            onAceptarEnNombre={onAceptarEnNombre}
+            onSave={(v) => {
+              const nuevoId = uid();
+              onAddPendiente({ ...v, id: nuevoId });
+              if (v.asignadoA && onAsignar) onAsignar(nuevoId);
+              setNuevaTareaEn(null);
+            }} />
+        </Modal>
+      )}
 
       {toast && (
         <ToastDeshacer clave={toast.clave} texto={toast.texto} onDeshacer={toast.deshacer} onCerrar={() => setToast(null)} />
