@@ -11269,30 +11269,24 @@ function ContactoForm({ item, proyectos, vinculos, onVincularProyecto, onDesvinc
 
   return (
     <div>
-      {/* Foto a la izquierda y el nombre completo a su derecha (Angel, 1 oct 2026): la foto
-          centrada se comía casi media pantalla del modal y empujaba todo lo demás abajo. Así,
-          lo primero que se ve es quién es la persona. En celular se apilan, porque lado a lado
-          no caben. */}
-      <div className="flex flex-col sm:flex-row sm:items-start gap-4 mb-3">
-        <div className="shrink-0 mx-auto sm:mx-0" style={{ width: 150 }}>
-          <AvatarForm
-            avatarUrl={v.fotoUrl}
-            helpText="Foto (opcional). Sin ella se muestran sus iniciales."
-            subirAvatar={async (file) => {
-              const path = `contactos/${contactoId}/${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
-              const { error: upErr } = await supabase.storage.from("adjuntos").upload(path, file);
-              if (upErr) return { error: upErr.message };
-              const { data: pub } = supabase.storage.from("adjuntos").getPublicUrl(path);
-              setV((prev) => ({ ...prev, fotoUrl: pub.publicUrl }));
-              return { url: pub.publicUrl };
-            }}
-          />
-        </div>
-        <div className="flex-1 min-w-0">
-          <Field label="Nombre(s)"><input className="gp-input" autoFocus value={v.nombres} onChange={(e) => setV({ ...v, nombres: e.target.value })} /></Field>
-          <Field label="Apellido paterno"><input className="gp-input" value={v.apellidoPaterno} onChange={(e) => setV({ ...v, apellidoPaterno: e.target.value })} /></Field>
-          <Field label="Apellido materno"><input className="gp-input" value={v.apellidoMaterno} onChange={(e) => setV({ ...v, apellidoMaterno: e.target.value })} /></Field>
-        </div>
+      <div className="flex justify-center mb-3">
+        <AvatarForm
+          avatarUrl={v.fotoUrl}
+          helpText="Foto del contacto (opcional). Si no subes una, se muestran sus iniciales."
+          subirAvatar={async (file) => {
+            const path = `contactos/${contactoId}/${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
+            const { error: upErr } = await supabase.storage.from("adjuntos").upload(path, file);
+            if (upErr) return { error: upErr.message };
+            const { data: pub } = supabase.storage.from("adjuntos").getPublicUrl(path);
+            setV((prev) => ({ ...prev, fotoUrl: pub.publicUrl }));
+            return { url: pub.publicUrl };
+          }}
+        />
+      </div>
+      <Field label="Nombre(s)"><input className="gp-input" autoFocus value={v.nombres} onChange={(e) => setV({ ...v, nombres: e.target.value })} /></Field>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <Field label="Apellido paterno"><input className="gp-input" value={v.apellidoPaterno} onChange={(e) => setV({ ...v, apellidoPaterno: e.target.value })} /></Field>
+        <Field label="Apellido materno"><input className="gp-input" value={v.apellidoMaterno} onChange={(e) => setV({ ...v, apellidoMaterno: e.target.value })} /></Field>
       </div>
       <Field label="Tipo de contacto (puede ser varios)">
         <div className="flex flex-wrap gap-1.5">
