@@ -5768,6 +5768,10 @@ function finanzasProyecto(data, proyectoId) {
   const porCobrar = suma(ingresos.filter((f) => f.estatus !== "Cobrado"));
   const gastado = suma(egresos.filter((f) => f.estatus === "Cobrado"));
   const gastoPorPagar = suma(egresos.filter((f) => f.estatus !== "Cobrado"));
+  // Dentro de los egresos conviene separar lo que se le paga a la gente de lo que se gasta en
+  // operar (viáticos, materiales): son dos conversaciones distintas al revisar un proyecto.
+  const pagosAPersonas = suma(egresos.filter((f) => f.categoria === "Pago a colaborador"));
+  const gastosOperativos = (gastado + gastoPorPagar) - pagosAPersonas;
 
   const tareas = (data.pendientes || []).filter((t) => t.proyectoId === proyectoId && Number(t.precio) > 0);
   // Comprometido = todo lo pactado, se haya hecho o no. Devengado = lo de las tareas ya
@@ -5791,6 +5795,7 @@ function finanzasProyecto(data, proyectoId) {
 
   return {
     movs, cobrado, porCobrar, ingresoTotal, gastado, gastoPorPagar, gastoReal,
+    pagosAPersonas, gastosOperativos,
     comprometidoEquipo, devengadoEquipo, costoTotal, margen, margenPct,
     presupuesto, topeGasto, pctPresupuesto,
   };
@@ -6719,41 +6724,46 @@ function MovimientoProyectoForm({ tipo, proyecto, contactos, categoriasUsadas, o
   );
 }
 
-// Pago al responsable por liderar el proyecto (opción A, elegida por Angel el 1 oct 2026): se
-// crea como una TAREA con precio y responsable, no como un campo nuevo del proyecto. Así entra
-// sola al reparto por persona, al costo comprometido y a "Mis pagos" del colaborador, que es el
-// circuito que ya existe para pagarle a alguien.
-function PagoResponsableForm({ proyecto, contactos, existente, onGuardar, onCancelar }) {
-  const [contactoId, setContactoId] = useState(existente?.colaboradorContactoId || proyecto.responsableContactoId || "");
-  const [monto, setMonto] = useState(existente?.precio ?? "");
-  const [descripcion, setDescripcion] = useState(existente?.descripcion || `Liderar el proyecto — ${proyecto.nombre}`);
-  const [fechaPago, setFechaPago] = useState(existente?.fechaPagoAprox || "");
+// Pago al responsable por liderar el proyecto. Primero lo hice como una tarea con precio
+// (opción A), y en cuanto se usó quedó claro que estaba mal: una tarea que no es trabajo
+// ensucia la lista del proyecto y dos pagos se ven como la misma tarea repetida. Ahora es lo
+// que Angel pidió y lo que la app ya hacía para esto — un Egreso de Finanzas con categoría
+// "Pago a colaborador", el mismo que usa la pantalla de colaboradores. Así cae solo en los
+// pagos del colaborador, en los gastos del proyecto y en el histórico de Finanzas, y pueden
+// registrarse varios sin que ninguno estorbe en las tareas.
+function PagoResponsableForm({ proyecto, contactos, onGuardar, onCancelar }) {
+  const [contactoId, setContactoId] = useState(proyecto.responsableContactoId || "");
+  const [monto, setMonto] = useState("");
+  const [concepto, setConcepto] = useState(`Liderazgo del proyecto — ${proyecto.nombre}`);
+  const [fecha, setFecha] = useState(todayISO());
+  const [estatus, setEstatus] = useState("Pendiente");
   const [error, setError] = useState("");
   const [guardando, setGuardando] = useState(false);
+  const nombreDe = (id) => (contactos || []).find((c) => c.id === id)?.nombre || "";
   return (
     <div>
       <p className="text-sm gp-text-muted mb-4">
-        Un pago por dirigir el proyecto, aparte de las tareas que ejecute. Se registra como una
-        tarea con precio a nombre del responsable: así aparece en el reparto del proyecto y en los
-        pagos del colaborador, sin inventar un lugar nuevo donde guardar dinero.
+        Un pago por dirigir el proyecto, aparte de las tareas que ejecute. Se registra como un
+        egreso de Finanzas en la categoría "Pago a colaborador", igual que cualquier otro pago:
+        aparece en los pagos de esa persona y en los gastos del proyecto, no en sus tareas.
       </p>
-      {existente && (
-        <p className="gp-bloque rounded-lg p-2.5 text-xs mb-3" style={{ borderLeft: "3px solid var(--gold)" }}>
-          Este proyecto ya tiene un pago por liderarlo. Lo que captures aquí lo <b>reemplaza</b>, no
-          crea otro: para pagar dos veces, agrega una tarea aparte desde Tareas.
-        </p>
-      )}
-      <Field label="Responsable">
+      <Field label="A quién se le paga">
         <select className="gp-input" value={contactoId} onChange={(e) => setContactoId(e.target.value)}>
-          <option value="">— yo —</option>
+          <option value="">— elige a la persona —</option>
           {ordenadosPorNombre(contactos).map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
         </select>
       </Field>
-      <Field label="Concepto"><input className="gp-input" value={descripcion} onChange={(e) => setDescripcion(e.target.value)} /></Field>
+      <Field label="Concepto"><input className="gp-input" value={concepto} onChange={(e) => setConcepto(e.target.value)} /></Field>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Field label="Monto"><MoneyInput value={monto} onChange={setMonto} /></Field>
-        <Field label="Fecha de pago aprox. (opcional)"><input type="date" className="gp-input" value={fechaPago} onChange={(e) => setFechaPago(e.target.value)} /></Field>
+        <Field label="Fecha"><input type="date" className="gp-input" value={fecha} onChange={(e) => setFecha(e.target.value)} /></Field>
       </div>
+      <Field label="Estatus">
+        <select className="gp-input" value={estatus} onChange={(e) => setEstatus(e.target.value)}>
+          <option value="Pendiente">Por pagar</option>
+          <option value="Cobrado">Ya pagado</option>
+        </select>
+      </Field>
       {error && <p className="text-xs gp-text-red mb-2">{error}</p>}
       <div className="flex gap-2 mt-1">
         <button onClick={onCancelar} className="gp-btn-ghost flex-1 py-2 text-sm">Cancelar</button>
@@ -6762,22 +6772,18 @@ function PagoResponsableForm({ proyecto, contactos, existente, onGuardar, onCanc
           disabled={guardando}
           style={guardando ? { opacity: 0.6 } : undefined}
           onClick={() => {
+            if (!contactoId) { setError("Elige a quién se le paga."); return; }
             if (!(Number(monto) > 0)) { setError("El monto tiene que ser mayor a cero."); return; }
-            // Bloquear el botón al primer clic: sin esto, dos toques seguidos creaban dos pagos.
+            // Bloquear al primer clic: sin esto, dos toques seguidos creaban dos pagos.
             setGuardando(true);
             onGuardar({
-              id: existente?.id || uid(), proyectoId: proyecto.id, parentId: "",
-              descripcion: descripcion.trim() || "Liderar el proyecto",
-              fechaLimite: proyecto.fechaFin || "", fechaRevision: "", prioridad: "Media",
-              estatus: existente?.estatus || "Pendiente", colaboradorContactoId: contactoId || null, contactoId: "",
-              precio: Number(monto), fechaPagoAprox: fechaPago, tiempoEstimado: "", tiempoReal: "",
-              asignadoA: "", avance: existente?.avance ?? "",
-              // Marca de nacimiento: con esto la pantalla reconoce cuál es el pago por liderar y
-              // lo edita en vez de crear otro igual.
-              origenTabla: "proyectos", origenId: proyecto.id,
-            }, existente);
+              id: uid(), tipo: "Egreso", categoria: "Pago a colaborador", forma: "Transferencia",
+              estatus, esRecurrente: false, fecha, proyectoId: proyecto.id, contactoId,
+              concepto: concepto.trim() || `Liderazgo — ${nombreDe(contactoId)}`,
+              monto: Number(monto), moneda: MONEDA_BASE, tipoCambio: 1, montoBase: Number(monto),
+            });
           }}
-        >{existente ? "Actualizar" : "Guardar"}</button>
+        >Registrar pago</button>
       </div>
     </div>
   );
@@ -6819,9 +6825,6 @@ function FichaProyecto({
   const [modalFin, setModalFin] = useState(null); // null | ingreso | egreso | responsable | presupuesto
   const fin = finanzasProyecto(data, p.id);
   const reparto = repartoCostosProyecto(data, p.id);
-  // El pago por liderar se reconoce por su marca de origen, no por el texto de la descripción.
-  const pagoLiderazgo = (data.pendientes || []).find(
-    (t) => t.proyectoId === p.id && t.origenTabla === "proyectos" && t.origenId === p.id) || null;
   const categoriasUsadas = [...new Set((data.finanzas || []).map((f) => f.categoria).filter(Boolean))].sort();
   // Ramas cerradas del árbol de tareas de la pestaña "Tareas" de esta ficha.
   const [colapsadasTareas, setColapsadasTareas] = useState(() => new Set());
@@ -7160,6 +7163,7 @@ function FichaProyecto({
                   <div className="gp-bloque rounded-lg p-2.5">
                     <p className="text-[10px] gp-text-muted">Gastos</p>
                     <p className="gp-mono text-sm gp-text-red">{fmtMoney(fin.gastoReal)}</p>
+                    {fin.pagosAPersonas > 0 && <p className="text-[9px] gp-text-muted">{fmtMoney(fin.pagosAPersonas)} a personas</p>}
                     {fin.gastoPorPagar > 0 && <p className="text-[9px] gp-text-muted">{fmtMoney(fin.gastoPorPagar)} sin pagar</p>}
                   </div>
                 </div>
@@ -7296,12 +7300,9 @@ function FichaProyecto({
       )}
       {modalFin === "responsable" && (
         <Modal title="Pago al responsable" onClose={() => setModalFin(null)}>
-          <PagoResponsableForm proyecto={p} contactos={data.contactos} existente={pagoLiderazgo}
+          <PagoResponsableForm proyecto={p} contactos={data.contactos}
             onCancelar={() => setModalFin(null)}
-            onGuardar={(tarea, previo) => {
-              if (previo) onEditTarea(previo.id, tarea); else onAddTarea(tarea);
-              setModalFin(null);
-            }} />
+            onGuardar={(mov) => { onAddFinanzas(mov); setModalFin(null); }} />
         </Modal>
       )}
       {modalFin === "presupuesto" && (
