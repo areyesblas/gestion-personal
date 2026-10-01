@@ -49,6 +49,9 @@ const ImportarExcelModal = lazy(() => import("./components/import/ImportarExcelM
 const OnboardingContextos = lazy(() => import("./components/onboarding/OnboardingContextos"));
 
 /* ---------- estilos y tokens ---------- */
+// OJO: todo lo de adentro del <style> vive en un template literal, así que NO se pueden usar
+// backticks aquí, ni siquiera dentro de un comentario CSS: el primero que aparezca cierra la
+// cadena a media hoja y rompe el build entero (pasó el 1 oct 2026).
 const Tokens = ({ tema = "oscuro" }) => (
   <style>{`
     @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');
