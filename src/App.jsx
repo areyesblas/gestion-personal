@@ -6356,8 +6356,12 @@ function Proyectos({
             onGuardarPresupuesto={(actual, monto) => {
               // Un solo tope por proyecto: si ya había uno se edita, si no se crea. El periodo
               // va vacío a propósito — este presupuesto es del proyecto completo, no mensual.
+              // OJO: presupuestos tiene CHECK (tipo IN ('categoria','proyecto')) y
+              // CHECK (periodo IN ('mensual','anual')), los dos en minúsculas. Mandar "Proyecto"
+              // con mayúscula reventaba el insert y solo se veía "No se pudo guardar".
+              // El periodo va nulo a propósito: este tope es del proyecto completo, no de un mes.
               if (actual) onEditPresupuesto(actual.id, { monto });
-              else onAddPresupuesto({ id: uid(), tipo: "Proyecto", categoria: "", proyectoId: seleccionado.id, periodo: "", monto, notas: "" });
+              else onAddPresupuesto({ id: uid(), tipo: "proyecto", proyectoId: seleccionado.id, monto, notas: "" });
             }}
             sensibleDesbloqueadoHasta={sensibleDesbloqueadoHasta}
             onDesbloquear={onDesbloquear}
@@ -6518,7 +6522,7 @@ function MovimientoProyectoForm({ tipo, proyecto, contactos, categoriasUsadas, o
       </p>
       <Field label="Concepto"><input className="gp-input" autoFocus value={concepto} onChange={(e) => setConcepto(e.target.value)} /></Field>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <Field label="Monto"><input type="number" className="gp-input" inputMode="decimal" value={monto} onChange={(e) => setMonto(e.target.value)} /></Field>
+        <Field label="Monto"><MoneyInput value={monto} onChange={setMonto} /></Field>
         <Field label="Fecha"><input type="date" className="gp-input" value={fecha} onChange={(e) => setFecha(e.target.value)} /></Field>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -6595,7 +6599,7 @@ function PagoResponsableForm({ proyecto, contactos, onGuardar, onCancelar }) {
       </Field>
       <Field label="Concepto"><input className="gp-input" value={descripcion} onChange={(e) => setDescripcion(e.target.value)} /></Field>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <Field label="Monto"><input type="number" className="gp-input" inputMode="decimal" value={monto} onChange={(e) => setMonto(e.target.value)} /></Field>
+        <Field label="Monto"><MoneyInput value={monto} onChange={setMonto} /></Field>
         <Field label="Fecha de pago aprox. (opcional)"><input type="date" className="gp-input" value={fechaPago} onChange={(e) => setFechaPago(e.target.value)} /></Field>
       </div>
       {error && <p className="text-xs gp-text-red mb-2">{error}</p>}
@@ -6630,7 +6634,7 @@ function PresupuestoProyectoForm({ proyecto, actual, onGuardar, onCancelar }) {
         Cuánto estás dispuesto a gastar en este proyecto. No bloquea nada: sirve para ver en la
         barra cuánto llevas consumido y que no te agarre de sorpresa.
       </p>
-      <Field label="Tope de gasto"><input type="number" className="gp-input" inputMode="decimal" autoFocus value={monto} onChange={(e) => setMonto(e.target.value)} /></Field>
+      <Field label="Tope de gasto"><MoneyInput value={monto} onChange={setMonto} autoFocus /></Field>
       {error && <p className="text-xs gp-text-red mb-2">{error}</p>}
       <div className="flex gap-2 mt-1">
         <button onClick={onCancelar} className="gp-btn-ghost flex-1 py-2 text-sm">Cancelar</button>
@@ -18255,7 +18259,7 @@ function MovimientoRapidoForm({ tipoInicial, onSave }) {
   return (
     <div>
       <Field label="Concepto"><input className="gp-input" value={concepto} onChange={(e) => setConcepto(e.target.value)} /></Field>
-      <Field label="Monto"><input type="number" step="0.01" className="gp-input" value={monto} onChange={(e) => setMonto(e.target.value)} /></Field>
+      <Field label="Monto"><MoneyInput value={monto} onChange={setMonto} /></Field>
       <Field label="Tipo">
         <div className="flex gap-1">
           {["Ingreso", "Egreso"].map((t) => (
