@@ -3627,7 +3627,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
               filtroContactoInicial={regalosFiltroContacto} onLimpiarFiltro={() => setRegalosFiltroContacto("")}
               onVerContacto={irAFichaContacto}
               onAddNota={(i) => addItem("notas", i)} onAddCita={(i) => addItem("citas", i)} onAddEvento={(i) => addItem("eventos", i)}
-              onAddComentario={(i) => addItem("comentarios", i)}
+              onAddComentario={(i) => addItem("comentarios", i)} onCrearContacto={crearContactoRapido}
               onIrAVista={irAVista} onVerProyecto={irADetalleProyecto} />
           )}
           {(view === "marketing" || view === "redes") && (
@@ -11223,7 +11223,7 @@ function ContactoForm({ item, proyectos, vinculos, onVincularProyecto, onDesvinc
 
 /* ---------- Regalos (histórico de regalos/felicitaciones, incluye control de Navidad) ---------- */
 function Regalos({ data, onAdd, onEdit, onRemove, filtroContactoInicial, onLimpiarFiltro, onVerContacto,
-  onAddNota, onAddCita, onAddEvento, onAddComentario, onIrAVista, onVerProyecto }) {
+  onAddNota, onAddCita, onAddEvento, onAddComentario, onCrearContacto, onIrAVista, onVerProyecto }) {
   const [modal, setModal] = useState(null);
   // Ficha del contacto abierta a la derecha, sin salir de Atenciones (pedido de Angel,
   // 29 sept 2026): el grid se queda a la izquierda y la navegación no cambia de pantalla.
@@ -11346,7 +11346,8 @@ function Regalos({ data, onAdd, onEdit, onRemove, filtroContactoInicial, onLimpi
 
       {modal && (
         <Modal title={modal.item.id ? "Editar atención" : "Nueva atención"} onClose={() => setModal(null)}>
-          <RegaloForm item={modal.item} contactos={data.contactos} onSave={(v) => { modal.item.id ? onEdit(modal.item.id, v) : onAdd(v); setModal(null); }} />
+          <RegaloForm item={modal.item} contactos={data.contactos} onCrearContacto={onCrearContacto}
+            onSave={(v) => { modal.item.id ? onEdit(modal.item.id, v) : onAdd(v); setModal(null); }} />
         </Modal>
       )}
       </div>
@@ -11377,9 +11378,10 @@ function Regalos({ data, onAdd, onEdit, onRemove, filtroContactoInicial, onLimpi
   );
 }
 
-function RegaloForm({ item, contactos, onSave }) {
+function RegaloForm({ item, contactos, onCrearContacto, onSave }) {
   const [v, setV] = useState(item);
   const [error, setError] = useState("");
+  const contactoElegido = v.contactoId ? (contactos || []).find((c) => c.id === v.contactoId) : null;
   // Combo alfabético, como el resto de los combos de la app: la lista llega en orden de captura
   // y con muchos contactos encontrar a alguien se vuelve una lotería.
   const contactosOrdenados = useMemo(
@@ -11387,11 +11389,20 @@ function RegaloForm({ item, contactos, onSave }) {
     [contactos]);
   return (
     <div>
+      {/* Misma mecánica que en Nueva tarea (pedido de Angel, 30 sept 2026): se busca por nombre y,
+          si la persona no existe, se crea desde aquí. Al crearla se abre el formulario corto para
+          completar apellidos, correo y WhatsApp sin salir de la atención. */}
       <Field label="Contacto">
-        <select className="gp-input" value={v.contactoId || ""} onChange={(e) => setV({ ...v, contactoId: e.target.value })}>
-          <option value="">— selecciona —</option>
-          {contactosOrdenados.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
-        </select>
+        <ComboboxMultiBuscar
+          max={1}
+          seleccionados={contactoElegido ? [{ id: contactoElegido.id, label: contactoElegido.nombre }] : []}
+          opciones={contactosOrdenados.map((c) => ({ id: c.id, label: c.nombre }))}
+          onAgregar={(o) => setV({ ...v, contactoId: o.id })}
+          onQuitar={() => setV({ ...v, contactoId: "" })}
+          onCrear={onCrearContacto ? (nombre) => setV({ ...v, contactoId: onCrearContacto(nombre) }) : undefined}
+          placeholder="Buscar persona o crearla…"
+          crearLabel={(t) => `Crear contacto "${t}"`}
+        />
       </Field>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Field label="Tipo de atención"><select className="gp-input" value={v.tipo || "Regalo"} onChange={(e) => setV({ ...v, tipo: e.target.value })}>{TIPOS_ATENCION.map((t) => <option key={t}>{t}</option>)}</select></Field>
