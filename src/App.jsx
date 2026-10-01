@@ -3314,7 +3314,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
 
         {/* rail lateral / cajón */}
         <div
-          className={`w-64 ${sidebarColapsado ? "md:w-20" : "md:w-56"} shrink-0 p-4 flex flex-col gap-4 overflow-y-auto gp-scroll fixed md:static inset-y-0 left-0 z-50 md:z-auto transition-all duration-200 ${mobileNavOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"}`}
+          className={`w-64 ${sidebarColapsado ? "md:w-20" : "md:w-56"} shrink-0 p-4 flex flex-col overflow-y-auto gp-scroll fixed md:static inset-y-0 left-0 z-50 md:z-auto transition-all duration-200 ${mobileNavOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"}`}
           style={{ maxHeight: "100vh", background: "var(--sidebar-bg)", borderRight: "1px solid var(--sidebar-borde)" }}
         >
           <div className="px-2 flex flex-col items-center text-center gap-1 relative" style={{ paddingTop: "calc(env(safe-area-inset-top) + 4px)" }}>
@@ -3326,28 +3326,29 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
             >
               {sidebarColapsado ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}
             </button>
-            <img src="/icono-arkeyone.png" alt="ArkeyOne" style={{ height: 34 }} />
-            <span className={`gp-serif text-lg font-semibold ${sidebarColapsado ? "md:hidden" : ""}`} style={{ letterSpacing: "0.3px" }}>ARKEYONE</span>
-            {/* Temporal, mientras depuramos los bugs de voz en Android/iOS: confirma de un
-                vistazo si un dispositivo ya cargó el último deploy. Quitar cuando ya no haga falta. */}
-            <p className={`text-[10px] gp-text-muted ${sidebarColapsado ? "md:hidden" : ""}`}>commit {__COMMIT_HASH__}</p>
-            <p className={`text-xs gp-text-muted truncate ${sidebarColapsado ? "md:hidden" : ""}`} style={{ maxWidth: 160 }}>
-              {activeOwnerId === misId ? miEmail : `Viendo: ${activeOwnerEmail}`}
-            </p>
+            <img src="/icono-arkeyone.png" alt="ARKEY·ONE" style={{ height: 34 }} />
+            {/* El nombre va con punto medio, igual que el lockup de la pantalla de login. */}
+            <span className={`gp-serif text-lg font-semibold ${sidebarColapsado ? "md:hidden" : ""}`} style={{ letterSpacing: "0.3px" }}>ARKEY·ONE</span>
           </div>
 
-          <div className={`hidden md:flex gap-1 ${sidebarColapsado ? "md:flex-col" : ""}`}>
+          {/* ZONA 2 — acciones fijas: lo que se usa desde cualquier pantalla. Va separada de la
+              marca y de la navegación por bastante más aire que el que hay dentro de cada zona
+              (28 contra 6): eso es lo que hace que se lean como tres bloques y no como una lista
+              corrida (distribución "A · tres zonas", elegida por Angel el 1 oct 2026). */}
+          <div className="mt-7 flex flex-col gap-1.5">
             <button
               onClick={() => setBusquedaAbierta(true)}
               title="Buscar en todo ARKEYONE"
-              className={`gp-input flex items-center justify-center px-3 py-2 ${sidebarColapsado ? "md:px-0" : ""}`}
+              className={`gp-input hidden md:flex items-center gap-2 px-3 py-2 text-left ${sidebarColapsado ? "md:justify-center md:px-0" : ""}`}
             >
-              <Search size={16} />
+              <Search size={16} className="shrink-0" />
+              {/* Con texto, no solo el ícono: así se lee como campo de búsqueda y no como un
+                  botón más del menú. Colapsado se queda solo la lupa. */}
+              <span className={`gp-text-muted ${sidebarColapsado ? "md:hidden" : ""}`}>Buscar…</span>
             </button>
-          </div>
 
           {misColaboraciones.length > 0 && (
-            <div className={`px-2 ${sidebarColapsado ? "md:hidden" : ""}`}>
+            <div className={`${sidebarColapsado ? "md:hidden" : ""}`}>
               <select
                 className="gp-input text-xs w-full"
                 value={activeOwnerId}
@@ -3380,6 +3381,10 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
               <Home size={15} /> <span className={sidebarColapsado ? "md:hidden" : ""}>Centro de mando</span>
             </button>
           )}
+          </div>
+
+          {/* ZONA 3 — navegación */}
+          <div className="mt-7 flex flex-col">
 
           {navGroupsFiltrados.map((g) => {
             const cerrado = grupoEstaCerrado(g.label);
@@ -3421,6 +3426,11 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
               </div>
             );
           })}
+          </div>
+
+          {/* ZONA 4 — sistema y datos de la cuenta. Aquí bajaron el correo y el número de commit:
+              arriba competían con el logo, y este es el bloque al que uno viene cuando le importa
+              "de quién es esta cuenta" o "qué versión traigo". */}
           <div className="gp-nav-separador mt-auto pt-2 flex flex-col gap-0.5">
             <p className={`gp-nav-titulo px-3 mb-1 text-xs gp-text-muted uppercase ${sidebarColapsado ? "md:hidden" : ""}`}>Sistema</p>
             <button onClick={() => { setNotifPanelAbierto(true); setMobileNavOpen(false); }} title="Notificaciones"
@@ -3438,6 +3448,12 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
               style={cerrandoSesion ? { opacity: 0.6 } : undefined}>
               <LogOut size={15} /> <span className={sidebarColapsado ? "md:hidden" : ""}>{cerrandoSesion ? "Cerrando sesión…" : "Cerrar sesión"}</span>
             </button>
+            <p className={`text-[11px] gp-text-muted truncate px-3 pt-1.5 ${sidebarColapsado ? "md:hidden" : ""}`}>
+              {activeOwnerId === misId ? miEmail : `Viendo: ${activeOwnerEmail}`}
+            </p>
+            {/* Temporal, mientras depuramos los bugs de voz en Android/iOS: confirma de un
+                vistazo si un dispositivo ya cargó el último deploy. Quitar cuando ya no haga falta. */}
+            <p className={`text-[10px] gp-text-muted px-3 ${sidebarColapsado ? "md:hidden" : ""}`}>commit {__COMMIT_HASH__}</p>
           </div>
         </div>
 
