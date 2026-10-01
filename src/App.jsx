@@ -149,10 +149,11 @@ const Tokens = ({ tema = "oscuro" }) => (
     .gp-navitem-active svg{ color:var(--gold); }
     .gp-navitem-active:hover{ background:rgba(245,158,11,.22); }
     .gp-navitem-drop{ box-shadow: inset 0 2px 0 var(--gold); }
-    /* Los grupos del menú se separan con una línea, no solo con aire: sobre superficie blanca el
-       aire por sí solo no deja ver dónde termina una sección y empieza la siguiente. La línea va
-       ENTRE grupos (no arriba del primero) para no dibujar un filo suelto bajo el logo. */
-    .gp-nav-grupo + .gp-nav-grupo{ border-top:1px solid var(--sidebar-borde); margin-top:8px; padding-top:8px; }
+    /* Los grupos del menú se separan con aire, no con línea (Angel, 1 oct 2026: las líneas arriba
+       de Dinero, Patrimonio, Módulos y Personal cargaban de más la columna). Lo que ordena el
+       menú es el título de cada sección en negritas; la única línea que queda es la de "Sistema",
+       porque ahí sí cambia la naturaleza de lo que viene abajo. */
+    .gp-nav-grupo + .gp-nav-grupo{ margin-top:10px; }
     .gp-nav-separador{ border-top:1px solid var(--sidebar-borde); }
     /* El título de cada sección también se lee más: es el rótulo que ordena todo el menú. */
     .gp-nav-titulo{ font-weight:600; letter-spacing:.06em; }
