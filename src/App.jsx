@@ -131,7 +131,7 @@ const Tokens = ({ tema = "oscuro" }) => (
        original (Angel, 1 oct 2026). Sin tope, al jalar una caja se empujaban el resto de los
        campos y el botón de Guardar fuera de la pantalla, y había que buscarlos a ciegas dentro
        del modal. El tope se calcula con los renglones de cada caja —alto = renglones ×
-       interlineado + padding + borde— y en celular se ajusta solo, porque va en `em` y ahí la
+       interlineado + padding + borde— y en celular se ajusta solo, porque va en em y ahí la
        letra del campo es de 16 px en vez de 13. Arrastrar a lo ancho queda deshabilitado: eso
        rompía la rejilla de dos columnas de los formularios. */
     textarea.gp-input{ resize:vertical; max-height:calc(2.5 * (2 * 1.2em + 14px)); }
