@@ -3545,7 +3545,12 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
               fichaTab={contactoSelTab} onFichaTab={setContactoSelTab} />
           )}
           {view === "regalos" && (
-            <Regalos data={data} onAdd={(i) => addItem("regalos", i)} onEdit={(id, p) => editItem("regalos", id, p)} onRemove={(id) => askDelete("regalos", id)} filtroContactoInicial={regalosFiltroContacto} onLimpiarFiltro={() => setRegalosFiltroContacto("")} onVerContacto={irAFichaContacto} />
+            <Regalos data={data} onAdd={(i) => addItem("regalos", i)} onEdit={(id, p) => editItem("regalos", id, p)} onRemove={(id) => askDelete("regalos", id)}
+              filtroContactoInicial={regalosFiltroContacto} onLimpiarFiltro={() => setRegalosFiltroContacto("")}
+              onVerContacto={irAFichaContacto}
+              onAddNota={(i) => addItem("notas", i)} onAddCita={(i) => addItem("citas", i)} onAddEvento={(i) => addItem("eventos", i)}
+              onAddComentario={(i) => addItem("comentarios", i)}
+              onIrAVista={irAVista} onVerProyecto={irADetalleProyecto} />
           )}
           {(view === "marketing" || view === "redes") && (
             <MarketingYRedes
@@ -10911,8 +10916,13 @@ function ContactoForm({ item, proyectos, vinculos, onVincularProyecto, onDesvinc
 }
 
 /* ---------- Regalos (histórico de regalos/felicitaciones, incluye control de Navidad) ---------- */
-function Regalos({ data, onAdd, onEdit, onRemove, filtroContactoInicial, onLimpiarFiltro, onVerContacto }) {
+function Regalos({ data, onAdd, onEdit, onRemove, filtroContactoInicial, onLimpiarFiltro, onVerContacto,
+  onAddNota, onAddCita, onAddEvento, onAddComentario, onIrAVista, onVerProyecto }) {
   const [modal, setModal] = useState(null);
+  // Ficha del contacto abierta a la derecha, sin salir de Atenciones (pedido de Angel,
+  // 29 sept 2026): el grid se queda a la izquierda y la navegación no cambia de pantalla.
+  const [contactoFichaId, setContactoFichaId] = useState(null);
+  const [fichaTab, setFichaTab] = useState("informacion");
   const [filtroContacto, setFiltroContacto] = useState(filtroContactoInicial || "");
   const [filtroOcasion, setFiltroOcasion] = useState("Todos");
   const [filtroAnio, setFiltroAnio] = useState("Todos");
@@ -10925,6 +10935,13 @@ function Regalos({ data, onAdd, onEdit, onRemove, filtroContactoInicial, onLimpi
 
   const nombreContacto = (id) => data.contactos.find((c) => c.id === id)?.nombre || "—";
   const anios = [...new Set(data.regalos.map((r) => r.anio).filter(Boolean))].sort((a, b) => b - a);
+  const contactoFicha = contactoFichaId ? (data.contactos || []).find((c) => c.id === contactoFichaId) : null;
+  // Mismo cálculo que en Contactos: la ficha se arma con la tabla puente contacto_proyectos.
+  const proyectosDeContacto = (contactoId) => (data.contactoProyectos || [])
+    .filter((v) => v.contactoId === contactoId)
+    .map((v) => (data.proyectos || []).find((p) => p.id === v.proyectoId))
+    .filter(Boolean);
+  const abrirFicha = (contactoId) => { setContactoFichaId(contactoId); setFichaTab("informacion"); };
 
   const camposOrden = {
     fecha: { get: (r) => r.fecha, tipo: "fecha" },
@@ -10954,7 +10971,11 @@ function Regalos({ data, onAdd, onEdit, onRemove, filtroContactoInicial, onLimpi
   ];
 
   return (
-    <div>
+    <div className="flex flex-col lg:flex-row gap-4 items-start">
+      {/* El grid de atenciones se queda siempre aquí a la izquierda; la ficha del contacto abre a
+          la derecha, sin cambiar de pantalla. En celular no caben lado a lado, así que ahí la
+          ficha toma el ancho completo — mismo comportamiento que Contactos y Proyectos. */}
+      <div className={`min-w-0 flex-1 w-full ${contactoFicha ? "hidden lg:block" : ""}`}>
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-1">
         <h2 className="gp-serif text-2xl">Atenciones</h2>
         <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm w-full sm:w-auto"><Plus size={14} /> Nuevo</button>
@@ -10992,10 +11013,10 @@ function Regalos({ data, onAdd, onEdit, onRemove, filtroContactoInicial, onLimpi
           <tbody>
             {ordenados.map((r) => (
               // Tocar el renglón abre la ficha completa de esa persona en Contactos — la misma
-              // pantalla, no una copia: Contactos es la entidad maestra de personas.
+              // misma ficha que usa Contactos (la entidad maestra de personas), no una copia.
               <tr key={r.id}
-                onClick={() => r.contactoId && onVerContacto?.(r.contactoId)}
-                style={{ cursor: r.contactoId ? "pointer" : "default" }}
+                onClick={() => r.contactoId && abrirFicha(r.contactoId)}
+                style={{ cursor: r.contactoId ? "pointer" : "default", background: r.contactoId === contactoFichaId ? "var(--panel-hi)" : undefined }}
                 title={r.contactoId ? "Ver la ficha de este contacto" : undefined}>
                 <td>{nombreContacto(r.contactoId)}</td>
                 <td><Badge tone="gold">{r.tipo || "Regalo"}</Badge></td>
@@ -11021,6 +11042,30 @@ function Regalos({ data, onAdd, onEdit, onRemove, filtroContactoInicial, onLimpi
         <Modal title={modal.item.id ? "Editar atención" : "Nueva atención"} onClose={() => setModal(null)}>
           <RegaloForm item={modal.item} contactos={data.contactos} onSave={(v) => { modal.item.id ? onEdit(modal.item.id, v) : onAdd(v); setModal(null); }} />
         </Modal>
+      )}
+      </div>
+
+      {contactoFicha && (
+        <div className="w-full lg:w-[420px] xl:w-[460px] shrink-0 lg:sticky lg:top-4">
+          <FichaContacto
+            c={contactoFicha}
+            data={data}
+            proyectosVinculados={proyectosDeContacto(contactoFicha.id)}
+            onCerrar={() => setContactoFichaId(null)}
+            /* Editar sí lleva a Contactos: ahí vive el formulario completo de la persona, y es un
+               salto que el usuario pidió a propósito, no el efecto de tocar un renglón. */
+            onEditar={() => onVerContacto?.(contactoFicha.id)}
+            /* Ya estamos en Atenciones: "ver todas" filtra este mismo grid por esa persona. */
+            onVerAtenciones={(c) => setFiltroContacto(c.id)}
+            onIrAVista={onIrAVista}
+            onAddNota={onAddNota}
+            onAddCita={onAddCita}
+            onAddEvento={onAddEvento}
+            onAddComentario={onAddComentario}
+            tab={fichaTab} onTab={setFichaTab}
+            onVerProyecto={onVerProyecto}
+          />
+        </div>
       )}
     </div>
   );
