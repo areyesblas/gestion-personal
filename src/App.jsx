@@ -1410,6 +1410,67 @@ function CamposMoneda({ monto, moneda, tipoCambio, fecha, onCambiar }) {
   );
 }
 
+/* ---------- Cambios sin guardar ----------
+   Hasta ahora varios controles escribían en la base en cuanto los movías —el avance de una
+   tarea, el estado de un proyecto— y no había forma de arrepentirse. Angel pidió lo contrario:
+   que cambiar un dato no guarde, que haya botón de Guardar, y que al salir con cambios
+   pendientes la app pregunte antes de perderlos.
+
+   El registro es global a propósito: quien quiera salir (cambiar de pantalla, cerrar el panel,
+   cerrar la pestaña) solo necesita preguntar "¿hay algo sin guardar?", sin saber quién lo tiene
+   ni dónde está. */
+const borradoresPendientes = new Set();
+
+function confirmarDescartarCambios() {
+  if (borradoresPendientes.size === 0) return true;
+  return window.confirm("Tienes cambios sin guardar. ¿Quieres descartarlos y salir?");
+}
+
+// Avisa también al cerrar la pestaña o recargar. El navegador enseña su propio texto; lo único
+// que podemos hacer es pedirle que pregunte.
+if (typeof window !== "undefined") {
+  window.addEventListener("beforeunload", (e) => {
+    if (borradoresPendientes.size === 0) return;
+    e.preventDefault();
+    e.returnValue = "";
+  });
+}
+
+// Borrador de un formulario en línea: mantiene una copia local de los campos, dice si hay algo
+// distinto de lo guardado y se apunta en el registro mientras lo haya.
+function useBorrador(original) {
+  const [borrador, setBorrador] = useState(original);
+  const firma = JSON.stringify(original);
+  const marcaRef = useRef({});
+
+  // Si el registro cambia desde fuera (se eligió otra tarea, llegó un refresco), el borrador se
+  // reinicia con lo nuevo: lo que se está editando es siempre lo que está en pantalla.
+  useEffect(() => { setBorrador(original); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [firma]);
+
+  const sucio = JSON.stringify(borrador) !== firma;
+  useEffect(() => {
+    const marca = marcaRef.current;
+    if (sucio) borradoresPendientes.add(marca); else borradoresPendientes.delete(marca);
+    return () => borradoresPendientes.delete(marca);
+  }, [sucio]);
+
+  const cambiar = (parche) => setBorrador((prev) => ({ ...prev, ...parche }));
+  const descartar = () => setBorrador(original);
+  return { borrador, cambiar, descartar, sucio };
+}
+
+// Barra de Guardar/Descartar que aparece solo cuando hay algo que guardar.
+function BarraGuardar({ sucio, onGuardar, onDescartar, etiqueta = "Guardar cambios" }) {
+  if (!sucio) return null;
+  return (
+    <div className="flex items-center gap-2 mt-3 pt-3 border-t gp-border">
+      <span className="text-[11px] gp-text-gold flex-1">Hay cambios sin guardar.</span>
+      <button onClick={onDescartar} className="gp-btn-ghost px-3 py-1.5 text-xs rounded shrink-0">Descartar</button>
+      <button onClick={onGuardar} className="gp-btn px-3 py-1.5 text-xs rounded shrink-0">{etiqueta}</button>
+    </div>
+  );
+}
+
 function Modal({ title, onClose, children }) {
   const [tocado, setTocado] = useState(false);
   const [confirmando, setConfirmando] = useState(false);
@@ -2554,6 +2615,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
   const [reauthCargando, setReauthCargando] = useState(false);
 
   const irAVista = (id) => {
+    if (!confirmarDescartarCambios()) return;
     if (CANDADO_SENSIBLE_ACTIVO && VISTAS_SENSIBLES.includes(id) && Date.now() > sensibleDesbloqueadoHasta) {
       setReauthPendiente(id);
       setReauthPassword("");
@@ -6931,6 +6993,9 @@ function FichaProyecto({
   // Cambiar el estado del proyecto pasa SIEMPRE por aquí, venga del check o del selector: así
   // completar por cualquiera de los dos caminos registra la fecha, y salir de "Finalizado" la
   // borra (si no, quedaría una fecha de cierre en un proyecto abierto).
+  // El estado vive en un borrador y se escribe al dar Guardar. Completar sigue pasando por su
+  // confirmación de siempre (fecha, tareas abiertas), así que se delega a cambiarEstatusProyecto.
+  const borradorProyecto = useBorrador({ estatus: p.estatus });
   const cambiarEstatusProyecto = (nuevo) => {
     if (nuevo === p.estatus) return;
     if (nuevo === "Finalizado") { setConfirmacion(preguntaCompletarProyecto({ proyecto: p, data, onEditProyecto: onEdit })); return; }
@@ -6981,16 +7046,18 @@ function FichaProyecto({
         </div>
         <div className="flex items-center gap-1 shrink-0">
           <button onClick={onEditar} className="gp-btn-ghost px-2.5 py-1.5 text-xs rounded flex items-center gap-1"><Pencil size={12} /> Editar</button>
-          <IconBtn title="Cerrar" onClick={onCerrar}><X size={15} /></IconBtn>
+          <IconBtn title="Cerrar" onClick={() => { if (confirmarDescartarCambios()) onCerrar(); }}><X size={15} /></IconBtn>
         </div>
       </div>
 
       {/* Cambiar el estado es la acción más frecuente sobre un proyecto (el pipeline entero vive
-          de eso), por eso está aquí arriba y no escondida dentro del formulario. */}
+          de eso), por eso está aquí arriba y no escondida dentro del formulario. Ya no se guarda
+          al soltar el combo: queda en borrador hasta que se da Guardar, y si intentas salir con
+          el cambio pendiente la app pregunta antes de perderlo. */}
       <div className="grid grid-cols-2 gap-2 mt-3">
         <select
-          className="gp-input text-xs" value={p.estatus}
-          onChange={(e) => cambiarEstatusProyecto(e.target.value)}
+          className="gp-input text-xs" value={borradorProyecto.borrador.estatus}
+          onChange={(e) => borradorProyecto.cambiar({ estatus: e.target.value })}
           aria-label="Cambiar estado del proyecto"
         >
           {ESTATUS_PROYECTO.map((e) => <option key={e} value={e}>{e}</option>)}
@@ -6999,6 +7066,13 @@ function FichaProyecto({
           <ExternalLink size={12} /> Centro de proyecto
         </button>
       </div>
+
+      <BarraGuardar
+        sucio={borradorProyecto.sucio}
+        onDescartar={borradorProyecto.descartar}
+        onGuardar={() => { cambiarEstatusProyecto(borradorProyecto.borrador.estatus); }}
+        etiqueta="Guardar estado"
+      />
 
       {/* Un proyecto se puede dar por terminado aunque le queden tareas abiertas — la confirmación
           avisa cuántas faltan. Y no necesita fecha de fin: los proyectos continuos no la tienen y
@@ -9132,6 +9206,17 @@ function Pendientes({ data, activeOwnerId, onAdd, onEdit, onEditProyecto, onRemo
 // el formulario completo: mover el porcentaje de avance y cambiar el estatus. Lo demás son
 // atajos a lo que ya existe (editar, subtarea, comentarios, eliminar).
 function FichaTarea({ t, data, onCerrar, onEditar, onAgregarSubtarea, onComentarios, onEliminar, onCambiarAvance, onCambiarEstatus, nComentarios }) {
+  // El avance y el estatus se editan en un borrador: mover la barra ya no escribe en la base.
+  // Se guardan al dar Guardar, y si intentas salir con cambios la app pregunta antes.
+  const { borrador, cambiar, descartar, sucio } = useBorrador({
+    avance: t.avance ?? "", estatus: t.estatus,
+  });
+  const guardar = () => {
+    if (borrador.avance !== (t.avance ?? "")) onCambiarAvance(borrador.avance === "" ? null : Number(borrador.avance));
+    // Completar pasa por su propia confirmación (fecha, subtareas abiertas): se delega al mismo
+    // camino de siempre en vez de escribir el estatus a mano desde aquí.
+    if (borrador.estatus !== t.estatus) onCambiarEstatus(borrador.estatus);
+  };
   const subtareas = (data.pendientes || []).filter((x) => x.parentId === t.id);
   const tieneHijos = subtareas.length > 0;
   // Con subtareas el avance NO se teclea: es la ponderación de los hijos. Teclearlo encima sería
@@ -9159,7 +9244,7 @@ function FichaTarea({ t, data, onCerrar, onEditar, onAgregarSubtarea, onComentar
           <p className="gp-serif text-base leading-tight break-words" style={hecha ? { textDecoration: "line-through" } : undefined}>{t.descripcion}</p>
           {padre && <p className="text-xs gp-text-muted mt-1">de: {padre.descripcion}</p>}
         </div>
-        <IconBtn title="Cerrar" onClick={onCerrar}><X size={15} /></IconBtn>
+        <IconBtn title="Cerrar" onClick={() => { if (confirmarDescartarCambios()) onCerrar(); }}><X size={15} /></IconBtn>
       </div>
 
       <div className="gp-bloque rounded-lg p-3 mb-3">
@@ -9176,18 +9261,15 @@ function FichaTarea({ t, data, onCerrar, onEditar, onAgregarSubtarea, onComentar
           <div className="flex items-center gap-2">
             <input
               type="range" min={0} max={100} step={5} className="flex-1"
-              value={Number.isFinite(Number(t.avance)) && t.avance !== null && t.avance !== "" ? Number(t.avance) : avance}
-              onChange={(e) => onCambiarAvance(Number(e.target.value))}
+              value={borrador.avance === "" || borrador.avance === null ? avance : Number(borrador.avance)}
+              onChange={(e) => cambiar({ avance: Number(e.target.value) })}
               style={{ accentColor: "var(--gold)" }}
               aria-label="Porcentaje de avance"
             />
             <input
               type="number" min={0} max={100} className="gp-input" style={{ width: 72 }}
-              value={t.avance ?? ""} placeholder={String(avance)}
-              onChange={(e) => {
-                const v = e.target.value === "" ? null : Math.max(0, Math.min(100, Number(e.target.value)));
-                onCambiarAvance(v);
-              }}
+              value={borrador.avance ?? ""} placeholder={String(avance)}
+              onChange={(e) => cambiar({ avance: e.target.value === "" ? "" : Math.max(0, Math.min(100, Number(e.target.value))) })}
             />
           </div>
         )}
@@ -9195,10 +9277,12 @@ function FichaTarea({ t, data, onCerrar, onEditar, onAgregarSubtarea, onComentar
 
       <div className="mb-3">
         <span className="text-xs gp-text-muted">Estatus</span>
-        <select className="gp-input mt-1" value={t.estatus} onChange={(e) => onCambiarEstatus(e.target.value)}>
+        <select className="gp-input mt-1" value={borrador.estatus} onChange={(e) => cambiar({ estatus: e.target.value })}>
           {ESTATUS_TAREA.map((x) => <option key={x}>{x}</option>)}
         </select>
       </div>
+
+      <BarraGuardar sucio={sucio} onGuardar={guardar} onDescartar={descartar} />
 
       <div className="flex flex-col gap-0.5 mb-3">
         <Dato label="Proyecto" valor={nombreDe(data.proyectos, t.proyectoId, "")} />
