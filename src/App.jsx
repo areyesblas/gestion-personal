@@ -367,6 +367,62 @@ const toneEstatusTarea = (estatus) => (
   "muted" // Borrador, No iniciada, Pendiente
 );
 const TIPO_FIN = ["Ingreso", "Egreso"];
+
+/* ---------- Divisas ----------
+   La cuenta lleva UNA moneda base (MXN) y todo lo que se suma, reporta o compara usa el monto ya
+   convertido y CONGELADO en el momento de capturar (finanzas.monto_base). Un movimiento de hace
+   dos años no cambia de valor porque hoy se moviera el dólar: eso fue lo que costó ese día.
+   Las monedas son las que cubre la API de tipos de cambio (lista del BCE); para cualquier otra
+   se captura el tipo de cambio a mano, que de todos modos siempre se puede corregir. */
+const MONEDA_BASE = "MXN";
+const MONEDAS = [
+  { codigo: "MXN", nombre: "Peso mexicano" },
+  { codigo: "USD", nombre: "Dólar estadounidense" },
+  { codigo: "EUR", nombre: "Euro" },
+  { codigo: "CAD", nombre: "Dólar canadiense" },
+  { codigo: "GBP", nombre: "Libra esterlina" },
+  { codigo: "BRL", nombre: "Real brasileño" },
+  { codigo: "JPY", nombre: "Yen japonés" },
+  { codigo: "CHF", nombre: "Franco suizo" },
+];
+
+// El monto con el que se hacen TODAS las cuentas. El `?? monto` no es decoración: los
+// movimientos viejos y los que crean las sincronizaciones automáticas (eventos, activos) no
+// traen monto_base, y esos siempre son MXN, donde monto y monto base son el mismo número.
+const montoBaseDe = (f) => Number(f?.montoBase ?? f?.monto) || 0;
+
+// Formatea un importe en su moneda original, para enseñar "USD 1,200" junto al equivalente.
+const fmtMonedaOriginal = (monto, moneda) => {
+  const n = Number(monto) || 0;
+  try { return n.toLocaleString("es-MX", { style: "currency", currency: moneda || MONEDA_BASE }); }
+  catch { return `${n.toLocaleString("es-MX")} ${moneda || ""}`.trim(); }
+};
+
+// Tipo de cambio del DÍA del movimiento, no el de hoy: api.frankfurter.dev responde histórico
+// pidiéndole una fecha. Si falla (sin internet, fecha futura, moneda que la API no cubre) se
+// devuelve null y el formulario deja capturarlo a mano, que es lo que hay que hacer de todos
+// modos cuando el banco te cobró a otro tipo.
+const cacheTipoCambio = new Map();
+async function tipoCambioDelDia(moneda, fecha) {
+  if (!moneda || moneda === MONEDA_BASE) return 1;
+  const dia = (fecha || todayISO()).slice(0, 10);
+  const clave = `${moneda}|${dia}`;
+  if (cacheTipoCambio.has(clave)) return cacheTipoCambio.get(clave);
+  try {
+    const hoy = todayISO();
+    const ruta = dia >= hoy ? "latest" : dia;
+    const resp = await fetch(`https://api.frankfurter.dev/v1/${ruta}?base=${moneda}&symbols=${MONEDA_BASE}`);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const json = await resp.json();
+    const valor = Number(json?.rates?.[MONEDA_BASE]);
+    const bueno = Number.isFinite(valor) && valor > 0 ? valor : null;
+    cacheTipoCambio.set(clave, bueno);
+    return bueno;
+  } catch (err) {
+    console.error("No se pudo consultar el tipo de cambio:", err);
+    return null;
+  }
+}
 const FORMA_PAGO = ordenAlfabetico(["Efectivo", "Transferencia", "Especie", "Intercambio"]);
 const OCASIONES_REGALO = ordenAlfabetico(["Cumpleaños", "Navidad", "Aniversario", "Felicitación", "Otro"]);
 const ESTATUS_REGALO = ["Por comprar", "Comprado", "Envuelto", "Entregado"];
@@ -1231,7 +1287,7 @@ function CampoPassword({ value, onChange, required, className = "gp-input", auto
 // Campo de captura de dinero: mientras escribes, va formateando con $ y comas (como una app de banco).
 // Por dentro sigue guardando un número plano (ej. "1234.5") para no romper nada de la base de datos;
 // solo lo que se VE en pantalla lleva el formato.
-function MoneyInput({ value, onChange, className = "gp-input", placeholder, autoFocus, style }) {
+function MoneyInput({ value, onChange, className = "gp-input", placeholder, autoFocus, style, moneda = "MXN" }) {
   const digitsFromValue = (val) => {
     if (val === "" || val === null || val === undefined) return "";
     const n = Math.round((Number(val) || 0) * 100);
@@ -1242,7 +1298,11 @@ function MoneyInput({ value, onChange, className = "gp-input", placeholder, auto
   // Si el valor cambia desde afuera (ej. al abrir el modal con datos ya existentes), lo reflejamos.
   useEffect(() => { setDigits(digitsFromValue(value)); }, [value]);
 
-  const formatted = digits === "" ? "" : ((Number(digits) || 0) / 100).toLocaleString("es-MX", { style: "currency", currency: "MXN" });
+  const formatted = digits === "" ? "" : (() => {
+    const n = (Number(digits) || 0) / 100;
+    try { return n.toLocaleString("es-MX", { style: "currency", currency: moneda || "MXN" }); }
+    catch { return n.toLocaleString("es-MX"); }
+  })();
 
   const handleChange = (e) => {
     const soloDigitos = e.target.value.replace(/[^\d]/g, "");
@@ -1262,6 +1322,91 @@ function MoneyInput({ value, onChange, className = "gp-input", placeholder, auto
       value={formatted}
       onChange={handleChange}
     />
+  );
+}
+
+// Monto en cualquier moneda, con su tipo de cambio del día. Lo usa el formulario de Finanzas y
+// el de movimientos del proyecto, para que capturar en dólares se haga igual en los dos lados.
+//
+// El tipo de cambio se pide a la API con la FECHA del movimiento, no con la de hoy: así un gasto
+// capturado hoy pero fechado el mes pasado se congela al tipo que había ese día. Y siempre queda
+// editable, porque el tipo que te cobró el banco casi nunca es el oficial.
+// Muestra el importe de un movimiento. Siempre en pesos, porque es la moneda con la que se
+// compara todo; si el movimiento fue en otra moneda, debajo va lo que realmente se pagó y el
+// tipo de cambio al que quedó congelado, que es el dato que hace cuadrar el histórico.
+function MontoMovimiento({ f, className = "" }) {
+  const signo = f.tipo === "Ingreso" ? "+" : "−";
+  const color = f.tipo === "Ingreso" ? "var(--teal)" : "var(--red)";
+  const otraMoneda = f.moneda && f.moneda !== MONEDA_BASE;
+  return (
+    <span className={`inline-flex flex-col items-end ${className}`}>
+      <span className="gp-mono" style={{ color }}>{f.monto ? `${signo}${fmtMoney(montoBaseDe(f))}` : "—"}</span>
+      {otraMoneda && (
+        <span className="gp-mono gp-text-muted" style={{ fontSize: 10 }}>
+          {fmtMonedaOriginal(f.monto, f.moneda)} @ {Number(f.tipoCambio) || 1}
+        </span>
+      )}
+    </span>
+  );
+}
+
+function CamposMoneda({ monto, moneda, tipoCambio, fecha, onCambiar }) {
+  const [buscando, setBuscando] = useState(false);
+  const [aviso, setAviso] = useState("");
+  // onCambiar cambia de identidad en cada render del padre; guardarlo en un ref evita que el
+  // efecto se vuelva a disparar solo por eso y se cicle.
+  const cbRef = useRef(onCambiar);
+  cbRef.current = onCambiar;
+
+  const consultar = async (cual, cuando) => {
+    if (!cual || cual === MONEDA_BASE) { cbRef.current({ tipoCambio: 1 }); setAviso(""); return; }
+    setBuscando(true); setAviso("");
+    const valor = await tipoCambioDelDia(cual, cuando);
+    setBuscando(false);
+    if (valor == null) setAviso("No se pudo consultar ese día. Captura el tipo de cambio a mano.");
+    else cbRef.current({ tipoCambio: valor });
+  };
+
+  useEffect(() => { consultar(moneda, fecha); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [moneda, fecha]);
+
+  const esBase = !moneda || moneda === MONEDA_BASE;
+  const equivalente = (Number(monto) || 0) * (Number(tipoCambio) || 0);
+
+  return (
+    <>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <Field label="Monto">
+          <MoneyInput value={monto} moneda={moneda || MONEDA_BASE} onChange={(val) => onCambiar({ monto: val })} />
+        </Field>
+        <Field label="Moneda">
+          <select className="gp-input" value={moneda || MONEDA_BASE} onChange={(e) => onCambiar({ moneda: e.target.value })}>
+            {MONEDAS.map((m) => <option key={m.codigo} value={m.codigo}>{m.codigo} — {m.nombre}</option>)}
+          </select>
+        </Field>
+      </div>
+      {!esBase && (
+        <div className="gp-bloque rounded-lg p-3 mb-3">
+          <div className="flex items-end gap-2">
+            <Field label={`Tipo de cambio del ${fecha || "día"}`}>
+              <input
+                type="number" step="0.0001" min="0" className="gp-input" inputMode="decimal"
+                value={tipoCambio ?? ""} onChange={(e) => onCambiar({ tipoCambio: e.target.value })}
+              />
+            </Field>
+            <button
+              type="button" onClick={() => consultar(moneda, fecha)} disabled={buscando}
+              className="gp-btn-ghost px-3 rounded text-xs shrink-0"
+              style={{ height: 34, marginBottom: 12, opacity: buscando ? 0.6 : 1 }}
+            >
+              {buscando ? "Consultando…" : "Actualizar"}
+            </button>
+          </div>
+          <p className="text-xs" style={{ color: aviso ? "var(--red)" : "var(--muted)" }}>
+            {aviso || `Equivale a ${fmtMoney(equivalente)} ${MONEDA_BASE}. Este número se guarda congelado: si el tipo de cambio se mueve después, este movimiento no cambia.`}
+          </p>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -5615,7 +5760,7 @@ const CATEGORIAS_GASTO_PROYECTO = ordenAlfabetico([
 //   · comprometido / pagado -> lo que sale al equipo (precio pactado de tareas vs tareas ya hechas)
 function finanzasProyecto(data, proyectoId) {
   const movs = (data.finanzas || []).filter((f) => f.proyectoId === proyectoId);
-  const suma = (lista) => lista.reduce((t, f) => t + (Number(f.monto) || 0), 0);
+  const suma = (lista) => lista.reduce((t, f) => t + montoBaseDe(f), 0);
 
   const ingresos = movs.filter((f) => f.tipo === "Ingreso");
   const egresos = movs.filter((f) => f.tipo === "Egreso");
@@ -5653,8 +5798,8 @@ function finanzasProyecto(data, proyectoId) {
 
 function rentabilidadProyecto(data, proyectoId) {
   const movs = data.finanzas.filter((f) => f.proyectoId === proyectoId && f.estatus === "Cobrado");
-  const ingresos = movs.filter((f) => f.tipo === "Ingreso").reduce((s, f) => s + (Number(f.monto) || 0), 0);
-  const egresos = movs.filter((f) => f.tipo === "Egreso").reduce((s, f) => s + (Number(f.monto) || 0), 0);
+  const ingresos = movs.filter((f) => f.tipo === "Ingreso").reduce((s, f) => s + montoBaseDe(f), 0);
+  const egresos = movs.filter((f) => f.tipo === "Egreso").reduce((s, f) => s + montoBaseDe(f), 0);
   const tareasProyecto = data.pendientes.filter((t) => t.proyectoId === proyectoId);
   const pagosColab = tareasProyecto
     .filter((t) => t.colaboradorContactoId && t.estatus === "Completada")
@@ -7068,9 +7213,7 @@ function FichaProyecto({
                           <span className="truncate">{f.concepto}</span>
                           <span className="shrink-0 flex items-center gap-1.5">
                             <Badge tone={f.estatus === "Cobrado" ? "teal" : "gold"}>{f.estatus}</Badge>
-                            <span className="gp-mono text-[11px]" style={{ color: f.tipo === "Ingreso" ? "var(--teal)" : "var(--red)" }}>
-                              {f.tipo === "Ingreso" ? "+" : "−"}{fmtMoney(f.monto)}
-                            </span>
+                            <MontoMovimiento f={f} className="text-[11px]" />
                           </span>
                         </div>
                       ))}
@@ -7097,7 +7240,8 @@ function FichaProyecto({
                         { label: "Tipo", get: (f) => f.tipo },
                         { label: "Categoría", get: (f) => f.categoria },
                         { label: "Estatus", get: (f) => f.estatus },
-                        { label: "Monto", get: (f) => fmtMoney(f.monto) },
+                        { label: "Monto", get: (f) => fmtMoney(montoBaseDe(f)) },
+                        { label: "Moneda original", get: (f) => (f.moneda && f.moneda !== MONEDA_BASE ? `${fmtMonedaOriginal(f.monto, f.moneda)} @ ${Number(f.tipoCambio) || 1}` : "") },
                       ],
                       `proyecto_${p.nombre}`,
                       `Estado financiero — ${p.nombre}`,
@@ -9201,11 +9345,11 @@ function calcularSaldo(data) {
 
     if (!f.esRecurrente) {
       if (!f.fecha || f.fecha < activo.fecha || f.fecha > hoy) continue;
-      const monto = (Number(f.monto) || 0) * signo;
+      const monto = montoBaseDe(f) * signo;
       if (f.forma === "Efectivo") efectivo += monto; else cuenta += monto;
     } else {
       const n = contarOcurrenciasRecurrente(f, activo.fecha, hoy);
-      const monto = (Number(f.monto) || 0) * signo * n;
+      const monto = montoBaseDe(f) * signo * n;
       if (f.forma === "Efectivo") efectivo += monto; else cuenta += monto;
     }
   }
@@ -9255,7 +9399,7 @@ function Finanzas({ data, onAdd, onEdit, onRemove, crearAlEntrar, onConsumirCrea
   const [ordenDir, setOrdenDir] = useState("asc");
   const [busqueda, setBusqueda] = useState("");
   const toggleOrden = (key) => { if (orden === key) setOrdenDir((d) => (d === "asc" ? "desc" : "asc")); else { setOrden(key); setOrdenDir("asc"); } };
-  const empty = { concepto: "", tipo: "Ingreso", proyectoId: "", contactoId: "", fecha: todayISO(), fechaVencimiento: "", monto: "", categoria: "", forma: "Transferencia", estatus: "Cobrado", pautando: false, esRecurrente: false, frecuencia: "Mensual", fechaFin: "" };
+  const empty = { concepto: "", tipo: "Ingreso", proyectoId: "", contactoId: "", fecha: todayISO(), fechaVencimiento: "", monto: "", moneda: MONEDA_BASE, tipoCambio: 1, montoBase: "", categoria: "", forma: "Transferencia", estatus: "Cobrado", pautando: false, esRecurrente: false, frecuencia: "Mensual", fechaFin: "" };
 
   useEffect(() => {
     if (crearAlEntrar) { setModal({ item: { ...empty, ...(crearAlEntrar.preset || {}) } }); onConsumirCrearAlEntrar(); }
@@ -9274,12 +9418,12 @@ function Finanzas({ data, onAdd, onEdit, onRemove, crearAlEntrar, onConsumirCrea
   const cobrosPendientes = finanzasFiltradas
     .filter((f) => f.tipo === "Ingreso" && f.estatus === "Pendiente")
     .sort((a, b) => (a.fechaVencimiento || "9999").localeCompare(b.fechaVencimiento || "9999"));
-  const totalCobrosPendientes = cobrosPendientes.reduce((s, f) => s + (Number(f.monto) || 0), 0);
+  const totalCobrosPendientes = cobrosPendientes.reduce((s, f) => s + montoBaseDe(f), 0);
 
   let recurrentes = finanzasFiltradas.filter((f) => f.esRecurrente);
   if (filtroTipoRecurrente !== "Todos") recurrentes = recurrentes.filter((f) => f.tipo === filtroTipoRecurrente);
   if (filtroVigencia !== "Todos") recurrentes = recurrentes.filter((f) => (filtroVigencia === "Vigentes" ? esVigente(f) : !esVigente(f)));
-  const totalRecurrentes = recurrentes.reduce((s, f) => s + (Number(f.monto) || 0) * (f.tipo === "Ingreso" ? 1 : -1), 0);
+  const totalRecurrentes = recurrentes.reduce((s, f) => s + montoBaseDe(f) * (f.tipo === "Ingreso" ? 1 : -1), 0);
 
   // Resumen del mes: movimientos puntuales de este mes ya cobrados, más los recurrentes vigentes
   // (esos ocurren cada mes, incluido este, sin importar en qué mes se hayan dado de alta).
@@ -9288,15 +9432,15 @@ function Finanzas({ data, onAdd, onEdit, onRemove, crearAlEntrar, onConsumirCrea
     if (f.esRecurrente) return esVigente(f);
     return (f.fecha || "").startsWith(mesActual);
   });
-  const ingresosMes = movsDelMes.filter((f) => f.tipo === "Ingreso").reduce((s, f) => s + (Number(f.monto) || 0), 0);
-  const egresosMes = movsDelMes.filter((f) => f.tipo === "Egreso").reduce((s, f) => s + (Number(f.monto) || 0), 0);
+  const ingresosMes = movsDelMes.filter((f) => f.tipo === "Ingreso").reduce((s, f) => s + montoBaseDe(f), 0);
+  const egresosMes = movsDelMes.filter((f) => f.tipo === "Egreso").reduce((s, f) => s + montoBaseDe(f), 0);
   const netoMes = ingresosMes - egresosMes;
 
   const camposOrden = {
     fecha: { get: (f) => f.fecha, tipo: "fecha" },
     registro: { get: (f) => f.createdAt, tipo: "fecha" },
     alfabetico: { get: (f) => f.concepto, tipo: "texto" },
-    monto: { get: (f) => Number(f.monto) || 0, tipo: "numero" },
+    monto: { get: (f) => montoBaseDe(f), tipo: "numero" },
   };
   const opcionesOrden = [
     { key: "fecha", label: "fecha del movimiento" },
@@ -9314,7 +9458,9 @@ function Finanzas({ data, onAdd, onEdit, onRemove, crearAlEntrar, onConsumirCrea
 
   const columnasExport = [
     { label: "Concepto", get: (f) => f.concepto }, { label: "Tipo", get: (f) => f.tipo },
-    { label: "Fecha", get: (f) => f.fecha }, { label: "Monto", get: (f) => f.monto },
+    { label: "Fecha", get: (f) => f.fecha },
+    { label: "Monto (MXN)", get: (f) => montoBaseDe(f) },
+    { label: "Moneda original", get: (f) => (f.moneda && f.moneda !== MONEDA_BASE ? `${f.monto} ${f.moneda} @ ${Number(f.tipoCambio) || 1}` : "") },
     { label: "Categoría", get: (f) => f.categoria }, { label: "Forma", get: (f) => f.forma },
     { label: "Estatus", get: (f) => f.estatus }, { label: "Proyecto", get: (f) => nombreProyecto(f.proyectoId) },
     { label: "Contacto", get: (f) => nombreCliente(f.contactoId) },
@@ -9423,7 +9569,7 @@ function Finanzas({ data, onAdd, onEdit, onRemove, crearAlEntrar, onConsumirCrea
                     {vista === "cobros" && f.fechaVencimiento && <span style={{ color: vencido ? "var(--red)" : undefined }}> · vence {f.fechaVencimiento}{vencido ? " (vencido)" : ""}</span>}
                   </p>
                 </div>
-                <span className={`gp-mono text-sm shrink-0 ${f.tipo === "Ingreso" ? "gp-text-teal" : "gp-text-red"}`}>{f.tipo === "Ingreso" ? "+" : "−"}{f.monto ? fmtMoney(f.monto) : "—"}</span>
+                <MontoMovimiento f={f} className="text-sm shrink-0" />
               </div>
               {abierta && (
                 <div className="mt-2.5 pt-2.5 border-t gp-border pl-5">
@@ -9455,8 +9601,8 @@ function Finanzas({ data, onAdd, onEdit, onRemove, crearAlEntrar, onConsumirCrea
         return (
           <div className="space-y-3">
             {gruposMes.map(([mes, movs]) => {
-              const ingMes = movs.filter((f) => f.tipo === "Ingreso").reduce((s, f) => s + (Number(f.monto) || 0), 0);
-              const egMes = movs.filter((f) => f.tipo === "Egreso").reduce((s, f) => s + (Number(f.monto) || 0), 0);
+              const ingMes = movs.filter((f) => f.tipo === "Ingreso").reduce((s, f) => s + montoBaseDe(f), 0);
+              const egMes = movs.filter((f) => f.tipo === "Egreso").reduce((s, f) => s + montoBaseDe(f), 0);
               const abierto = mesesAbiertos.has(mes);
               return (
                 <div key={mes}>
@@ -9535,10 +9681,11 @@ function FinanzaForm({ item, proyectos, contactos, onSave }) {
           </select>
         </Field>
       </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <Field label="Categoría"><input className="gp-input" value={v.categoria} onChange={(e) => setV({ ...v, categoria: e.target.value })} placeholder="ej. hosting, venta, renta" /></Field>
-        <Field label="Monto"><MoneyInput className="gp-input" value={v.monto} onChange={(val) => setV({ ...v, monto: val })} /></Field>
-      </div>
+      <Field label="Categoría"><input className="gp-input" value={v.categoria} onChange={(e) => setV({ ...v, categoria: e.target.value })} placeholder="ej. hosting, venta, renta" /></Field>
+      <CamposMoneda
+        monto={v.monto} moneda={v.moneda || MONEDA_BASE} tipoCambio={v.tipoCambio ?? 1} fecha={v.fecha}
+        onCambiar={(parche) => setV((prev) => ({ ...prev, ...parche }))}
+      />
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Field label="Forma"><select className="gp-input" value={v.forma} onChange={(e) => setV({ ...v, forma: e.target.value })}>{FORMA_PAGO.map((c) => <option key={c}>{c}</option>)}</select></Field>
         <Field label="Estatus"><select className="gp-input" value={v.estatus} onChange={(e) => setV({ ...v, estatus: e.target.value })}><option>Cobrado</option><option>Pendiente</option></select></Field>
@@ -9566,7 +9713,14 @@ function FinanzaForm({ item, proyectos, contactos, onSave }) {
       {error && <p className="text-xs gp-text-red mb-2">{error}</p>}
 
 
-      <button className="gp-btn w-full py-2 text-sm mt-1" onClick={() => { if (!v.concepto?.toString().trim()) { setError("El concepto es obligatorio."); return; } setError(""); onSave(v); }}>Guardar</button>
+      <button className="gp-btn w-full py-2 text-sm mt-1" onClick={() => {
+        if (!v.concepto?.toString().trim()) { setError("El concepto es obligatorio."); return; }
+        setError("");
+        // El monto base se congela al guardar: monto × tipo de cambio de ese día. Es el número
+        // con el que suma toda la app, y no se vuelve a recalcular aunque el tipo cambie.
+        const tc = Number(v.tipoCambio) || 1;
+        onSave({ ...v, moneda: v.moneda || MONEDA_BASE, tipoCambio: tc, montoBase: (Number(v.monto) || 0) * tc });
+      }}>Guardar</button>
     </div>
   );
 }
@@ -9978,7 +10132,7 @@ function Equipo({ data, onAddContacto, onEditContacto, onAddFinanzas, onAddFactu
   const colaboradores = data.contactos.filter((c) => (c.tipos && c.tipos.length ? c.tipos : [c.tipo || "Otro"]).includes("Colaborador"));
   const tareasDe = (id) => data.pendientes.filter((p) => p.colaboradorContactoId === id);
   const ganadoDe = (id) => tareasDe(id).filter((p) => p.estadoAceptacion === "aceptada" || p.aceptadaPorCreador).reduce((s, p) => s + (Number(p.precio) || 0), 0);
-  const pagadoDe = (id) => data.finanzas.filter((f) => f.categoria === "Pago a colaborador" && f.contactoId === id && f.estatus !== "Cancelado").reduce((s, f) => s + (Number(f.monto) || 0), 0);
+  const pagadoDe = (id) => data.finanzas.filter((f) => f.categoria === "Pago a colaborador" && f.contactoId === id && f.estatus !== "Cancelado").reduce((s, f) => s + montoBaseDe(f), 0);
   const nombreProyecto = (pid) => data.proyectos.find((p) => p.id === pid)?.nombre || "—";
 
   const camposOrden = {
@@ -12079,8 +12233,8 @@ function Marketing({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
   const actividadesDeCampana = (id) => (data.campanaActividades || []).filter((a) => a.campanaId === id).sort((a, b) => (a.fecha || "").localeCompare(b.fecha || ""));
   // Regla maestra de dinero: gastado/ingreso NUNCA se capturan a mano — se suman los
   // movimientos reales de Finanzas que están ligados a esta campaña (campanaId).
-  const gastadoDe = (id) => (data.finanzas || []).filter((f) => f.campanaId === id && f.tipo === "Egreso" && f.estatus !== "Cancelado").reduce((s, f) => s + (Number(f.monto) || 0), 0);
-  const ingresoDe = (id) => (data.finanzas || []).filter((f) => f.campanaId === id && f.tipo === "Ingreso" && f.estatus !== "Cancelado").reduce((s, f) => s + (Number(f.monto) || 0), 0);
+  const gastadoDe = (id) => (data.finanzas || []).filter((f) => f.campanaId === id && f.tipo === "Egreso" && f.estatus !== "Cancelado").reduce((s, f) => s + montoBaseDe(f), 0);
+  const ingresoDe = (id) => (data.finanzas || []).filter((f) => f.campanaId === id && f.tipo === "Ingreso" && f.estatus !== "Cancelado").reduce((s, f) => s + montoBaseDe(f), 0);
   const retorno = (c) => {
     const gastado = gastadoDe(c.id);
     const ingreso = ingresoDe(c.id);
@@ -14946,7 +15100,7 @@ function Estimaciones({ data }) {
       const m = (f.fecha || "").slice(0, 7);
       if (!monthKeys.includes(m)) continue;
       if (!map[f.contactoId]) map[f.contactoId] = { ingresos: 0, egresos: 0 };
-      map[f.contactoId][f.tipo === "Ingreso" ? "ingresos" : "egresos"] += Number(f.monto) || 0;
+      map[f.contactoId][f.tipo === "Ingreso" ? "ingresos" : "egresos"] += montoBaseDe(f);
     }
     return Object.entries(map)
       .map(([id, v]) => ({ nombre: nombreContacto(id), neto: v.ingresos - v.egresos }))
@@ -14955,8 +15109,8 @@ function Estimaciones({ data }) {
 
   // --- Comportamiento de ingresos y gastos recurrentes ---
   const recurrentesActivos = data.finanzas.filter((f) => f.esRecurrente && (!f.fechaFin || f.fechaFin >= todayISO()));
-  const recurrenteIngresoMensual = recurrentesActivos.filter((f) => f.tipo === "Ingreso" && f.frecuencia !== "Anual").reduce((s, f) => s + (Number(f.monto) || 0), 0);
-  const recurrenteEgresoMensual = recurrentesActivos.filter((f) => f.tipo === "Egreso" && f.frecuencia !== "Anual").reduce((s, f) => s + (Number(f.monto) || 0), 0);
+  const recurrenteIngresoMensual = recurrentesActivos.filter((f) => f.tipo === "Ingreso" && f.frecuencia !== "Anual").reduce((s, f) => s + montoBaseDe(f), 0);
+  const recurrenteEgresoMensual = recurrentesActivos.filter((f) => f.tipo === "Egreso" && f.frecuencia !== "Anual").reduce((s, f) => s + montoBaseDe(f), 0);
 
   // --- Proyección de categorías y necesidades futuras (gasto mensual promedio, para presupuestar) ---
   const promedioMensualPorCategoria = useMemo(() => {
@@ -14978,7 +15132,7 @@ function Estimaciones({ data }) {
   const medianaEvento = ordenExtremos.length ? ordenExtremos[Math.floor(ordenExtremos.length / 2)] : null;
 
   const rentas = data.finanzas.filter((f) => f.categoria === "Renta Airbnb" && f.monto);
-  const promedioRenta = rentas.length ? rentas.reduce((s, f) => s + Number(f.monto), 0) / rentas.length : null;
+  const promedioRenta = rentas.length ? rentas.reduce((s, f) => s + montoBaseDe(f), 0) / rentas.length : null;
 
   const tareasConAmbos = data.pendientes.filter((t) => t.tiempoEstimado && t.tiempoReal);
   let precisionTiempo = null;
