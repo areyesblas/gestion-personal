@@ -656,6 +656,15 @@ const tagsUnicos = (citas) => [...new Set((citas || []).flatMap((c) => c.tags ||
 const OLD_STORAGE_KEY = "gestion_personal_data"; // localStorage, versión muy vieja
 const OLD_BLOB_TABLE = "gestion_data"; // tabla única jsonb, versión anterior a este modelo relacional
 
+// Todo combo que liste registros de OTRA entidad (proyectos, contactos, colaboradores, tareas…)
+// va en orden alfabético (pedido de Angel, 29 sept 2026: "revisar en todos los combos que traigan
+// información de otras entidades"). Los catálogos fijos ya se ordenan en su propia definición con
+// ordenAlfabetico(), y los pipelines —estatus de proyecto, de tarea— conservan su orden a
+// propósito: ahí el orden ES información.
+const compararEs = (a, b) => (a || "").toString().localeCompare((b || "").toString(), "es", { sensitivity: "base" });
+const ordenadosPorNombre = (lista) => [...(lista || [])].sort((a, b) => compararEs(a.nombre, b.nombre));
+const ordenadosPor = (lista, get) => [...(lista || [])].sort((a, b) => compararEs(get(a), get(b)));
+
 const camelToSnake = (s) => s.replace(/[A-Z]/g, (c) => "_" + c.toLowerCase());
 const snakeToCamel = (s) => s.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
 const tableName = (key) => camelToSnake(key);
@@ -1049,9 +1058,11 @@ function Badge({ children, tone = "muted" }) {
   return <span className="gp-badge" style={toneStyle}>{children}</span>;
 }
 
+// Botón de solo ícono. `title` es obligatorio en la práctica: un ícono suelto no dice qué hace,
+// así que se usa como tooltip y, de paso, como nombre accesible del botón.
 function IconBtn({ onClick, children, title }) {
   return (
-    <button onClick={onClick} title={title}
+    <button onClick={onClick} title={title} aria-label={title}
       className="p-1.5 rounded gp-btn-ghost" style={{ lineHeight: 0 }}>
       {children}
     </button>
@@ -1160,7 +1171,7 @@ function Modal({ title, onClose, children }) {
       >
         <div className="flex items-center justify-between mb-4">
           <h3 className="gp-serif text-lg">{title}</h3>
-          <IconBtn onClick={intentarCerrar}><X size={16} /></IconBtn>
+          <IconBtn title="Cerrar" onClick={intentarCerrar}><X size={16} /></IconBtn>
         </div>
         {children}
 
@@ -6809,7 +6820,7 @@ function ProyectoForm({ item, contactos, empresas = [], vinculos, onVincularCont
                 ficha que ya existe en Contactos. */}
             <select className="gp-input" value={v.responsableContactoId || ""} onChange={(e) => setV({ ...v, responsableContactoId: e.target.value })}>
               <option value="">Tú</option>
-              {[...contactos].sort((a, b) => (a.nombre || "").localeCompare(b.nombre || "", "es")).map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+              {ordenadosPorNombre(contactos).map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
             </select>
           </Field>
         </div>
@@ -6822,7 +6833,7 @@ function ProyectoForm({ item, contactos, empresas = [], vinculos, onVincularCont
               crean campos nuevos, solo se nombran bien y la de revisión se deja de esconder. */}
           <Field label="Fecha de arranque"><input type="date" className="gp-input" value={v.fechaInicio || ""} onChange={(e) => setV({ ...v, fechaInicio: e.target.value })} /></Field>
           <Field label="Fecha de revisión"><input type="date" className="gp-input" value={v.fechaRevision || ""} onChange={(e) => setV({ ...v, fechaRevision: e.target.value })} /></Field>
-          <Field label="Fecha de entrega (liberación)"><input type="date" className="gp-input" value={v.fechaFin || ""} onChange={(e) => setV({ ...v, fechaFin: e.target.value })} /></Field>
+          <Field label="Fecha de entrega"><input type="date" className="gp-input" value={v.fechaFin || ""} onChange={(e) => setV({ ...v, fechaFin: e.target.value })} /></Field>
         </div>
       </SeccionForm>
 
@@ -7091,8 +7102,8 @@ function ProyectoDetalle({ data, proyectoId, onVolver, onAddTarea, onEditTarea, 
                       <span className="text-sm flex-1">{m.descripcion}</span>
                       <Badge tone={m.prioridad === "Alta" ? "red" : m.prioridad === "Media" ? "gold" : "muted"}>{m.prioridad || "Media"}</Badge>
                       {m.fechaObjetivo && <span className="text-xs gp-mono gp-text-muted">{m.fechaObjetivo}</span>}
-                      <IconBtn onClick={() => setModalMeta({ item: m })}><Pencil size={12} /></IconBtn>
-                      <IconBtn onClick={() => onRemoveMeta(m.id)}><Trash2 size={12} /></IconBtn>
+                      <IconBtn title="Editar" onClick={() => setModalMeta({ item: m })}><Pencil size={12} /></IconBtn>
+                      <IconBtn title="Eliminar" onClick={() => onRemoveMeta(m.id)}><Trash2 size={12} /></IconBtn>
                     </div>
                   );
                 })}
@@ -7167,10 +7178,10 @@ function ProyectoDetalle({ data, proyectoId, onVolver, onAddTarea, onEditTarea, 
                       </td>
                       <td className="gp-mono">{sensibleDesbloqueado ? (p.precio ? fmtMoney(p.precio) : "—") : (p.precio ? "🔒" : "—")}</td>
                       <td><div className="flex gap-1">
-                        <IconBtn onClick={() => setModal({ item: { ...empty, parentId: p.id } })}><Plus size={13} /></IconBtn>
-                        <IconBtn onClick={() => setComentariosDe(p)}><MessageCircle size={13} />{nc > 0 && <span className="gp-mono" style={{ fontSize: 9, marginLeft: 2 }}>{nc}</span>}</IconBtn>
-                        <IconBtn onClick={() => setModal({ item: paraEditar(p) })}><Pencil size={13} /></IconBtn>
-                        <IconBtn onClick={() => confirmarBorrado(p)}><Trash2 size={13} /></IconBtn>
+                        <IconBtn title="Agregar subtarea" onClick={() => setModal({ item: { ...empty, parentId: p.id } })}><Plus size={13} /></IconBtn>
+                        <IconBtn title="Comentarios" onClick={() => setComentariosDe(p)}><MessageCircle size={13} />{nc > 0 && <span className="gp-mono" style={{ fontSize: 9, marginLeft: 2 }}>{nc}</span>}</IconBtn>
+                        <IconBtn title="Editar" onClick={() => setModal({ item: paraEditar(p) })}><Pencil size={13} /></IconBtn>
+                        <IconBtn title="Eliminar" onClick={() => confirmarBorrado(p)}><Trash2 size={13} /></IconBtn>
                       </div></td>
                     </tr>
                   );
@@ -8107,7 +8118,7 @@ function Pendientes({ data, activeOwnerId, onAdd, onEdit, onEditProyecto, onRemo
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
             <select className="gp-input" style={{ maxWidth: 220 }} value={filtroProyecto} onChange={(e) => setFiltroProyecto(e.target.value)}>
               <option value="">Todos los proyectos</option>
-              {[...data.proyectos].sort((a, b) => a.nombre.localeCompare(b.nombre, "es")).map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+              {ordenadosPorNombre(data.proyectos).map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
             </select>
             <OrdenSelector opciones={opcionesOrden} value={orden} onChange={setOrden} />
             <BotonArbolTareas idsRamas={idsRamas} colapsadas={colapsadas} onCambiar={setColapsadas} />
@@ -8116,7 +8127,7 @@ function Pendientes({ data, activeOwnerId, onAdd, onEdit, onEditProyecto, onRemo
         {vista === "mindmap" && (
           <select className="gp-input" style={{ maxWidth: 260 }} value={proyectoMindMap} onChange={(e) => setProyectoMindMap(e.target.value)}>
             <option value="">— elige un proyecto —</option>
-            {data.proyectos.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+            {ordenadosPorNombre(data.proyectos).map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
           </select>
         )}
       </div>
@@ -8202,10 +8213,10 @@ function Pendientes({ data, activeOwnerId, onAdd, onEdit, onEditProyecto, onRemo
                   <td className="gp-mono hidden md:table-cell">{p.precio ? fmtMoney(p.precio) : "—"}</td>
                   <td className="gp-mono gp-text-muted hidden md:table-cell">{p.tiempoEstimado ? `${p.tiempoEstimado}h` : "—"}{p.tiempoReal ? ` / ${p.tiempoReal}h` : ""}</td>
                   <td onClick={(e) => e.stopPropagation()}><div className="flex gap-1">
-                    <IconBtn onClick={() => setModal({ item: paraEditar(p) })}><Pencil size={13} /></IconBtn>
-                    <IconBtn onClick={() => setModal({ item: { ...empty, proyectoId: p.proyectoId, parentId: p.id } })}><Plus size={13} /></IconBtn>
-                    <IconBtn onClick={() => setComentariosDe(p)}><MessageCircle size={13} />{nc > 0 && <span className="gp-mono" style={{ fontSize: 9, marginLeft: 2 }}>{nc}</span>}</IconBtn>
-                    <IconBtn onClick={() => confirmarBorrado(p)}><Trash2 size={13} /></IconBtn>
+                    <IconBtn title="Editar" onClick={() => setModal({ item: paraEditar(p) })}><Pencil size={13} /></IconBtn>
+                    <IconBtn title="Agregar subtarea" onClick={() => setModal({ item: { ...empty, proyectoId: p.proyectoId, parentId: p.id } })}><Plus size={13} /></IconBtn>
+                    <IconBtn title="Comentarios" onClick={() => setComentariosDe(p)}><MessageCircle size={13} />{nc > 0 && <span className="gp-mono" style={{ fontSize: 9, marginLeft: 2 }}>{nc}</span>}</IconBtn>
+                    <IconBtn title="Eliminar" onClick={() => confirmarBorrado(p)}><Trash2 size={13} /></IconBtn>
                   </div></td>
                 </tr>
               );
@@ -8290,7 +8301,7 @@ function PendienteForm({ item, proyectos, contactos, pendientes, colaboradores, 
       <Field label="Es subtarea de (opcional)">
         <select className="gp-input" value={v.parentId || ""} onChange={(e) => setV({ ...v, parentId: e.target.value })}>
           <option value="">— tarea principal —</option>
-          {opcionesParent.map((t) => <option key={t.id} value={t.id}>{t.descripcion}</option>)}
+          {ordenadosPor(opcionesParent, (t) => t.descripcion).map((t) => <option key={t.id} value={t.id}>{t.descripcion}</option>)}
         </select>
       </Field>
       <Field label="Proyecto">
@@ -8399,7 +8410,7 @@ function PendienteForm({ item, proyectos, contactos, pendientes, colaboradores, 
         <Field label="Asignar a colaborador ARKEYONE (opcional — le llega notificación push)">
           <select className="gp-input" value={v.asignadoA || ""} onChange={(e) => setV({ ...v, asignadoA: e.target.value })}>
             <option value="">— sin asignar —</option>
-            {colaboradores.map((c) => <option key={c.colaborador_user_id} value={c.colaborador_user_id}>{c.colaborador_email}</option>)}
+            {ordenadosPor(colaboradores, (c) => c.colaborador_email).map((c) => <option key={c.colaborador_user_id} value={c.colaborador_user_id}>{c.colaborador_email}</option>)}
           </select>
         </Field>
       )}
@@ -8822,13 +8833,13 @@ function FinanzaForm({ item, proyectos, contactos, onSave }) {
         <Field label="Proyecto">
           <select className="gp-input" value={v.proyectoId} onChange={(e) => setV({ ...v, proyectoId: e.target.value })}>
             <option value="">— sin proyecto —</option>
-            {proyectos.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+            {ordenadosPorNombre(proyectos).map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
           </select>
         </Field>
         <Field label="Cliente (quién pagó)">
           <select className="gp-input" value={v.contactoId || ""} onChange={(e) => setV({ ...v, contactoId: e.target.value })}>
             <option value="">— sin cliente —</option>
-            {contactos.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+            {ordenadosPorNombre(contactos).map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
           </select>
         </Field>
       </div>
@@ -8964,8 +8975,8 @@ function Facturas({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCome
                   </td>
                   <td>{f.finanzasId ? <Badge tone="teal">🔗 Vinculada</Badge> : <Badge tone="muted">Sin vincular</Badge>}</td>
                   <td><div className="flex gap-1">
-                    <IconBtn onClick={() => setComentariosDe(f)}><MessageCircle size={13} />{nc > 0 && <span className="gp-mono" style={{ fontSize: 9, marginLeft: 2 }}>{nc}</span>}</IconBtn>
-                    <IconBtn onClick={() => setModal({ item: f })}><Pencil size={13} /></IconBtn><IconBtn onClick={() => onRemove(f.id)}><Trash2 size={13} /></IconBtn>
+                    <IconBtn title="Comentarios" onClick={() => setComentariosDe(f)}><MessageCircle size={13} />{nc > 0 && <span className="gp-mono" style={{ fontSize: 9, marginLeft: 2 }}>{nc}</span>}</IconBtn>
+                    <IconBtn title="Editar" onClick={() => setModal({ item: f })}><Pencil size={13} /></IconBtn><IconBtn title="Eliminar" onClick={() => onRemove(f.id)}><Trash2 size={13} /></IconBtn>
                   </div></td>
                 </tr>
               );
@@ -9015,13 +9026,13 @@ function FacturaForm({ item, proyectos, contactos, finanzas, onAddFinanzas, onSa
         <Field label="Proyecto">
           <select className="gp-input" value={v.proyectoId} onChange={(e) => setV({ ...v, proyectoId: e.target.value })}>
             <option value="">— sin proyecto —</option>
-            {proyectos.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+            {ordenadosPorNombre(proyectos).map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
           </select>
         </Field>
         <Field label="Contacto (cliente o proveedor)">
           <select className="gp-input" value={v.contactoId || ""} onChange={(e) => setV({ ...v, contactoId: e.target.value })}>
             <option value="">— sin contacto —</option>
-            {contactos.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+            {ordenadosPorNombre(contactos).map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
           </select>
         </Field>
       </div>
@@ -9151,7 +9162,7 @@ function Deudas({ data, onAddFinanzas, onEditFinanzas, onRemoveFinanzas, onAddPa
                   <td className="gp-mono">{fmtMoney(saldoPendiente(d))}</td>
                   <td><div className="flex gap-1">
                     <button title="Registrar un pago" onClick={() => setModal({ item: d, paso: "pagar" })} className="text-xs px-2 py-1 rounded gp-btn-ghost gp-text-teal">Pagar</button>
-                    <IconBtn onClick={() => setModal({ item: d })}><Pencil size={13} /></IconBtn><IconBtn onClick={() => onRemoveFinanzas(d.id)}><Trash2 size={13} /></IconBtn>
+                    <IconBtn title="Editar" onClick={() => setModal({ item: d })}><Pencil size={13} /></IconBtn><IconBtn title="Eliminar" onClick={() => onRemoveFinanzas(d.id)}><Trash2 size={13} /></IconBtn>
                   </div></td>
                 </tr>
               );
@@ -9236,7 +9247,7 @@ function DeudaForm({ item, proyectos, saldoPendiente, onAbrirPago, onSave }) {
       <Field label="Proyecto relacionado">
         <select className="gp-input" value={v.proyectoId} onChange={(e) => setV({ ...v, proyectoId: e.target.value })}>
           <option value="">— personal / sin proyecto —</option>
-          {proyectos.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+          {ordenadosPorNombre(proyectos).map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
         </select>
       </Field>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -9322,7 +9333,7 @@ function Equipo({ data, onAddContacto, onEditContacto, onAddFinanzas, onAddFactu
                     {m.correo && <span className="flex items-center gap-1"><Mail size={12} /> {m.correo}</span>}
                   </div>
                 </div>
-                <IconBtn onClick={() => setModal({ item: m })}><Pencil size={13} /></IconBtn>
+                <IconBtn title="Editar" onClick={() => setModal({ item: m })}><Pencil size={13} /></IconBtn>
               </div>
               {m.notas && <p className="text-xs mt-2 gp-text-muted">{m.notas}</p>}
               <div className="mt-3 pt-3 border-t gp-border text-xs space-y-1">
@@ -9404,7 +9415,7 @@ function PagoColaboradorForm({ saldoPendiente, proyectos, onPagar }) {
       <Field label="Proyecto relacionado (opcional)">
         <select className="gp-input" value={proyectoId} onChange={(e) => setProyectoId(e.target.value)}>
           <option value="">— sin proyecto —</option>
-          {proyectos.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+          {ordenadosPorNombre(proyectos).map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
         </select>
       </Field>
       <label className="flex items-center gap-2 mb-3 text-sm cursor-pointer">
@@ -9466,7 +9477,7 @@ function Actividades({ data, onAdd, onEdit, onRemove }) {
                 <td className="gp-text-muted">{nombreProyecto(a.proyectoId)}</td>
                 <td className="gp-mono gp-text-teal">{a.ganancia ? fmtMoney(a.ganancia) : "—"}</td>
                 <td className="gp-text-muted">{a.notas}</td>
-                <td><div className="flex gap-1"><IconBtn onClick={() => setModal({ item: a })}><Pencil size={13} /></IconBtn><IconBtn onClick={() => onRemove(a.id)}><Trash2 size={13} /></IconBtn></div></td>
+                <td><div className="flex gap-1"><IconBtn title="Editar" onClick={() => setModal({ item: a })}><Pencil size={13} /></IconBtn><IconBtn title="Eliminar" onClick={() => onRemove(a.id)}><Trash2 size={13} /></IconBtn></div></td>
               </tr>
             ))}
             {ordenados.length === 0 && <tr><td colSpan={7} className="text-center gp-text-muted py-6">Aún no has escrito nada en tu diario.</td></tr>}
@@ -9496,7 +9507,7 @@ function ActividadForm({ item, proyectos, onSave }) {
       <Field label="Proyecto relacionado (opcional)">
         <select className="gp-input" value={v.proyectoId} onChange={(e) => setV({ ...v, proyectoId: e.target.value })}>
           <option value="">— ninguno —</option>
-          {proyectos.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+          {ordenadosPorNombre(proyectos).map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
         </select>
       </Field>
       <Field label="Ganancia generada (si aplica)"><MoneyInput className="gp-input" value={v.ganancia} onChange={(val) => setV({ ...v, ganancia: val })} /></Field>
@@ -9574,7 +9585,7 @@ function ActivosDigitales({ data, onAdd, onEdit, onRemove, onCrearTarea }) {
                   <td><Badge tone={tone}>{label}</Badge></td>
                   <td className="gp-mono">{a.costoRenovacion ? fmtMoney(a.costoRenovacion) : "—"}</td>
                   <td>{a.renovacionAutomatica ? <Badge tone="teal">Sí</Badge> : <span className="gp-text-muted text-xs">No</span>}</td>
-                  <td><div className="flex gap-1"><IconBtn onClick={() => setModal({ item: a })}><Pencil size={13} /></IconBtn><IconBtn onClick={() => onRemove(a.id)}><Trash2 size={13} /></IconBtn></div></td>
+                  <td><div className="flex gap-1"><IconBtn title="Editar" onClick={() => setModal({ item: a })}><Pencil size={13} /></IconBtn><IconBtn title="Eliminar" onClick={() => onRemove(a.id)}><Trash2 size={13} /></IconBtn></div></td>
                 </tr>
               );
             })}
@@ -9620,7 +9631,7 @@ function ActivoForm({ item, proyectos, onSave }) {
       <Field label="Proyecto relacionado">
         <select className="gp-input" value={v.proyectoId} onChange={(e) => setV({ ...v, proyectoId: e.target.value })}>
           <option value="">— ninguno —</option>
-          {proyectos.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+          {ordenadosPorNombre(proyectos).map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
         </select>
       </Field>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -9714,7 +9725,7 @@ function Metas({ data, onAdd, onEdit, onRemove }) {
                       {ESTATUS_META.map((s) => <option key={s}>{s}</option>)}
                     </select>
                   </td>
-                  <td><div className="flex gap-1"><IconBtn onClick={() => setModal({ item: m })}><Pencil size={13} /></IconBtn><IconBtn onClick={() => onRemove(m.id)}><Trash2 size={13} /></IconBtn></div></td>
+                  <td><div className="flex gap-1"><IconBtn title="Editar" onClick={() => setModal({ item: m })}><Pencil size={13} /></IconBtn><IconBtn title="Eliminar" onClick={() => onRemove(m.id)}><Trash2 size={13} /></IconBtn></div></td>
                 </tr>
               );
             })}
@@ -9740,7 +9751,7 @@ function MetaForm({ item, proyectos, onSave }) {
       <Field label="Proyecto">
         <select className="gp-input" value={v.proyectoId} onChange={(e) => setV({ ...v, proyectoId: e.target.value })}>
           <option value="">— sin proyecto —</option>
-          {proyectos.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+          {ordenadosPorNombre(proyectos).map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
         </select>
       </Field>
       <Field label="Meta"><input className="gp-input" placeholder="ej. Llegar a 1000 seguidores, cerrar 3 clientes" value={v.descripcion} onChange={(e) => setV({ ...v, descripcion: e.target.value })} /></Field>
@@ -11030,7 +11041,7 @@ function Regalos({ data, onAdd, onEdit, onRemove, filtroContactoInicial, onLimpi
                     {ESTATUS_REGALO.map((s) => <option key={s}>{s}</option>)}
                   </select>
                 </td>
-                <td onClick={(e) => e.stopPropagation()}><div className="flex gap-1"><IconBtn onClick={() => setModal({ item: r })}><Pencil size={13} /></IconBtn><IconBtn onClick={() => onRemove(r.id)}><Trash2 size={13} /></IconBtn></div></td>
+                <td onClick={(e) => e.stopPropagation()}><div className="flex gap-1"><IconBtn title="Editar" onClick={() => setModal({ item: r })}><Pencil size={13} /></IconBtn><IconBtn title="Eliminar" onClick={() => onRemove(r.id)}><Trash2 size={13} /></IconBtn></div></td>
               </tr>
             ))}
             {ordenados.length === 0 && <tr><td colSpan={9} className="text-center gp-text-muted py-6">Sin atenciones registradas con este filtro.</td></tr>}
@@ -11151,7 +11162,7 @@ function RedesSociales({ data, onAdd, onEdit, onRemove }) {
                 <td><Badge tone="muted">{r.plataforma}</Badge></td>
                 <td className="gp-mono">{r.seguidores || "—"}</td>
                 <td className="gp-mono">{r.alcance || "—"}</td>
-                <td><div className="flex gap-1"><IconBtn onClick={() => setModal({ item: r })}><Pencil size={13} /></IconBtn><IconBtn onClick={() => onRemove(r.id)}><Trash2 size={13} /></IconBtn></div></td>
+                <td><div className="flex gap-1"><IconBtn title="Editar" onClick={() => setModal({ item: r })}><Pencil size={13} /></IconBtn><IconBtn title="Eliminar" onClick={() => onRemove(r.id)}><Trash2 size={13} /></IconBtn></div></td>
               </tr>
             ))}
             {ordenados.length === 0 && <tr><td colSpan={6} className="text-center gp-text-muted py-6">Sin métricas registradas.</td></tr>}
@@ -11175,7 +11186,7 @@ function RedesForm({ item, proyectos, onSave }) {
       <Field label="Proyecto">
         <select className="gp-input" value={v.proyectoId} onChange={(e) => setV({ ...v, proyectoId: e.target.value })}>
           <option value="">— sin proyecto —</option>
-          {proyectos.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+          {ordenadosPorNombre(proyectos).map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
         </select>
       </Field>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -11282,7 +11293,7 @@ function Marketing({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
       <div className="flex flex-wrap items-center gap-2 mb-2">
         <select className="gp-input text-xs py-1.5" style={{ width: "auto" }} value={filtroProyecto} onChange={(e) => setFiltroProyecto(e.target.value)}>
           <option value="Todos">Todos los proyectos</option>
-          {data.proyectos.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+          {ordenadosPorNombre(data.proyectos).map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
         </select>
         <select className="gp-input text-xs py-1.5" style={{ width: "auto" }} value={filtroEstatus} onChange={(e) => setFiltroEstatus(e.target.value)}>
           <option value="Todas">Todos los estatus</option>
@@ -11315,8 +11326,8 @@ function Marketing({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
                   </p>
                 </div>
                 <div className="flex gap-1">
-                  <IconBtn onClick={() => setComentariosDe(c)}><MessageCircle size={13} />{nc > 0 && <span className="gp-mono" style={{ fontSize: 9, marginLeft: 2 }}>{nc}</span>}</IconBtn>
-                  <IconBtn onClick={() => setModal({ item: c })}><Pencil size={13} /></IconBtn><IconBtn onClick={() => onRemove(c.id)}><Trash2 size={13} /></IconBtn>
+                  <IconBtn title="Comentarios" onClick={() => setComentariosDe(c)}><MessageCircle size={13} />{nc > 0 && <span className="gp-mono" style={{ fontSize: 9, marginLeft: 2 }}>{nc}</span>}</IconBtn>
+                  <IconBtn title="Editar" onClick={() => setModal({ item: c })}><Pencil size={13} /></IconBtn><IconBtn title="Eliminar" onClick={() => onRemove(c.id)}><Trash2 size={13} /></IconBtn>
                 </div>
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 mt-3 text-xs">
@@ -11450,8 +11461,8 @@ function CampanaActividades({ campana, actividades, contactos, onNueva, onEditar
                 </div>
               </div>
               <div className="flex gap-1 shrink-0">
-                <IconBtn onClick={() => onEditar(a)}><Pencil size={13} /></IconBtn>
-                <IconBtn onClick={() => onEliminar(a.id)}><Trash2 size={13} /></IconBtn>
+                <IconBtn title="Editar" onClick={() => onEditar(a)}><Pencil size={13} /></IconBtn>
+                <IconBtn title="Eliminar" onClick={() => onEliminar(a.id)}><Trash2 size={13} /></IconBtn>
               </div>
             </div>
             <div className="flex items-center justify-between mt-2">
@@ -11485,7 +11496,7 @@ function ActividadCampanaForm({ item, contactos, onSave }) {
         <Field label="Responsable (opcional)">
           <select className="gp-input" value={v.responsableContactoId || ""} onChange={(e) => setV({ ...v, responsableContactoId: e.target.value || null })}>
             <option value="">— sin asignar —</option>
-            {contactos.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+            {ordenadosPorNombre(contactos).map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
           </select>
         </Field>
         <Field label="Prioridad"><select className="gp-input" value={v.prioridad} onChange={(e) => setV({ ...v, prioridad: e.target.value })}>{["Baja", "Media", "Alta"].map((p) => <option key={p}>{p}</option>)}</select></Field>
@@ -11512,7 +11523,7 @@ function CampanaForm({ item, proyectos, onSave }) {
         <Field label="Proyecto">
           <select className="gp-input" value={v.proyectoId} onChange={(e) => setV({ ...v, proyectoId: e.target.value })}>
             <option value="">— sin proyecto —</option>
-            {proyectos.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+            {ordenadosPorNombre(proyectos).map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
           </select>
         </Field>
         <Field label="Plataforma"><select className="gp-input" value={v.plataforma} onChange={(e) => setV({ ...v, plataforma: e.target.value })}>{PLATAFORMAS_CAMPANA.map((c) => <option key={c}>{c}</option>)}</select></Field>
@@ -11629,8 +11640,8 @@ function Patrimonio({ data, onAdd, onEdit, onRemove, onAddValuacion, onRemoveVal
                   <p className="text-xs gp-text-muted mt-0.5">Adquirido {b.fechaAdquisicion || "—"} por {fmtMoney(adquisicion)}</p>
                 </div>
                 <div className="flex gap-1">
-                  <IconBtn onClick={() => setComentariosDe(b)}><MessageCircle size={13} />{nc > 0 && <span className="gp-mono" style={{ fontSize: 9, marginLeft: 2 }}>{nc}</span>}</IconBtn>
-                  <IconBtn onClick={() => setModal({ item: b })}><Pencil size={13} /></IconBtn><IconBtn onClick={() => onRemove(b.id)}><Trash2 size={13} /></IconBtn>
+                  <IconBtn title="Comentarios" onClick={() => setComentariosDe(b)}><MessageCircle size={13} />{nc > 0 && <span className="gp-mono" style={{ fontSize: 9, marginLeft: 2 }}>{nc}</span>}</IconBtn>
+                  <IconBtn title="Editar" onClick={() => setModal({ item: b })}><Pencil size={13} /></IconBtn><IconBtn title="Eliminar" onClick={() => onRemove(b.id)}><Trash2 size={13} /></IconBtn>
                 </div>
               </div>
               <div className="mt-3 flex items-end justify-between">
@@ -11677,7 +11688,7 @@ function Patrimonio({ data, onAdd, onEdit, onRemove, onAddValuacion, onRemoveVal
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="gp-mono">{fmtMoney(v.valor)}</span>
-                  <IconBtn onClick={() => onRemoveValuacion(v.id)}><Trash2 size={13} /></IconBtn>
+                  <IconBtn title="Eliminar" onClick={() => onRemoveValuacion(v.id)}><Trash2 size={13} /></IconBtn>
                 </div>
               </div>
             ))}
@@ -11779,7 +11790,7 @@ function Documentos({ data, onAdd, onEdit, onRemove, onCrearTarea }) {
                 <td className="gp-text-muted">{nombreProyecto(d.proyectoId)}</td>
                 <td className="gp-mono">{d.fechaVencimiento || "—"}</td>
                 <td className="gp-text-muted">{d.notas}</td>
-                <td><div className="flex gap-1"><IconBtn onClick={() => setModal({ item: d })}><Pencil size={13} /></IconBtn><IconBtn onClick={() => onRemove(d.id)}><Trash2 size={13} /></IconBtn></div></td>
+                <td><div className="flex gap-1"><IconBtn title="Editar" onClick={() => setModal({ item: d })}><Pencil size={13} /></IconBtn><IconBtn title="Eliminar" onClick={() => onRemove(d.id)}><Trash2 size={13} /></IconBtn></div></td>
               </tr>
             ))}
             {ordenados.length === 0 && <tr><td colSpan={6} className="text-center gp-text-muted py-6">Sin documentos registrados.</td></tr>}
@@ -11824,7 +11835,7 @@ function DocumentoForm({ item, proyectos, onSave }) {
       <Field label="Proyecto relacionado">
         <select className="gp-input" value={v.proyectoId} onChange={(e) => setV({ ...v, proyectoId: e.target.value })}>
           <option value="">— ninguno —</option>
-          {proyectos.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+          {ordenadosPorNombre(proyectos).map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
         </select>
       </Field>
       <Field label="Fecha de vencimiento (si aplica)"><input type="date" className="gp-input" value={v.fechaVencimiento} onChange={(e) => setV({ ...v, fechaVencimiento: e.target.value })} /></Field>
@@ -11937,8 +11948,8 @@ function Presupuesto({ data, onAdd, onEdit, onRemove, presupuestoMensual, onGuar
                   {p.notas && <p className="text-xs gp-text-muted mt-0.5">{p.notas}</p>}
                 </div>
                 <div className="flex gap-1">
-                  <IconBtn onClick={() => setModal({ item: p })}><Pencil size={13} /></IconBtn>
-                  <IconBtn onClick={() => onRemove(p.id)}><Trash2 size={13} /></IconBtn>
+                  <IconBtn title="Editar" onClick={() => setModal({ item: p })}><Pencil size={13} /></IconBtn>
+                  <IconBtn title="Eliminar" onClick={() => onRemove(p.id)}><Trash2 size={13} /></IconBtn>
                 </div>
               </div>
               <div className="mt-3">
@@ -11988,7 +11999,7 @@ function PresupuestoForm({ item, proyectos, categoriasFinanzas, onSave }) {
         <Field label="Proyecto">
           <select className="gp-input" value={v.proyectoId} onChange={(e) => setV({ ...v, proyectoId: e.target.value })}>
             <option value="">— elige un proyecto —</option>
-            {proyectos.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+            {ordenadosPorNombre(proyectos).map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
           </select>
         </Field>
       ) : (
@@ -12087,7 +12098,7 @@ function MiPerfil({ nombreMostrar, avatarUrl, ciudad, bio, estudios, habilidades
                   <input className="gp-input" placeholder="Institución" value={e.institucion} onChange={(ev) => editarEstudio(i, { institucion: ev.target.value })} />
                   <input className="gp-input" placeholder="Título / grado" value={e.titulo} onChange={(ev) => editarEstudio(i, { titulo: ev.target.value })} />
                   <input className="gp-input" placeholder="Año" value={e.anio} onChange={(ev) => editarEstudio(i, { anio: ev.target.value })} />
-                  <IconBtn onClick={() => quitarEstudio(i)}><Trash2 size={13} /></IconBtn>
+                  <IconBtn title="Eliminar" onClick={() => quitarEstudio(i)}><Trash2 size={13} /></IconBtn>
                 </div>
               ))}
             </div>
@@ -12117,7 +12128,7 @@ function MiPerfil({ nombreMostrar, avatarUrl, ciudad, bio, estudios, habilidades
                 <div key={i} className="grid grid-cols-1 sm:grid-cols-[140px_1fr_auto] gap-2 items-center">
                   <input className="gp-input" placeholder="Red (ej. LinkedIn)" value={r.red} onChange={(ev) => editarRed(i, { red: ev.target.value })} />
                   <input className="gp-input" placeholder="URL" value={r.url} onChange={(ev) => editarRed(i, { url: ev.target.value })} />
-                  <IconBtn onClick={() => quitarRed(i)}><Trash2 size={13} /></IconBtn>
+                  <IconBtn title="Eliminar" onClick={() => quitarRed(i)}><Trash2 size={13} /></IconBtn>
                 </div>
               ))}
             </div>
@@ -12324,7 +12335,7 @@ function Habitos({ data, onAdd, onEdit, onRemove }) {
               </button>
               <div className="flex items-center gap-3 shrink-0">
                 <span className="text-xs gp-text-gold flex items-center gap-1"><Flame size={12} /> {racha === 0 ? "Sin racha" : `${racha} día${racha === 1 ? "" : "s"}`}</span>
-                <IconBtn onClick={() => onRemove(h.id)}><Trash2 size={13} /></IconBtn>
+                <IconBtn title="Eliminar" onClick={() => onRemove(h.id)}><Trash2 size={13} /></IconBtn>
               </div>
             </div>
           );
@@ -12452,7 +12463,7 @@ function MedicamentoForm({ inicial, contactos, soloCuidado, onSave, onCancel }) 
       <Field label="¿Para quién es?">
         <select className="gp-input" value={form.contactoId || ""} onChange={(e) => set("contactoId", e.target.value || null)}>
           {!soloCuidado && <option value="">Yo</option>}
-          {(contactos || []).map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+          {ordenadosPorNombre(contactos).map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
         </select>
       </Field>
 
@@ -12461,7 +12472,7 @@ function MedicamentoForm({ inicial, contactos, soloCuidado, onSave, onCancel }) 
         {form.horarios.map((h, i) => (
           <div key={i} className="flex items-center gap-2">
             <input type="time" className="gp-input" style={{ width: 140 }} value={h} onChange={(e) => cambiarHorario(i, e.target.value)} />
-            {form.horarios.length > 1 && <IconBtn onClick={() => quitarHorario(i)}><Trash2 size={13} /></IconBtn>}
+            {form.horarios.length > 1 && <IconBtn title="Eliminar" onClick={() => quitarHorario(i)}><Trash2 size={13} /></IconBtn>}
           </div>
         ))}
         <button type="button" onClick={agregarHorario} className="text-xs gp-text-gold">+ Agregar otro horario</button>
@@ -12741,7 +12752,7 @@ function Salud({ data, onAdd, onEdit, onRemove, onUpdatePerfil, soloCuidado, onA
                     ) : "—"}
                   </td>
                   <td className="gp-text-muted">{s.notas}</td>
-                  <td><div className="flex gap-1"><IconBtn onClick={() => setModal({ item: s })}><Pencil size={13} /></IconBtn><IconBtn onClick={() => onRemove(s.id)}><Trash2 size={13} /></IconBtn></div></td>
+                  <td><div className="flex gap-1"><IconBtn title="Editar" onClick={() => setModal({ item: s })}><Pencil size={13} /></IconBtn><IconBtn title="Eliminar" onClick={() => onRemove(s.id)}><Trash2 size={13} /></IconBtn></div></td>
                 </tr>
               );
             })}
@@ -13139,8 +13150,8 @@ function RutinasEjercicio({ data, personaId, onAdd, onEdit, onRemove }) {
               <p className="text-sm font-medium">{r.nombre}</p>
               <div className="flex items-center gap-2">
                 {vigente(r) ? <Badge tone="teal">Vigente</Badge> : <Badge tone="muted">Vencida</Badge>}
-                <IconBtn onClick={() => setModalRutina(r)}><Pencil size={13} /></IconBtn>
-                <IconBtn onClick={() => onRemove("rutinasEjercicio", r.id, { mensaje: "Se borrará la rutina y sus ejercicios configurados." })}><Trash2 size={13} /></IconBtn>
+                <IconBtn title="Editar" onClick={() => setModalRutina(r)}><Pencil size={13} /></IconBtn>
+                <IconBtn title="Eliminar" onClick={() => onRemove("rutinasEjercicio", r.id, { mensaje: "Se borrará la rutina y sus ejercicios configurados." })}><Trash2 size={13} /></IconBtn>
               </div>
             </div>
             <p className="text-xs gp-text-muted mb-2">Del {r.fechaInicio} {r.fechaFin ? `al ${r.fechaFin}` : "· sin fecha de fin"}</p>
@@ -13232,7 +13243,7 @@ function RutinaItemRow({ item, onEdit, onRemove }) {
         <input list="sugerencias-ejercicio-rutina" className="gp-input text-sm flex-1 min-w-[140px]" value={v.ejercicio}
           onChange={(e) => setV({ ...v, ejercicio: e.target.value })} onBlur={() => onEdit({ ejercicio: v.ejercicio })} />
         <SelectorTipoEjercicio tipo={v.tipo} onChange={cambiarTipo} />
-        <IconBtn onClick={onRemove}><Trash2 size={13} /></IconBtn>
+        <IconBtn title="Eliminar" onClick={onRemove}><Trash2 size={13} /></IconBtn>
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <input type="number" className="gp-input text-sm" style={{ width: 70 }} placeholder="kg" value={v.peso ?? ""}
@@ -13331,7 +13342,7 @@ function SesionEjercicio({ data, personaId, onAdd, onEdit, onRemove }) {
                 <p className="text-sm">{s.fecha} {s.hora ? <span className="gp-text-muted">{s.hora.slice(0, 5)}</span> : ""} {s.rutinaId ? `· ${nombreRutina(s.rutinaId) || "Rutina"}` : "· Entrenamiento libre"}</p>
                 <p className="text-xs gp-text-muted">{hechos}/{its.length} ejercicios hechos</p>
               </button>
-              <IconBtn onClick={() => onRemove("sesionesEjercicio", s.id, { mensaje: "Se borrará la sesión y sus ejercicios registrados." })}><Trash2 size={13} /></IconBtn>
+              <IconBtn title="Eliminar" onClick={() => onRemove("sesionesEjercicio", s.id, { mensaje: "Se borrará la sesión y sus ejercicios registrados." })}><Trash2 size={13} /></IconBtn>
             </div>
           );
         })}
@@ -13378,7 +13389,7 @@ function SesionItemRow({ item, onEdit, onRemove }) {
               onChange={(e) => setV({ ...v, repeticiones: e.target.value })} onBlur={() => onEdit({ repeticiones: v.repeticiones })} />
           </>
         )}
-        <IconBtn onClick={onRemove}><Trash2 size={13} /></IconBtn>
+        <IconBtn title="Eliminar" onClick={onRemove}><Trash2 size={13} /></IconBtn>
       </div>
       {esTiempo && (
         <div className="flex flex-wrap items-center justify-between gap-3 pl-7">
@@ -13510,7 +13521,7 @@ function MedidasCorporales({ data, personaId, onAdd, onEdit, onRemove }) {
                 <td className="gp-mono">{m.fecha}</td>
                 {CAMPOS_MEDIDAS.map((c) => <td key={c.key} className="gp-mono">{m[c.key] || "—"}</td>)}
                 <td className="gp-text-muted">{m.notas}</td>
-                <td><div className="flex gap-1"><IconBtn onClick={() => setModal({ item: m })}><Pencil size={13} /></IconBtn><IconBtn onClick={() => onRemove("medidasCorporales", m.id)}><Trash2 size={13} /></IconBtn></div></td>
+                <td><div className="flex gap-1"><IconBtn title="Editar" onClick={() => setModal({ item: m })}><Pencil size={13} /></IconBtn><IconBtn title="Eliminar" onClick={() => onRemove("medidasCorporales", m.id)}><Trash2 size={13} /></IconBtn></div></td>
               </tr>
             ))}
             {ordenados.length === 0 && <tr><td colSpan={CAMPOS_MEDIDAS.length + 3} className="text-center gp-text-muted py-6">Sin medidas registradas.</td></tr>}
@@ -13582,7 +13593,7 @@ function ProgresoEjercicio({ data, personaId }) {
       ) : (
         <>
           <select className="gp-input text-sm mb-3" style={{ maxWidth: 260 }} value={ejercicioSel} onChange={(e) => setEjercicioSel(e.target.value)}>
-            {ejerciciosDisponibles.map((e) => <option key={e} value={e}>{e}</option>)}
+            {[...ejerciciosDisponibles].sort(compararEs).map((e) => <option key={e} value={e}>{e}</option>)}
           </select>
           <div className="mb-5">
             <GraficaSalud titulo={ejercicioSel} unidad="kg" puntos={puntosPeso} series={[{ key: "peso", label: "Peso", color: "var(--teal)" }]} />
@@ -13642,9 +13653,9 @@ function ComidasDelDia({ data, personaId, onAdd, onEdit, onRemove }) {
     <div>
       <div className="flex items-center justify-between mb-4 gap-2 flex-wrap">
         <div className="flex items-center gap-2">
-          <IconBtn onClick={() => cambiarDia(-1)}><ChevronLeft size={14} /></IconBtn>
+          <IconBtn title="Día anterior" onClick={() => cambiarDia(-1)}><ChevronLeft size={14} /></IconBtn>
           <input type="date" className="gp-input text-sm" value={fecha} onChange={(e) => setFecha(e.target.value)} />
-          <IconBtn onClick={() => cambiarDia(1)}><ChevronRight size={14} /></IconBtn>
+          <IconBtn title="Día siguiente" onClick={() => cambiarDia(1)}><ChevronRight size={14} /></IconBtn>
         </div>
         <button onClick={() => setCopiarModal(true)} disabled={comidasDia.length === 0} className="gp-btn-ghost px-3 py-1.5 text-xs rounded flex items-center gap-1 disabled:opacity-50"><Copy size={12} /> Copiar día</button>
       </div>
@@ -13702,13 +13713,13 @@ function ComidaRow({ item, recetas, nombreReceta, onEdit, onRemove }) {
       <select className="gp-input text-sm" style={{ minWidth: 160 }} value={v.recetaId || ""}
         onChange={(e) => { const recetaId = e.target.value || null; setV({ ...v, recetaId }); onEdit({ recetaId }); }}>
         <option value="">Sin receta (libre)</option>
-        {recetas.map((r) => <option key={r.id} value={r.id}>{r.nombre}</option>)}
+        {ordenadosPorNombre(recetas).map((r) => <option key={r.id} value={r.id}>{r.nombre}</option>)}
       </select>
       {!v.recetaId && (
         <input className="gp-input text-sm flex-1 min-w-[140px]" placeholder="Qué comiste…" value={v.descripcion || ""}
           onChange={(e) => setV({ ...v, descripcion: e.target.value })} onBlur={() => onEdit({ descripcion: v.descripcion })} />
       )}
-      <IconBtn onClick={onRemove}><Trash2 size={13} /></IconBtn>
+      <IconBtn title="Eliminar" onClick={onRemove}><Trash2 size={13} /></IconBtn>
     </div>
   );
 }
@@ -13731,8 +13742,8 @@ function Recetas({ data, onAdd, onEdit, onRemove }) {
             <div className="flex items-center justify-between gap-2 mb-1">
               <p className="text-sm font-medium">{r.nombre}</p>
               <div className="flex items-center gap-1">
-                <IconBtn onClick={() => setModal({ item: r })}><Pencil size={13} /></IconBtn>
-                <IconBtn onClick={() => onRemove("recetas", r.id)}><Trash2 size={13} /></IconBtn>
+                <IconBtn title="Editar" onClick={() => setModal({ item: r })}><Pencil size={13} /></IconBtn>
+                <IconBtn title="Eliminar" onClick={() => onRemove("recetas", r.id)}><Trash2 size={13} /></IconBtn>
               </div>
             </div>
             <p className="text-xs gp-text-muted mb-1">{r.categoria}{r.porciones ? ` · ${r.porciones} porciones` : ""}</p>
@@ -13775,7 +13786,7 @@ function RecetaForm({ item, onSave }) {
             <input className="gp-input text-sm flex-1" placeholder="Ingrediente" value={ing.nombre} onChange={(e) => editarIngrediente(i, { nombre: e.target.value })} />
             <input className="gp-input text-sm" style={{ width: 70 }} placeholder="cant." value={ing.cantidad} onChange={(e) => editarIngrediente(i, { cantidad: e.target.value })} />
             <input className="gp-input text-sm" style={{ width: 70 }} placeholder="unidad" value={ing.unidad} onChange={(e) => editarIngrediente(i, { unidad: e.target.value })} />
-            <IconBtn onClick={() => quitarIngrediente(i)}><Trash2 size={13} /></IconBtn>
+            <IconBtn title="Eliminar" onClick={() => quitarIngrediente(i)}><Trash2 size={13} /></IconBtn>
           </div>
         ))}
       </div>
@@ -13929,7 +13940,7 @@ function Reportes({ data }) {
         </select>
         <select className="gp-input sm:max-w-[220px]" value={proyectoFiltro} onChange={(e) => setProyectoFiltro(e.target.value)}>
           <option value="">Todos los proyectos</option>
-          {data.proyectos.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+          {ordenadosPorNombre(data.proyectos).map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
         </select>
       </div>
 
@@ -14352,7 +14363,7 @@ function Apartados({ data, onAdd, onEdit, onRemove, onAportar, onRetirar }) {
                   <p className="text-sm font-medium">{a.nombre}</p>
                   <p className="text-xs gp-text-muted mt-0.5">{a.proyectoId ? nombreProyecto(a.proyectoId) : "Personal"} {a.fechaObjetivo ? `· para ${a.fechaObjetivo}` : ""}</p>
                 </div>
-                <div className="flex gap-1"><IconBtn onClick={() => setModal({ item: a })}><Pencil size={13} /></IconBtn><IconBtn onClick={() => onRemove(a.id)}><Trash2 size={13} /></IconBtn></div>
+                <div className="flex gap-1"><IconBtn title="Editar" onClick={() => setModal({ item: a })}><Pencil size={13} /></IconBtn><IconBtn title="Eliminar" onClick={() => onRemove(a.id)}><Trash2 size={13} /></IconBtn></div>
               </div>
               <div className="mt-3">
                 <div className="flex justify-between text-xs mb-1">
@@ -14450,7 +14461,7 @@ function RetirarFondosForm({ apartado, proyectos, onSave }) {
       <Field label="Destino (proyecto o rubro)">
         <select className="gp-input" value={proyectoId} onChange={(e) => setProyectoId(e.target.value)}>
           <option value="">— sin proyecto (personal) —</option>
-          {proyectos.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+          {ordenadosPorNombre(proyectos).map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
         </select>
       </Field>
       <Field label="Concepto"><input className="gp-input" value={concepto} onChange={(e) => setConcepto(e.target.value)} /></Field>
@@ -14475,7 +14486,7 @@ function ApartadoForm({ item, proyectos, onSave }) {
       <Field label="Proyecto relacionado (opcional)">
         <select className="gp-input" value={v.proyectoId} onChange={(e) => setV({ ...v, proyectoId: e.target.value })}>
           <option value="">— personal —</option>
-          {proyectos.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+          {ordenadosPorNombre(proyectos).map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
         </select>
       </Field>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -15449,7 +15460,7 @@ function PendienteExistenteForm({ pendientes, horaSugerida, onAsignar }) {
       <Field label="Tarea guardada">
         <select className="gp-input" value={pendienteId} onChange={(e) => setPendienteId(e.target.value)}>
           <option value="">— elige una —</option>
-          {pendientes.map((p) => <option key={p.id} value={p.id}>{p.descripcion}{p.fechaLimite ? ` (vence: ${p.fechaLimite})` : ""}</option>)}
+          {ordenadosPor(pendientes, (p) => p.descripcion).map((p) => <option key={p.id} value={p.id}>{p.descripcion}{p.fechaLimite ? ` (vence: ${p.fechaLimite})` : ""}</option>)}
         </select>
       </Field>
       {pendientes.length === 0 && <p className="text-xs gp-text-muted mb-2">No tienes tareas guardadas sin programar.</p>}
@@ -15660,7 +15671,7 @@ function Notas({ data, ownerId, onAdd, onEdit, onRemove }) {
             style={{ minHeight: 120, ...(n.pendienteOfflineId ? { borderStyle: "dashed", opacity: 0.9 } : {}) }}>
             <div className="flex items-start justify-between gap-2 mb-1">
               <span className="text-sm font-medium truncate">{n.titulo || "Sin título"}</span>
-              <IconBtn onClick={(e) => {
+              <IconBtn title="Eliminar" onClick={(e) => {
                 e.stopPropagation();
                 if (n.pendienteOfflineId) { quitarPendientesOffline([n.pendienteOfflineId]); setTick((t) => t + 1); }
                 else onRemove(n.id);
@@ -17359,7 +17370,7 @@ function GlucosaRapidaForm({ contactos, onCrearContacto, onSave }) {
       <Field label="¿De quién es esta medición?">
         <select className="gp-input" value={contactoId} onChange={(e) => setContactoId(e.target.value)}>
           <option value="">Yo</option>
-          {(contactos || []).map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+          {ordenadosPorNombre(contactos).map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
         </select>
         <button type="button" className="text-xs gp-text-gold mt-1" onClick={() => setNuevoAbierto((v) => !v)}>
           {nuevoAbierto ? "Cancelar" : "+ Agregar contacto"}
@@ -17411,7 +17422,7 @@ function PresionRapidaForm({ contactos, onCrearContacto, onSave }) {
       <Field label="¿De quién es esta medición?">
         <select className="gp-input" value={contactoId} onChange={(e) => setContactoId(e.target.value)}>
           <option value="">Yo</option>
-          {(contactos || []).map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+          {ordenadosPorNombre(contactos).map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
         </select>
         <button type="button" className="text-xs gp-text-gold mt-1" onClick={() => setNuevoAbierto((v) => !v)}>
           {nuevoAbierto ? "Cancelar" : "+ Agregar contacto"}
@@ -17555,8 +17566,8 @@ function Eventos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveComen
                 {e.comentarios && <p className="text-xs gp-text-muted mt-1">{e.comentarios}</p>}
               </div>
               <div className="flex gap-1" onClick={(ev) => ev.stopPropagation()}>
-                <IconBtn onClick={() => setModal({ item: e })}><Pencil size={13} /></IconBtn>
-                <IconBtn onClick={() => onRemove(e.id)}><Trash2 size={13} /></IconBtn>
+                <IconBtn title="Editar" onClick={() => setModal({ item: e })}><Pencil size={13} /></IconBtn>
+                <IconBtn title="Eliminar" onClick={() => onRemove(e.id)}><Trash2 size={13} /></IconBtn>
               </div>
             </div>
             {expanded === e.id && (
@@ -17653,13 +17664,13 @@ function EventoForm({ item, proyectos, contactos, onSave }) {
         <Field label="Proyecto relacionado (opcional)">
           <select className="gp-input" value={v.proyectoId} onChange={(e) => setV({ ...v, proyectoId: e.target.value })}>
             <option value="">— ninguno —</option>
-            {proyectos.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+            {ordenadosPorNombre(proyectos).map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
           </select>
         </Field>
         <Field label="Cliente (opcional)">
           <select className="gp-input" value={v.contactoId || ""} onChange={(e) => setV({ ...v, contactoId: e.target.value })}>
             <option value="">— ninguno —</option>
-            {contactos.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+            {ordenadosPorNombre(contactos).map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
           </select>
         </Field>
       </div>
