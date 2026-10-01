@@ -151,6 +151,17 @@ const Tokens = ({ tema = "oscuro" }) => (
        Buscar es la acción que más se usa y con un borde de 1 px se perdía contra el fondo. */
     .gp-buscador{ border:2px solid var(--gold) !important; border-radius:10px !important; background:var(--panel) !important; }
     .gp-buscador:focus{ outline:none; box-shadow:0 0 0 3px rgba(245,158,11,.25); }
+    /* Barra de avance: una sola, que a la vez muestra y edita. Antes había dos —la de progreso
+       y el deslizador— y parecían dos cosas distintas. El relleno se pinta con un degradado
+       inline (lo calcula quien la usa) para que cambie de color con el porcentaje. */
+    input[type="range"].gp-rango{ -webkit-appearance:none; appearance:none; width:100%; height:10px;
+      border-radius:999px; outline:none; cursor:pointer; }
+    input[type="range"].gp-rango::-webkit-slider-thumb{ -webkit-appearance:none; appearance:none;
+      width:20px; height:20px; border-radius:50%; background:#FFFFFF; border:3px solid currentColor;
+      cursor:pointer; box-shadow:0 1px 3px rgba(0,0,0,.3); }
+    input[type="range"].gp-rango::-moz-range-thumb{ width:20px; height:20px; border-radius:50%;
+      background:#FFFFFF; border:3px solid currentColor; cursor:pointer; }
+    input[type="range"].gp-rango:focus-visible{ box-shadow:0 0 0 3px rgba(245,158,11,.3); }
     /* En celular, un input con letra menor a 16px hace que iOS/Android le hagan zoom
        automático al enfocarlo (y a veces no regresa bien al tamaño normal al desenfocar).
        Por eso en pantallas chicas los inputs usan 16px; en escritorio se quedan en 13px. */
@@ -1457,6 +1468,56 @@ function useBorrador(original) {
   const cambiar = (parche) => setBorrador((prev) => ({ ...prev, ...parche }));
   const descartar = () => setBorrador(original);
   return { borrador, cambiar, descartar, sucio };
+}
+
+// Versión de renglón del patrón de guardar: un selector dentro de una tabla no puede abrir una
+// barra completa, así que al cambiarlo aparecen un ✓ y una ✕ junto a él, en su propia fila
+// (Angel, 1 oct 2026: "una barra por renglón"). Mientras no se confirme, nada se escribe, y el
+// renglón cuenta como cambio pendiente para el aviso de salir.
+function SelectGuardable({ valor, opciones, onGuardar, ariaLabel, style }) {
+  const { borrador, cambiar, descartar, sucio } = useBorrador({ v: valor });
+  return (
+    <span className="inline-flex items-center gap-1">
+      <select
+        className="gp-input" style={{ padding: "2px 6px", ...(style || {}) }}
+        value={borrador.v} onChange={(e) => cambiar({ v: e.target.value })} aria-label={ariaLabel}
+      >
+        {opciones.map((o) => <option key={o}>{o}</option>)}
+      </select>
+      {sucio && (
+        <>
+          <IconBtn title="Guardar este cambio" onClick={() => { const v = borrador.v; descartar(); onGuardar(v); }}>
+            <Check size={13} className="gp-text-teal" />
+          </IconBtn>
+          <IconBtn title="Descartar" onClick={descartar}><X size={13} className="gp-text-red" /></IconBtn>
+        </>
+      )}
+    </span>
+  );
+}
+
+// Mismo patrón que SelectGuardable, para los campos numéricos de una tabla (el avance en el
+// árbol de tareas del centro de proyecto).
+function NumeroGuardable({ valor, placeholder, onGuardar, ariaLabel, style }) {
+  const { borrador, cambiar, descartar, sucio } = useBorrador({ v: valor ?? "" });
+  return (
+    <span className="inline-flex items-center gap-1">
+      <input
+        type="number" min={0} max={100} aria-label={ariaLabel}
+        value={borrador.v} placeholder={placeholder}
+        onChange={(e) => cambiar({ v: e.target.value === "" ? "" : Math.max(0, Math.min(100, Number(e.target.value))) })}
+        className="gp-input gp-mono" style={{ width: 48, padding: "1px 4px", fontSize: 10, ...(style || {}) }}
+      />
+      {sucio && (
+        <>
+          <IconBtn title="Guardar este cambio" onClick={() => { const v = borrador.v; descartar(); onGuardar(v === "" ? null : Number(v)); }}>
+            <Check size={12} className="gp-text-teal" />
+          </IconBtn>
+          <IconBtn title="Descartar" onClick={descartar}><X size={12} className="gp-text-red" /></IconBtn>
+        </>
+      )}
+    </span>
+  );
 }
 
 // Barra de Guardar/Descartar que aparece solo cuando hay algo que guardar.
@@ -8047,13 +8108,9 @@ function ProyectoDetalle({ data, proyectoId, onVolver, onAddTarea, onEditTarea, 
                           {tieneHijos ? (
                             <span className="gp-mono" style={{ fontSize: 10 }}>{avance}%</span>
                           ) : (
-                            <input
-                              type="number" min={0} max={100} value={p.avance ?? ""} placeholder={String(avance)}
-                              onChange={(e) => {
-                                const val = e.target.value === "" ? null : Math.max(0, Math.min(100, Number(e.target.value)));
-                                onEditTarea(p.id, { avance: val });
-                              }}
-                              className="gp-input gp-mono" style={{ width: 48, padding: "1px 4px", fontSize: 10 }}
+                            <NumeroGuardable
+                              valor={p.avance} placeholder={String(avance)} ariaLabel="Avance de la tarea"
+                              onGuardar={(val) => onEditTarea(p.id, { avance: val })}
                             />
                           )}
                           {!tieneHijos && (
@@ -9120,9 +9177,12 @@ function Pendientes({ data, activeOwnerId, onAdd, onEdit, onEditProyecto, onRemo
                       // celular el selector no cabe, así que ahí se muestra el estado como badge.
                       <>
                         <span className="md:hidden"><Badge tone={toneEstatusTarea(p.estatus)}>{p.estatus}</Badge></span>
-                        <select className="gp-input hidden md:inline-block" style={{ padding: "2px 6px" }} value={p.estatus} onChange={(e) => cambiarEstatusTarea(p, e.target.value)}>
-                          {ESTATUS_TAREA.map((s) => <option key={s}>{s}</option>)}
-                        </select>
+                        <span className="hidden md:inline-flex">
+                          <SelectGuardable
+                            valor={p.estatus} opciones={ESTATUS_TAREA} ariaLabel="Estatus de la tarea"
+                            onGuardar={(nuevo) => cambiarEstatusTarea(p, nuevo)}
+                          />
+                        </span>
                       </>
                     )}
                   </td>
@@ -9224,6 +9284,10 @@ function FichaTarea({ t, data, onCerrar, onEditar, onAgregarSubtarea, onComentar
   const avance = Math.round(calcAvanceTarea(buildTareaTree((data.pendientes || []).filter((x) => x.id === t.id || descendientesDe(t.id, data.pendientes).includes(x.id)))[0] || t));
   const hecha = t.estatus === "Completada";
   const vencida = !hecha && t.fechaLimite && daysUntil(t.fechaLimite) < 0;
+  // Lo que se está viendo en la barra: el borrador si se movió, y si no el calculado.
+  const avanceEditable = borrador.avance === "" || borrador.avance === null || borrador.avance === undefined
+    ? avance : Number(borrador.avance);
+  const colorAvance = avanceEditable >= 100 ? "var(--teal)" : avanceEditable >= 50 ? "#087CF5" : "var(--gold)";
   const nombreDe = (lista, id, vacio = "—") => (lista || []).find((x) => x.id === id)?.nombre || vacio;
   const padre = t.parentId ? (data.pendientes || []).find((x) => x.id === t.parentId) : null;
 
@@ -9248,26 +9312,34 @@ function FichaTarea({ t, data, onCerrar, onEditar, onAgregarSubtarea, onComentar
       </div>
 
       <div className="gp-bloque rounded-lg p-3 mb-3">
-        <div className="flex items-center justify-between mb-1.5">
+        <div className="flex items-center justify-between mb-2">
           <span className="text-xs gp-text-muted">Avance</span>
-          <span className="gp-mono text-sm" style={{ color: avance >= 100 ? "var(--teal)" : avance >= 50 ? "#087CF5" : "var(--gold)" }}>{avance}%</span>
-        </div>
-        <div className="h-2 rounded-full mb-2" style={{ background: "var(--border)" }}>
-          <div className="h-2 rounded-full" style={{ width: `${avance}%`, background: avance >= 100 ? "var(--teal)" : avance >= 50 ? "#087CF5" : "var(--gold)" }} />
+          <span className="gp-mono text-sm" style={{ color: colorAvance }}>{avanceEditable}%</span>
         </div>
         {tieneHijos ? (
-          <p className="text-[10px] gp-text-muted">Se calcula solo: es el promedio del avance de sus {subtareas.length} subtarea{subtareas.length === 1 ? "" : "s"}.</p>
+          <>
+            <div className="h-2.5 rounded-full mb-2" style={{ background: "var(--border)" }}>
+              <div className="h-2.5 rounded-full" style={{ width: `${avance}%`, background: colorAvance }} />
+            </div>
+            <p className="text-[10px] gp-text-muted">Se calcula solo: es el promedio del avance de sus {subtareas.length} subtarea{subtareas.length === 1 ? "" : "s"}.</p>
+          </>
         ) : (
-          <div className="flex items-center gap-2">
+          /* Una sola barra: la misma que muestra el porcentaje es la que se arrastra, y se tiñe
+             según cuánto lleve. Tener dos (una de progreso y un deslizador aparte) hacía creer
+             que eran cosas distintas. */
+          <div className="flex items-center gap-2.5">
             <input
-              type="range" min={0} max={100} step={5} className="flex-1"
-              value={borrador.avance === "" || borrador.avance === null ? avance : Number(borrador.avance)}
+              type="range" min={0} max={100} step={5} className="gp-rango flex-1"
+              value={avanceEditable}
               onChange={(e) => cambiar({ avance: Number(e.target.value) })}
-              style={{ accentColor: "var(--gold)" }}
               aria-label="Porcentaje de avance"
+              style={{
+                color: colorAvance,
+                background: `linear-gradient(to right, ${colorAvance} 0%, ${colorAvance} ${avanceEditable}%, var(--border) ${avanceEditable}%, var(--border) 100%)`,
+              }}
             />
             <input
-              type="number" min={0} max={100} className="gp-input" style={{ width: 72 }}
+              type="number" min={0} max={100} className="gp-input" style={{ width: 68 }}
               value={borrador.avance ?? ""} placeholder={String(avance)}
               onChange={(e) => cambiar({ avance: e.target.value === "" ? "" : Math.max(0, Math.min(100, Number(e.target.value))) })}
             />
@@ -12250,9 +12322,10 @@ function Regalos({ data, onAdd, onEdit, onRemove, filtroContactoInicial, onLimpi
                 <td className="gp-text-muted">{r.descripcion}</td>
                 <td className="gp-mono">{r.costo ? fmtMoney(r.costo) : "—"}</td>
                 <td onClick={(e) => e.stopPropagation()}>
-                  <select className="gp-input" style={{ padding: "2px 6px" }} value={r.estatus || "Por comprar"} onChange={(e) => onEdit(r.id, { estatus: e.target.value })}>
-                    {ESTATUS_REGALO.map((s) => <option key={s}>{s}</option>)}
-                  </select>
+                  <SelectGuardable
+                    valor={r.estatus || "Por comprar"} opciones={ESTATUS_REGALO} ariaLabel="Estatus de la atención"
+                    onGuardar={(nuevo) => onEdit(r.id, { estatus: nuevo })}
+                  />
                 </td>
                 <td onClick={(e) => e.stopPropagation()}><div className="flex gap-1"><IconBtn title="Editar" onClick={() => setModal({ item: r })}><Pencil size={13} /></IconBtn><IconBtn title="Eliminar" onClick={() => onRemove(r.id)}><Trash2 size={13} /></IconBtn></div></td>
               </tr>
