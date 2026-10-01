@@ -2118,6 +2118,14 @@ function AvisoInstalarPWA() {
 // Por seguridad, las pantallas sensibles (Finanzas, Salud, etc.) NO se restauran automáticamente
 // -- tras una recarga, vuelven a pedir la contraseña de reautenticación como cualquier otra vez
 // que expira la sesión corta, así que se manda a "dashboard" en esos casos.
+// Candados de reautenticación de los módulos sensibles. Apagados a propósito el 1 oct 2026
+// (Angel: "de momento quítalos, al final vemos a qué se los ponemos y el mecanismo más
+// práctico"). Toda la maquinaria sigue intacta —las listas de vistas, el modal de contraseña,
+// las ventanas de 15 y 10 minutos—: volver a encenderlos es poner esta constante en true.
+// Mientras esté en false, la app NO pide contraseña para entrar a Finanzas, Salud, Documentos,
+// etc. Eso baja el nivel de protección a propósito y es una decisión del dueño del producto.
+const CANDADO_SENSIBLE_ACTIVO = false;
+
 const VISTAS_SENSIBLES_NO_RESTAURAR = ["finanzas", "facturas", "reportes", "estimaciones", "deudas", "apartados", "patrimonio", "activos", "documentos", "salud", "medicamentos", "actividades", "presupuesto"];
 function leerVistaGuardadaTrasReload() {
   try {
@@ -2546,13 +2554,13 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
   const [reauthCargando, setReauthCargando] = useState(false);
 
   const irAVista = (id) => {
-    if (VISTAS_SENSIBLES.includes(id) && Date.now() > sensibleDesbloqueadoHasta) {
+    if (CANDADO_SENSIBLE_ACTIVO && VISTAS_SENSIBLES.includes(id) && Date.now() > sensibleDesbloqueadoHasta) {
       setReauthPendiente(id);
       setReauthPassword("");
       setReauthError("");
       return;
     }
-    if (VISTAS_SENSIBLES_DIARIO.includes(id) && Date.now() > diarioDesbloqueadoHasta) {
+    if (CANDADO_SENSIBLE_ACTIVO && VISTAS_SENSIBLES_DIARIO.includes(id) && Date.now() > diarioDesbloqueadoHasta) {
       setReauthPendiente(id);
       setReauthPassword("");
       setReauthError("");
@@ -2703,6 +2711,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
   // Mismo mecanismo para Diario, con su propia ventana de 10 min (secc. 24.5): "si sale y
   // vuelve antes de vencer, no pide clave y reinicia los 10 minutos desde la nueva consulta".
   useEffect(() => {
+    if (!CANDADO_SENSIBLE_ACTIVO) return; // candados apagados: el Diario no se vuelve a cerrar solo
     if (!VISTAS_SENSIBLES_DIARIO.includes(view)) return;
     const extender = () => setDiarioDesbloqueadoHasta(Date.now() + DIARIO_MS);
     const eventos = ["mousemove", "keydown", "mousedown", "click", "scroll", "touchstart"];
@@ -5222,7 +5231,7 @@ function Dashboard({ data: datosCompletos, empresas = [], contextos = [], contex
     const id = setInterval(() => forceTick((t) => t + 1), 15000);
     return () => clearInterval(id);
   }, []);
-  const sensibleDesbloqueado = Date.now() < (sensibleDesbloqueadoHasta || 0);
+  const sensibleDesbloqueado = !CANDADO_SENSIBLE_ACTIVO || Date.now() < (sensibleDesbloqueadoHasta || 0);
 
   const ledgerMesActual = useMemo(() => buildMonthlyLedger(data.finanzas, [mesActual]), [data.finanzas, mesActual]);
   const egresos = ledgerMesActual.filter((f) => f.tipo === "Egreso").reduce((s, f) => s + f.monto, 0);
@@ -6789,6 +6798,71 @@ function PagoResponsableForm({ proyecto, contactos, onGuardar, onCancelar }) {
   );
 }
 
+// Comprobante de un pago: la foto de la transferencia o el depósito. Se guarda con el mismo
+// mecanismo de adjuntos que ya usa el resto de la app (un comentario con adjuntos ligado al
+// movimiento), así que no hace falta columna nueva ni bucket nuevo.
+//
+// Dos formas de subirlo, porque en celular la diferencia importa: "Subir" abre la galería y
+// "Tomar foto" abre la cámara directo — eso lo hace el atributo capture, que en iPhone y
+// Android manda a la cámara trasera sin pasar por el carrete.
+function ComprobantePago({ movimiento, data, onAddComentario }) {
+  const [subiendo, setSubiendo] = useState(false);
+  const [error, setError] = useState("");
+  const adjuntos = (data.comentarios || [])
+    .filter((c) => c.entidadTipo === "finanzas" && c.entidadId === movimiento.id)
+    .flatMap((c) => c.adjuntos || []);
+
+  const subir = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    if (file.size > 25 * 1024 * 1024) { setError("La imagen pesa más de 25 MB."); return; }
+    setError("");
+    setSubiendo(true);
+    try {
+      const path = `finanzas/${movimiento.id}/${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
+      const { error: upErr } = await supabase.storage.from("adjuntos").upload(path, file);
+      if (upErr) { setError(`No se pudo subir: ${upErr.message}`); return; }
+      const { data: pub } = supabase.storage.from("adjuntos").getPublicUrl(path);
+      const tipo = file.type.startsWith("image/") ? "imagen" : "documento";
+      await onAddComentario({
+        entidadTipo: "finanzas", entidadId: movimiento.id, texto: "Comprobante de pago",
+        adjuntos: [{ tipo, nombre: file.name || "comprobante", url: pub.publicUrl }],
+      });
+    } finally {
+      setSubiendo(false);
+    }
+  };
+
+  const claseBoton = "gp-btn-ghost rounded text-[10px] px-2 py-1 flex items-center gap-1 cursor-pointer";
+  return (
+    <div className="mt-2 pt-2 border-t gp-border">
+      {adjuntos.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 mb-1.5">
+          {adjuntos.map((a, i) => (
+            <a key={i} href={a.url} target="_blank" rel="noopener noreferrer"
+              className="text-[10px] gp-text-gold flex items-center gap-1">
+              <FileText size={11} /> {a.nombre || `Comprobante ${i + 1}`}
+            </a>
+          ))}
+        </div>
+      )}
+      <div className="flex items-center gap-1.5 flex-wrap">
+        <label className={claseBoton}>
+          <Upload size={11} /> {adjuntos.length > 0 ? "Otro comprobante" : "Subir comprobante"}
+          <input type="file" accept="image/*,application/pdf" className="hidden" onChange={subir} disabled={subiendo} />
+        </label>
+        <label className={claseBoton}>
+          <Camera size={11} /> Tomar foto
+          <input type="file" accept="image/*" capture="environment" className="hidden" onChange={subir} disabled={subiendo} />
+        </label>
+        {subiendo && <span className="text-[10px] gp-text-muted">Subiendo…</span>}
+      </div>
+      {error && <p className="text-[10px] gp-text-red mt-1">{error}</p>}
+    </div>
+  );
+}
+
 // Tope de gasto del proyecto. Usa la tabla `presupuestos`, que ya tenía proyecto_id.
 function PresupuestoProyectoForm({ proyecto, actual, onGuardar, onCancelar }) {
   const [monto, setMonto] = useState(actual ? String(actual.monto ?? "") : "");
@@ -6826,6 +6900,10 @@ function FichaProyecto({
   const fin = finanzasProyecto(data, p.id);
   const reparto = repartoCostosProyecto(data, p.id);
   const categoriasUsadas = [...new Set((data.finanzas || []).map((f) => f.categoria).filter(Boolean))].sort();
+  const pagosColaboradores = fin.movs
+    .filter((f) => f.categoria === "Pago a colaborador")
+    .sort((a, b) => (b.fecha || "").localeCompare(a.fecha || ""));
+  const nombreContactoFicha = (id) => (data.contactos || []).find((c) => c.id === id)?.nombre || "";
   // Ramas cerradas del árbol de tareas de la pestaña "Tareas" de esta ficha.
   const [colapsadasTareas, setColapsadasTareas] = useState(() => new Set());
   const [confirmacion, setConfirmacion] = useState(null);
@@ -6837,7 +6915,7 @@ function FichaProyecto({
     const id = setInterval(() => forceTick((t) => t + 1), 15000);
     return () => clearInterval(id);
   }, []);
-  const sensibleDesbloqueado = Date.now() < (sensibleDesbloqueadoHasta || 0);
+  const sensibleDesbloqueado = !CANDADO_SENSIBLE_ACTIVO || Date.now() < (sensibleDesbloqueadoHasta || 0);
 
   const tareas = (data.pendientes || []).filter((t) => t.proyectoId === p.id);
   const tareasAbiertas = tareas.filter((t) => !ESTATUS_TAREA_CERRADOS.includes(t.estatus));
@@ -7170,22 +7248,39 @@ function FichaProyecto({
 
                 {/* El número que de verdad dice si conviene: lo que vas a cobrar menos todo lo
                     que te va a costar. En rojo cuando el proyecto va a perder dinero. */}
+                {/* "Margen" por sí solo no dice nada: ahora se ve la resta completa, renglón por
+                    renglón, para que el número de abajo no haya que creérselo. */}
                 <div className="rounded-lg p-3 mb-3" style={{
                   background: fin.margen >= 0 ? "rgba(95,191,139,.12)" : "rgba(239,68,68,.12)",
                   border: `1px solid ${fin.margen >= 0 ? "var(--teal)" : "var(--red)"}`,
                 }}>
-                  <div className="flex items-baseline justify-between gap-2">
-                    <span className="text-xs font-medium">Margen</span>
-                    <span className="gp-serif text-lg" style={{ color: fin.margen >= 0 ? "var(--teal)" : "var(--red)" }}>
-                      {fmtMoney(fin.margen)}{fin.margenPct !== null ? ` · ${fin.margenPct}%` : ""}
-                    </span>
+                  <p className="text-xs font-medium mb-2">¿Cuánto te queda?</p>
+                  <div className="flex flex-col gap-1 text-xs">
+                    <div className="flex items-baseline justify-between gap-2">
+                      <span className="gp-text-muted">Vas a cobrar</span>
+                      <span className="gp-mono gp-text-teal">{fmtMoney(fin.ingresoTotal)}</span>
+                    </div>
+                    <div className="flex items-baseline justify-between gap-2">
+                      <span className="gp-text-muted">− Lo pactado con el equipo</span>
+                      <span className="gp-mono gp-text-red">{fmtMoney(fin.comprometidoEquipo)}</span>
+                    </div>
+                    <div className="flex items-baseline justify-between gap-2">
+                      <span className="gp-text-muted">− Gastos del proyecto</span>
+                      <span className="gp-mono gp-text-red">{fmtMoney(fin.gastoReal)}</span>
+                    </div>
+                    <div className="flex items-baseline justify-between gap-2 pt-1.5 mt-0.5 border-t gp-border">
+                      <span className="font-medium">= Te queda</span>
+                      <span className="gp-serif text-base" style={{ color: fin.margen >= 0 ? "var(--teal)" : "var(--red)" }}>
+                        {fmtMoney(fin.margen)}{fin.margenPct !== null ? ` · ${fin.margenPct}%` : ""}
+                      </span>
+                    </div>
                   </div>
-                  <p className="text-[10px] gp-text-muted mt-1">
+                  <p className="text-[10px] gp-text-muted mt-2">
                     {fin.ingresoTotal === 0
-                      ? "Todavía no registras cuánto vas a cobrar por este proyecto."
+                      ? "Todavía no registras cuánto vas a cobrar por este proyecto, así que esta cuenta aún no significa nada."
                       : fin.margen >= 0
-                        ? `${fmtMoney(fin.ingresoTotal)} por cobrar menos ${fmtMoney(fin.costoTotal)} de costos.`
-                        : `Vas a gastar ${fmtMoney(Math.abs(fin.margen))} más de lo que vas a cobrar.`}
+                        ? `De cada peso que cobres, te quedan ${fin.margenPct} centavos.`
+                        : `Cuidado: vas a gastar ${fmtMoney(Math.abs(fin.margen))} más de lo que vas a cobrar.`}
                   </p>
                 </div>
 
@@ -7219,6 +7314,30 @@ function FichaProyecto({
                             <span className="gp-text-teal">{fmtMoney(x.generado)}</span>
                             <span className="gp-text-muted"> de {fmtMoney(x.total)}</span>
                           </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Lo que ya se le pagó a cada quien, con su fecha y su comprobante. Son los
+                    egresos de categoría "Pago a colaborador" de este proyecto. */}
+                {pagosColaboradores.length > 0 && (
+                  <div className="mb-3">
+                    <p className="text-[10px] uppercase tracking-wide gp-text-muted mb-1.5">Pagos a colaboradores ({pagosColaboradores.length})</p>
+                    <div className="flex flex-col gap-2">
+                      {pagosColaboradores.map((f) => (
+                        <div key={f.id} className="gp-bloque rounded-lg p-2.5">
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <p className="text-xs font-medium truncate">{nombreContactoFicha(f.contactoId) || f.concepto}</p>
+                              <p className="text-[10px] gp-text-muted">{fmtFechaCorta(f.fecha) || "sin fecha"} · {f.estatus === "Cobrado" ? "pagado" : "por pagar"}</p>
+                            </div>
+                            <MontoMovimiento f={f} className="text-xs shrink-0" />
+                          </div>
+                          <ComprobantePago
+                            movimiento={f} data={data} onAddComentario={onAddComentario}
+                          />
                         </div>
                       ))}
                     </div>
@@ -7627,7 +7746,7 @@ function ProyectoDetalle({ data, proyectoId, onVolver, onAddTarea, onEditTarea, 
     const id = setInterval(() => forceTick((t) => t + 1), 15000);
     return () => clearInterval(id);
   }, []);
-  const sensibleDesbloqueado = Date.now() < (sensibleDesbloqueadoHasta || 0);
+  const sensibleDesbloqueado = !CANDADO_SENSIBLE_ACTIVO || Date.now() < (sensibleDesbloqueadoHasta || 0);
 
   if (!proyecto) {
     return (
