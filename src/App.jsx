@@ -61,6 +61,10 @@ const Tokens = ({ tema = "oscuro" }) => (
        proporcionalmente sutil, igual que antes. Sobre --panel el color efectivo es ~#2B5076. */
     .gp-root{ --bg:#0B2341; --panel:#12304F; --panel-hi:#1A3D63; --border:#234A70;
       --text:#EAF1FA; --muted:#93A7C4; --gold:#F59E0B; --teal:#5FBF8B; --teal-tint:#DCF5E6; --teal-text:#1D6B42; --panel-2:rgba(130,195,255,.22); --muted-bloque:#B3C5DC; --red:#EF4444;
+      /* El menú lateral tiene su propio fondo y su propio filo. En oscuro se queda como estaba
+         (mismo azul que el lienzo: ahí todo es oscuro y el borde basta). El tema claro los
+         redefine, ver más abajo. */
+      --sidebar-bg:#0B2341; --sidebar-borde:#234A70;
       /* Fila de una tarea ya completada. Sobre el azul oscuro hace falta un verde con bastante
          luz propia para que se lea como "hecho" de un vistazo; el tema claro lo redefine abajo. */
       --hecho-bg:rgba(95,191,139,.28); --hecho-bg-hi:rgba(95,191,139,.38); --hecho-borde:#5FBF8B;
@@ -90,6 +94,11 @@ const Tokens = ({ tema = "oscuro" }) => (
        El borde #DDE3EC se queda: es más oscuro que el lienzo nuevo, así que sigue leyéndose como
        el filo de la tarjeta y no como un halo. */
     .gp-root.tema-azul-claro{ --bg:#D7EAFD; --panel:#FFFFFF; --panel-hi:#EDF1F7; --border:#DDE3EC; --text:#14213D; --muted:#5A6880; --muted-bloque:#5A6880; --panel-2:rgba(8,124,245,.05);
+      /* 1 oct 2026: con el lienzo azul, el menú quedaba del MISMO color que el contenido y la
+         división se perdía (reportado por Angel). Se le da superficie propia —blanca, como las
+         tarjetas— y un filo más marcado que el borde normal, para que se lea como una columna
+         aparte y no como parte del fondo. */
+      --sidebar-bg:#FFFFFF; --sidebar-borde:#C3D3E6;
       /* Sobre blanco el mismo verde se ve lavado: aquí se usa el verde sólido de ARKEYONE con
          más cuerpo, que sí contrasta contra #FFFFFF sin tapar el texto. */
       --hecho-bg:rgba(22,163,106,.20); --hecho-bg-hi:rgba(22,163,106,.30); --hecho-borde:#16A36A;
@@ -140,6 +149,13 @@ const Tokens = ({ tema = "oscuro" }) => (
     .gp-navitem-active svg{ color:var(--gold); }
     .gp-navitem-active:hover{ background:rgba(245,158,11,.22); }
     .gp-navitem-drop{ box-shadow: inset 0 2px 0 var(--gold); }
+    /* Los grupos del menú se separan con una línea, no solo con aire: sobre superficie blanca el
+       aire por sí solo no deja ver dónde termina una sección y empieza la siguiente. La línea va
+       ENTRE grupos (no arriba del primero) para no dibujar un filo suelto bajo el logo. */
+    .gp-nav-grupo + .gp-nav-grupo{ border-top:1px solid var(--sidebar-borde); margin-top:8px; padding-top:8px; }
+    .gp-nav-separador{ border-top:1px solid var(--sidebar-borde); }
+    /* El título de cada sección también se lee más: es el rótulo que ordena todo el menú. */
+    .gp-nav-titulo{ font-weight:600; letter-spacing:.06em; }
     .gp-dot-teal{ background:var(--teal); } .gp-dot-red{ background:var(--red); } .gp-dot-gold{ background:var(--gold); }
     .gp-text-muted{ color:var(--muted); }
     .gp-text-gold{ color:var(--gold); } .gp-text-teal{ color:var(--teal); } .gp-text-red{ color:var(--red); }
@@ -3297,8 +3313,8 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
 
         {/* rail lateral / cajón */}
         <div
-          className={`w-64 ${sidebarColapsado ? "md:w-20" : "md:w-56"} shrink-0 border-r gp-border p-4 flex flex-col gap-4 overflow-y-auto gp-scroll fixed md:static inset-y-0 left-0 z-50 md:z-auto transition-all duration-200 ${mobileNavOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"}`}
-          style={{ maxHeight: "100vh", background: "var(--bg)" }}
+          className={`w-64 ${sidebarColapsado ? "md:w-20" : "md:w-56"} shrink-0 p-4 flex flex-col gap-4 overflow-y-auto gp-scroll fixed md:static inset-y-0 left-0 z-50 md:z-auto transition-all duration-200 ${mobileNavOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"}`}
+          style={{ maxHeight: "100vh", background: "var(--sidebar-bg)", borderRight: "1px solid var(--sidebar-borde)" }}
         >
           <div className="px-2 flex flex-col items-center text-center gap-1 relative" style={{ paddingTop: "calc(env(safe-area-inset-top) + 4px)" }}>
             <button onClick={() => setMobileNavOpen(false)} className="md:hidden absolute right-0 p-1 gp-btn-ghost rounded" style={{ top: "calc(env(safe-area-inset-top) + 4px)" }} aria-label="Cerrar menú"><X size={16} /></button>
@@ -3369,10 +3385,10 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
             const mostrarItems = (sidebarColapsado && esEscritorio) || !cerrado;
             const itemsOrdenados = ordenarItemsGrupo(g.label, g.items);
             return (
-              <div key={g.label}>
+              <div key={g.label} className="gp-nav-grupo">
                 <button
                   onClick={() => toggleGrupo(g.label)}
-                  className={`w-full flex items-center justify-between px-3 mb-1 text-xs gp-text-muted gp-btn-ghost rounded py-1 uppercase tracking-wide ${sidebarColapsado ? "md:hidden" : ""}`}
+                  className={`gp-nav-titulo w-full flex items-center justify-between px-3 mb-1 text-xs gp-text-muted gp-btn-ghost rounded py-1 uppercase ${sidebarColapsado ? "md:hidden" : ""}`}
                 >
                   <span>{g.label}</span>
                   {!cerrado ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
@@ -3404,8 +3420,8 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
               </div>
             );
           })}
-          <div className="mt-auto pt-2 border-t gp-border flex flex-col gap-0.5">
-            <p className={`px-3 mb-1 text-xs gp-text-muted uppercase tracking-wide ${sidebarColapsado ? "md:hidden" : ""}`}>Sistema</p>
+          <div className="gp-nav-separador mt-auto pt-2 flex flex-col gap-0.5">
+            <p className={`gp-nav-titulo px-3 mb-1 text-xs gp-text-muted uppercase ${sidebarColapsado ? "md:hidden" : ""}`}>Sistema</p>
             <button onClick={() => { setNotifPanelAbierto(true); setMobileNavOpen(false); }} title="Notificaciones"
               className={`gp-navitem flex items-center gap-2 px-3 py-2.5 md:py-2 text-[15px] text-left w-full relative ${sidebarColapsado ? "md:justify-center md:px-2" : ""}`}>
               <Bell size={15} />
