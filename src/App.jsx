@@ -1533,7 +1533,14 @@ function BarraGuardar({ sucio, onGuardar, onDescartar, etiqueta = "Guardar cambi
   );
 }
 
-// El modal se dibuja en el <body> a través de un portal, no donde está escrito en el árbol.
+// A dónde se manda el modal con el portal. NO al <body>: todos los colores de la app son
+// variables CSS declaradas en .gp-root, así que un modal colgado del body se queda sin ellas y
+// se dibuja transparente —se ve "como si no pasara nada" al abrirlo— (pasó el 1 oct 2026).
+// Colgarlo de .gp-root conserva las variables y el tema activo, y aun así lo saca de cualquier
+// contenedor intermedio. Si por lo que sea no existiera, el body es mejor que nada.
+const raizPortal = () => (typeof document === "undefined" ? null : (document.querySelector(".gp-root") || document.body));
+
+// El modal se dibuja por un portal, no donde está escrito en el árbol.
 // Motivo (bug del 1 oct 2026): la ficha del proyecto vive en una columna con position:sticky,
 // y sticky crea su propio contexto de apilamiento. Un `fixed z-50` dentro de ahí queda atrapado
 // en ese contexto, así que el banner de la pantalla —que lleva un z-10 propio— se dibujaba
@@ -1547,6 +1554,9 @@ function Modal({ title, onClose, children }) {
     if (tocado) setConfirmando(true);
     else onClose();
   };
+
+  const destino = raizPortal();
+  if (!destino) return null;
 
   return createPortal(
     <div className="fixed inset-0 z-[95] flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,.55)" }} onClick={intentarCerrar}>
@@ -1579,7 +1589,7 @@ function Modal({ title, onClose, children }) {
         )}
       </div>
     </div>,
-    document.body,
+    destino,
   );
 }
 
