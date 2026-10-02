@@ -12505,7 +12505,14 @@ function RegaloForm({ item, contactos, onCrearContacto, onSave }) {
         <Field label="Año"><input type="number" className="gp-input" value={v.anio} onChange={(e) => setV({ ...v, anio: e.target.value })} /></Field>
       </div>
       <Field label="Fecha (opcional)"><input type="date" className="gp-input" value={v.fecha || ""} onChange={(e) => setV({ ...v, fecha: e.target.value })} /></Field>
-      <Field label="Regalo o mensaje"><input className="gp-input" placeholder="ej. Perfume, tarjeta de felicitación, transferencia" value={v.descripcion} onChange={(e) => setV({ ...v, descripcion: e.target.value })} /></Field>
+      {/* Se llama "Mensaje" y es de varios renglones (Angel, 2 oct 2026): la mayoría de las
+          atenciones son justo eso —un texto de condolencia, una felicitación—, y en un renglón
+          no cabía ni se podía releer antes de mandarlo. */}
+      <Field label="Mensaje">
+        <textarea className="gp-input" rows={3}
+          placeholder="ej. el texto de la felicitación, o qué se regaló: perfume, tarjeta, transferencia"
+          value={v.descripcion} onChange={(e) => setV({ ...v, descripcion: e.target.value })} />
+      </Field>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Field label="Costo (opcional)"><MoneyInput className="gp-input" value={v.costo} onChange={(val) => setV({ ...v, costo: val })} /></Field>
         <Field label="Estatus"><select className="gp-input" value={v.estatus} onChange={(e) => setV({ ...v, estatus: e.target.value })}>{ESTATUS_REGALO.map((s) => <option key={s}>{s}</option>)}</select></Field>
