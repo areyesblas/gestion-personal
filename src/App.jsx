@@ -12359,12 +12359,20 @@ function ContactoForm({ item, proyectos, vinculos, etiquetasExistentes = [], tit
           "ExGobierno" es justo el caso donde un campo único te obligaría a elegir entre lo que
           es hoy y lo que fue. Ninguna sustituye al Tipo de contacto, que es TU relación con esa
           persona: si "Médico" se metiera ahí, el filtro de Clientes dejaría de servir. */}
-      <Field label="Título (opcional — escribe uno nuevo si no está en la lista)">
-        <input className="gp-input" list="titulos-contacto" placeholder="ej. Arq., Dr., Lic., Mtro. en Arquitectura"
-          value={v.titulo || ""} onChange={(e) => setV({ ...v, titulo: e.target.value })} />
-        {/* La lista es solo sugerencia: el campo acepta cualquier texto, y lo que escribas aquí
-            queda sugerido la próxima vez. */}
-        <datalist id="titulos-contacto">{titulosExistentes.map((t) => <option key={t} value={t} />)}</datalist>
+      {/* Mismo buscador que las etiquetas, con una diferencia a propósito: max=1, porque una
+          persona tiene UN título. Se busca entre los ya usados y si no está sale "Crear…",
+          igual que en etiquetas, en vez del datalist que parecía una lista cerrada. */}
+      <Field label="Título (opcional)">
+        <ComboboxMultiBuscar
+          max={1}
+          seleccionados={v.titulo ? [{ id: v.titulo, label: v.titulo }] : []}
+          opciones={titulosExistentes.map((t) => ({ id: t, label: t }))}
+          onAgregar={(o) => setV({ ...v, titulo: o.id })}
+          onQuitar={() => setV({ ...v, titulo: "" })}
+          onCrear={(texto) => setV({ ...v, titulo: texto })}
+          placeholder="Buscar o escribir un título… (Arq., Dr., Lic.)"
+          crearLabel={(t) => `Crear título "${t}"`}
+        />
       </Field>
       <Field label="Etiquetas (opcional — para agrupar y buscar: Médicos, Gobierno, ExGobierno…)">
         <ComboboxMultiBuscar
