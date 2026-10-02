@@ -479,12 +479,52 @@ const COLOR_TIPO_CONTACTO = { Amistad: "#14B8A6", Cliente: "#087CF5", Proveedor:
 // —para eso están las etiquetas, que sí admiten varias por contacto.
 // Catálogo abierto de etiquetas: se deduce de las que ya se usaron, igual que los tags de
 // Citas. No hay tabla que mantener ni opciones que puedan quedarse huérfanas.
+// Mismo criterio para las etiquetas de proyectos: el catálogo son las que ya se usaron.
+const etiquetasDeProyectos = (proyectos) =>
+  [...new Set((proyectos || []).flatMap((p) => p.etiquetas || []))].sort((a, b) => compararEs(a, b));
+
 const etiquetasDeContactos = (contactos) =>
   [...new Set((contactos || []).flatMap((c) => c.etiquetas || []))].sort((a, b) => compararEs(a, b));
 
 // Los títulos funcionan igual: la lista fija es solo el arranque, y todo título que se escriba
 // una vez queda sugerido para los siguientes contactos. Así no hay que pedirle a nadie que
 // agregue "Mtro. en Arquitectura" a una lista del código para poder usarlo.
+// Renombra o quita un valor de catálogo en todos los registros que lo usan. `esLista` distingue
+// un campo de varios valores (etiquetas) de uno solo (título). Devuelve cuántos cambió.
+// Pasar `nuevo = null` borra.
+async function editarValorCatalogo({ registros, campo, esLista, viejo, nuevo, onEditar }) {
+  const afectados = (registros || []).filter((r) => (esLista ? (r[campo] || []).includes(viejo) : (r[campo] || "") === viejo));
+  for (const r of afectados) {
+    const valor = esLista
+      ? (nuevo
+          ? [...new Set((r[campo] || []).map((x) => (x === viejo ? nuevo : x)))]
+          : (r[campo] || []).filter((x) => x !== viejo))
+      : (nuevo || "");
+    await onEditar(r.id, { [campo]: valor });
+  }
+  return afectados.length;
+}
+
+// Pregunta y ejecuta. Se usa igual en Contactos, Proyectos y Citas, para que administrar un
+// catálogo se sienta igual en toda la app.
+function usarCatalogoEditable({ registros, campo, esLista, onEditar, nombreSingular }) {
+  const cuantos = (viejo) => (registros || []).filter((r) => (esLista ? (r[campo] || []).includes(viejo) : (r[campo] || "") === viejo)).length;
+  return {
+    renombrar: async (viejo) => {
+      const nuevo = window.prompt(`Renombrar "${viejo}". Se cambia en ${cuantos(viejo)} ficha(s).`, viejo);
+      if (nuevo === null) return;
+      const limpio = nuevo.trim();
+      if (!limpio || limpio === viejo) return;
+      await editarValorCatalogo({ registros, campo, esLista, viejo, nuevo: limpio, onEditar });
+    },
+    eliminar: async (viejo) => {
+      const n = cuantos(viejo);
+      if (!window.confirm(`Quitar ${nombreSingular} "${viejo}" de ${n} ficha(s). Esto no borra las fichas, solo les quita ese valor. ¿Continuar?`)) return;
+      await editarValorCatalogo({ registros, campo, esLista, viejo, nuevo: null, onEditar });
+    },
+  };
+}
+
 const titulosDeContactos = (contactos) =>
   [...new Set([...TITULOS_CONTACTO, ...(contactos || []).map((c) => (c.titulo || "").trim()).filter(Boolean)])]
     .sort((a, b) => compararEs(a, b));
@@ -1638,7 +1678,15 @@ function Modal({ title, onClose, children }) {
 // alta al vuelo (Grupo C — multi-contacto y tags en Citas, pensado para reusarse en otras
 // pantallas después). `opciones` y `seleccionados` son {id, label}. `onCrear` es opcional: si no
 // se pasa, no se ofrece crear (por ejemplo, si algún día se usa solo para elegir entre existentes).
-function ComboboxMultiBuscar({ seleccionados, opciones, onAgregar, onQuitar, onCrear, placeholder, crearLabel, max }) {
+// `onRenombrarOpcion` y `onEliminarOpcion` son opcionales. Cuando se pasan, cada opción de la
+// lista trae su lápiz y su bote: sirven para corregir un valor mal escrito o quitar uno que ya
+// no se usa.
+//
+// OJO con lo que significan: estos catálogos NO son una tabla, son el conjunto de valores que
+// ya están capturados en las fichas. Por eso renombrar una opción es renombrarla en TODOS los
+// registros que la traen, y borrarla es quitarla de todos. Quien pasa los manejadores es quien
+// hace ese recorrido, y avisa a cuántas fichas va a afectar antes de tocarlas.
+function ComboboxMultiBuscar({ seleccionados, opciones, onAgregar, onQuitar, onCrear, placeholder, crearLabel, max, onRenombrarOpcion, onEliminarOpcion }) {
   const [query, setQuery] = useState("");
   const [abierto, setAbierto] = useState(false);
   const idsSeleccionados = new Set(seleccionados.map((s) => s.id));
@@ -1679,13 +1727,29 @@ function ComboboxMultiBuscar({ seleccionados, opciones, onAgregar, onQuitar, onC
         {abierto && (q || filtradas.length > 0) && (
           <div className="absolute z-10 mt-1 w-full gp-panel overflow-y-auto gp-scroll" style={{ maxHeight: 200 }}>
             {filtradas.slice(0, 8).map((o) => (
-              <button
-                type="button" key={o.id}
-                className="w-full text-left px-3 py-2 text-sm gp-panel-hi"
-                onMouseDown={(e) => { e.preventDefault(); onAgregar(o); setQuery(""); }}
-              >
-                {o.label}
-              </button>
+              <div key={o.id} className="flex items-center gap-1 gp-panel-hi">
+                <button
+                  type="button"
+                  className="flex-1 min-w-0 text-left px-3 py-2 text-sm truncate"
+                  onMouseDown={(e) => { e.preventDefault(); onAgregar(o); setQuery(""); }}
+                >
+                  {o.label}
+                </button>
+                {onRenombrarOpcion && (
+                  <button
+                    type="button" title={`Renombrar "${o.label}" en todas las fichas`}
+                    className="p-1.5 rounded gp-text-muted shrink-0"
+                    onMouseDown={(e) => { e.preventDefault(); onRenombrarOpcion(o.id); }}
+                  ><Pencil size={12} /></button>
+                )}
+                {onEliminarOpcion && (
+                  <button
+                    type="button" title={`Quitar "${o.label}" de todas las fichas`}
+                    className="p-1.5 rounded gp-text-red shrink-0 mr-1"
+                    onMouseDown={(e) => { e.preventDefault(); onEliminarOpcion(o.id); }}
+                  ><Trash2 size={12} /></button>
+                )}
+              </div>
             ))}
             {q && !coincideExacto && onCrear && (
               <button
@@ -6439,6 +6503,11 @@ function Proyectos({
   ];
 
   const FILTROS = ["Todos", ...ESTATUS_PROYECTO];
+  // Corregir o quitar una etiqueta la cambia en todos los proyectos que la traen: el catálogo
+  // son las etiquetas ya capturadas, no una tabla aparte.
+  const catalogoEtiquetasProyectos = usarCatalogoEditable({
+    registros: data.proyectos, campo: "etiquetas", esLista: true, onEditar: onEdit, nombreSingular: "la etiqueta",
+  });
   const contarFiltro = (t) => (t === "Todos" ? data.proyectos.length : data.proyectos.filter((p) => p.estatus === t).length);
   // Opciones del combo de etapa: id, etiqueta corta, color y cuántos proyectos hay en cada una.
   const opcionesFiltroEstatus = FILTROS.map((t) => ({
@@ -6737,6 +6806,8 @@ function Proyectos({
             contactos={data.contactos}
             empresas={data.empresas || []}
             vinculos={(data.contactoProyectos || []).filter((v) => v.proyectoId === modal.item.id)}
+            etiquetasExistentes={etiquetasDeProyectos(data.proyectos)}
+            catalogoEtiquetas={catalogoEtiquetasProyectos}
             onVincularContacto={onVincularContacto}
             onDesvincularContacto={onDesvincularContacto}
             onSave={(v) => { modal.item.id ? onEdit(modal.item.id, v) : onAdd(v); setModal(null); }}
@@ -7742,7 +7813,7 @@ function SeccionForm({ titulo, children }) {
 // Separado por secciones (secc. 27): lo indispensable arriba, fechas y relaciones después, y los
 // datos secundarios detrás de "Información adicional" para que dar de alta un proyecto no sea un
 // formulario gigantesco.
-function ProyectoForm({ item, contactos, empresas = [], vinculos, onVincularContacto, onDesvincularContacto, onSave }) {
+function ProyectoForm({ item, contactos, empresas = [], vinculos, etiquetasExistentes = [], catalogoEtiquetas, onVincularContacto, onDesvincularContacto, onSave }) {
   // El id se decide desde ahora (no al guardar) para poder vincular contactos antes de que el
   // proyecto exista como fila — mismo truco que ya usa ContactoForm.
   const [proyectoId] = useState(() => item.id || uid());
@@ -7760,7 +7831,6 @@ function ProyectoForm({ item, contactos, empresas = [], vinculos, onVincularCont
   });
   const [error, setError] = useState("");
   const [adicionalAbierto, setAdicionalAbierto] = useState(false);
-  const [etiquetaTexto, setEtiquetaTexto] = useState("");
 
   // Igual que en ContactoForm: si el proyecto YA existe, vincular/desvincular se guarda al
   // momento (esperar al botón Guardar hacía que se perdieran al cerrar con la X); si es nuevo, se
@@ -7782,12 +7852,6 @@ function ProyectoForm({ item, contactos, empresas = [], vinculos, onVincularCont
     }
   };
 
-  const agregarEtiqueta = () => {
-    const t = etiquetaTexto.trim();
-    if (!t) return;
-    if (!v.etiquetas.some((e) => e.toLowerCase() === t.toLowerCase())) setV({ ...v, etiquetas: [...v.etiquetas, t] });
-    setEtiquetaTexto("");
-  };
 
   const guardar = () => {
     if (!v.nombre?.toString().trim()) { setError("El nombre del proyecto es obligatorio."); return; }
@@ -7916,21 +7980,20 @@ function ProyectoForm({ item, contactos, empresas = [], vinculos, onVincularCont
 
       {adicionalAbierto && (
         <SeccionForm titulo="Opcional">
+          {/* Mismo combobox que las etiquetas de contactos y los tags de citas: sugiere las ya
+              usadas, deja crear una nueva y permite corregirla o quitarla de todos los proyectos.
+              Antes era un input suelto que solo respondía a Enter y no sugería nada. */}
           <Field label="Etiquetas">
-            {v.etiquetas.length > 0 && (
-              <div className="flex flex-wrap gap-1.5 mb-2">
-                {v.etiquetas.map((e) => (
-                  <span key={e} className="gp-bloque text-xs pl-2.5 pr-1.5 py-1 rounded-full flex items-center gap-1">
-                    {e}
-                    <button type="button" onClick={() => setV({ ...v, etiquetas: v.etiquetas.filter((x) => x !== e) })} className="gp-text-muted"><X size={11} /></button>
-                  </span>
-                ))}
-              </div>
-            )}
-            <input
-              className="gp-input" placeholder="Escribe una etiqueta y Enter"
-              value={etiquetaTexto} onChange={(e) => setEtiquetaTexto(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); agregarEtiqueta(); } }}
+            <ComboboxMultiBuscar
+              seleccionados={(v.etiquetas || []).map((e) => ({ id: e, label: e }))}
+              opciones={(etiquetasExistentes || []).map((e) => ({ id: e, label: e }))}
+              onAgregar={(o) => setV({ ...v, etiquetas: [...(v.etiquetas || []), o.id] })}
+              onQuitar={(id) => setV({ ...v, etiquetas: (v.etiquetas || []).filter((x) => x !== id) })}
+              onCrear={(texto) => setV({ ...v, etiquetas: [...(v.etiquetas || []), texto] })}
+              onRenombrarOpcion={catalogoEtiquetas?.renombrar}
+              onEliminarOpcion={catalogoEtiquetas?.eliminar}
+              placeholder="Escribe una etiqueta…"
+              crearLabel={(t) => `Crear etiqueta "${t}"`}
             />
           </Field>
           <Field label="Repositorio (opcional)">
@@ -10540,6 +10603,14 @@ function DeudaForm({ item, proyectos, saldoPendiente, onAbrirPago, onSave }) {
 // por cada colaborador, sus tareas asignadas, lo ganado (tareas aceptadas, aunque sigan en proceso),
 // lo ya pagado (egresos reales en Finanzas) y el saldo pendiente — sin duplicar el dinero real.
 function Equipo({ data, onAddContacto, onEditContacto, onAddFinanzas, onAddFactura, onVincularProyecto, onDesvincularProyecto }) {
+  // Mismos catálogos que en Contactos: es la misma gente y las mismas etiquetas, solo que
+  // editadas desde otra pantalla. Aquí el editor de contactos se llama onEditContacto.
+  const catalogoEtiquetasContactos = usarCatalogoEditable({
+    registros: data.contactos, campo: "etiquetas", esLista: true, onEditar: onEditContacto, nombreSingular: "la etiqueta",
+  });
+  const catalogoTitulosContactos = usarCatalogoEditable({
+    registros: data.contactos, campo: "titulo", esLista: false, onEditar: onEditContacto, nombreSingular: "el título",
+  });
   const [modal, setModal] = useState(null); // {item} alta/edición contacto | {colaborador, paso:"pagar"}
   const [orden, setOrden] = useState("alfabetico");
   const [busqueda, setBusqueda] = useState("");
@@ -10626,6 +10697,8 @@ function Equipo({ data, onAddContacto, onEditContacto, onAddFinanzas, onAddFactu
             vinculos={(data.contactoProyectos || []).filter((v) => v.contactoId === modal.item.id)}
             etiquetasExistentes={etiquetasDeContactos(data.contactos)}
             titulosExistentes={titulosDeContactos(data.contactos)}
+            catalogoEtiquetas={catalogoEtiquetasContactos}
+            catalogoTitulos={catalogoTitulosContactos}
             onVincularProyecto={onVincularProyecto} onDesvincularProyecto={onDesvincularProyecto}
             onSave={(v) => {
               const vConTipo = { ...v, tipos: v.tipos.includes("Colaborador") ? v.tipos : [...v.tipos, "Colaborador"] };
@@ -11219,6 +11292,13 @@ function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
   const [busqueda, setBusquedaState] = useState("");
   const [filtrosAbiertos, setFiltrosAbiertos] = useState(false);
   const [filtroEtiqueta, setFiltroEtiqueta] = useState("Todas");
+  // Administrar el catálogo = tocar las fichas, porque el catálogo ES lo que está capturado.
+  const catalogoEtiquetasContactos = usarCatalogoEditable({
+    registros: data.contactos, campo: "etiquetas", esLista: true, onEditar: onEdit, nombreSingular: "la etiqueta",
+  });
+  const catalogoTitulosContactos = usarCatalogoEditable({
+    registros: data.contactos, campo: "titulo", esLista: false, onEditar: onEdit, nombreSingular: "el título",
+  });
   const [menuAcciones, setMenuAcciones] = useState(null); // id del contacto con su menú "···" abierto
   const [pagina, setPagina] = useState(1);
   const [porPagina, setPorPagina] = useState(100);
@@ -11507,6 +11587,8 @@ function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
             vinculos={(data.contactoProyectos || []).filter((v) => v.contactoId === modal.item.id)}
             etiquetasExistentes={etiquetasDeContactos(data.contactos)}
             titulosExistentes={titulosDeContactos(data.contactos)}
+            catalogoEtiquetas={catalogoEtiquetasContactos}
+            catalogoTitulos={catalogoTitulosContactos}
             onVincularProyecto={onVincularProyecto}
             onDesvincularProyecto={onDesvincularProyecto}
             onSave={(v) => { modal.item.id ? onEdit(modal.item.id, v) : onAdd(v); setModal(null); }}
@@ -12213,7 +12295,7 @@ function CampoTelefonoPais({ valor, onChange, placeholderNumero }) {
   );
 }
 
-function ContactoForm({ item, proyectos, vinculos, etiquetasExistentes = [], titulosExistentes = TITULOS_CONTACTO, onVincularProyecto, onDesvincularProyecto, onSave }) {
+function ContactoForm({ item, proyectos, vinculos, etiquetasExistentes = [], titulosExistentes = TITULOS_CONTACTO, catalogoEtiquetas, catalogoTitulos, onVincularProyecto, onDesvincularProyecto, onSave }) {
   // El id se decide desde ahora (no al guardar) para poder subir la foto y armar la ruta de
   // Storage antes de que el contacto exista como fila — mismo truco que ya usa ContactoRapidoForm.
   const [contactoId] = useState(() => item.id || uid());
@@ -12370,6 +12452,8 @@ function ContactoForm({ item, proyectos, vinculos, etiquetasExistentes = [], tit
           onAgregar={(o) => setV({ ...v, titulo: o.id })}
           onQuitar={() => setV({ ...v, titulo: "" })}
           onCrear={(texto) => setV({ ...v, titulo: texto })}
+          onRenombrarOpcion={catalogoTitulos?.renombrar}
+          onEliminarOpcion={catalogoTitulos?.eliminar}
           placeholder="Buscar o escribir un título… (Arq., Dr., Lic.)"
           crearLabel={(t) => `Crear título "${t}"`}
         />
@@ -12381,6 +12465,8 @@ function ContactoForm({ item, proyectos, vinculos, etiquetasExistentes = [], tit
           onAgregar={(o) => setV({ ...v, etiquetas: [...(v.etiquetas || []), o.id] })}
           onQuitar={(id) => setV({ ...v, etiquetas: (v.etiquetas || []).filter((x) => x !== id) })}
           onCrear={(texto) => setV({ ...v, etiquetas: [...(v.etiquetas || []), texto] })}
+          onRenombrarOpcion={catalogoEtiquetas?.renombrar}
+          onEliminarOpcion={catalogoEtiquetas?.eliminar}
           placeholder="Escribe una etiqueta…"
           crearLabel={(t) => `Crear etiqueta "${t}"`}
         />
@@ -16170,6 +16256,12 @@ function Agenda({
   const [modalAgregar, setModalAgregar] = useState(null); // null | "nueva" | "existente"
   // Clic en un hueco de la cuadrícula: menú para crear ahí mismo, con el día y la hora que se
   // tocaron ya puestos (pedido de Angel, 29 sept 2026).
+  // Catálogo de tags de citas: igual que las etiquetas de contactos, se puede corregir o quitar
+  // un tag en todas las citas que lo traen.
+  const catalogoTagsCitas = usarCatalogoEditable({
+    registros: data.citas, campo: "tags", esLista: true,
+    onEditar: (id, patch) => onEditCita(id, patch), nombreSingular: "el tag",
+  });
   const [menuHueco, setMenuHueco] = useState(null);   // { x, y, dia, hora }
   const [nuevaCitaEn, setNuevaCitaEn] = useState(null); // { dia, hora }
   const [nuevaTareaEn, setNuevaTareaEn] = useState(null); // { dia, hora }
@@ -16650,7 +16742,7 @@ function Agenda({
           </div>
           {modalAgregar === "nueva" && (
             <CitaForm item={{ titulo: "", fechaHora: localInputsAFechaHora(todayISO(), "09:00"), lugar: "", contactoIds: [], tags: [], notas: "" }} contactos={data.contactos}
-              tagsExistentes={tagsUnicos(data.citas)} onCrearContacto={onCrearContacto}
+              tagsExistentes={tagsUnicos(data.citas)} catalogoTags={catalogoTagsCitas} onCrearContacto={onCrearContacto}
               onSave={(v) => { onAddCita({ ...v, id: uid() }); setModalAgregar(null); }} />
           )}
           {modalAgregar === "existente" && (
@@ -16666,7 +16758,7 @@ function Agenda({
         <Modal title={edicion.tipo === "cita" ? "Editar cita" : "Editar tarea"} onClose={() => setEdicion(null)}>
           {edicion.tipo === "cita" ? (
             <>
-              <CitaForm item={edicion.item} contactos={data.contactos} tagsExistentes={tagsUnicos(data.citas)}
+              <CitaForm item={edicion.item} contactos={data.contactos} tagsExistentes={tagsUnicos(data.citas)} catalogoTags={catalogoTagsCitas}
                 onCrearContacto={onCrearContacto}
                 onSave={(v) => { editarCita(edicion.item, v, true); setEdicion(null); }} />
               <button className="w-full mt-3 py-2 text-sm rounded gp-btn-ghost gp-text-red flex items-center justify-center gap-2"
@@ -16975,7 +17067,7 @@ function Agenda({
         <Modal title={`Nueva cita — ${fmtFechaCorta(nuevaCitaEn.dia)} ${nuevaCitaEn.hora}`} onClose={() => setNuevaCitaEn(null)}>
           <CitaForm
             item={{ titulo: "", fechaHora: localInputsAFechaHora(nuevaCitaEn.dia, nuevaCitaEn.hora), lugar: "", contactoIds: [], tags: [], notas: "" }}
-            contactos={data.contactos} tagsExistentes={tagsUnicos(data.citas)} onCrearContacto={onCrearContacto}
+            contactos={data.contactos} tagsExistentes={tagsUnicos(data.citas)} catalogoTags={catalogoTagsCitas} onCrearContacto={onCrearContacto}
             onSave={(v) => { onAddCita({ ...v, id: uid() }); setNuevaCitaEn(null); }} />
         </Modal>
       )}
@@ -17051,7 +17143,7 @@ function PendienteExistenteForm({ pendientes, horaSugerida, onAsignar }) {
   );
 }
 
-function CitaForm({ item, contactos, tagsExistentes, onCrearContacto, onSave }) {
+function CitaForm({ item, contactos, tagsExistentes, catalogoTags, onCrearContacto, onSave }) {
   const inicial = fechaHoraALocalInputs(item.fechaHora);
   const [titulo, setTitulo] = useState(item.titulo || "");
   const [fecha, setFecha] = useState(inicial.fecha);
@@ -17095,6 +17187,8 @@ function CitaForm({ item, contactos, tagsExistentes, onCrearContacto, onSave }) 
           onAgregar={(o) => setTags((ts) => [...ts, o.id])}
           onQuitar={(id) => setTags((ts) => ts.filter((x) => x !== id))}
           onCrear={(texto) => setTags((ts) => [...ts, texto])}
+          onRenombrarOpcion={catalogoTags?.renombrar}
+          onEliminarOpcion={catalogoTags?.eliminar}
           placeholder="Agregar tag…"
           crearLabel={(texto) => `Crear tag "${texto}"`}
         />
