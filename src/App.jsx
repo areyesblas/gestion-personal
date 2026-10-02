@@ -482,6 +482,13 @@ const COLOR_TIPO_CONTACTO = { Amistad: "#14B8A6", Cliente: "#087CF5", Proveedor:
 const etiquetasDeContactos = (contactos) =>
   [...new Set((contactos || []).flatMap((c) => c.etiquetas || []))].sort((a, b) => compararEs(a, b));
 
+// Los títulos funcionan igual: la lista fija es solo el arranque, y todo título que se escriba
+// una vez queda sugerido para los siguientes contactos. Así no hay que pedirle a nadie que
+// agregue "Mtro. en Arquitectura" a una lista del código para poder usarlo.
+const titulosDeContactos = (contactos) =>
+  [...new Set([...TITULOS_CONTACTO, ...(contactos || []).map((c) => (c.titulo || "").trim()).filter(Boolean)])]
+    .sort((a, b) => compararEs(a, b));
+
 const TITULOS_CONTACTO = ordenAlfabetico(["Arq.", "C.P.", "Dr.", "Dra.", "Ing.", "Lic.", "Mtro.", "Mtra.", "Profr.", "Sr.", "Sra."]);
 
 // Categorías de notificación configurables por el usuario (Configuración > Notificaciones).
@@ -10618,6 +10625,7 @@ function Equipo({ data, onAddContacto, onEditContacto, onAddFinanzas, onAddFactu
             item={modal.item} proyectos={data.proyectos}
             vinculos={(data.contactoProyectos || []).filter((v) => v.contactoId === modal.item.id)}
             etiquetasExistentes={etiquetasDeContactos(data.contactos)}
+            titulosExistentes={titulosDeContactos(data.contactos)}
             onVincularProyecto={onVincularProyecto} onDesvincularProyecto={onDesvincularProyecto}
             onSave={(v) => {
               const vConTipo = { ...v, tipos: v.tipos.includes("Colaborador") ? v.tipos : [...v.tipos, "Colaborador"] };
@@ -11498,6 +11506,7 @@ function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
             proyectos={data.proyectos}
             vinculos={(data.contactoProyectos || []).filter((v) => v.contactoId === modal.item.id)}
             etiquetasExistentes={etiquetasDeContactos(data.contactos)}
+            titulosExistentes={titulosDeContactos(data.contactos)}
             onVincularProyecto={onVincularProyecto}
             onDesvincularProyecto={onDesvincularProyecto}
             onSave={(v) => { modal.item.id ? onEdit(modal.item.id, v) : onAdd(v); setModal(null); }}
@@ -12204,7 +12213,7 @@ function CampoTelefonoPais({ valor, onChange, placeholderNumero }) {
   );
 }
 
-function ContactoForm({ item, proyectos, vinculos, etiquetasExistentes = [], onVincularProyecto, onDesvincularProyecto, onSave }) {
+function ContactoForm({ item, proyectos, vinculos, etiquetasExistentes = [], titulosExistentes = TITULOS_CONTACTO, onVincularProyecto, onDesvincularProyecto, onSave }) {
   // El id se decide desde ahora (no al guardar) para poder subir la foto y armar la ruta de
   // Storage antes de que el contacto exista como fila — mismo truco que ya usa ContactoRapidoForm.
   const [contactoId] = useState(() => item.id || uid());
@@ -12350,10 +12359,12 @@ function ContactoForm({ item, proyectos, vinculos, etiquetasExistentes = [], onV
           "ExGobierno" es justo el caso donde un campo único te obligaría a elegir entre lo que
           es hoy y lo que fue. Ninguna sustituye al Tipo de contacto, que es TU relación con esa
           persona: si "Médico" se metiera ahí, el filtro de Clientes dejaría de servir. */}
-      <Field label="Título (opcional)">
-        <input className="gp-input" list="titulos-contacto" placeholder="ej. Arq., Dr., Lic."
+      <Field label="Título (opcional — escribe uno nuevo si no está en la lista)">
+        <input className="gp-input" list="titulos-contacto" placeholder="ej. Arq., Dr., Lic., Mtro. en Arquitectura"
           value={v.titulo || ""} onChange={(e) => setV({ ...v, titulo: e.target.value })} />
-        <datalist id="titulos-contacto">{TITULOS_CONTACTO.map((t) => <option key={t} value={t} />)}</datalist>
+        {/* La lista es solo sugerencia: el campo acepta cualquier texto, y lo que escribas aquí
+            queda sugerido la próxima vez. */}
+        <datalist id="titulos-contacto">{titulosExistentes.map((t) => <option key={t} value={t} />)}</datalist>
       </Field>
       <Field label="Etiquetas (opcional — para agrupar y buscar: Médicos, Gobierno, ExGobierno…)">
         <ComboboxMultiBuscar
