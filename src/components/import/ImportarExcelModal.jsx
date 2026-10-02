@@ -68,6 +68,8 @@ const CONFIGS = {
       { campo: 'correo', etiqueta: 'Correo', alias: ['correo', 'email', 'e-mail', 'correo electronico', 'correo electrónico'], requerido: false, ejemplo: 'maria@constructora.com' },
       { campo: 'fechaNacimiento', etiqueta: 'Cumpleaños', alias: ['cumpleanos', 'cumpleaños', 'fecha de nacimiento', 'nacimiento'], requerido: false, ejemplo: '1985-03-14', ayuda: 'AAAA-MM-DD o DD/MM/AAAA. Sirve para los avisos de cumpleaños.' },
       { campo: 'direccion', etiqueta: 'Dirección', alias: ['direccion', 'dirección', 'domicilio'], requerido: false, ejemplo: 'Av. Reforma 123, CDMX' },
+      { campo: 'titulo', etiqueta: 'Título', alias: ['titulo', 'título', 'trato'], requerido: false, ejemplo: 'Arq.', ayuda: 'Cómo te diriges a la persona: Dr., Arq., Lic. Un solo valor.' },
+      { campo: 'etiquetas', etiqueta: 'Etiquetas', alias: ['etiquetas', 'clasificacion', 'clasificación', 'tags', 'sector'], requerido: false, ejemplo: 'Arquitectos; Gobierno', ayuda: 'Para agrupar y buscar (Médicos, Gobierno, ExGobierno…). Varias separadas por coma o punto y coma.' },
       { campo: 'notas', etiqueta: 'Notas', alias: ['notas', 'observaciones', 'comentarios'], requerido: false, ejemplo: 'Prefiere que le escriban por WhatsApp' },
     ],
     validar: (m) => {
@@ -87,7 +89,8 @@ const CONFIGS = {
         ok: true,
         item: {
           nombres, apellidoPaterno, apellidoMaterno, nombre, tipos: [tipo],
-          empresa: texto(m.empresa), puesto: texto(m.puesto),
+          empresa: texto(m.empresa), puesto: texto(m.puesto), titulo: texto(m.titulo),
+          etiquetas: texto(m.etiquetas).split(/[,;]/).map((x) => x.trim()).filter(Boolean),
           whatsapp: texto(m.whatsapp), telefono: texto(m.telefono), correo: texto(m.correo),
           fechaNacimiento: parseFecha(m.fechaNacimiento) || '',
           direccion: texto(m.direccion), notas: texto(m.notas),

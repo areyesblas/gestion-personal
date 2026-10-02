@@ -468,11 +468,21 @@ const TIPOS_ATENCION = ordenAlfabetico(["Regalo", "Felicitación", "Condolencia"
 // Roles de un contacto. Un contacto puede tener varios a la vez (anexo de arquitectura). "Personal"
 // y "Familia" se agregaron el 24 sept 2026 con el rediseño de la pantalla, calcados del mockup de
 // Angel — la columna `tipos` es text[], así que ampliar el catálogo no requiere migración.
-const TIPOS_CONTACTO = ordenAlfabetico(["Cliente", "Proveedor", "Colaborador", "Personal", "Familia", "Otro"]);
+const TIPOS_CONTACTO = ordenAlfabetico(["Amistad", "Cliente", "Proveedor", "Colaborador", "Personal", "Familia", "Otro"]);
 // Cómo se nombra cada rol en las pastillas de filtro (en plural, como el mockup).
-const FILTRO_PLURAL = { Cliente: "Clientes", Proveedor: "Proveedores", Colaborador: "Colaboradores", Personal: "Personal", Familia: "Familia", Otro: "Otros" };
+const FILTRO_PLURAL = { Amistad: "Amistades", Cliente: "Clientes", Proveedor: "Proveedores", Colaborador: "Colaboradores", Personal: "Personal", Familia: "Familia", Otro: "Otros" };
 // Un color propio por rol, para distinguirlos de un vistazo en la lista (mockup 24 sept 2026).
-const COLOR_TIPO_CONTACTO = { Cliente: "#087CF5", Proveedor: "#F59E0B", Colaborador: "#16A36A", Personal: "#8B5CF6", Familia: "#EC4899", Otro: "#64748B" };
+const COLOR_TIPO_CONTACTO = { Amistad: "#14B8A6", Cliente: "#087CF5", Proveedor: "#F59E0B", Colaborador: "#16A36A", Personal: "#8B5CF6", Familia: "#EC4899", Otro: "#64748B" };
+
+// Títulos de trato más comunes. Es una sugerencia, no una lista cerrada: el campo deja escribir
+// cualquier otro. Sirve para dirigirse a la persona ("Estimado Arq. Quintana"), NO para filtrar
+// —para eso están las etiquetas, que sí admiten varias por contacto.
+// Catálogo abierto de etiquetas: se deduce de las que ya se usaron, igual que los tags de
+// Citas. No hay tabla que mantener ni opciones que puedan quedarse huérfanas.
+const etiquetasDeContactos = (contactos) =>
+  [...new Set((contactos || []).flatMap((c) => c.etiquetas || []))].sort((a, b) => compararEs(a, b));
+
+const TITULOS_CONTACTO = ordenAlfabetico(["Arq.", "C.P.", "Dr.", "Dra.", "Ing.", "Lic.", "Mtro.", "Mtra.", "Profr.", "Sr.", "Sra."]);
 
 // Categorías de notificación configurables por el usuario (Configuración > Notificaciones).
 // Cada "tipo" concreto de notificación (medicamento, cita, deuda, etc.) pertenece a una de estas
@@ -10526,7 +10536,7 @@ function Equipo({ data, onAddContacto, onEditContacto, onAddFinanzas, onAddFactu
   const [modal, setModal] = useState(null); // {item} alta/edición contacto | {colaborador, paso:"pagar"}
   const [orden, setOrden] = useState("alfabetico");
   const [busqueda, setBusqueda] = useState("");
-  const emptyContacto = { nombre: "", nombres: "", apellidoPaterno: "", apellidoMaterno: "", tipos: ["Colaborador"], whatsapp: "", correo: "", direccion: "", notas: "", contexto: "", parentesco: "", fechaNacimiento: "" };
+  const emptyContacto = { nombre: "", nombres: "", apellidoPaterno: "", apellidoMaterno: "", tipos: ["Colaborador"], titulo: "", etiquetas: [], whatsapp: "", correo: "", direccion: "", notas: "", contexto: "", parentesco: "", fechaNacimiento: "" };
 
   const colaboradores = data.contactos.filter((c) => (c.tipos && c.tipos.length ? c.tipos : [c.tipo || "Otro"]).includes("Colaborador"));
   const tareasDe = (id) => data.pendientes.filter((p) => p.colaboradorContactoId === id);
@@ -10607,6 +10617,7 @@ function Equipo({ data, onAddContacto, onEditContacto, onAddFinanzas, onAddFactu
           <ContactoForm
             item={modal.item} proyectos={data.proyectos}
             vinculos={(data.contactoProyectos || []).filter((v) => v.contactoId === modal.item.id)}
+            etiquetasExistentes={etiquetasDeContactos(data.contactos)}
             onVincularProyecto={onVincularProyecto} onDesvincularProyecto={onDesvincularProyecto}
             onSave={(v) => {
               const vConTipo = { ...v, tipos: v.tipos.includes("Colaborador") ? v.tipos : [...v.tipos, "Colaborador"] };
@@ -11033,6 +11044,21 @@ function AvatarContacto({ c, size = 32 }) {
   );
 }
 
+// Las etiquetas del contacto, en chips. Se ven en la lista y en la ficha: son justo el dato que
+// sirve para encontrar a alguien ("¿quiénes son de Gobierno?").
+function ChipsEtiquetasContacto({ c, max = 3 }) {
+  const lista = c.etiquetas || [];
+  if (lista.length === 0) return null;
+  return (
+    <span className="inline-flex items-center gap-1 flex-wrap">
+      {lista.slice(0, max).map((e) => (
+        <span key={e} className="gp-badge" style={{ color: "var(--muted)", background: "var(--panel-2)" }}>{e}</span>
+      ))}
+      {lista.length > max && <span className="text-[10px] gp-text-muted">+{lista.length - max}</span>}
+    </span>
+  );
+}
+
 function ChipsTiposContacto({ c }) {
   return (
     <div className="flex items-center gap-1 flex-wrap">
@@ -11184,6 +11210,7 @@ function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
   const [ordenDir, setOrdenDir] = useState("asc");
   const [busqueda, setBusquedaState] = useState("");
   const [filtrosAbiertos, setFiltrosAbiertos] = useState(false);
+  const [filtroEtiqueta, setFiltroEtiqueta] = useState("Todas");
   const [menuAcciones, setMenuAcciones] = useState(null); // id del contacto con su menú "···" abierto
   const [pagina, setPagina] = useState(1);
   const [porPagina, setPorPagina] = useState(100);
@@ -11193,7 +11220,7 @@ function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
   const setBusqueda = (q) => { setBusquedaState(q); setPagina(1); };
   const toggleOrden = (key) => { if (orden === key) setOrdenDir((d) => (d === "asc" ? "desc" : "asc")); else { setOrden(key); setOrdenDir("asc"); } };
 
-  const empty = { nombre: "", nombres: "", apellidoPaterno: "", apellidoMaterno: "", tipos: ["Cliente"], parentesco: "", fechaNacimiento: "", contexto: "", fotoUrl: "", empresa: "", puesto: "", whatsapp: "", telefono: "", correo: "", direccion: "", notas: "" };
+  const empty = { nombre: "", nombres: "", apellidoPaterno: "", apellidoMaterno: "", tipos: ["Cliente"], titulo: "", etiquetas: [], parentesco: "", fechaNacimiento: "", contexto: "", fotoUrl: "", empresa: "", puesto: "", whatsapp: "", telefono: "", correo: "", direccion: "", notas: "" };
   const tiposDe = (c) => (c.tipos && c.tipos.length ? c.tipos : [c.tipo || "Otro"]);
   const proyectosDe = (contactoId) => (data.contactoProyectos || [])
     .filter((v) => v.contactoId === contactoId)
@@ -11231,8 +11258,11 @@ function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
     ),
   ];
 
-  const filtrados = filtroTipo === "Todos" ? data.contactos : data.contactos.filter((c) => tiposDe(c).includes(filtroTipo));
-  const buscados = filtrarPorBusqueda(filtrados, busqueda, [(c) => c.nombre, (c) => c.empresa, (c) => c.puesto, (c) => c.contexto, (c) => c.whatsapp, (c) => c.telefono, (c) => c.correo, (c) => c.parentesco, (c) => c.notas]);
+  const porTipo = filtroTipo === "Todos" ? data.contactos : data.contactos.filter((c) => tiposDe(c).includes(filtroTipo));
+  // La etiqueta es un filtro aparte del tipo, porque son ejes distintos: se puede querer "los
+  // clientes que además son de Gobierno" y eso solo sale combinándolos.
+  const filtrados = filtroEtiqueta === "Todas" ? porTipo : porTipo.filter((c) => (c.etiquetas || []).includes(filtroEtiqueta));
+  const buscados = filtrarPorBusqueda(filtrados, busqueda, [(c) => c.nombre, (c) => c.titulo, (c) => (c.etiquetas || []).join(" "), (c) => c.empresa, (c) => c.puesto, (c) => c.contexto, (c) => c.whatsapp, (c) => c.telefono, (c) => c.correo, (c) => c.parentesco, (c) => c.notas]);
   const visibles = ordenarLista(buscados, orden, camposOrden, ordenDir);
 
   // Paginación: `pagina` puede quedar fuera de rango si se borran contactos, así que se acota
@@ -11245,6 +11275,8 @@ function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
     { label: "Nombre completo", get: (c) => c.nombre }, { label: "Nombre(s)", get: (c) => c.nombres || "" },
     { label: "Apellido paterno", get: (c) => c.apellidoPaterno || "" }, { label: "Apellido materno", get: (c) => c.apellidoMaterno || "" },
     { label: "Tipo", get: (c) => tiposDe(c).join(", ") },
+    { label: "Título", get: (c) => c.titulo || "" },
+    { label: "Etiquetas", get: (c) => (c.etiquetas || []).join(", ") },
     { label: "Empresa/Organización", get: (c) => c.empresa || "" }, { label: "Puesto", get: (c) => c.puesto || "" },
     { label: "Parentesco", get: (c) => c.parentesco }, { label: "WhatsApp", get: (c) => c.whatsapp }, { label: "Teléfono", get: (c) => c.telefono || "" },
     { label: "Correo", get: (c) => c.correo }, { label: "Proyectos", get: (c) => proyectosDe(c.id).map((p) => p.nombre).join(", ") },
@@ -11305,7 +11337,14 @@ function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
       {filtrosAbiertos && (
         <div className="gp-panel p-3 mb-3 flex flex-wrap items-center gap-3">
           <OrdenSelector opciones={opcionesOrden} value={orden} onChange={(v) => { setOrden(v); setOrdenDir("asc"); }} />
-          <button onClick={() => { setFiltroTipo("Todos"); setBusqueda(""); setOrden("alfabetico"); setOrdenDir("asc"); }} className="text-xs gp-text-gold">Limpiar filtros</button>
+          <label className="flex items-center gap-1.5 text-xs">
+            <span className="gp-text-muted">Etiqueta</span>
+            <select className="gp-input text-xs py-1.5" style={{ width: "auto" }} value={filtroEtiqueta} onChange={(e) => setFiltroEtiqueta(e.target.value)}>
+              <option value="Todas">Todas</option>
+              {etiquetasDeContactos(data.contactos).map((e) => <option key={e} value={e}>{e}</option>)}
+            </select>
+          </label>
+          <button onClick={() => { setFiltroTipo("Todos"); setFiltroEtiqueta("Todas"); setBusqueda(""); setOrden("alfabetico"); setOrdenDir("asc"); }} className="text-xs gp-text-gold">Limpiar filtros</button>
         </div>
       )}
 
@@ -11341,8 +11380,9 @@ function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
                       <AvatarContacto c={c} />
                       <div className="min-w-0">
                         <div className="flex items-center gap-1.5 flex-wrap">
-                          <span className="font-medium">{c.nombre}</span>
+                          <span className="font-medium">{c.titulo ? `${c.titulo} ` : ""}{c.nombre}</span>
                           <BadgeCumpleContacto c={c} />
+                          <ChipsEtiquetasContacto c={c} max={2} />
                         </div>
                         {c.puesto && <div className="text-xs gp-text-muted">{c.puesto}</div>}
                       </div>
@@ -11457,6 +11497,7 @@ function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
             item={modal.item}
             proyectos={data.proyectos}
             vinculos={(data.contactoProyectos || []).filter((v) => v.contactoId === modal.item.id)}
+            etiquetasExistentes={etiquetasDeContactos(data.contactos)}
             onVincularProyecto={onVincularProyecto}
             onDesvincularProyecto={onDesvincularProyecto}
             onSave={(v) => { modal.item.id ? onEdit(modal.item.id, v) : onAdd(v); setModal(null); }}
@@ -11783,8 +11824,8 @@ function FichaContacto({ c, data, proyectosVinculados, onCerrar, onEditar, onVer
         <div className="flex items-start gap-3 min-w-0">
           <AvatarContacto c={c} size={64} />
           <div className="min-w-0">
-            <p className="gp-serif text-lg leading-tight">{c.nombre}</p>
-            <div className="mt-1"><ChipsTiposContacto c={c} /></div>
+            <p className="gp-serif text-lg leading-tight">{c.titulo ? `${c.titulo} ` : ""}{c.nombre}</p>
+            <div className="mt-1 flex flex-wrap items-center gap-1"><ChipsTiposContacto c={c} /><ChipsEtiquetasContacto c={c} /></div>
             {c.puesto && <p className="text-xs gp-text-muted mt-1">{c.puesto}</p>}
             {c.empresa && <p className="text-xs gp-text-muted">{c.empresa}</p>}
             <div className="mt-1"><BadgeCumpleContacto c={c} /></div>
@@ -12163,7 +12204,7 @@ function CampoTelefonoPais({ valor, onChange, placeholderNumero }) {
   );
 }
 
-function ContactoForm({ item, proyectos, vinculos, onVincularProyecto, onDesvincularProyecto, onSave }) {
+function ContactoForm({ item, proyectos, vinculos, etiquetasExistentes = [], onVincularProyecto, onDesvincularProyecto, onSave }) {
   // El id se decide desde ahora (no al guardar) para poder subir la foto y armar la ruta de
   // Storage antes de que el contacto exista como fila — mismo truco que ya usa ContactoRapidoForm.
   const [contactoId] = useState(() => item.id || uid());
@@ -12302,6 +12343,29 @@ function ContactoForm({ item, proyectos, vinculos, onVincularProyecto, onDesvinc
         <CampoTelefonoPais valor={v.telefono} onChange={(x) => setV({ ...v, telefono: x })} placeholderNumero="55 1234 5678" />
       </Field>
       <Field label="Correo (opcional)"><input className="gp-input" value={v.correo} onChange={(e) => setV({ ...v, correo: e.target.value })} /></Field>
+
+      {/* Dos ejes distintos, a propósito en dos campos. El título es cómo le hablas a la persona
+          (un solo valor). Las etiquetas son a qué mundo pertenece —Médicos, Gobierno,
+          ExGobierno— y por eso admiten varias: alguien puede ser médico Y de gobierno, y
+          "ExGobierno" es justo el caso donde un campo único te obligaría a elegir entre lo que
+          es hoy y lo que fue. Ninguna sustituye al Tipo de contacto, que es TU relación con esa
+          persona: si "Médico" se metiera ahí, el filtro de Clientes dejaría de servir. */}
+      <Field label="Título (opcional)">
+        <input className="gp-input" list="titulos-contacto" placeholder="ej. Arq., Dr., Lic."
+          value={v.titulo || ""} onChange={(e) => setV({ ...v, titulo: e.target.value })} />
+        <datalist id="titulos-contacto">{TITULOS_CONTACTO.map((t) => <option key={t} value={t} />)}</datalist>
+      </Field>
+      <Field label="Etiquetas (opcional — para agrupar y buscar: Médicos, Gobierno, ExGobierno…)">
+        <ComboboxMultiBuscar
+          seleccionados={(v.etiquetas || []).map((e) => ({ id: e, label: e }))}
+          opciones={etiquetasExistentes.map((e) => ({ id: e, label: e }))}
+          onAgregar={(o) => setV({ ...v, etiquetas: [...(v.etiquetas || []), o.id] })}
+          onQuitar={(id) => setV({ ...v, etiquetas: (v.etiquetas || []).filter((x) => x !== id) })}
+          onCrear={(texto) => setV({ ...v, etiquetas: [...(v.etiquetas || []), texto] })}
+          placeholder="Escribe una etiqueta…"
+          crearLabel={(t) => `Crear etiqueta "${t}"`}
+        />
+      </Field>
       <Field label="Dirección (opcional)"><textarea className="gp-input" rows={2} placeholder="Calle, número, colonia, ciudad…" value={v.direccion || ""} onChange={(e) => setV({ ...v, direccion: e.target.value })} /></Field>
       <Field label="Notas"><textarea className="gp-input" rows={2} value={v.notas} onChange={(e) => setV({ ...v, notas: e.target.value })} /></Field>
       {error && <p className="text-xs gp-text-red mb-2">{error}</p>}
