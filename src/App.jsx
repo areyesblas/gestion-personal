@@ -65,6 +65,9 @@ const Tokens = ({ tema = "oscuro" }) => (
        proporcionalmente sutil, igual que antes. Sobre --panel el color efectivo es ~#2B5076. */
     .gp-root{ --bg:#0B2341; --panel:#12304F; --panel-hi:#1A3D63; --border:#234A70;
       --text:#EAF1FA; --muted:#93A7C4; --gold:#F59E0B; --teal:#5FBF8B; --teal-tint:#DCF5E6; --teal-text:#1D6B42; --panel-2:rgba(130,195,255,.22); --muted-bloque:#B3C5DC; --red:#EF4444;
+      /* Encabezado de los grids: un azul más claro que el panel, para que la fila de títulos se
+         lea como una barra aparte y no como el primer registro. */
+      --grid-head-bg:#27527E; --grid-head-text:#FFFFFF;
       /* El menú lateral tiene su propio fondo y su propio filo. En oscuro se queda como estaba
          (mismo azul que el lienzo: ahí todo es oscuro y el borde basta). El tema claro los
          redefine, ver más abajo. */
@@ -98,6 +101,10 @@ const Tokens = ({ tema = "oscuro" }) => (
        El borde #DDE3EC se queda: es más oscuro que el lienzo nuevo, así que sigue leyéndose como
        el filo de la tarjeta y no como un halo. */
     .gp-root.tema-azul-claro{ --bg:#D7EAFD; --panel:#FFFFFF; --panel-hi:#EDF1F7; --border:#DDE3EC; --text:#14213D; --muted:#5A6880; --muted-bloque:#5A6880; --panel-2:rgba(8,124,245,.05);
+      /* En claro el encabezado va en el navy de la marca con texto blanco: sobre tarjetas
+         blancas es lo que de verdad resalta, y es el color que pide el documento de diseño
+         para las barras de títulos. */
+      --grid-head-bg:#102B55; --grid-head-text:#FFFFFF;
       /* 1 oct 2026: con el lienzo azul, el menú quedaba del MISMO color que el contenido y la
          división se perdía (reportado por Angel). Se le da superficie propia —blanca, como las
          tarjetas— y un filo más marcado que el borde normal, para que se lea como una columna
@@ -199,7 +206,22 @@ const Tokens = ({ tema = "oscuro" }) => (
     .gp-text-muted{ color:var(--muted); }
     .gp-text-gold{ color:var(--gold); } .gp-text-teal{ color:var(--teal); } .gp-text-red{ color:var(--red); }
     table.gp-table{ border-collapse:collapse; width:100%; font-size:13px; }
-    table.gp-table th{ text-align:left; color:var(--muted); font-weight:500; padding:8px 10px; border-bottom:1px solid var(--border); font-size:11px; letter-spacing:.02em; }
+    /* Encabezados de TODOS los grids. Centrados, en mayúsculas, con su propio color de fondo
+       —uno por tema, ver --grid-head-bg— y una línea dorada abajo. El peso es 600 y no 700: con
+       fondo propio y mayúsculas ya resaltan, y en negritas la fila se veía apelmazada.
+       Se quedan PEGADOS arriba al recorrer la lista (position:sticky), que es lo que permite
+       mostrar 100 registros sin perder de vista qué columna es cuál. */
+    table.gp-table th{ position:sticky; top:0; z-index:2;
+      text-align:center; color:var(--grid-head-text); font-weight:600; padding:12px 10px;
+      border-bottom:2px solid var(--gold); font-size:13px; letter-spacing:.05em;
+      text-transform:uppercase; background:var(--grid-head-bg); white-space:nowrap; }
+    table.gp-table th:first-child{ border-top-left-radius:10px; }
+    table.gp-table th:last-child{ border-top-right-radius:10px; }
+    /* Para que el sticky tenga contra qué pegarse, el contenedor del grid tiene que ser su propia
+       caja con scroll: si quien se desplaza es la página, el encabezado se va con ella. Se aplica
+       a cualquier div con una tabla directamente adentro, sin tocar las veinte pantallas que las
+       dibujan. En navegadores sin :has() simplemente no se pega, que es como estaba antes. */
+    div:has(> table.gp-table){ max-height:72vh; overflow:auto; }
     table.gp-table td{ padding:8px 10px; border-bottom:1px solid var(--border); vertical-align:top; }
     table.gp-table tr:hover td{ background:var(--panel-hi); }
     /* Tareas (pedido de Angel, 29 sept 2026): nada de tinte al pasar el mouse — solo la manita,
@@ -6347,7 +6369,9 @@ function Proyectos({
   const [busqueda, setBusquedaState] = useState("");
   const [menuAcciones, setMenuAcciones] = useState(null);
   const [pagina, setPagina] = useState(1);
-  const [porPagina, setPorPagina] = useState(8);
+  // 100 por página (Angel, 2 oct 2026): con el encabezado fijo ya no estorba una lista larga, y
+  // paginar de 8 en 8 obligaba a andar brincando páginas para encontrar algo.
+  const [porPagina, setPorPagina] = useState(100);
   // Cualquier cambio de filtro o búsqueda regresa a la página 1 — si no, se queda en una página
   // que ya no existe con el nuevo resultado y la lista se ve vacía sin razón aparente.
   const setFiltroEstatus = (t) => { setFiltroEstatusState(t); setPagina(1); };
@@ -6618,7 +6642,7 @@ function Proyectos({
             <label className="flex items-center gap-1.5">
               Mostrar
               <select className="gp-input text-xs py-1" style={{ width: "auto" }} value={porPagina} onChange={(e) => { setPorPagina(Number(e.target.value)); setPagina(1); }}>
-                {[8, 12, 24, 50, 100].map((n) => <option key={n} value={n}>{n}</option>)}
+                {[12, 24, 50, 100, 250].map((n) => <option key={n} value={n}>{n}</option>)}
               </select>
               por página
             </label>
@@ -9038,7 +9062,7 @@ function Pendientes({ data, activeOwnerId, onAdd, onEdit, onEditProyecto, onRemo
   // Si la lista está filtrada por un proyecto, la tarea nueva ya nace en ese proyecto: es de
   // donde viene el usuario y volver a elegirlo a mano era un paso de más (pedido de Angel,
   // 29 sept 2026). Se recalcula en cada render, así que siempre refleja el filtro actual.
-  const empty = { proyectoId: filtroProyecto || "", parentId: "", descripcion: "", fechaLimite: todayISO(), fechaRevision: "", prioridad: "Media", estatus: "Pendiente", colaboradorContactoId: null, contactoId: "", precio: "", fechaPagoAprox: "", tiempoEstimado: "", tiempoReal: "", asignadoA: "" };
+  const empty = { proyectoId: filtroProyecto && filtroProyecto !== "_sin_" ? filtroProyecto : "", parentId: "", descripcion: "", fechaLimite: todayISO(), fechaRevision: "", prioridad: "Media", estatus: "Pendiente", colaboradorContactoId: null, contactoId: "", precio: "", fechaPagoAprox: "", tiempoEstimado: "", tiempoReal: "", asignadoA: "" };
 
   useEffect(() => {
     if (crearAlEntrar) { setModal({ item: { ...empty, ...(crearAlEntrar.preset || {}) } }); onConsumirCrearAlEntrar(); }
@@ -9071,7 +9095,9 @@ function Pendientes({ data, activeOwnerId, onAdd, onEdit, onEditProyecto, onRemo
     { key: "prioridad", label: "prioridad" },
   ];
   const nombreProyectoOrden = (t) => (t.proyectoId ? (data.proyectos.find((pr) => pr.id === t.proyectoId)?.nombre || "") : "");
-  const porProyecto = filtroProyecto ? data.pendientes.filter((t) => t.proyectoId === filtroProyecto) : data.pendientes;
+  const porProyecto = filtroProyecto === "_sin_"
+    ? data.pendientes.filter((t) => !t.proyectoId)
+    : filtroProyecto ? data.pendientes.filter((t) => t.proyectoId === filtroProyecto) : data.pendientes;
   // Filtro por avance (pedido de Angel, 29 sept 2026). "Sin terminar" es el de todos los días:
   // todo lo que sigue vivo. Una tarea cuenta como empezada si tiene estatus "En proceso" o si le
   // pusieron un porcentaje mayor a cero.
@@ -9148,6 +9174,9 @@ function Pendientes({ data, activeOwnerId, onAdd, onEdit, onEditProyecto, onRemo
         {vista === "lista" && (
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
             <select className="gp-input" style={{ maxWidth: 220 }} value={filtroProyecto} onChange={(e) => setFiltroProyecto(e.target.value)}>
+              {/* Las tareas sueltas no tenían forma de verse: con "Todos" se perdían entre las de
+                  proyecto y no había filtro que las aislara. Va hasta arriba, como pidió Angel. */}
+              <option value="_sin_">— Sin proyecto —</option>
               <option value="">Todos los proyectos</option>
               {ordenadosPorNombre(data.proyectos).map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
             </select>
@@ -9235,14 +9264,15 @@ function Pendientes({ data, activeOwnerId, onAdd, onEdit, onEditProyecto, onRemo
                   </td>
                   <td className="hidden md:table-cell"><Badge tone={p.prioridad === "Alta" ? "red" : p.prioridad === "Media" ? "gold" : "muted"}>{p.prioridad}</Badge></td>
                   <td onClick={(e) => e.stopPropagation()}>
-                    {tieneHijos ? (
-                      <div className="flex items-center gap-1.5" style={{ minWidth: 70 }}>
-                        <div className="h-1.5 rounded flex-1" style={{ background: "var(--border)" }}>
-                          <div className="h-1.5 rounded" style={{ width: `${avance}%`, background: avance === 100 ? "var(--teal)" : "var(--gold)" }} />
-                        </div>
-                        <span className="gp-mono" style={{ fontSize: 10 }}>{avance}%</span>
+                    {/* La barrita se ve SIEMPRE, tenga o no subtareas: es la columna de avance y
+                        antes, en las tareas sin hijos, ahí solo salía el selector de estatus. */}
+                    <div className="flex items-center gap-1.5 mb-1" style={{ minWidth: 86 }}>
+                      <div className="h-1.5 rounded flex-1" style={{ background: "var(--border)" }}>
+                        <div className="h-1.5 rounded" style={{ width: `${avanceFila}%`, background: avanceFila >= 100 ? "var(--teal)" : avanceFila >= 50 ? "#087CF5" : "var(--gold)" }} />
                       </div>
-                    ) : (
+                      <span className="gp-mono" style={{ fontSize: 10 }}>{avanceFila}%</span>
+                    </div>
+                    {tieneHijos ? null : (
                       // El check de completar ya vive en su propia columna; aquí queda el selector
                       // completo para los demás estados (En proceso, En espera, Cancelada…). En
                       // celular el selector no cabe, así que ahí se muestra el estado como badge.
@@ -11155,7 +11185,7 @@ function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
   const [filtrosAbiertos, setFiltrosAbiertos] = useState(false);
   const [menuAcciones, setMenuAcciones] = useState(null); // id del contacto con su menú "···" abierto
   const [pagina, setPagina] = useState(1);
-  const [porPagina, setPorPagina] = useState(12);
+  const [porPagina, setPorPagina] = useState(100);
   // Cambiar filtro o búsqueda siempre regresa a la página 1 — si no, se queda en una página que
   // ya no existe con el nuevo resultado y la lista se ve vacía sin razón aparente.
   const setFiltroTipo = (t) => { setFiltroTipoState(t); setPagina(1); };
@@ -11384,7 +11414,7 @@ function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
           <label className="flex items-center gap-1.5">
             Mostrar
             <select className="gp-input text-xs py-1" style={{ width: "auto" }} value={porPagina} onChange={(e) => { setPorPagina(Number(e.target.value)); setPagina(1); }}>
-              {[12, 24, 50, 100].map((n) => <option key={n} value={n}>{n}</option>)}
+              {[12, 24, 50, 100, 250].map((n) => <option key={n} value={n}>{n}</option>)}
             </select>
             por página
           </label>
