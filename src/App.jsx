@@ -207,12 +207,13 @@ const Tokens = ({ tema = "oscuro" }) => (
     .gp-text-gold{ color:var(--gold); } .gp-text-teal{ color:var(--teal); } .gp-text-red{ color:var(--red); }
     table.gp-table{ border-collapse:collapse; width:100%; font-size:13px; }
     /* Encabezados de TODOS los grids. Centrados, en mayúsculas, con su propio color de fondo
-       —uno por tema, ver --grid-head-bg— y una línea dorada abajo. El peso es 600 y no 700: con
-       fondo propio y mayúsculas ya resaltan, y en negritas la fila se veía apelmazada.
+       —uno por tema, ver --grid-head-bg— y una línea dorada abajo. El peso va en NORMAL (400) a
+       prueba, 2 oct 2026: con el fondo propio, las mayúsculas y el espaciado entre letras el
+       encabezado ya resalta sin negritas. Si se ve flojo, subirlo a 600 es cambiar este número.
        Se quedan PEGADOS arriba al recorrer la lista (position:sticky), que es lo que permite
        mostrar 100 registros sin perder de vista qué columna es cuál. */
     table.gp-table th{ position:sticky; top:0; z-index:2;
-      text-align:center; color:var(--grid-head-text); font-weight:600; padding:12px 10px;
+      text-align:center; color:var(--grid-head-text); font-weight:400; padding:12px 10px;
       border-bottom:2px solid var(--gold); font-size:13px; letter-spacing:.05em;
       text-transform:uppercase; background:var(--grid-head-bg); white-space:nowrap; }
     table.gp-table th:first-child{ border-top-left-radius:10px; }
