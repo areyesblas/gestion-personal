@@ -7739,7 +7739,7 @@ function FichaProyecto({
               <p className="gp-serif text-base flex items-center gap-1.5"><Wallet size={15} className="gp-text-gold" /> Dinero del proyecto</p>
               <p className="text-[11px] gp-text-muted">Control de ingresos, gastos y pagos del proyecto.</p>
             </div>
-            <button onClick={() => setModalFin({ tipo: "ingreso", estatus: "Pendiente" })} className="gp-btn px-3 py-1.5 text-xs rounded flex items-center gap-1.5 shrink-0">
+            <button onClick={() => setModalFin("elegir")} className="gp-btn px-3 py-1.5 text-xs rounded flex items-center gap-1.5 shrink-0">
               <Plus size={13} /> Agregar movimiento
             </button>
           </div>
@@ -7772,7 +7772,10 @@ function FichaProyecto({
                   <p className="text-xs font-medium">Gastos del proyecto</p>
                   <p className="text-[10px] gp-text-muted">{fin.topeGasto === null ? "Sin presupuesto fijado" : "Presupuesto total"}</p>
                 </div>
-                <IconBtn title={fin.topeGasto === null ? "Poner un tope de gasto" : "Cambiar el tope"} onClick={() => setModalFin("presupuesto")}><Target size={13} /></IconBtn>
+                <span className="flex items-center shrink-0">
+                  <IconBtn title="Registrar un gasto" onClick={() => setModalFin({ tipo: "egreso", estatus: "Cobrado" })}><Plus size={13} /></IconBtn>
+                  <IconBtn title={fin.topeGasto === null ? "Poner un tope de gasto" : "Cambiar el tope"} onClick={() => setModalFin("presupuesto")}><Target size={13} /></IconBtn>
+                </span>
               </div>
               <p className="gp-serif text-xl mt-1.5">{fin.topeGasto === null ? fmtMoney(fin.gastoReal) : fmtMoney(fin.topeGasto)}</p>
               <div className="h-2 rounded-full my-2" style={{ background: "var(--border)" }}>
@@ -7962,6 +7965,60 @@ function FichaProyecto({
             allá, ligado a este proyecto: este módulo no almacena ni un importe propio.
           </p>
         </div>
+      )}
+
+      {/* Los modales del dinero. Van aquí, hermanos de las pestañas y no dentro de la de
+          Finanzas, para que sigan montados aunque se cambie de pestaña con uno abierto. */}
+      {modalFin === "elegir" && (
+        <Modal title="¿Qué vas a registrar?" onClose={() => setModalFin(null)}>
+          <div className="flex flex-col gap-2">
+            {[
+              { id: { tipo: "ingreso", estatus: "Pendiente" }, icono: <Plus size={15} className="gp-text-teal" />, titulo: "Cobro al cliente", sub: "Lo que te van a pagar por el proyecto, cobrado o por cobrar." },
+              { id: { tipo: "egreso", estatus: "Cobrado" }, icono: <Plus size={15} className="gp-text-red" />, titulo: "Gasto del proyecto", sub: "Viáticos, traslados, materiales, software…" },
+              { id: "responsable", icono: <Users size={15} className="gp-text-gold" />, titulo: "Pago a un colaborador", sub: "Lo que le entregas a alguien del equipo." },
+            ].map((o) => (
+              <button key={o.titulo} onClick={() => setModalFin(o.id)}
+                className="gp-bloque rounded-lg p-3 text-left flex items-start gap-2.5">
+                <span className="mt-0.5 shrink-0">{o.icono}</span>
+                <span className="min-w-0">
+                  <span className="block text-sm font-medium">{o.titulo}</span>
+                  <span className="block text-xs gp-text-muted">{o.sub}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+        </Modal>
+      )}
+
+      {modalFin?.tipo === "ingreso" && (
+        <Modal title={modalFin.estatus === "Cobrado" ? "Cobro ya recibido" : "Cobro por recibir"} onClose={() => setModalFin(null)}>
+          <MovimientoProyectoForm tipo="Ingreso" proyecto={p} contactos={data.contactos} categoriasUsadas={categoriasUsadas}
+            estatusInicial={modalFin.estatus}
+            onCancelar={() => setModalFin(null)}
+            onGuardar={(mov) => { onAddFinanzas(mov); setModalFin(null); }} />
+        </Modal>
+      )}
+      {modalFin?.tipo === "egreso" && (
+        <Modal title="Gasto del proyecto" onClose={() => setModalFin(null)}>
+          <MovimientoProyectoForm tipo="Egreso" proyecto={p} contactos={data.contactos} categoriasUsadas={categoriasUsadas}
+            estatusInicial={modalFin.estatus}
+            onCancelar={() => setModalFin(null)}
+            onGuardar={(mov) => { onAddFinanzas(mov); setModalFin(null); }} />
+        </Modal>
+      )}
+      {modalFin === "responsable" && (
+        <Modal title="Pago a un colaborador" onClose={() => setModalFin(null)}>
+          <PagoResponsableForm proyecto={p} contactos={data.contactos}
+            onCancelar={() => setModalFin(null)}
+            onGuardar={(mov) => { onAddFinanzas(mov); setModalFin(null); }} />
+        </Modal>
+      )}
+      {modalFin === "presupuesto" && (
+        <Modal title="Tope de gasto del proyecto" onClose={() => setModalFin(null)}>
+          <PresupuestoProyectoForm proyecto={p} actual={fin.presupuesto}
+            onCancelar={() => setModalFin(null)}
+            onGuardar={(monto) => { onGuardarPresupuesto(fin.presupuesto, monto); setModalFin(null); }} />
+        </Modal>
       )}
 
       {tab === "notas" && (
