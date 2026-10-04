@@ -1601,6 +1601,86 @@ function NumeroGuardable({ valor, placeholder, onGuardar, ariaLabel, style }) {
   );
 }
 
+/* ---------- Paneles redimensionables ----------
+   Las pantallas de lista + ficha (Contactos, Proyectos, Tareas, Atenciones) tenían el ancho de
+   la ficha clavado en el código. Con tablas de muchas columnas eso dejaba la lista apretada, y
+   en pantallas grandes desperdiciaba espacio. Ahora hay un divisor que se arrastra y el ancho
+   se recuerda por pantalla, porque no es el mismo el que conviene en Contactos que en Tareas.
+
+   Solo aplica en escritorio: en celular los dos bloques van apilados y no hay nada que repartir. */
+const ANCHO_PANEL_MIN = 320;
+const ANCHO_PANEL_DEFECTO = 440;
+
+function usePanelRedimensionable(clave) {
+  const contenedorRef = useRef(null);
+  const [esEscritorio, setEsEscritorio] = useState(() => {
+    try { return window.matchMedia("(min-width: 1024px)").matches; } catch { return true; }
+  });
+  const [ancho, setAncho] = useState(() => {
+    try { return Number(localStorage.getItem(`arkeyone_panel_${clave}`)) || ANCHO_PANEL_DEFECTO; }
+    catch { return ANCHO_PANEL_DEFECTO; }
+  });
+  const arrastrandoRef = useRef(false);
+
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 1024px)");
+    const alCambiar = (e) => setEsEscritorio(e.matches);
+    mq.addEventListener("change", alCambiar);
+    return () => mq.removeEventListener("change", alCambiar);
+  }, []);
+
+  useEffect(() => {
+    const alMover = (e) => {
+      if (!arrastrandoRef.current || !contenedorRef.current) return;
+      const caja = contenedorRef.current.getBoundingClientRect();
+      // El ancho se mide desde el borde DERECHO del contenedor: arrastrar hacia la izquierda
+      // agranda la ficha y encoge la lista, que es lo que uno espera al jalar el divisor.
+      const propuesto = caja.right - e.clientX;
+      const maximo = Math.max(ANCHO_PANEL_MIN, caja.width - 380); // la lista nunca baja de 380
+      setAncho(Math.round(Math.max(ANCHO_PANEL_MIN, Math.min(propuesto, maximo))));
+    };
+    const alSoltar = () => {
+      if (!arrastrandoRef.current) return;
+      arrastrandoRef.current = false;
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      try { localStorage.setItem(`arkeyone_panel_${clave}`, String(ancho)); } catch { /* modo privado */ }
+    };
+    window.addEventListener("pointermove", alMover);
+    window.addEventListener("pointerup", alSoltar);
+    window.addEventListener("pointercancel", alSoltar);
+    return () => {
+      window.removeEventListener("pointermove", alMover);
+      window.removeEventListener("pointerup", alSoltar);
+      window.removeEventListener("pointercancel", alSoltar);
+    };
+  }, [clave, ancho]);
+
+  const divisor = (
+    <div
+      className="hidden lg:flex items-center justify-center shrink-0 self-stretch"
+      style={{ width: 10, cursor: "col-resize", touchAction: "none" }}
+      title="Arrastra para cambiar el ancho. Doble clic para volver al original."
+      role="separator" aria-orientation="vertical"
+      onPointerDown={(e) => {
+        e.preventDefault();
+        arrastrandoRef.current = true;
+        document.body.style.cursor = "col-resize";
+        document.body.style.userSelect = "none";
+      }}
+      onDoubleClick={() => {
+        setAncho(ANCHO_PANEL_DEFECTO);
+        try { localStorage.setItem(`arkeyone_panel_${clave}`, String(ANCHO_PANEL_DEFECTO)); } catch { /* modo privado */ }
+      }}
+    >
+      <span className="rounded-full" style={{ width: 4, height: 44, background: "var(--border)" }} />
+    </div>
+  );
+
+  // En celular no se fija ancho: los bloques se apilan y cada uno toma todo el ancho.
+  return { contenedorRef, divisor, estiloPanel: esEscritorio ? { width: ancho } : undefined };
+}
+
 // Barra de Guardar/Descartar que aparece solo cuando hay algo que guardar.
 function BarraGuardar({ sucio, onGuardar, onDescartar, etiqueta = "Guardar cambios" }) {
   if (!sucio) return null;
@@ -6548,6 +6628,8 @@ function Proyectos({
   proyectoSel, onSeleccionar, fichaTab, onFichaTab,
   crearAlEntrar, onConsumirCrearAlEntrar,
 }) {
+  // Ancho de la ficha de la derecha, arrastrable y recordado por pantalla.
+  const { contenedorRef, divisor, estiloPanel } = usePanelRedimensionable("proyectos");
   const [modal, setModal] = useState(null);
   const [importarAbierto, setImportarAbierto] = useState(false);
   const [filtroEstatus, setFiltroEstatusState] = useState("Todos");
@@ -6684,7 +6766,7 @@ function Proyectos({
   const limpiarFiltros = () => { setFiltroEstatus("Todos"); setFiltroContexto("Todos"); setFiltroCategoria("Todas"); setBusqueda(""); setOrden("default"); setOrdenDir("asc"); };
 
   return (
-    <div className="flex flex-col lg:flex-row gap-4 items-start">
+    <div ref={contenedorRef} className="flex flex-col lg:flex-row gap-4 items-start">
       {/* Columna de la lista. En celular se esconde cuando hay una ficha abierta (no caben lado a
           lado); en escritorio se angosta y la ficha se pone a la derecha, igual que Contactos. */}
       <div className={`min-w-0 flex-1 w-full ${seleccionado ? "hidden lg:block" : ""}`}>
@@ -6849,8 +6931,9 @@ function Proyectos({
 
       {/* Ficha del proyecto: panel a la derecha en escritorio (pegado arriba mientras se baja la
           lista) y pantalla completa en celular. */}
+      {seleccionado && divisor}
       {seleccionado && (
-        <div className="w-full lg:w-[420px] xl:w-[460px] shrink-0 lg:sticky lg:top-4">
+        <div className="w-full shrink-0 lg:sticky lg:top-4" style={estiloPanel}>
           <FichaProyecto
             p={seleccionado}
             data={data}
@@ -9276,6 +9359,8 @@ function MindMapPendientes({ proyecto, tareas, onNodoClick, onAgregar, onElimina
 }
 
 function Pendientes({ data, activeOwnerId, onAdd, onEdit, onEditProyecto, onRemove, onAddComentario, onRemoveComentario, onAsignar, onCrearContacto, onCrearProyecto, onEnviarInvitacion, onAceptarEnNombre, crearAlEntrar, onConsumirCrearAlEntrar, filtroProyectoInicial, onConsumirFiltroProyecto }) {
+  // Ancho de la ficha de la derecha, arrastrable y recordado por pantalla.
+  const { contenedorRef, divisor, estiloPanel } = usePanelRedimensionable("tareas");
   const [modal, setModal] = useState(null);
   const [comentariosDe, setComentariosDe] = useState(null);
   const [orden, setOrden] = useState("default");
@@ -9388,7 +9473,7 @@ function Pendientes({ data, activeOwnerId, onAdd, onEdit, onEditProyecto, onRemo
   const tareaSel = tareaSelId ? data.pendientes.find((t) => t.id === tareaSelId) : null;
 
   return (
-    <div className="flex flex-col lg:flex-row gap-4 items-start">
+    <div ref={contenedorRef} className="flex flex-col lg:flex-row gap-4 items-start">
       {/* Lista a la izquierda, ficha de la tarea a la derecha — mismo patrón que Contactos. */}
       <div className={`min-w-0 flex-1 w-full ${tareaSel ? "hidden lg:block" : ""}`}>
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-1">
@@ -9535,8 +9620,9 @@ function Pendientes({ data, activeOwnerId, onAdd, onEdit, onEditProyecto, onRemo
       )}
       </div>
 
+      {tareaSel && divisor}
       {tareaSel && (
-        <div className="w-full lg:w-[420px] xl:w-[460px] shrink-0 lg:sticky lg:top-4">
+        <div className="w-full shrink-0 lg:sticky lg:top-4" style={estiloPanel}>
           <FichaTarea
             t={tareaSel}
             data={data}
@@ -11432,6 +11518,8 @@ function ComboFiltroColor({ opciones, valor, onCambiar }) {
 }
 
 function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveComentario, onVerRegalos, onVincularProyecto, onDesvincularProyecto, onAddNota, onAddCita, onAddEvento, onIrAVista, onVerProyecto, contactoSel, onSeleccionar, fichaTab, onFichaTab }) {
+  // Ancho de la ficha de la derecha, arrastrable y recordado por pantalla.
+  const { contenedorRef, divisor, estiloPanel } = usePanelRedimensionable("contactos");
   const [modal, setModal] = useState(null);
   const [importarAbierto, setImportarAbierto] = useState(false);
   const [comentariosDe, setComentariosDe] = useState(null);
@@ -11535,7 +11623,7 @@ function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
   const seleccionado = data.contactos.find((c) => c.id === contactoSel) || null;
 
   return (
-    <div className="flex flex-col lg:flex-row gap-4 items-start">
+    <div ref={contenedorRef} className="flex flex-col lg:flex-row gap-4 items-start">
       {/* Columna de la lista. En celular se esconde cuando hay una ficha abierta (no caben lado
           a lado), en escritorio se angosta y la ficha se pone a la derecha, como el mockup. */}
       <div className={`min-w-0 flex-1 w-full ${seleccionado ? "hidden lg:block" : ""}`}>
@@ -11702,8 +11790,9 @@ function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
 
       {/* Ficha del contacto: panel a la derecha en escritorio (pegado arriba mientras se baja la
           lista), y pantalla completa en celular — lado a lado no cabe en un teléfono. */}
+      {seleccionado && divisor}
       {seleccionado && (
-        <div className="w-full lg:w-[420px] xl:w-[460px] shrink-0 lg:sticky lg:top-4">
+        <div className="w-full shrink-0 lg:sticky lg:top-4" style={estiloPanel}>
           <FichaContacto
             c={seleccionado}
             data={data}
@@ -12634,6 +12723,8 @@ function ContactoForm({ item, proyectos, vinculos, etiquetasExistentes = [], tit
 /* ---------- Regalos (histórico de regalos/felicitaciones, incluye control de Navidad) ---------- */
 function Regalos({ data, onAdd, onEdit, onRemove, filtroContactoInicial, onLimpiarFiltro, onVerContacto,
   onAddNota, onAddCita, onAddEvento, onAddComentario, onCrearContacto, onIrAVista, onVerProyecto }) {
+  // Ancho de la ficha de la derecha, arrastrable y recordado por pantalla.
+  const { contenedorRef, divisor, estiloPanel } = usePanelRedimensionable("atenciones");
   const [modal, setModal] = useState(null);
   // Ficha del contacto abierta a la derecha, sin salir de Atenciones (pedido de Angel,
   // 29 sept 2026): el grid se queda a la izquierda y la navegación no cambia de pantalla.
@@ -12687,7 +12778,7 @@ function Regalos({ data, onAdd, onEdit, onRemove, filtroContactoInicial, onLimpi
   ];
 
   return (
-    <div className="flex flex-col lg:flex-row gap-4 items-start">
+    <div ref={contenedorRef} className="flex flex-col lg:flex-row gap-4 items-start">
       {/* El grid de atenciones se queda siempre aquí a la izquierda; la ficha del contacto abre a
           la derecha, sin cambiar de pantalla. En celular no caben lado a lado, así que ahí la
           ficha toma el ancho completo — mismo comportamiento que Contactos y Proyectos. */}
@@ -12763,8 +12854,9 @@ function Regalos({ data, onAdd, onEdit, onRemove, filtroContactoInicial, onLimpi
       )}
       </div>
 
+      {contactoFicha && divisor}
       {contactoFicha && (
-        <div className="w-full lg:w-[420px] xl:w-[460px] shrink-0 lg:sticky lg:top-4">
+        <div className="w-full shrink-0 lg:sticky lg:top-4" style={estiloPanel}>
           <FichaContacto
             c={contactoFicha}
             data={data}
