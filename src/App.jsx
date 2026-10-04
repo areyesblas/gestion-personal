@@ -197,6 +197,14 @@ const Tokens = ({ tema = "oscuro" }) => (
        porque ahí sí cambia la naturaleza de lo que viene abajo. */
     .gp-nav-grupo + .gp-nav-grupo{ margin-top:10px; }
     .gp-nav-separador{ border-top:1px solid var(--sidebar-borde); }
+    /* Divisor entre la lista y la ficha. Se ve una línea de 3 px de alto completo —lo bastante
+       para que se note que ahí hay algo, sin convertirse en una pared— y al pasar el mouse
+       engorda y se pone dorada, que es lo que termina de decir "esto se jala". */
+    .gp-divisor{ cursor:col-resize; }
+    .gp-divisor-linea{ width:3px; border-radius:999px; background:var(--border);
+      transition:background .15s ease, width .15s ease; }
+    .gp-divisor:hover .gp-divisor-linea{ background:var(--gold); width:5px; }
+    .gp-divisor:active .gp-divisor-linea{ background:var(--gold); width:5px; }
     /* Placa del logo: blanca siempre, porque el logotipo está hecho para fondo claro. Sobre el
        menú blanco del tema claro es invisible (blanco sobre blanco) y no estorba. */
     .gp-placa-logo{ background:#FFFFFF; border-radius:12px; padding:6px 9px; }
@@ -1658,8 +1666,8 @@ function usePanelRedimensionable(clave) {
 
   const divisor = (
     <div
-      className="hidden lg:flex items-center justify-center shrink-0 self-stretch"
-      style={{ width: 10, cursor: "col-resize", touchAction: "none" }}
+      className="gp-divisor hidden lg:flex items-stretch justify-center shrink-0 self-stretch"
+      style={{ width: 11, touchAction: "none", minHeight: 120 }}
       title="Arrastra para cambiar el ancho. Doble clic para volver al original."
       role="separator" aria-orientation="vertical"
       onPointerDown={(e) => {
@@ -1673,7 +1681,7 @@ function usePanelRedimensionable(clave) {
         try { localStorage.setItem(`arkeyone_panel_${clave}`, String(ANCHO_PANEL_DEFECTO)); } catch { /* modo privado */ }
       }}
     >
-      <span className="rounded-full" style={{ width: 4, height: 44, background: "var(--border)" }} />
+      <span className="gp-divisor-linea" />
     </div>
   );
 
