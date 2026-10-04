@@ -6060,25 +6060,63 @@ function finanzasProyecto(data, proyectoId) {
     .map(([nombre, monto]) => ({ nombre, monto, pct: gastoReal ? Math.round((monto / gastoReal) * 100) : 0 }))
     .sort((a, b) => b.monto - a.monto);
 
-  // Evolución mes a mes: lo cobrado y lo gastado ACUMULADO, que es lo que deja ver si el
-  // proyecto va ganando o perdiendo terreno. Los movimientos pendientes no entran: son
-  // proyección, no historia.
+  // Evolución mes a mes. Dos líneas distintas a propósito:
+  //   · la sólida es HISTORIA: solo lo que ya se cobró y ya se pagó.
+  //   · la punteada es PROYECCIÓN: agrega lo pendiente en el mes en que se espera que pase.
+  //
+  // De qué fecha cuelga cada pendiente, en este orden:
+  //   1. su propia fecha de cobro/pago (fecha_vencimiento). Es la mejor porque ya la capturaste
+  //      tú al registrar el movimiento: es un compromiso, no una estimación mía.
+  //   2. si no tiene, la fecha de entrega del proyecto, que es cuando normalmente se factura.
+  //   3. si tampoco hay, el mes del propio movimiento, para que no desaparezca de la gráfica.
+  const proyecto = (data.proyectos || []).find((x) => x.id === proyectoId);
+  const mesDe = (f) => {
+    if (f.estatus === "Cobrado") return (f.fecha || "").slice(0, 7);
+    return ((f.fechaVencimiento || proyecto?.fechaFin || f.fecha || "")).slice(0, 7);
+  };
   const porMes = {};
+  const tocar = (mes) => { if (!porMes[mes]) porMes[mes] = { mes, ingreso: 0, gasto: 0, ingresoPend: 0, gastoPend: 0 }; };
   movs.forEach((f) => {
-    const mes = (f.fecha || "").slice(0, 7);
+    const mes = mesDe(f);
     if (!mes) return;
-    if (!porMes[mes]) porMes[mes] = { mes, ingreso: 0, gasto: 0 };
-    if (f.estatus !== "Cobrado") return;
-    if (f.tipo === "Ingreso") porMes[mes].ingreso += montoBaseDe(f);
-    else porMes[mes].gasto += montoBaseDe(f);
+    tocar(mes);
+    const monto = montoBaseDe(f);
+    if (f.estatus === "Cobrado") {
+      if (f.tipo === "Ingreso") porMes[mes].ingreso += monto; else porMes[mes].gasto += monto;
+    } else if (f.tipo === "Ingreso") porMes[mes].ingresoPend += monto;
+    else porMes[mes].gastoPend += monto;
   });
-  let acumI = 0, acumG = 0;
+
+  // Meses corridos entre el primero y el último, para que el eje no brinque huecos.
+  const clavesMes = Object.keys(porMes).sort();
+  if (clavesMes.length) {
+    const [aIni, mIni] = clavesMes[0].split("-").map(Number);
+    const [aFin, mFin] = clavesMes[clavesMes.length - 1].split("-").map(Number);
+    for (let a = aIni, m = mIni; a < aFin || (a === aFin && m <= mFin); m === 12 ? (m = 1, a++) : m++) {
+      tocar(`${a}-${String(m).padStart(2, "0")}`);
+    }
+  }
+
+  const mesHoy = todayISO().slice(0, 7);
+  // La punteada solo tiene sentido si queda algo por pasar; si no, duplicaría la sólida.
+  const hayPendientes = porCobrar > 0 || gastoPorPagar > 0;
+  let acumI = 0, acumG = 0, acumProy = 0;
   const evolucion = Object.values(porMes)
     .sort((a, b) => a.mes.localeCompare(b.mes))
     .map((m) => {
       acumI += m.ingreso; acumG += m.gasto;
-      return { ...m, acumuladoIngreso: acumI, acumuladoGasto: acumG, neto: acumI - acumG };
+      acumProy += m.ingreso - m.gasto + m.ingresoPend - m.gastoPend;
+      const esPasado = m.mes <= mesHoy;
+      return {
+        ...m,
+        acumuladoIngreso: acumI, acumuladoGasto: acumG,
+        neto: esPasado ? acumI - acumG : null,
+        // Arranca EN el mes actual, no después: ahí las dos valen lo mismo y las líneas se
+        // tocan. Si empezara en el primer mes con pendientes, se verían como dos trazos sueltos.
+        proyeccion: !hayPendientes || m.mes < mesHoy ? null : acumProy,
+      };
     });
+  const hayProyeccion = hayPendientes && evolucion.some((m) => m.proyeccion !== null);
 
   // Resultado: lo que hay hoy en la mano y lo que habrá cuando el cliente termine de pagar.
   const disponibleHoy = cobrado - gastado;
@@ -6086,7 +6124,7 @@ function finanzasProyecto(data, proyectoId) {
 
   return {
     movs, cobrado, porCobrar, ingresoTotal, gastado, gastoPorPagar, gastoReal,
-    pagosAPersonas, gastosOperativos, desgloseGastos, evolucion,
+    pagosAPersonas, gastosOperativos, desgloseGastos, evolucion, hayProyeccion,
     disponibleHoy, resultadoProyectado,
     comprometidoEquipo, devengadoEquipo, costoTotal, margen, margenPct,
     presupuesto, topeGasto, pctPresupuesto,
@@ -7698,10 +7736,21 @@ function FichaProyecto({
                       <Tooltip formatter={(v) => fmtMoney(v)} contentStyle={{ background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 8, fontSize: 11 }} />
                       <Bar dataKey="ingreso" name="Cobrado" fill="#16A36A" radius={[3, 3, 0, 0]} />
                       <Bar dataKey="gasto" name="Gastado" fill="#E5484D" radius={[3, 3, 0, 0]} />
-                      <Line type="monotone" dataKey="neto" name="Neto acumulado" stroke="#087CF5" strokeWidth={2} dot={false} />
+                      <Line type="monotone" dataKey="neto" name="Neto acumulado" stroke="#087CF5" strokeWidth={2} dot={false} connectNulls={false} />
+                      {/* Punteada = lo que falta por pasar, colocado en la fecha de cobro o pago
+                          que capturaste en cada movimiento pendiente. */}
+                      {fin.hayProyeccion && (
+                        <Line type="monotone" dataKey="proyeccion" name="Proyección" stroke="#8B5CF6" strokeWidth={2} strokeDasharray="5 4" dot={false} connectNulls />
+                      )}
                     </ComposedChart>
                   </ResponsiveContainer>
                 </div>
+                {fin.hayProyeccion && (
+                  <p className="text-[9px] gp-text-muted mt-1">
+                    La línea punteada es lo que falta por pasar, puesto en la fecha de cobro o de
+                    pago que capturaste en cada movimiento pendiente.
+                  </p>
+                )}
               </div>
             )}
 
