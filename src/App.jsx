@@ -232,6 +232,13 @@ const Tokens = ({ tema = "oscuro" }) => (
        a cualquier div con una tabla directamente adentro, sin tocar las veinte pantallas que las
        dibujan. En navegadores sin :has() simplemente no se pega, que es como estaba antes. */
     div:has(> table.gp-table){ max-height:72vh; overflow:auto; }
+    /* Sin barra de desplazamiento a la vista en los grids (pedido de Angel, 5 oct 2026). La barra
+       sigue EXISTIENDO —se recorre igual con rueda, trackpad, dedo, teclado y arrastrando— solo
+       deja de dibujarse: scrollbar-width para Firefox, ::-webkit-scrollbar para Safari y Chrome.
+       Se aplica SOLO al contenedor del grid, nunca al documento: la barra de la página se queda.
+       Lo que se pierde es el aviso visual de que hay más columnas a la derecha. */
+    div:has(> table.gp-table){ scrollbar-width:none; -ms-overflow-style:none; }
+    div:has(> table.gp-table)::-webkit-scrollbar{ width:0; height:0; }
     table.gp-table td{ padding:8px 10px; border-bottom:1px solid var(--border); vertical-align:top; }
     table.gp-table tr:hover td{ background:var(--panel-hi); }
     /* Tareas (pedido de Angel, 29 sept 2026): nada de tinte al pasar el mouse — solo la manita,
