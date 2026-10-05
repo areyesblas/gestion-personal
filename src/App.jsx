@@ -1339,68 +1339,6 @@ function IconBtn({ onClick, children, title }) {
   );
 }
 
-// Ítem del menú lateral que tiene hijos (hoy solo Finanzas, 4 oct 2026). El padre NO navega: es
-// un interruptor, y los hijos son los que llevan a algún lado. Si el padre también navegara
-// habría dos botones distintos apuntando a la misma pantalla —él y su hijo "Resumen"— y los dos
-// se pintarían activos a la vez.
-//
-// Se abre solo cuando ya estás en uno de los hijos, para no perder de vista dónde andas, y la
-// preferencia de abierto/cerrado se recuerda en este navegador.
-//
-// Colapsado (modo solo íconos en escritorio) no hay padre: se dibujan los hijos sueltos con su
-// tooltip. Esconderlos dejaría ocho pantallas sin forma de llegar, y el punto de ese modo es
-// ahorrar ancho, no ahorrar navegación.
-function NavItemConHijos({ item, view, colapsado, onIr }) {
-  const CLAVE = `arkeyone_nav_hijos_${item.id}`;
-  const hijoActivo = item.hijos.some((h) => h.id === view);
-  const [abiertoManual, setAbiertoManual] = useState(() => {
-    try { return localStorage.getItem(CLAVE) === "1"; } catch { return false; }
-  });
-  const abierto = hijoActivo || abiertoManual;
-  const alternar = () => {
-    const siguiente = !abierto;
-    setAbiertoManual(siguiente);
-    try { localStorage.setItem(CLAVE, siguiente ? "1" : "0"); } catch { /* modo privado */ }
-  };
-
-  if (colapsado) {
-    return (
-      <div className="hidden md:flex flex-col gap-0.5">
-        {item.hijos.map((h) => (
-          <button key={h.id} onClick={() => onIr(h.id)} title={`${item.label} · ${h.label}`}
-            className={`gp-navitem flex items-center justify-center px-2 py-2 ${view === h.id ? "gp-navitem-active" : ""}`}>
-            <h.icon size={15} />
-          </button>
-        ))}
-      </div>
-    );
-  }
-
-  return (
-    <div>
-      <button
-        onClick={alternar}
-        title={`${item.label} — ${abierto ? "ocultar" : "ver"} secciones`}
-        className={`gp-navitem flex items-center gap-2 px-3 py-2.5 md:py-2 text-[15px] text-left w-full ${hijoActivo ? "gp-navitem-active" : ""}`}
-      >
-        <item.icon size={15} />
-        <span className="flex-1">{item.label}</span>
-        {abierto ? <ChevronDown size={13} className="shrink-0" /> : <ChevronRight size={13} className="shrink-0" />}
-      </button>
-      {abierto && (
-        <div className="flex flex-col gap-0.5 mt-0.5 mb-1" style={{ marginLeft: 14, paddingLeft: 10, borderLeft: "1px solid var(--sidebar-borde, var(--border))" }}>
-          {item.hijos.map((h) => (
-            <button key={h.id} onClick={() => onIr(h.id)} title={h.label}
-              className={`gp-navitem flex items-center gap-2 px-2.5 py-2 md:py-1.5 text-[13px] text-left ${view === h.id ? "gp-navitem-active" : ""}`}>
-              <h.icon size={13} /> {h.label}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
 // OJO: esto es un <div>, no un <label>, y es a propósito. Cuando era <label>, el navegador
 // reenviaba CUALQUIER clic dentro del campo al primer botón que hubiera adentro — así que tocar
 // el texto de un chip (proyecto vinculado, tag, tipo de contacto) equivalía a picarle su "✕" y lo
@@ -2529,7 +2467,7 @@ function AvisoInstalarPWA() {
 // etc. Eso baja el nivel de protección a propósito y es una decisión del dueño del producto.
 const CANDADO_SENSIBLE_ACTIVO = false;
 
-const VISTAS_SENSIBLES_NO_RESTAURAR = ["finanzas", "fin-movimientos", "fin-cobrar", "fin-ingresos", "fin-egresos", "fin-recurrentes", "facturas", "reportes", "estimaciones", "deudas", "apartados", "patrimonio", "activos", "documentos", "salud", "medicamentos", "actividades", "presupuesto"];
+const VISTAS_SENSIBLES_NO_RESTAURAR = ["finanzas", "facturas", "reportes", "estimaciones", "deudas", "apartados", "patrimonio", "activos", "documentos", "salud", "medicamentos", "actividades", "presupuesto"];
 function leerVistaGuardadaTrasReload() {
   try {
     const cruda = localStorage.getItem("arkeyone_reload_vista");
@@ -2644,12 +2582,6 @@ const VIEW_TO_MODULO = {
   empresas: "empresas", proyectos: "proyectos", metas: "metas", pendientes: "pendientes",
   finanzas: "finanzas", facturas: "facturas", deudas: "deudas", apartados: "apartados",
   presupuesto: "presupuestos",
-  // Los hijos de Finanzas (4 oct 2026) son cortes de la MISMA tabla, así que todos piden el
-  // mismo permiso: quien tiene el módulo finanzas ve los siete, igual que antes veía la pantalla
-  // completa. Si algún día hace falta que alguien vea solo "Por cobrar", eso es un permiso nuevo
-  // y no se resuelve aquí.
-  "fin-movimientos": "finanzas", "fin-cobrar": "finanzas",
-  "fin-ingresos": "finanzas", "fin-egresos": "finanzas", "fin-recurrentes": "finanzas",
   patrimonio: "patrimonio", activos: "activos", documentos: "documentos",
   equipo: "equipo", contactos: "contactos", regalos: "regalos",
   redes: "redes_metricas", marketing: "campanas",
@@ -2946,7 +2878,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
   // reautenticación o actividad. Si se cumple el plazo, se pide contraseña de nuevo antes de
   // entrar/seguir en el módulo — independiente del cierre general de sesión a los 30 min.
   const SENSIBLE_MS = 15 * 60 * 1000;
-  const VISTAS_SENSIBLES = ["finanzas", "fin-movimientos", "fin-cobrar", "fin-ingresos", "fin-egresos", "fin-recurrentes", "facturas", "reportes", "estimaciones", "deudas", "apartados", "patrimonio", "activos", "documentos", "salud", "medicamentos", "presupuesto"];
+  const VISTAS_SENSIBLES = ["finanzas", "facturas", "reportes", "estimaciones", "deudas", "apartados", "patrimonio", "activos", "documentos", "salud", "medicamentos", "presupuesto"];
   // Sentinel para "solo desbloquear, sin navegar a ningún lado" — se usa cuando el candado
   // aparece dentro de otra pantalla (Centro de Mando, pestañas de un proyecto) para revelar
   // información ya enmascarada ahí mismo, en vez de mandar al usuario al módulo completo.
@@ -3787,19 +3719,12 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
       { id: "notas", label: "Notas", icon: StickyNote },
     ]},
     { label: "Dinero", items: [
-      // Finanzas tiene hijos (4 oct 2026): cada uno es un corte distinto de la MISMA tabla
-      // `finanzas`, con otras columnas y otras acciones. "Por pagar" es el módulo que se llamaba
-      // Deudas — conserva su id para no romper los deep links de las notificaciones push.
-      { id: "finanzas", label: "Finanzas", icon: Wallet, hijos: [
-        { id: "finanzas", label: "Resumen", icon: BarChart3 },
-        { id: "fin-movimientos", label: "Movimientos", icon: ListChecks },
-        { id: "fin-cobrar", label: "Por cobrar", icon: ArrowDownCircle },
-        { id: "deudas", label: "Por pagar", icon: ArrowUpCircle },
-        { id: "fin-ingresos", label: "Ingresos", icon: TrendingUp },
-        { id: "fin-egresos", label: "Egresos", icon: TrendingDown },
-        { id: "fin-recurrentes", label: "Recurrentes", icon: Clock },
-        { id: "facturas", label: "Facturas e IVA", icon: Receipt },
-      ]},
+      // Finanzas vuelve a ser UN ítem (4 oct 2026, decisión de Angel): los cortes que por un rato
+      // fueron hijos del menú ahora viven dentro de la pantalla — Resumen y Movimientos como
+      // secciones, y las opciones (Ingresos, Egresos, Por cobrar, Por pagar, Recurrentes) como
+      // pestañas del grid. Un menú lateral con ocho hijos pesaba más de lo que ayudaba.
+      { id: "finanzas", label: "Finanzas", icon: Wallet },
+      { id: "deudas", label: "Deudas", icon: AlertTriangle },
       { id: "apartados", label: "Apartados", icon: PiggyBank },
       { id: "presupuesto", label: "Presupuesto", icon: Target },
       { id: "reportes", label: "Reportes", icon: PieChartIcon },
@@ -3838,22 +3763,16 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
     { id: "mi-calendario", label: "Mi calendario", icon: CalendarClock },
     { id: "mis-pagos", label: "Mis pagos", icon: Wallet },
   ]};
-  const puedeVer = (id) =>
-    (VIEW_TO_MODULO[id] && modulosPermitidos.includes(VIEW_TO_MODULO[id]))
-    // "medicamentos" ya no es un id de navGroups (es tab de Salud) — un cuidador sin
-    // módulo completo solo necesita ver "salud" para llegar a esa pestaña.
-    || (esCuidadorSinModuloCompleto && id === "salud");
   const navGroupsFiltrados = modulosPermitidos === null
     ? navGroups
     : [
         GRUPO_TRABAJO_COLABORADOR,
         ...navGroups
-          .map((g) => ({ ...g, items: g.items
-            // Un ítem con hijos sobrevive si al menos un hijo es visible, y se queda solo con
-            // esos: así un colaborador con permiso de Finanzas pero no de Facturas ve el módulo
-            // sin el hijo que no le toca, en vez de perder Finanzas entera.
-            .map((it) => (it.hijos ? { ...it, hijos: it.hijos.filter((h) => puedeVer(h.id)) } : it))
-            .filter((it) => (it.hijos ? it.hijos.length > 0 : puedeVer(it.id))) }))
+          .map((g) => ({ ...g, items: g.items.filter((it) =>
+            (VIEW_TO_MODULO[it.id] && modulosPermitidos.includes(VIEW_TO_MODULO[it.id]))
+            // "medicamentos" ya no es un id de navGroups (es tab de Salud) — un cuidador sin
+            // módulo completo solo necesita ver "salud" para llegar a esa pestaña.
+            || (esCuidadorSinModuloCompleto && it.id === "salud")) }))
           .filter((g) => g.items.length > 0),
       ];
 
@@ -4016,12 +3935,6 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
                 {mostrarItems && (
                   <div className="flex flex-col gap-0.5">
                     {itemsOrdenados.map((n) => (
-                      n.hijos ? (
-                        <NavItemConHijos
-                          key={n.id} item={n} view={view} colapsado={sidebarColapsado}
-                          onIr={(id) => { irAVista(id); setMobileNavOpen(false); }}
-                        />
-                      ) : (
                       <button
                         key={n.id}
                         onClick={() => { irAVista(n.id); setMobileNavOpen(false); }}
@@ -4040,7 +3953,6 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
                       >
                         <n.icon size={15} /> <span className={sidebarColapsado ? "md:hidden" : ""}>{n.label}</span>
                       </button>
-                      )
                     ))}
                   </div>
                 )}
@@ -4237,51 +4149,23 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
               onConsumirCrearAlEntrar={consumirAccionRapidaCrear}
             />
           )}
-          {/* Los siete hijos de Finanzas. Todos leen la misma tabla y comparten los mismos
-              handlers; lo que cambia es el corte que presenta cada uno. */}
-          {view === "finanzas" && (
-            <FinanzasResumen
+          {/* Finanzas y Facturas e IVA son la misma pantalla con secciones; el id de la vista
+              decide en cuál abre. Los cortes de los movimientos (Ingresos, Egresos, Por cobrar,
+              Por pagar, Recurrentes) son pestañas del grid, adentro. */}
+          {(view === "finanzas" || view === "facturas") && (
+            <FinanzasPantalla
+              key={view}
               data={data}
-              onAdd={(i) => addItem("finanzas", i)} onEdit={(id, p) => editItem("finanzas", id, p)}
-              onIrAVista={irAVista}
+              seccionInicial={view === "facturas" ? "facturas" : "resumen"}
+              onAdd={(i) => addItem("finanzas", i)} onEdit={(id, p) => editItem("finanzas", id, p)} onRemove={(id) => askDelete("finanzas", id)}
+              onAddPago={(i) => addItem("pagosFinanzas", i)}
               crearAlEntrar={accionRapidaCrear?.modulo === "finanzas" ? accionRapidaCrear : null}
               onConsumirCrearAlEntrar={consumirAccionRapidaCrear}
-            />
-          )}
-          {view === "fin-movimientos" && (
-            <FinanzasMovimientos
-              data={data}
-              onAdd={(i) => addItem("finanzas", i)} onEdit={(id, p) => editItem("finanzas", id, p)} onRemove={(id) => askDelete("finanzas", id)}
-              crearAlEntrar={accionRapidaCrear?.modulo === "finanzas" ? accionRapidaCrear : null}
-              onConsumirCrearAlEntrar={consumirAccionRapidaCrear}
-            />
-          )}
-          {view === "fin-cobrar" && (
-            <FinanzasPorCobrar
-              data={data}
-              onEdit={(id, p) => editItem("finanzas", id, p)} onRemove={(id) => askDelete("finanzas", id)}
-              onAddPago={(i) => addItem("pagosFinanzas", i)} onIrAVista={irAVista}
-            />
-          )}
-          {view === "fin-ingresos" && (
-            <FinanzasIngresos data={data} onEdit={(id, p) => editItem("finanzas", id, p)} onIrAVista={irAVista} />
-          )}
-          {view === "fin-egresos" && (
-            <FinanzasEgresos data={data} onEdit={(id, p) => editItem("finanzas", id, p)} onIrAVista={irAVista} />
-          )}
-          {view === "fin-recurrentes" && (
-            <FinanzasRecurrentes
-              data={data}
-              onAdd={(i) => addItem("finanzas", i)} onEdit={(id, p) => editItem("finanzas", id, p)} onRemove={(id) => askDelete("finanzas", id)}
-              onIrAVista={irAVista}
-            />
-          )}
-          {view === "facturas" && (
-            <Facturas
-              data={data}
-              onAdd={(i) => addItem("facturas", i)} onEdit={(id, p) => editItem("facturas", id, p)} onRemove={(id) => askDelete("facturas", id)}
-              onAddComentario={(i) => addItem("comentarios", i)} onRemoveComentario={(id) => askDelete("comentarios", id)}
-              onAddFinanzas={(i) => addItem("finanzas", i)}
+              facturasProps={{
+                onAdd: (i) => addItem("facturas", i), onEdit: (id, p) => editItem("facturas", id, p), onRemove: (id) => askDelete("facturas", id),
+                onAddComentario: (i) => addItem("comentarios", i), onRemoveComentario: (id) => askDelete("comentarios", id),
+                onAddFinanzas: (i) => addItem("finanzas", i),
+              }}
             />
           )}
           {view === "reportes" && <Reportes data={data} />}
@@ -5737,7 +5621,7 @@ function Dashboard({ data: datosCompletos, empresas = [], contextos = [], contex
   data.finanzas.forEach((f) => {
     if (f.tipo === "Ingreso" && f.estatus === "Pendiente" && f.fechaVencimiento) {
       const dd = daysUntil(f.fechaVencimiento);
-      if (dd <= 7) acciones.push({ id: `cobro-${f.id}`, origen: "Cobro pendiente", tipo: "finanzas", texto: sensibleDesbloqueado ? (f.concepto || "Cobro") : "Cobro pendiente", sub: sensibleDesbloqueado ? fmtMoney(f.monto) : "🔒 Verifica tu contraseña para ver el detalle", dd, irA: () => setView("fin-cobrar") });
+      if (dd <= 7) acciones.push({ id: `cobro-${f.id}`, origen: "Cobro pendiente", tipo: "finanzas", texto: sensibleDesbloqueado ? (f.concepto || "Cobro") : "Cobro pendiente", sub: sensibleDesbloqueado ? fmtMoney(f.monto) : "🔒 Verifica tu contraseña para ver el detalle", dd, irA: () => setView("finanzas") });
     }
   });
   deudasDeFinanzas(data.finanzas).forEach((d) => {
@@ -10462,14 +10346,111 @@ function TarjetaResumenFin({ etiqueta, valor, color, tinte, icono, variacion, fi
   );
 }
 
-// MOVIMIENTOS — el libro completo. Es la pantalla a la que se entra a BUSCAR: cada registro, un
-// renglón, con todos los filtros encima. Las tarjetas y las gráficas que antes vivían aquí se
-// fueron a Resumen; aquí estorbaban, porque empujaban la tabla fuera de la primera pantalla.
-function FinanzasMovimientos({ data, onAdd, onEdit, onRemove, crearAlEntrar, onConsumirCrearAlEntrar }) {
-  const [modal, setModal] = useState(null);
+// Totales de lo que está seleccionado en el grid: cuánto es, cuánto ya se liquidó y cuánto falta.
+// Va pegado arriba de la tabla porque la pregunta "¿y de esto cuánto ya cobré?" aparece justo al
+// cambiar de pestaña, no al entrar a la pantalla.
+function TotalesSeleccion({ titulo, total, liquidado, pendiente, etiquetaLiquidado, extra }) {
+  const pct = total > 0 ? Math.round((liquidado / total) * 100) : 0;
+  return (
+    <div className="gp-bloque rounded-xl p-3 mb-2 flex flex-wrap items-center gap-x-6 gap-y-2">
+      <div>
+        <p className="text-[10px] gp-text-muted uppercase" style={{ letterSpacing: ".05em" }}>{titulo}</p>
+        <p className="gp-serif text-xl">{fmtMoney(total)}</p>
+      </div>
+      <div>
+        <p className="text-[10px] gp-text-muted uppercase" style={{ letterSpacing: ".05em" }}>{etiquetaLiquidado}</p>
+        <p className="gp-serif text-xl gp-text-teal">{fmtMoney(liquidado)}</p>
+      </div>
+      <div>
+        <p className="text-[10px] gp-text-muted uppercase" style={{ letterSpacing: ".05em" }}>Pendiente</p>
+        <p className="gp-serif text-xl" style={{ color: pendiente > 0 ? "var(--gold)" : "var(--muted)" }}>{fmtMoney(pendiente)}</p>
+      </div>
+      {extra}
+      <div className="flex-1 min-w-[140px]">
+        <div className="rounded-full overflow-hidden" style={{ height: 6, background: "var(--panel)" }}>
+          <div style={{ width: `${pct}%`, height: "100%", background: "var(--teal)" }} />
+        </div>
+        <p className="text-[10px] gp-text-muted mt-1">{pct}% de lo seleccionado ya está liquidado</p>
+      </div>
+    </div>
+  );
+}
+
+// FINANZAS — una sola pantalla con secciones (4 oct 2026, decisión de Angel después de probar la
+// versión con hijos en el menú lateral):
+//
+//   Resumen         cómo vas: las cuatro cifras del periodo, la evolución y en qué se va el dinero
+//   Movimientos     el grid, con sus opciones (Ingresos, Egresos, Por cobrar, Por pagar,
+//                   Recurrentes), los totales de lo seleccionado y los pagos ahí mismo
+//   Facturas e IVA  el papeleo fiscal de ese dinero
+//
+// Las secciones son pestañas, no vistas del menú: el panel izquierdo vuelve a tener un solo ítem
+// "Finanzas". El id de la vista (`finanzas` o `facturas`) decide en qué sección abre, para que los
+// avisos del Centro de Mando y los deep links sigan cayendo donde deben.
+function FinanzasPantalla({ data, seccionInicial, onAdd, onEdit, onRemove, onAddPago, crearAlEntrar, onConsumirCrearAlEntrar, facturasProps }) {
+  const [seccion, setSeccion] = useState(seccionInicial || "resumen");
+  // Qué opción del grid se abre al entrar a Movimientos. El Resumen la usa para mandar directo a
+  // "Por cobrar" o "Por pagar" desde sus bloques, en vez de dejar al usuario buscando la pestaña.
+  const [opcionGrid, setOpcionGrid] = useState("todos");
+
+  const SECCIONES = [
+    { id: "resumen", label: "Resumen", icono: <BarChart3 size={14} /> },
+    { id: "movimientos", label: "Movimientos", icono: <ListChecks size={14} /> },
+    { id: "facturas", label: "Facturas e IVA", icono: <Receipt size={14} /> },
+  ];
+  const verMovimientos = (opcion) => { setOpcionGrid(opcion || "todos"); setSeccion("movimientos"); };
+
+  return (
+    <div>
+      <div className="mb-3">
+        <p className="text-[11px] gp-text-muted">Dinero · Finanzas</p>
+        <h2 className="gp-serif text-2xl flex items-center gap-2"><Wallet size={20} className="gp-text-gold" /> Finanzas</h2>
+        <p className="text-sm gp-text-muted">Todo el dinero que entra y sale: proyectos, clientes, colaboradores y gastos.</p>
+      </div>
+
+      <div className="flex gap-1.5 mb-4 flex-wrap">
+        {SECCIONES.map((s) => (
+          <button key={s.id} onClick={() => setSeccion(s.id)}
+            className={`text-sm px-3.5 py-2 rounded-full border inline-flex items-center gap-1.5 ${seccion === s.id ? "gp-btn" : "gp-btn-ghost"}`}>
+            {s.icono} {s.label}
+          </button>
+        ))}
+      </div>
+
+      {seccion === "resumen" && (
+        <FinanzasResumen
+          data={data} onAdd={onAdd} onEdit={onEdit}
+          onVerMovimientos={verMovimientos}
+          crearAlEntrar={crearAlEntrar} onConsumirCrearAlEntrar={onConsumirCrearAlEntrar}
+        />
+      )}
+      {seccion === "movimientos" && (
+        // key: al entrar desde un bloque del Resumen hay que arrancar en esa opción, y remontar es
+        // la forma honesta de hacerlo sin sincronizar dos estados que pueden discrepar.
+        <FinanzasMovimientos
+          key={opcionGrid}
+          data={data} onAdd={onAdd} onEdit={onEdit} onRemove={onRemove} onAddPago={onAddPago}
+          opcionInicial={opcionGrid}
+          crearAlEntrar={crearAlEntrar} onConsumirCrearAlEntrar={onConsumirCrearAlEntrar}
+        />
+      )}
+      {seccion === "facturas" && <Facturas data={data} {...facturasProps} />}
+    </div>
+  );
+}
+
+// MOVIMIENTOS — el grid. Las opciones de arriba (Ingresos, Egresos, Por cobrar, Por pagar,
+// Recurrentes) son cortes de la misma lista, no pantallas distintas: cambian qué renglones se ven,
+// qué columnas aparecen y los totales de arriba. Desde cualquier renglón pendiente se registra el
+// pago o el cobro, parcial o total, con el mismo mecanismo de pagos_finanzas que usa Deudas — así
+// un abono registrado aquí es el mismo abono que se ve allá.
+function FinanzasMovimientos({ data, onAdd, onEdit, onRemove, onAddPago, opcionInicial, crearAlEntrar, onConsumirCrearAlEntrar }) {
+  const [modal, setModal] = useState(null); // { item } | { item, paso: "pagar" }
   const [importarAbierto, setImportarAbierto] = useState(false);
-  const [rango, setRango] = useState("mes");
-  const [pestana, setPestana] = useState("todos"); // todos | proyectos | clientes | colaboradores | ingresos | egresos | recurrentes
+  const [pestana, setPestana] = useState(opcionInicial || "todos");
+  // Las opciones que miran lo pendiente o lo que viene arrancan sin recorte de periodo: si no, al
+  // entrar a "Por cobrar" desde el Resumen desaparecería justo el adeudo viejo que se iba a ver.
+  const [rango, setRango] = useState(["cobrar", "pagar", "recurrentes"].includes(opcionInicial) ? "todo" : "mes");
   const [busqueda, setBusqueda] = useState("");
   const [filtroProyecto, setFiltroProyecto] = useState("Todos");
   const [filtroCategoria, setFiltroCategoria] = useState("Todas");
@@ -10489,33 +10470,37 @@ function FinanzasMovimientos({ data, onAdd, onEdit, onRemove, crearAlEntrar, onC
   const nombreProyecto = (id) => data.proyectos.find((p) => p.id === id)?.nombre || "—";
   const nombreContacto = (id) => data.contactos.find((c) => c.id === id)?.nombre || "—";
 
+  // Saldo real de un movimiento: su monto menos los abonos que ya tiene registrados.
+  const yaAbonado = (id) => (data.pagosFinanzas || []).filter((p) => p.finanzasId === id).reduce((s, p) => s + (Number(p.monto) || 0), 0);
+  const saldoDe = (f) => Math.max(0, montoBaseDe(f) - yaAbonado(f.id));
+
+  // Qué hace cada opción. `sinPeriodo` marca las que no se deben cortar por mes: un cobro de hace
+  // tres meses sigue pendiente hoy, y un recurrente mira hacia adelante — filtrarlos por periodo
+  // los esconde justo cuando importan.
+  const OPCIONES = [
+    { id: "todos", label: "Todos", icono: <ListChecks size={13} />, test: () => true },
+    { id: "ingresos", label: "Ingresos", icono: <TrendingUp size={13} />, test: (f) => f.tipo === "Ingreso" },
+    { id: "egresos", label: "Egresos", icono: <TrendingDown size={13} />, test: (f) => f.tipo === "Egreso" },
+    { id: "cobrar", label: "Por cobrar", icono: <ArrowDownCircle size={13} />, test: (f) => f.tipo === "Ingreso" && f.estatus !== "Cobrado", sinPeriodo: true },
+    { id: "pagar", label: "Por pagar", icono: <ArrowUpCircle size={13} />, test: (f) => f.tipo === "Egreso" && f.estatus !== "Cobrado", sinPeriodo: true },
+    { id: "recurrentes", label: "Recurrentes", icono: <Clock size={13} />, test: (f) => !!f.esRecurrente, sinPeriodo: true },
+  ];
+  const opcion = OPCIONES.find((o) => o.id === pestana) || OPCIONES[0];
+  // Al elegir una opción sin periodo se pasa el selector a "Todo" en vez de ignorarlo en silencio:
+  // así el usuario VE por qué está viendo movimientos de otros meses y lo puede volver a cerrar.
+  const elegirOpcion = (o) => {
+    setPestana(o.id);
+    setPagina(1);
+    if (o.sinPeriodo) setRango("todo");
+  };
+
   const { desde, hasta } = rangoFechas(rango);
   const { enRango } = cifrasFinanzas(data.finanzas, desde, hasta);
-
-  const PESTANAS = [
-    { id: "todos", label: "Todos", icono: <ListChecks size={13} /> },
-    { id: "proyectos", label: "Proyectos", icono: <FolderKanban size={13} /> },
-    { id: "clientes", label: "Clientes", icono: <Contact size={13} /> },
-    { id: "colaboradores", label: "Colaboradores", icono: <Users size={13} /> },
-    { id: "ingresos", label: "Ingresos", icono: <TrendingUp size={13} /> },
-    { id: "egresos", label: "Egresos", icono: <TrendingDown size={13} /> },
-    { id: "recurrentes", label: "Recurrentes", icono: <Clock size={13} /> },
-  ];
-  const pasaPestana = (f) => {
-    switch (pestana) {
-      case "proyectos": return !!f.proyectoId;
-      case "clientes": return f.tipo === "Ingreso" && !!f.contactoId;
-      case "colaboradores": return f.categoria === "Pago a colaborador";
-      case "ingresos": return f.tipo === "Ingreso";
-      case "egresos": return f.tipo === "Egreso";
-      case "recurrentes": return !!f.esRecurrente;
-      default: return true;
-    }
-  };
+  const conteo = (o) => enRango.filter(o.test).length;
 
   const categorias = [...new Set((data.finanzas || []).map((f) => f.categoria).filter(Boolean))].sort((a, b) => compararEs(a, b));
   const filtrados = enRango
-    .filter(pasaPestana)
+    .filter(opcion.test)
     .filter((f) => filtroProyecto === "Todos" || f.proyectoId === filtroProyecto)
     .filter((f) => filtroCategoria === "Todas" || f.categoria === filtroCategoria)
     .filter((f) => filtroEstado === "Todos" || f.estatus === filtroEstado);
@@ -10525,6 +10510,7 @@ function FinanzasMovimientos({ data, onAdd, onEdit, onRemove, crearAlEntrar, onC
   ]);
   const camposOrden = {
     fecha: { get: (f) => f.fecha, tipo: "fecha" },
+    vencimiento: { get: (f) => f.fechaVencimiento || f.fecha || "9999-12-31", tipo: "fecha" },
     monto: { get: (f) => montoBaseDe(f), tipo: "numero" },
     concepto: { get: (f) => f.concepto, tipo: "texto" },
   };
@@ -10533,7 +10519,21 @@ function FinanzasMovimientos({ data, onAdd, onEdit, onRemove, crearAlEntrar, onC
   const paginaActual = Math.min(pagina, totalPaginas);
   const inicio = (paginaActual - 1) * porPagina;
   const enPagina = ordenados.slice(inicio, inicio + porPagina);
-  const toggleOrden = (key) => { if (orden === key) setOrdenDir((d) => (d === "asc" ? "desc" : "asc")); else { setOrden(key); setOrdenDir(key === "concepto" ? "asc" : "desc"); } };
+  const toggleOrden = (key) => { if (orden === key) setOrdenDir((d) => (d === "asc" ? "desc" : "asc")); else { setOrden(key); setOrdenDir(key === "concepto" || key === "vencimiento" ? "asc" : "desc"); } };
+
+  // --- Totales de lo seleccionado (lo que pidió Angel: cobrado/pagado de lo que está a la vista) ---
+  const totalSel = buscados.reduce((t, f) => t + montoBaseDe(f), 0);
+  // Lo liquidado cuenta los abonos parciales, no solo los movimientos marcados como Cobrado: un
+  // movimiento de 10,000 con 4,000 abonados aporta 4,000, no 0 ni 10,000.
+  const liquidadoSel = buscados.reduce((t, f) => t + (f.estatus === "Cobrado" ? montoBaseDe(f) : yaAbonado(f.id)), 0);
+  const pendienteSel = Math.max(0, totalSel - liquidadoSel);
+  const etiquetaLiquidado = pestana === "egresos" || pestana === "pagar" ? "Ya pagado"
+    : pestana === "ingresos" || pestana === "cobrar" ? "Ya cobrado"
+    : "Ya liquidado";
+  const mensualSel = pestana === "recurrentes" ? buscados.reduce((t, f) => t + montoMensualizado(f) * (f.tipo === "Ingreso" ? 1 : -1), 0) : null;
+
+  const columnaVencimiento = pestana === "cobrar" || pestana === "pagar";
+  const columnaRecurrencia = pestana === "recurrentes";
 
   const columnasExport = [
     { label: "Fecha", get: (f) => f.fecha },
@@ -10546,48 +10546,47 @@ function FinanzasMovimientos({ data, onAdd, onEdit, onRemove, crearAlEntrar, onC
     { label: "Moneda", get: (f) => f.moneda || MONEDA_BASE },
     { label: "Monto", get: (f) => f.monto },
     { label: `Monto en ${MONEDA_BASE}`, get: (f) => montoBaseDe(f) },
+    { label: "Abonado", get: (f) => yaAbonado(f.id) },
+    { label: "Saldo", get: (f) => saldoDe(f) },
     { label: "Estado", get: (f) => f.estatus },
+    { label: "Próximo cargo", get: (f) => (f.esRecurrente ? (proximoCargoRecurrente(f) || "terminado") : "") },
   ];
 
   const nuevo = (preset) => setModal({ item: { ...empty, ...preset } });
-  const chips = [
-    { id: "todos", label: "Todos los movimientos", n: enRango.length },
-    { id: "ingresos", label: "Ingresos", n: enRango.filter((f) => f.tipo === "Ingreso").length },
-    { id: "egresos", label: "Egresos", n: enRango.filter((f) => f.tipo === "Egreso").length },
-    { id: "colaboradores", label: "Pagos a colaboradores", n: enRango.filter((f) => f.categoria === "Pago a colaborador").length },
-  ];
+
+  // Registra un abono (parcial o total) y recalcula el estatus: si el saldo llega a cero el
+  // movimiento queda Cobrado, si queda algo queda Parcial. Es el mismo flujo de Deudas, a
+  // propósito: el abono se guarda en pagos_finanzas y se ve igual desde las dos pantallas.
+  const registrarAbono = async (f, { monto, fecha }) => {
+    await onAddPago({ id: uid(), finanzasId: f.id, fecha, monto, comentario: "" });
+    const restante = saldoDe(f) - monto;
+    onEdit(f.id, { estatus: restante <= 0 ? "Cobrado" : "Parcial" });
+    setModal(null);
+  };
 
   return (
     <div>
-      <CabeceraFinanzas
-        seccion="Movimientos" titulo="Movimientos" icono={<ListChecks size={20} className="gp-text-gold" />}
-        subtitulo="Cada ingreso y cada gasto, uno por renglón. Es donde se busca."
-        rango={rango} onRango={(v) => { setRango(v); setPagina(1); }}
-        acciones={<>
-          <button onClick={() => setImportarAbierto(true)} className="gp-btn-ghost px-3 py-1.5 text-xs rounded flex items-center gap-1.5"><Upload size={13} /> Importar</button>
-          <button onClick={() => exportarFilasExcel(ordenados, columnasExport, "movimientos")} className="gp-btn-ghost px-3 py-1.5 text-xs rounded flex items-center gap-1.5"><Download size={13} /> Excel</button>
-          <button onClick={() => exportarFilasPDF(ordenados, columnasExport, "movimientos", "Movimientos", `${desde || "inicio"} a ${hasta || "hoy"}`)} className="gp-btn-ghost px-3 py-1.5 text-xs rounded flex items-center gap-1.5"><Download size={13} /> PDF</button>
-          <button onClick={() => nuevo({})} className="gp-btn px-3 py-1.5 text-sm rounded flex items-center gap-1.5"><Plus size={14} /> Nuevo movimiento</button>
-        </>}
-      />
-
-      {/* Pestañas de filtro rápido */}
-      <div className="flex items-center gap-1.5 flex-wrap mb-4">
-        {PESTANAS.map((t) => (
-          <button key={t.id} onClick={() => { setPestana(t.id); setPagina(1); }}
-            className={`text-xs px-3 py-1.5 rounded-full border inline-flex items-center gap-1.5 ${pestana === t.id ? "gp-btn" : "gp-btn-ghost"}`}>
-            {t.icono} {t.label}
+      {/* Opciones del grid */}
+      <div className="flex items-center gap-1.5 flex-wrap mb-3">
+        {OPCIONES.map((o) => (
+          <button key={o.id} onClick={() => elegirOpcion(o)}
+            title={o.sinPeriodo ? `${o.label} — se muestra sin recortar por periodo` : o.label}
+            className={`text-xs px-3 py-1.5 rounded-full border inline-flex items-center gap-1.5 ${pestana === o.id ? "gp-btn" : "gp-btn-ghost"}`}>
+            {o.icono} {o.label} <span className="gp-mono">{conteo(o)}</span>
           </button>
         ))}
       </div>
 
-      {/* Filtros de la tabla */}
+      {/* Filtros */}
       <div className="flex flex-wrap items-center gap-2 mb-2">
         <div className="relative flex-1" style={{ minWidth: 180, maxWidth: 300 }}>
           <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 gp-text-muted" style={{ pointerEvents: "none" }} />
           <input className="gp-input gp-buscador text-sm" style={{ paddingLeft: 32 }} placeholder="Buscar movimientos…"
             value={busqueda} onChange={(e) => { setBusqueda(e.target.value); setPagina(1); }} />
         </div>
+        <select className="gp-input text-xs py-1.5" style={{ width: "auto" }} value={rango} onChange={(e) => { setRango(e.target.value); setPagina(1); }} aria-label="Periodo">
+          {RANGOS_MOVIMIENTOS.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
+        </select>
         <select className="gp-input text-xs py-1.5" style={{ width: "auto" }} value={filtroProyecto} onChange={(e) => { setFiltroProyecto(e.target.value); setPagina(1); }} aria-label="Proyecto">
           <option value="Todos">Proyecto: Todos</option>
           {ordenadosPorNombre(data.proyectos).map((pr) => <option key={pr.id} value={pr.id}>{pr.nombre}</option>)}
@@ -10602,16 +10601,24 @@ function FinanzasMovimientos({ data, onAdd, onEdit, onRemove, crearAlEntrar, onC
           <option value="Pendiente">Pendiente</option>
           <option value="Parcial">Parcial</option>
         </select>
+        <div className="flex items-center gap-1.5">
+          <button onClick={() => setImportarAbierto(true)} className="gp-btn-ghost px-2.5 py-1.5 text-xs rounded flex items-center gap-1.5" title="Importar desde Excel"><Upload size={13} /></button>
+          <button onClick={() => exportarFilasExcel(ordenados, columnasExport, "movimientos")} className="gp-btn-ghost px-2.5 py-1.5 text-xs rounded flex items-center gap-1.5" title="Exportar a Excel"><Download size={13} /> Excel</button>
+          <button onClick={() => exportarFilasPDF(ordenados, columnasExport, "movimientos", `Movimientos — ${opcion.label}`, `${desde || "inicio"} a ${hasta || "hoy"}`)} className="gp-btn-ghost px-2.5 py-1.5 text-xs rounded flex items-center gap-1.5" title="Exportar a PDF"><Download size={13} /> PDF</button>
+          <button onClick={() => nuevo({})} className="gp-btn px-3 py-1.5 text-sm rounded flex items-center gap-1.5"><Plus size={14} /> Nuevo</button>
+        </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-1.5 mb-2">
-        {chips.map((c) => (
-          <button key={c.id} onClick={() => { setPestana(c.id); setPagina(1); }}
-            className={`text-[11px] px-2.5 py-1 rounded-full border inline-flex items-center gap-1.5 ${pestana === c.id ? "gp-btn" : "gp-btn-ghost"}`}>
-            {c.label} <span className="gp-mono">{c.n}</span>
-          </button>
-        ))}
-      </div>
+      <TotalesSeleccion
+        titulo={`${opcion.label} · ${buscados.length} movimiento${buscados.length === 1 ? "" : "s"}`}
+        total={totalSel} liquidado={liquidadoSel} pendiente={pendienteSel} etiquetaLiquidado={etiquetaLiquidado}
+        extra={mensualSel !== null ? (
+          <div>
+            <p className="text-[10px] gp-text-muted uppercase" style={{ letterSpacing: ".05em" }}>Neto al mes</p>
+            <p className="gp-serif text-xl" style={{ color: mensualSel >= 0 ? "var(--teal)" : "var(--red)" }}>{fmtMoney(Math.round(mensualSel))}</p>
+          </div>
+        ) : null}
+      />
 
       {/* Tabla */}
       <div className="gp-panel overflow-x-auto">
@@ -10624,43 +10631,85 @@ function FinanzasMovimientos({ data, onAdd, onEdit, onRemove, crearAlEntrar, onC
               <th className="hidden md:table-cell">Proyecto</th>
               <th className="hidden md:table-cell">Categoría</th>
               <th className="hidden lg:table-cell">Cliente / Colaborador</th>
-              <th className="hidden lg:table-cell">Forma de pago</th>
+              {columnaVencimiento && <Th label="Vence" sortKey="vencimiento" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} />}
+              {columnaVencimiento && <th>Antigüedad</th>}
+              {columnaRecurrencia && <th>Frecuencia</th>}
+              {columnaRecurrencia && <th>Al mes</th>}
+              {columnaRecurrencia && <th>Próximo</th>}
+              {!columnaVencimiento && !columnaRecurrencia && <th className="hidden lg:table-cell">Forma de pago</th>}
               <Th label="Monto" sortKey="monto" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} />
               <th>Estado</th>
               <th></th>
             </tr>
           </thead>
           <tbody>
-            {enPagina.map((f) => (
-              <tr key={f.id}>
-                <td className="gp-mono">{fmtFechaCorta(f.fecha)}</td>
-                <td>
-                  <Badge tone={f.tipo === "Ingreso" ? "teal" : "red"}>
-                    {f.categoria === "Pago a colaborador" ? "Pago colaborador" : f.tipo === "Ingreso" ? "Cobro cliente" : "Gasto"}
-                  </Badge>
-                </td>
-                <td style={{ maxWidth: 260 }}><span className="truncate block">{f.concepto}</span></td>
-                <td className="hidden md:table-cell gp-text-gold">{f.proyectoId ? nombreProyecto(f.proyectoId) : "—"}</td>
-                <td className="hidden md:table-cell gp-text-muted">{f.categoria || "—"}</td>
-                <td className="hidden lg:table-cell gp-text-muted">{f.contactoId ? nombreContacto(f.contactoId) : "—"}</td>
-                <td className="hidden lg:table-cell gp-text-muted">{f.forma || "—"}</td>
-                <td><MontoMovimiento f={f} /></td>
-                <td>
-                  <SelectGuardable
-                    valor={f.estatus || "Pendiente"} opciones={["Cobrado", "Pendiente", "Parcial"]}
-                    ariaLabel="Estado del movimiento" onGuardar={(nuevoEstado) => onEdit(f.id, { estatus: nuevoEstado })}
-                  />
-                </td>
-                <td>
-                  <div className="flex gap-1">
-                    <IconBtn title="Editar" onClick={() => setModal({ item: f })}><Pencil size={13} /></IconBtn>
-                    <IconBtn title="Eliminar" onClick={() => onRemove(f.id)}><Trash2 size={13} /></IconBtn>
-                  </div>
-                </td>
-              </tr>
-            ))}
+            {enPagina.map((f) => {
+              const abonado = yaAbonado(f.id);
+              const saldo = saldoDe(f);
+              const pendiente = f.estatus !== "Cobrado";
+              const v = vencimientoDe(f);
+              return (
+                <tr key={f.id}>
+                  <td className="gp-mono">{fmtFechaCorta(f.fecha)}</td>
+                  <td>
+                    <Badge tone={f.tipo === "Ingreso" ? "teal" : "red"}>
+                      {f.categoria === "Pago a colaborador" ? "Pago colaborador" : f.tipo === "Ingreso" ? "Cobro cliente" : "Gasto"}
+                    </Badge>
+                  </td>
+                  <td style={{ maxWidth: 260 }}><span className="truncate block">{f.concepto}</span></td>
+                  <td className="hidden md:table-cell gp-text-gold">{f.proyectoId ? nombreProyecto(f.proyectoId) : "—"}</td>
+                  <td className="hidden md:table-cell gp-text-muted">{f.categoria || "—"}</td>
+                  <td className="hidden lg:table-cell gp-text-muted">{f.contactoId ? nombreContacto(f.contactoId) : "—"}</td>
+                  {columnaVencimiento && <td className="gp-mono">{v.fecha ? fmtFechaCorta(v.fecha) : "—"}</td>}
+                  {columnaVencimiento && <td><span className="text-xs" style={{ color: v.vencido ? "var(--red)" : "var(--muted)" }}>{v.texto}</span></td>}
+                  {columnaRecurrencia && <td className="gp-text-muted">{f.frecuencia || "Mensual"}</td>}
+                  {columnaRecurrencia && <td className="gp-mono" style={{ color: f.tipo === "Ingreso" ? "var(--teal)" : "var(--red)" }}>{fmtMoney(Math.round(montoMensualizado(f)))}</td>}
+                  {columnaRecurrencia && (
+                    <td className="gp-mono">
+                      {proximoCargoRecurrente(f)
+                        ? fmtFechaCorta(proximoCargoRecurrente(f))
+                        : <span className="gp-text-muted">terminado</span>}
+                    </td>
+                  )}
+                  {!columnaVencimiento && !columnaRecurrencia && <td className="hidden lg:table-cell gp-text-muted">{f.forma || "—"}</td>}
+                  <td>
+                    <MontoMovimiento f={f} />
+                    {abonado > 0 && pendiente && (
+                      <span className="block text-[10px] gp-text-muted">abonado {fmtMoney(abonado)} · falta {fmtMoney(saldo)}</span>
+                    )}
+                  </td>
+                  <td>
+                    <SelectGuardable
+                      valor={f.estatus || "Pendiente"} opciones={["Cobrado", "Pendiente", "Parcial"]}
+                      ariaLabel="Estado del movimiento" onGuardar={(nuevoEstado) => onEdit(f.id, { estatus: nuevoEstado })}
+                    />
+                  </td>
+                  <td>
+                    <div className="flex gap-1 items-center">
+                      {/* Pago o cobro, parcial o total, sin salir del grid. */}
+                      {pendiente && (
+                        <button
+                          onClick={() => setModal({ item: f, paso: "pagar" })}
+                          title={f.tipo === "Ingreso" ? "Registrar un cobro (parcial o total)" : "Registrar un pago (parcial o total)"}
+                          className={`text-xs px-2 py-1 rounded gp-btn-ghost ${f.tipo === "Ingreso" ? "gp-text-teal" : "gp-text-gold"}`}
+                        >
+                          {f.tipo === "Ingreso" ? "Cobrar" : "Pagar"}
+                        </button>
+                      )}
+                      <IconBtn title="Editar" onClick={() => setModal({ item: f })}><Pencil size={13} /></IconBtn>
+                      <IconBtn title="Eliminar" onClick={() => onRemove(f.id)}><Trash2 size={13} /></IconBtn>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
             {enPagina.length === 0 && (
-              <tr><td colSpan={10} className="text-center gp-text-muted py-8">Sin movimientos con estos filtros.</td></tr>
+              <tr><td colSpan={12} className="text-center gp-text-muted py-8">
+                {pestana === "cobrar" ? "No hay nada por cobrar."
+                  : pestana === "pagar" ? "No hay nada por pagar."
+                  : pestana === "recurrentes" ? "No tienes movimientos recurrentes. Un movimiento se vuelve recurrente al marcarlo así en su formulario."
+                  : "Sin movimientos con estos filtros."}
+              </td></tr>
             )}
           </tbody>
         </table>
@@ -10690,9 +10739,23 @@ function FinanzasMovimientos({ data, onAdd, onEdit, onRemove, crearAlEntrar, onC
         </div>
       )}
 
-      {modal && (
+      {modal && !modal.paso && (
         <Modal title={modal.item.id ? "Editar movimiento" : "Nuevo movimiento"} onClose={() => setModal(null)}>
           <FinanzaForm item={modal.item} proyectos={data.proyectos} contactos={data.contactos} onSave={(v) => { modal.item.id ? onEdit(modal.item.id, v) : onAdd(v); setModal(null); }} />
+        </Modal>
+      )}
+
+      {modal && modal.paso === "pagar" && (
+        <Modal
+          title={`${modal.item.tipo === "Ingreso" ? "Registrar cobro" : "Registrar pago"} — ${modal.item.concepto || ""}`}
+          onClose={() => setModal(null)}
+        >
+          <PagoDeudaForm
+            saldoPendiente={saldoDe(modal.item)}
+            textoSaldado={modal.item.tipo === "Ingreso" ? "Con este cobro la cuenta queda liquidada." : "Con este pago la cuenta queda liquidada."}
+            etiquetaBoton={modal.item.tipo === "Ingreso" ? "Registrar cobro" : "Registrar pago"}
+            onPagar={(p) => registrarAbono(modal.item, p)}
+          />
         </Modal>
       )}
 
@@ -10710,7 +10773,7 @@ function FinanzasMovimientos({ data, onAdd, onEdit, onRemove, crearAlEntrar, onC
 // RESUMEN — la pantalla a la que se entra a VER, no a buscar. Las cuatro cifras del periodo, cómo
 // se movieron, en qué se fue el dinero y qué falta cobrar o pagar. Sin tabla: para la lista están
 // Movimientos y los demás hijos, y a cada uno se llega desde aquí.
-function FinanzasResumen({ data, onAdd, onEdit, onIrAVista, crearAlEntrar, onConsumirCrearAlEntrar }) {
+function FinanzasResumen({ data, onAdd, onEdit, onVerMovimientos, crearAlEntrar, onConsumirCrearAlEntrar }) {
   const [modal, setModal] = useState(null);
   const [rango, setRango] = useState("mes");
 
@@ -10770,12 +10833,13 @@ function FinanzasResumen({ data, onAdd, onEdit, onIrAVista, crearAlEntrar, onCon
 
   return (
     <div>
-      <CabeceraFinanzas
-        seccion="Resumen" titulo="Resumen" icono={<Wallet size={20} className="gp-text-gold" />}
-        subtitulo="Cómo vas en el periodo: lo que entró, lo que salió y lo que falta."
-        rango={rango} onRango={setRango}
-        acciones={<button onClick={() => nuevo({})} className="gp-btn px-3 py-1.5 text-sm rounded flex items-center gap-1.5"><Plus size={14} /> Nuevo movimiento</button>}
-      />
+      {/* El título de la pantalla lo pone la envoltura; aquí solo va lo que el Resumen controla. */}
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+        <select className="gp-input text-xs py-1.5" style={{ width: "auto" }} value={rango} onChange={(e) => setRango(e.target.value)} aria-label="Periodo">
+          {RANGOS_MOVIMIENTOS.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
+        </select>
+        <button onClick={() => nuevo({})} className="gp-btn px-3 py-1.5 text-sm rounded flex items-center gap-1.5"><Plus size={14} /> Nuevo movimiento</button>
+      </div>
 
       <div className="flex flex-col xl:flex-row gap-3 items-start">
         <div className="min-w-0 flex-1 w-full">
@@ -10843,7 +10907,7 @@ function FinanzasResumen({ data, onAdd, onEdit, onIrAVista, crearAlEntrar, onCon
               <div className="gp-panel p-3.5">
                 <TituloBloque
                   icono={<PieChartIcon size={15} />} color="var(--red)"
-                  derecha={<button onClick={() => onIrAVista("fin-egresos")} className="text-[10px] gp-text-gold shrink-0">Ver detalle</button>}
+                  derecha={<button onClick={() => onVerMovimientos("egresos")} className="text-[10px] gp-text-gold shrink-0">Ver detalle</button>}
                 >
                   Egresos por categoría
                 </TituloBloque>
@@ -10929,7 +10993,7 @@ function FinanzasResumen({ data, onAdd, onEdit, onIrAVista, crearAlEntrar, onCon
                       );
                     })}
                   </div>
-                  <button onClick={() => onIrAVista("fin-cobrar")} className="text-[10px] gp-text-gold mt-2 flex items-center gap-1">
+                  <button onClick={() => onVerMovimientos("cobrar")} className="text-[10px] gp-text-gold mt-2 flex items-center gap-1">
                     Ver los {cobrosPendientes.length} <ArrowRight size={10} />
                   </button>
                 </>
@@ -10962,7 +11026,7 @@ function FinanzasResumen({ data, onAdd, onEdit, onIrAVista, crearAlEntrar, onCon
                       );
                     })}
                   </div>
-                  <button onClick={() => onIrAVista("deudas")} className="text-[10px] gp-text-gold mt-2 flex items-center gap-1">
+                  <button onClick={() => onVerMovimientos("pagar")} className="text-[10px] gp-text-gold mt-2 flex items-center gap-1">
                     Ver los {pagosPendientes.length} <ArrowRight size={10} />
                   </button>
                 </>
@@ -10974,528 +11038,6 @@ function FinanzasResumen({ data, onAdd, onEdit, onIrAVista, crearAlEntrar, onCon
       {modal && (
         <Modal title={modal.item.id ? "Editar movimiento" : "Nuevo movimiento"} onClose={() => setModal(null)}>
           <FinanzaForm item={modal.item} proyectos={data.proyectos} contactos={data.contactos} onSave={(v) => { modal.item.id ? onEdit(modal.item.id, v) : onAdd(v); setModal(null); }} />
-        </Modal>
-      )}
-    </div>
-  );
-}
-
-// POR COBRAR — quién me debe. Es el espejo de Por pagar (el módulo Deudas), que existía desde el
-// principio mientras que del lado del dinero que ENTRA no había nada: lo pendiente de cobro solo
-// se veía como un total en una tarjeta, sin poder abrirlo.
-//
-// No lleva selector de periodo a propósito: un cobro de hace tres meses sigue pendiente hoy, y
-// filtrarlo por mes lo esconde justo cuando más urge. El corte aquí es la ANTIGÜEDAD.
-function FinanzasPorCobrar({ data, onEdit, onRemove, onAddPago, onIrAVista }) {
-  const [modal, setModal] = useState(null); // { item } | { item, paso:"cobrar" }
-  const [cubeta, setCubeta] = useState("todas");
-  const [busqueda, setBusqueda] = useState("");
-  const [orden, setOrden] = useState("vencimiento");
-  const [ordenDir, setOrdenDir] = useState("asc");
-  const toggleOrden = (key) => { if (orden === key) setOrdenDir((d) => (d === "asc" ? "desc" : "asc")); else { setOrden(key); setOrdenDir("asc"); } };
-
-  const nombreProyecto = (id) => data.proyectos.find((p) => p.id === id)?.nombre || "—";
-  const contactoDe = (id) => data.contactos.find((c) => c.id === id);
-  const nombreContacto = (id) => contactoDe(id)?.nombre || "";
-
-  const pendientes = (data.finanzas || []).filter((f) => f.tipo === "Ingreso" && f.estatus !== "Cobrado");
-  // Saldo real: el monto menos lo que ya se abonó en pagos_finanzas (mismo mecanismo que Deudas).
-  const yaPagado = (id) => (data.pagosFinanzas || []).filter((p) => p.finanzasId === id).reduce((s, p) => s + (Number(p.monto) || 0), 0);
-  const saldoDe = (f) => Math.max(0, montoBaseDe(f) - yaPagado(f.id));
-
-  const conVencimiento = pendientes.map((f) => ({ f, v: vencimientoDe(f), saldo: saldoDe(f) }));
-  const totalPorCobrar = conVencimiento.reduce((t, x) => t + x.saldo, 0);
-  const vencido = conVencimiento.filter((x) => x.v.vencido).reduce((t, x) => t + x.saldo, 0);
-  const porVencer = conVencimiento.filter((x) => !x.v.vencido && x.v.dias !== null && x.v.dias >= -30).reduce((t, x) => t + x.saldo, 0);
-  const clientesQueDeben = new Set(pendientes.filter((f) => f.contactoId).map((f) => f.contactoId)).size;
-
-  const cubetas = CUBETAS_ANTIGUEDAD.map((cu) => ({
-    ...cu,
-    n: conVencimiento.filter((x) => cu.test(x.v)).length,
-    monto: conVencimiento.filter((x) => cu.test(x.v)).reduce((t, x) => t + x.saldo, 0),
-  }));
-
-  const enCubeta = cubeta === "todas"
-    ? conVencimiento
-    : conVencimiento.filter((x) => CUBETAS_ANTIGUEDAD.find((cu) => cu.id === cubeta)?.test(x.v));
-  const buscados = filtrarPorBusqueda(enCubeta, busqueda, [
-    (x) => x.f.concepto, (x) => nombreContacto(x.f.contactoId), (x) => nombreProyecto(x.f.proyectoId),
-  ]);
-  const camposOrden = {
-    vencimiento: { get: (x) => x.v.fecha || "9999-12-31", tipo: "fecha" },
-    cliente: { get: (x) => nombreContacto(x.f.contactoId) || "zzz", tipo: "texto" },
-    monto: { get: (x) => x.saldo, tipo: "numero" },
-  };
-  const ordenados = ordenarLista(buscados, orden, camposOrden, ordenDir);
-
-  const columnasExport = [
-    { label: "Cliente", get: (x) => nombreContacto(x.f.contactoId) },
-    { label: "Concepto", get: (x) => x.f.concepto },
-    { label: "Proyecto", get: (x) => (x.f.proyectoId ? nombreProyecto(x.f.proyectoId) : "") },
-    { label: "Vence", get: (x) => x.v.fecha },
-    { label: "Antigüedad", get: (x) => x.v.texto },
-    { label: "Monto", get: (x) => montoBaseDe(x.f) },
-    { label: "Saldo por cobrar", get: (x) => x.saldo },
-    { label: "Estado", get: (x) => x.f.estatus },
-  ];
-
-  // Registra un abono y recalcula el estatus: si el saldo llega a cero queda Cobrado, si no Parcial.
-  const registrarCobro = async (f, { monto, fecha }) => {
-    await onAddPago({ id: uid(), finanzasId: f.id, fecha, monto, comentario: "" });
-    const restante = saldoDe(f) - monto;
-    onEdit(f.id, { estatus: restante <= 0 ? "Cobrado" : "Parcial" });
-    setModal(null);
-  };
-
-  // Recordatorio al cliente: WhatsApp si lo tiene (es lo que de verdad se usa), si no correo. El
-  // texto va prellenado pero se manda desde la app del teléfono, nunca desde aquí.
-  const recordatorio = (f) => {
-    const c = contactoDe(f.contactoId);
-    if (!c) return null;
-    const v = vencimientoDe(f);
-    const texto = encodeURIComponent(
-      `Hola${c.nombre ? ` ${c.nombre.split(" ")[0]}` : ""}, te escribo por el pago de ${f.concepto || "nuestro servicio"} por ${fmtMoney(montoBaseDe(f))}${v.fecha ? ` con vencimiento ${fmtFechaCorta(v.fecha)}` : ""}. ¿Me confirmas cuándo lo podemos ver? Gracias.`
-    );
-    if (c.whatsapp) return { url: `https://wa.me/${(c.whatsapp || "").replace(/\D/g, "")}?text=${texto}`, tipo: "whatsapp" };
-    if (c.correo) return { url: `mailto:${c.correo}?subject=${encodeURIComponent(`Pago pendiente — ${f.concepto || ""}`)}&body=${texto}`, tipo: "correo" };
-    return null;
-  };
-
-  return (
-    <div>
-      <CabeceraFinanzas
-        seccion="Por cobrar" titulo="Por cobrar" icono={<ArrowDownCircle size={20} className="gp-text-teal" />}
-        subtitulo="Quién te debe, desde cuándo y cuánto. Sin filtro de periodo: lo pendiente no caduca."
-        acciones={<>
-          <button onClick={() => exportarFilasExcel(ordenados, columnasExport, "por-cobrar")} className="gp-btn-ghost px-3 py-1.5 text-xs rounded flex items-center gap-1.5"><Download size={13} /> Excel</button>
-          <button onClick={() => exportarFilasPDF(ordenados, columnasExport, "por-cobrar", "Por cobrar", `Al ${fmtFechaCorta(todayISO())}`)} className="gp-btn-ghost px-3 py-1.5 text-xs rounded flex items-center gap-1.5"><Download size={13} /> PDF</button>
-          <button onClick={() => onIrAVista("fin-movimientos")} className="gp-btn-ghost px-3 py-1.5 text-xs rounded flex items-center gap-1.5"><ListChecks size={13} /> Ver movimientos</button>
-        </>}
-      />
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2.5 mb-3">
-        <TarjetaResumenFin etiqueta="Total por cobrar" valor={totalPorCobrar} color="var(--teal)" tinte="rgba(22,163,106,.14)" icono={<ArrowDownCircle size={16} />} />
-        <TarjetaResumenFin etiqueta="Vencido" valor={vencido} color="var(--red)" tinte="rgba(229,72,77,.14)" icono={<AlertTriangle size={16} />} />
-        <TarjetaResumenFin etiqueta="Vence en 30 días" valor={porVencer} color="var(--gold)" tinte="rgba(212,175,55,.16)" icono={<Clock size={16} />} />
-        <div className="gp-panel p-3.5">
-          <div className="flex items-start justify-between gap-2">
-            <p className="text-xs font-medium">Clientes que deben</p>
-            <span className="shrink-0 inline-flex items-center justify-center rounded-lg" style={{ color: "#087CF5", background: "rgba(8,124,245,.14)", width: 30, height: 30 }}><Contact size={16} /></span>
-          </div>
-          <p className="gp-serif text-2xl mt-1" style={{ color: "#087CF5" }}>{clientesQueDeben}</p>
-          <p className="text-[11px] gp-text-muted mt-0.5">{pendientes.length} cobro{pendientes.length === 1 ? "" : "s"} pendiente{pendientes.length === 1 ? "" : "s"}</p>
-        </div>
-      </div>
-
-      <div className="flex flex-wrap items-center gap-2 mb-2">
-        <div className="relative flex-1" style={{ minWidth: 180, maxWidth: 300 }}>
-          <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 gp-text-muted" style={{ pointerEvents: "none" }} />
-          <input className="gp-input gp-buscador text-sm" style={{ paddingLeft: 32 }} placeholder="Buscar cliente o concepto…" value={busqueda} onChange={(e) => setBusqueda(e.target.value)} />
-        </div>
-        <button onClick={() => setCubeta("todas")} className={`text-[11px] px-2.5 py-1 rounded-full border ${cubeta === "todas" ? "gp-btn" : "gp-btn-ghost"}`}>
-          Todas <span className="gp-mono">{conVencimiento.length}</span>
-        </button>
-        {cubetas.map((cu) => (
-          <button key={cu.id} onClick={() => setCubeta(cu.id)} className={`text-[11px] px-2.5 py-1 rounded-full border inline-flex items-center gap-1.5 ${cubeta === cu.id ? "gp-btn" : "gp-btn-ghost"}`}>
-            {cu.label} <span className="gp-mono">{cu.n}</span>
-            {cu.monto > 0 && <span className="gp-text-muted">{fmtMoney(cu.monto)}</span>}
-          </button>
-        ))}
-      </div>
-
-      <div className="gp-panel overflow-x-auto">
-        <table className="gp-table">
-          <thead>
-            <tr>
-              <Th label="Cliente" sortKey="cliente" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} />
-              <th>Concepto</th>
-              <th className="hidden md:table-cell">Proyecto</th>
-              <Th label="Vence" sortKey="vencimiento" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} />
-              <th>Antigüedad</th>
-              <Th label="Por cobrar" sortKey="monto" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} />
-              <th>Estado</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {ordenados.map(({ f, v, saldo }) => {
-              const rec = recordatorio(f);
-              const abonado = montoBaseDe(f) - saldo;
-              return (
-                <tr key={f.id}>
-                  <td>{f.contactoId ? nombreContacto(f.contactoId) : <span className="gp-text-muted">Sin cliente</span>}</td>
-                  <td style={{ maxWidth: 220 }}><span className="truncate block">{f.concepto}</span></td>
-                  <td className="hidden md:table-cell gp-text-gold">{f.proyectoId ? nombreProyecto(f.proyectoId) : "—"}</td>
-                  <td className="gp-mono">{v.fecha ? fmtFechaCorta(v.fecha) : "—"}</td>
-                  <td><span className="text-xs" style={{ color: v.vencido ? "var(--red)" : "var(--muted)" }}>{v.texto}</span></td>
-                  <td>
-                    <span className="gp-mono gp-text-teal">{fmtMoney(saldo)}</span>
-                    {abonado > 0 && <span className="block text-[10px] gp-text-muted">de {fmtMoney(montoBaseDe(f))}</span>}
-                  </td>
-                  <td><Badge tone={f.estatus === "Parcial" ? "gold" : "muted"}>{f.estatus || "Pendiente"}</Badge></td>
-                  <td>
-                    <div className="flex gap-1">
-                      <IconBtn title="Registrar cobro" onClick={() => setModal({ item: f, paso: "cobrar" })}><Banknote size={13} /></IconBtn>
-                      {rec && (
-                        <a href={rec.url} target="_blank" rel="noopener noreferrer" title={rec.tipo === "whatsapp" ? "Recordar por WhatsApp" : "Recordar por correo"}
-                          className="p-1.5 rounded gp-btn-ghost" style={{ lineHeight: 0, color: rec.tipo === "whatsapp" ? "#25D366" : "var(--gold)" }}>
-                          {rec.tipo === "whatsapp" ? <MessageCircle size={13} /> : <Mail size={13} />}
-                        </a>
-                      )}
-                      <IconBtn title="Editar" onClick={() => setModal({ item: f })}><Pencil size={13} /></IconBtn>
-                      <IconBtn title="Eliminar" onClick={() => onRemove(f.id)}><Trash2 size={13} /></IconBtn>
-                    </div>
-                  </td>
-                </tr>
-              );
-            })}
-            {ordenados.length === 0 && (
-              <tr><td colSpan={8} className="text-center gp-text-muted py-8">
-                {pendientes.length === 0 ? "No hay nada por cobrar. " : "Sin resultados con estos filtros."}
-              </td></tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      {modal && !modal.paso && (
-        <Modal title="Editar cobro" onClose={() => setModal(null)}>
-          <FinanzaForm item={modal.item} proyectos={data.proyectos} contactos={data.contactos} onSave={(v) => { onEdit(modal.item.id, v); setModal(null); }} />
-        </Modal>
-      )}
-      {modal && modal.paso === "cobrar" && (
-        <Modal title={`Registrar cobro — ${modal.item.concepto || ""}`} onClose={() => setModal(null)}>
-          <PagoDeudaForm
-            saldoPendiente={saldoDe(modal.item)}
-            textoSaldado="Con este cobro la cuenta queda liquidada."
-            etiquetaBoton="Registrar cobro"
-            onPagar={(p) => registrarCobro(modal.item, p)}
-          />
-        </Modal>
-      )}
-    </div>
-  );
-}
-
-// INGRESOS — un renglón por cliente (o por proyecto), no por movimiento. La pregunta no es "qué
-// cobré el martes" (eso es Movimientos) sino "quién me paga y cuánto me falta cobrarle".
-// Por eso agrupa en vez de filtrar: un filtro ya lo hacen los chips de Movimientos.
-function FinanzasIngresos({ data, onEdit, onIrAVista }) {
-  const [modal, setModal] = useState(null);
-  const [rango, setRango] = useState("anio");
-  const [agrupar, setAgrupar] = useState("cliente"); // cliente | proyecto
-  const [busqueda, setBusqueda] = useState("");
-  const [abierto, setAbierto] = useState(null);
-  const [orden, setOrden] = useState("total");
-  const [ordenDir, setOrdenDir] = useState("desc");
-  const toggleOrden = (key) => { if (orden === key) setOrdenDir((d) => (d === "asc" ? "desc" : "asc")); else { setOrden(key); setOrdenDir(key === "nombre" ? "asc" : "desc"); } };
-
-  const nombreProyecto = (id) => data.proyectos.find((p) => p.id === id)?.nombre || "";
-  const nombreContacto = (id) => data.contactos.find((c) => c.id === id)?.nombre || "";
-  const { desde, hasta } = rangoFechas(rango);
-  const { ingresos, ingresosTotal } = cifrasFinanzas(data.finanzas, desde, hasta);
-
-  // Un grupo por clave; los que no traen cliente (o proyecto) caen en un grupo propio en vez de
-  // desaparecer — si no, los totales de la pantalla no cuadrarían con los del Resumen.
-  const grupos = {};
-  ingresos.forEach((f) => {
-    const clave = agrupar === "cliente" ? (f.contactoId || "__sin__") : (f.proyectoId || "__sin__");
-    const nombre = agrupar === "cliente"
-      ? (f.contactoId ? nombreContacto(f.contactoId) || "Cliente eliminado" : "Sin cliente")
-      : (f.proyectoId ? nombreProyecto(f.proyectoId) || "Proyecto eliminado" : "Sin proyecto");
-    if (!grupos[clave]) grupos[clave] = { clave, nombre, movs: [], cobrado: 0, porCobrar: 0, total: 0, ultimo: "" };
-    const g = grupos[clave];
-    const m = montoBaseDe(f);
-    g.movs.push(f);
-    g.total += m;
-    if (f.estatus === "Cobrado") { g.cobrado += m; if ((f.fecha || "") > g.ultimo) g.ultimo = f.fecha || ""; }
-    else g.porCobrar += m;
-  });
-  const lista = Object.values(grupos);
-  const buscados = filtrarPorBusqueda(lista, busqueda, [(g) => g.nombre]);
-  const camposOrden = {
-    nombre: { get: (g) => g.nombre, tipo: "texto" },
-    cobrado: { get: (g) => g.cobrado, tipo: "numero" },
-    porCobrar: { get: (g) => g.porCobrar, tipo: "numero" },
-    total: { get: (g) => g.total, tipo: "numero" },
-  };
-  const ordenados = ordenarLista(buscados, orden, camposOrden, ordenDir);
-
-  const columnasExport = [
-    { label: agrupar === "cliente" ? "Cliente" : "Proyecto", get: (g) => g.nombre },
-    { label: "Movimientos", get: (g) => g.movs.length },
-    { label: "Cobrado", get: (g) => g.cobrado },
-    { label: "Por cobrar", get: (g) => g.porCobrar },
-    { label: "Total", get: (g) => g.total },
-    { label: "Último cobro", get: (g) => g.ultimo },
-  ];
-
-  return (
-    <div>
-      <CabeceraFinanzas
-        seccion="Ingresos" titulo="Ingresos" icono={<TrendingUp size={20} className="gp-text-teal" />}
-        subtitulo={agrupar === "cliente" ? "Quién te paga, cuánto llevas cobrado y cuánto falta." : "Cuánto ha dejado cada proyecto y cuánto falta cobrar."}
-        rango={rango} onRango={setRango}
-        acciones={<>
-          <div className="flex items-center gap-1">
-            <button onClick={() => setAgrupar("cliente")} className={`text-xs px-3 py-1.5 rounded-full border ${agrupar === "cliente" ? "gp-btn" : "gp-btn-ghost"}`}>Por cliente</button>
-            <button onClick={() => setAgrupar("proyecto")} className={`text-xs px-3 py-1.5 rounded-full border ${agrupar === "proyecto" ? "gp-btn" : "gp-btn-ghost"}`}>Por proyecto</button>
-          </div>
-          <button onClick={() => exportarFilasExcel(ordenados, columnasExport, "ingresos")} className="gp-btn-ghost px-3 py-1.5 text-xs rounded flex items-center gap-1.5"><Download size={13} /> Excel</button>
-          <button onClick={() => exportarFilasPDF(ordenados, columnasExport, "ingresos", "Ingresos", `${desde || "inicio"} a ${hasta || "hoy"}`)} className="gp-btn-ghost px-3 py-1.5 text-xs rounded flex items-center gap-1.5"><Download size={13} /> PDF</button>
-        </>}
-      />
-
-      <div className="flex flex-wrap items-center gap-2 mb-2">
-        <div className="relative flex-1" style={{ minWidth: 180, maxWidth: 300 }}>
-          <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 gp-text-muted" style={{ pointerEvents: "none" }} />
-          <input className="gp-input gp-buscador text-sm" style={{ paddingLeft: 32 }} placeholder={agrupar === "cliente" ? "Buscar cliente…" : "Buscar proyecto…"} value={busqueda} onChange={(e) => setBusqueda(e.target.value)} />
-        </div>
-        <span className="text-xs gp-text-muted">
-          {ordenados.length} {agrupar === "cliente" ? "cliente" : "proyecto"}{ordenados.length === 1 ? "" : "s"} · {fmtMoney(ingresosTotal)} en el periodo
-        </span>
-      </div>
-
-      <div className="gp-panel overflow-x-auto">
-        <table className="gp-table">
-          <thead>
-            <tr>
-              <th style={{ width: 28 }}></th>
-              <Th label={agrupar === "cliente" ? "Cliente" : "Proyecto"} sortKey="nombre" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} />
-              <th className="hidden md:table-cell">Movs.</th>
-              <Th label="Cobrado" sortKey="cobrado" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} />
-              <Th label="Por cobrar" sortKey="porCobrar" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} />
-              <Th label="Total" sortKey="total" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} />
-              <th className="hidden lg:table-cell">Último cobro</th>
-              <th className="hidden lg:table-cell">Peso</th>
-            </tr>
-          </thead>
-          <tbody>
-            {ordenados.map((g) => (
-              <Fragment key={g.clave}>
-                <tr onClick={() => setAbierto(abierto === g.clave ? null : g.clave)} style={{ cursor: "pointer" }}>
-                  <td>{abierto === g.clave ? <ChevronDown size={14} className="gp-text-muted" /> : <ChevronRight size={14} className="gp-text-muted" />}</td>
-                  <td>{g.nombre}</td>
-                  <td className="hidden md:table-cell gp-text-muted gp-mono">{g.movs.length}</td>
-                  <td className="gp-mono gp-text-teal">{fmtMoney(g.cobrado)}</td>
-                  <td className="gp-mono" style={{ color: g.porCobrar > 0 ? "var(--gold)" : "var(--muted)" }}>{g.porCobrar > 0 ? fmtMoney(g.porCobrar) : "—"}</td>
-                  <td className="gp-mono">{fmtMoney(g.total)}</td>
-                  <td className="hidden lg:table-cell gp-mono gp-text-muted">{g.ultimo ? fmtFechaCorta(g.ultimo) : "—"}</td>
-                  <td className="hidden lg:table-cell">
-                    <div className="flex items-center gap-1.5">
-                      <div className="rounded-full overflow-hidden" style={{ width: 54, height: 5, background: "var(--panel-2)" }}>
-                        <div style={{ width: `${ingresosTotal ? Math.round((g.total / ingresosTotal) * 100) : 0}%`, height: "100%", background: "var(--teal)" }} />
-                      </div>
-                      <span className="text-[10px] gp-text-muted">{ingresosTotal ? Math.round((g.total / ingresosTotal) * 100) : 0}%</span>
-                    </div>
-                  </td>
-                </tr>
-                {abierto === g.clave && (
-                  <tr>
-                    <td colSpan={8} style={{ padding: 0 }}>
-                      <div className="gp-bloque p-2.5">
-                        <div className="flex flex-col gap-1">
-                          {[...g.movs].sort((a, b) => (b.fecha || "").localeCompare(a.fecha || "")).map((f) => (
-                            <button key={f.id} onClick={() => setModal({ item: f })} title="Editar este movimiento" className="flex items-center justify-between gap-2 text-[11px] text-left px-1.5 py-1 rounded gp-btn-ghost">
-                              <span className="gp-mono gp-text-muted shrink-0" style={{ width: 60 }}>{fmtFechaCorta(f.fecha)}</span>
-                              <span className="flex-1 min-w-0 truncate">{f.concepto}</span>
-                              {agrupar === "cliente" && f.proyectoId && <span className="gp-text-gold shrink-0 hidden sm:inline truncate" style={{ maxWidth: 120 }}>{nombreProyecto(f.proyectoId)}</span>}
-                              <Badge tone={f.estatus === "Cobrado" ? "teal" : "gold"}>{f.estatus || "Pendiente"}</Badge>
-                              <span className="gp-mono shrink-0">{fmtMoney(montoBaseDe(f))}</span>
-                            </button>
-                          ))}
-                        </div>
-                        <button onClick={() => onIrAVista("fin-movimientos")} className="text-[10px] gp-text-gold mt-1.5 flex items-center gap-1">
-                          Abrir en Movimientos <ArrowRight size={10} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                )}
-              </Fragment>
-            ))}
-            {ordenados.length === 0 && (
-              <tr><td colSpan={8} className="text-center gp-text-muted py-8">No hay ingresos en este periodo.</td></tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      {modal && (
-        <Modal title="Editar movimiento" onClose={() => setModal(null)}>
-          <FinanzaForm item={modal.item} proyectos={data.proyectos} contactos={data.contactos} onSave={(v) => { onEdit(modal.item.id, v); setModal(null); }} />
-        </Modal>
-      )}
-    </div>
-  );
-}
-
-// EGRESOS — un renglón por categoría. "En qué se me va el dinero", con el tope de Presupuesto
-// encima cuando esa categoría tiene uno, y comparado contra el periodo anterior.
-function FinanzasEgresos({ data, onEdit, onIrAVista }) {
-  const [modal, setModal] = useState(null);
-  const [rango, setRango] = useState("mes");
-  const [busqueda, setBusqueda] = useState("");
-  const [abierto, setAbierto] = useState(null);
-  const [orden, setOrden] = useState("total");
-  const [ordenDir, setOrdenDir] = useState("desc");
-  const toggleOrden = (key) => { if (orden === key) setOrdenDir((d) => (d === "asc" ? "desc" : "asc")); else { setOrden(key); setOrdenDir(key === "nombre" ? "asc" : "desc"); } };
-
-  const nombreProyecto = (id) => data.proyectos.find((p) => p.id === id)?.nombre || "";
-  const nombreContacto = (id) => data.contactos.find((c) => c.id === id)?.nombre || "";
-  const { desde, hasta } = rangoFechas(rango);
-  const { egresos, egresosTotal } = cifrasFinanzas(data.finanzas, desde, hasta);
-  const anterior = rangoAnterior(rango);
-  const previo = cifrasFinanzas(data.finanzas, anterior.desde, anterior.hasta);
-
-  const categoriaDe = (f) => (f.categoria || "").trim() || "Sin categoría";
-  const grupos = {};
-  egresos.forEach((f) => {
-    const k = categoriaDe(f);
-    if (!grupos[k]) grupos[k] = { clave: k, nombre: k, movs: [], total: 0, pagado: 0, porPagar: 0 };
-    const g = grupos[k];
-    const m = montoBaseDe(f);
-    g.movs.push(f);
-    g.total += m;
-    if (f.estatus === "Cobrado") g.pagado += m; else g.porPagar += m;
-  });
-  // Lo mismo del periodo anterior, para la columna de variación.
-  const previoPorCategoria = {};
-  previo.egresos.forEach((f) => {
-    const k = categoriaDe(f);
-    previoPorCategoria[k] = (previoPorCategoria[k] || 0) + montoBaseDe(f);
-  });
-  // Tope de gasto de esa categoría, si hay uno capturado en Presupuesto.
-  const topeDe = (categoria) => {
-    const p = (data.presupuestos || []).find((x) => x.tipo === "categoria" && (x.categoria || "") === categoria);
-    return p ? Number(p.monto) || 0 : 0;
-  };
-
-  const lista = Object.values(grupos).map((g) => ({
-    ...g,
-    antes: previoPorCategoria[g.clave] || 0,
-    tope: topeDe(g.clave),
-    pct: egresosTotal ? Math.round((g.total / egresosTotal) * 100) : 0,
-  }));
-  const buscados = filtrarPorBusqueda(lista, busqueda, [(g) => g.nombre]);
-  const camposOrden = {
-    nombre: { get: (g) => g.nombre, tipo: "texto" },
-    total: { get: (g) => g.total, tipo: "numero" },
-    porPagar: { get: (g) => g.porPagar, tipo: "numero" },
-  };
-  const ordenados = ordenarLista(buscados, orden, camposOrden, ordenDir);
-
-  const columnasExport = [
-    { label: "Categoría", get: (g) => g.nombre },
-    { label: "Movimientos", get: (g) => g.movs.length },
-    { label: "Pagado", get: (g) => g.pagado },
-    { label: "Por pagar", get: (g) => g.porPagar },
-    { label: "Total", get: (g) => g.total },
-    { label: "Periodo anterior", get: (g) => g.antes },
-    { label: "Tope mensual", get: (g) => g.tope },
-  ];
-
-  return (
-    <div>
-      <CabeceraFinanzas
-        seccion="Egresos" titulo="Egresos" icono={<TrendingDown size={20} className="gp-text-red" />}
-        subtitulo="En qué se te va el dinero, por categoría, contra el periodo anterior y contra su tope."
-        rango={rango} onRango={setRango}
-        acciones={<>
-          <button onClick={() => onIrAVista("presupuesto")} className="gp-btn-ghost px-3 py-1.5 text-xs rounded flex items-center gap-1.5"><Target size={13} /> Topes</button>
-          <button onClick={() => exportarFilasExcel(ordenados, columnasExport, "egresos")} className="gp-btn-ghost px-3 py-1.5 text-xs rounded flex items-center gap-1.5"><Download size={13} /> Excel</button>
-          <button onClick={() => exportarFilasPDF(ordenados, columnasExport, "egresos", "Egresos por categoría", `${desde || "inicio"} a ${hasta || "hoy"}`)} className="gp-btn-ghost px-3 py-1.5 text-xs rounded flex items-center gap-1.5"><Download size={13} /> PDF</button>
-        </>}
-      />
-
-      <div className="flex flex-wrap items-center gap-2 mb-2">
-        <div className="relative flex-1" style={{ minWidth: 180, maxWidth: 300 }}>
-          <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 gp-text-muted" style={{ pointerEvents: "none" }} />
-          <input className="gp-input gp-buscador text-sm" style={{ paddingLeft: 32 }} placeholder="Buscar categoría…" value={busqueda} onChange={(e) => setBusqueda(e.target.value)} />
-        </div>
-        <span className="text-xs gp-text-muted">
-          {ordenados.length} categoría{ordenados.length === 1 ? "" : "s"} · {fmtMoney(egresosTotal)} en el periodo
-        </span>
-      </div>
-
-      <div className="gp-panel overflow-x-auto">
-        <table className="gp-table">
-          <thead>
-            <tr>
-              <th style={{ width: 28 }}></th>
-              <Th label="Categoría" sortKey="nombre" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} />
-              <th className="hidden md:table-cell">Movs.</th>
-              <Th label="Total" sortKey="total" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} />
-              <Th label="Por pagar" sortKey="porPagar" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} />
-              <th className="hidden lg:table-cell">vs. anterior</th>
-              <th>Peso / tope</th>
-            </tr>
-          </thead>
-          <tbody>
-            {ordenados.map((g) => {
-              const dif = g.antes > 0 ? Math.round(((g.total - g.antes) / g.antes) * 100) : null;
-              const pctTope = g.tope > 0 ? Math.min(100, Math.round((g.total / g.tope) * 100)) : 0;
-              const pasado = g.tope > 0 && g.total > g.tope;
-              return (
-                <Fragment key={g.clave}>
-                  <tr onClick={() => setAbierto(abierto === g.clave ? null : g.clave)} style={{ cursor: "pointer" }}>
-                    <td>{abierto === g.clave ? <ChevronDown size={14} className="gp-text-muted" /> : <ChevronRight size={14} className="gp-text-muted" />}</td>
-                    <td>{g.nombre}</td>
-                    <td className="hidden md:table-cell gp-text-muted gp-mono">{g.movs.length}</td>
-                    <td className="gp-mono gp-text-red">{fmtMoney(g.total)}</td>
-                    <td className="gp-mono" style={{ color: g.porPagar > 0 ? "var(--gold)" : "var(--muted)" }}>{g.porPagar > 0 ? fmtMoney(g.porPagar) : "—"}</td>
-                    <td className="hidden lg:table-cell">
-                      {dif === null
-                        ? <span className="text-[11px] gp-text-muted">nuevo</span>
-                        : <span className="text-[11px]" style={{ color: dif > 0 ? "var(--red)" : "var(--teal)" }}>{dif > 0 ? "↑" : "↓"} {Math.abs(dif)}%</span>}
-                    </td>
-                    <td>
-                      <div className="flex items-center gap-1.5">
-                        <div className="rounded-full overflow-hidden" style={{ width: 54, height: 5, background: "var(--panel-2)" }}>
-                          <div style={{ width: `${g.tope > 0 ? pctTope : g.pct}%`, height: "100%", background: pasado ? "var(--red)" : g.tope > 0 ? "var(--gold)" : "var(--red)" }} />
-                        </div>
-                        <span className="text-[10px]" style={{ color: pasado ? "var(--red)" : "var(--muted)" }}>
-                          {g.tope > 0 ? `${pctTope}% de ${fmtMoney(g.tope)}` : `${g.pct}%`}
-                        </span>
-                      </div>
-                    </td>
-                  </tr>
-                  {abierto === g.clave && (
-                    <tr>
-                      <td colSpan={7} style={{ padding: 0 }}>
-                        <div className="gp-bloque p-2.5">
-                          <div className="flex flex-col gap-1">
-                            {[...g.movs].sort((a, b) => (b.fecha || "").localeCompare(a.fecha || "")).map((f) => (
-                              <button key={f.id} onClick={() => setModal({ item: f })} title="Editar este movimiento" className="flex items-center justify-between gap-2 text-[11px] text-left px-1.5 py-1 rounded gp-btn-ghost">
-                                <span className="gp-mono gp-text-muted shrink-0" style={{ width: 60 }}>{fmtFechaCorta(f.fecha)}</span>
-                                <span className="flex-1 min-w-0 truncate">{f.concepto}</span>
-                                {f.contactoId && <span className="gp-text-muted shrink-0 hidden sm:inline truncate" style={{ maxWidth: 110 }}>{nombreContacto(f.contactoId)}</span>}
-                                {f.proyectoId && <span className="gp-text-gold shrink-0 hidden sm:inline truncate" style={{ maxWidth: 110 }}>{nombreProyecto(f.proyectoId)}</span>}
-                                <Badge tone={f.estatus === "Cobrado" ? "teal" : "gold"}>{f.estatus === "Cobrado" ? "Pagado" : f.estatus || "Pendiente"}</Badge>
-                                <span className="gp-mono shrink-0">{fmtMoney(montoBaseDe(f))}</span>
-                              </button>
-                            ))}
-                          </div>
-                          <button onClick={() => onIrAVista("fin-movimientos")} className="text-[10px] gp-text-gold mt-1.5 flex items-center gap-1">
-                            Abrir en Movimientos <ArrowRight size={10} />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  )}
-                </Fragment>
-              );
-            })}
-            {ordenados.length === 0 && (
-              <tr><td colSpan={7} className="text-center gp-text-muted py-8">No hay egresos en este periodo.</td></tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      {modal && (
-        <Modal title="Editar movimiento" onClose={() => setModal(null)}>
-          <FinanzaForm item={modal.item} proyectos={data.proyectos} contactos={data.contactos} onSave={(v) => { onEdit(modal.item.id, v); setModal(null); }} />
         </Modal>
       )}
     </div>
@@ -11532,172 +11074,6 @@ function proximoCargoRecurrente(f) {
   }
   if (fin && d > fin) return null;
   return dateStr(d);
-}
-
-// RECURRENTES — lo que se repite. No es "qué pasó" sino "qué va a pasar": la renta, las
-// suscripciones, los dominios. Lo que se quiere saber aquí es cuánto cuesta vivir cada mes, y ese
-// número no lo da ninguna otra pantalla porque hay que mensualizar cada frecuencia por separado.
-function FinanzasRecurrentes({ data, onEdit, onRemove, onAdd, onIrAVista }) {
-  const [modal, setModal] = useState(null);
-  const [tipo, setTipo] = useState("todos"); // todos | Ingreso | Egreso
-  const [busqueda, setBusqueda] = useState("");
-  const [verTerminados, setVerTerminados] = useState(false);
-  const [orden, setOrden] = useState("proximo");
-  const [ordenDir, setOrdenDir] = useState("asc");
-  const toggleOrden = (key) => { if (orden === key) setOrdenDir((d) => (d === "asc" ? "desc" : "asc")); else { setOrden(key); setOrdenDir("asc"); } };
-
-  const nombreProyecto = (id) => data.proyectos.find((p) => p.id === id)?.nombre || "";
-  const empty = { concepto: "", tipo: "Egreso", proyectoId: "", contactoId: "", fecha: todayISO(), fechaVencimiento: "", monto: "", moneda: MONEDA_BASE, tipoCambio: 1, montoBase: "", categoria: "", forma: "Transferencia", estatus: "Cobrado", pautando: false, esRecurrente: true, frecuencia: "Mensual", fechaFin: "" };
-
-  const todos = (data.finanzas || []).filter((f) => f.esRecurrente).map((f) => ({
-    f,
-    mensual: montoMensualizado(f),
-    proximo: proximoCargoRecurrente(f),
-  }));
-  const vivos = todos.filter((x) => x.proximo);
-  const terminados = todos.filter((x) => !x.proximo);
-
-  const egresoMensual = vivos.filter((x) => x.f.tipo === "Egreso").reduce((t, x) => t + x.mensual, 0);
-  const ingresoMensual = vivos.filter((x) => x.f.tipo === "Ingreso").reduce((t, x) => t + x.mensual, 0);
-
-  const base = verTerminados ? todos : vivos;
-  const filtrados = base.filter((x) => tipo === "todos" || x.f.tipo === tipo);
-  const buscados = filtrarPorBusqueda(filtrados, busqueda, [
-    (x) => x.f.concepto, (x) => x.f.categoria, (x) => nombreProyecto(x.f.proyectoId),
-  ]);
-  const camposOrden = {
-    proximo: { get: (x) => x.proximo || "9999-12-31", tipo: "fecha" },
-    concepto: { get: (x) => x.f.concepto, tipo: "texto" },
-    mensual: { get: (x) => x.mensual, tipo: "numero" },
-  };
-  const ordenados = ordenarLista(buscados, orden, camposOrden, ordenDir);
-
-  const columnasExport = [
-    { label: "Concepto", get: (x) => x.f.concepto },
-    { label: "Tipo", get: (x) => x.f.tipo },
-    { label: "Frecuencia", get: (x) => x.f.frecuencia },
-    { label: "Monto", get: (x) => montoBaseDe(x.f) },
-    { label: "Equivale al mes", get: (x) => Math.round(x.mensual) },
-    { label: "Próximo", get: (x) => x.proximo || "terminado" },
-    { label: "Termina", get: (x) => x.f.fechaFin || "" },
-    { label: "Categoría", get: (x) => x.f.categoria },
-  ];
-
-  return (
-    <div>
-      <CabeceraFinanzas
-        seccion="Recurrentes" titulo="Recurrentes" icono={<Clock size={20} className="gp-text-gold" />}
-        subtitulo="Lo que se repite solo: renta, suscripciones, renovaciones. Sin periodo, porque esto mira hacia adelante."
-        acciones={<>
-          <button onClick={() => exportarFilasExcel(ordenados, columnasExport, "recurrentes")} className="gp-btn-ghost px-3 py-1.5 text-xs rounded flex items-center gap-1.5"><Download size={13} /> Excel</button>
-          <button onClick={() => setModal({ item: { ...empty } })} className="gp-btn px-3 py-1.5 text-sm rounded flex items-center gap-1.5"><Plus size={14} /> Nuevo recurrente</button>
-        </>}
-      />
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2.5 mb-3">
-        <TarjetaResumenFin
-          etiqueta="Gasto fijo al mes" valor={egresoMensual} color="var(--red)" tinte="rgba(229,72,77,.14)" icono={<TrendingDown size={16} />}
-          filas={[{ label: "Al año", valor: egresoMensual * 12 }]}
-        />
-        <TarjetaResumenFin
-          etiqueta="Ingreso fijo al mes" valor={ingresoMensual} color="var(--teal)" tinte="rgba(22,163,106,.14)" icono={<TrendingUp size={16} />}
-          filas={[{ label: "Al año", valor: ingresoMensual * 12 }]}
-        />
-        <TarjetaResumenFin
-          etiqueta="Neto fijo al mes" valor={ingresoMensual - egresoMensual}
-          color={ingresoMensual - egresoMensual >= 0 ? "#087CF5" : "var(--red)"}
-          tinte={ingresoMensual - egresoMensual >= 0 ? "rgba(8,124,245,.14)" : "rgba(229,72,77,.14)"} icono={<Wallet size={16} />}
-          filas={[{ label: "Lo que queda cada mes antes de lo demás", valor: ingresoMensual - egresoMensual }]}
-        />
-        <div className="gp-panel p-3.5">
-          <div className="flex items-start justify-between gap-2">
-            <p className="text-xs font-medium">Activos</p>
-            <span className="shrink-0 inline-flex items-center justify-center rounded-lg" style={{ color: "var(--gold)", background: "rgba(212,175,55,.16)", width: 30, height: 30 }}><Clock size={16} /></span>
-          </div>
-          <p className="gp-serif text-2xl mt-1 gp-text-gold">{vivos.length}</p>
-          <p className="text-[11px] gp-text-muted mt-0.5">
-            {terminados.length > 0 ? `${terminados.length} ya terminado${terminados.length === 1 ? "" : "s"}` : "ninguno terminado"}
-          </p>
-        </div>
-      </div>
-
-      <div className="flex flex-wrap items-center gap-2 mb-2">
-        <div className="relative flex-1" style={{ minWidth: 180, maxWidth: 300 }}>
-          <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 gp-text-muted" style={{ pointerEvents: "none" }} />
-          <input className="gp-input gp-buscador text-sm" style={{ paddingLeft: 32 }} placeholder="Buscar recurrente…" value={busqueda} onChange={(e) => setBusqueda(e.target.value)} />
-        </div>
-        {[{ id: "todos", label: "Todos" }, { id: "Egreso", label: "Egresos" }, { id: "Ingreso", label: "Ingresos" }].map((t) => (
-          <button key={t.id} onClick={() => setTipo(t.id)} className={`text-[11px] px-2.5 py-1 rounded-full border ${tipo === t.id ? "gp-btn" : "gp-btn-ghost"}`}>{t.label}</button>
-        ))}
-        {terminados.length > 0 && (
-          <label className="flex items-center gap-1.5 text-[11px] gp-text-muted cursor-pointer">
-            <input type="checkbox" checked={verTerminados} onChange={(e) => setVerTerminados(e.target.checked)} />
-            Ver terminados
-          </label>
-        )}
-      </div>
-
-      <div className="gp-panel overflow-x-auto">
-        <table className="gp-table">
-          <thead>
-            <tr>
-              <Th label="Concepto" sortKey="concepto" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} />
-              <th>Tipo</th>
-              <th>Frecuencia</th>
-              <th className="hidden md:table-cell">Categoría</th>
-              <th>Monto</th>
-              <Th label="Equivale al mes" sortKey="mensual" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} />
-              <Th label="Próximo" sortKey="proximo" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} />
-              <th className="hidden lg:table-cell">Termina</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {ordenados.map(({ f, mensual, proximo }) => (
-              <tr key={f.id} style={proximo ? undefined : { opacity: 0.55 }}>
-                <td style={{ maxWidth: 220 }}>
-                  <span className="truncate block">{f.concepto}</span>
-                  {f.proyectoId && <span className="block text-[10px] gp-text-gold truncate">{nombreProyecto(f.proyectoId)}</span>}
-                </td>
-                <td><Badge tone={f.tipo === "Ingreso" ? "teal" : "red"}>{f.tipo}</Badge></td>
-                <td className="gp-text-muted">{f.frecuencia || "Mensual"}</td>
-                <td className="hidden md:table-cell gp-text-muted">{f.categoria || "—"}</td>
-                <td><MontoMovimiento f={f} /></td>
-                <td className="gp-mono" style={{ color: f.tipo === "Ingreso" ? "var(--teal)" : "var(--red)" }}>{fmtMoney(Math.round(mensual))}</td>
-                <td className="gp-mono">{proximo ? fmtFechaCorta(proximo) : <span className="gp-text-muted">terminado</span>}</td>
-                <td className="hidden lg:table-cell gp-mono gp-text-muted">{f.fechaFin ? fmtFechaCorta(f.fechaFin) : "sin fin"}</td>
-                <td>
-                  <div className="flex gap-1">
-                    <IconBtn title="Editar" onClick={() => setModal({ item: f })}><Pencil size={13} /></IconBtn>
-                    <IconBtn title="Eliminar" onClick={() => onRemove(f.id)}><Trash2 size={13} /></IconBtn>
-                  </div>
-                </td>
-              </tr>
-            ))}
-            {ordenados.length === 0 && (
-              <tr><td colSpan={9} className="text-center gp-text-muted py-8">
-                {todos.length === 0
-                  ? "No tienes movimientos recurrentes. Un movimiento se vuelve recurrente al marcarlo así en su formulario."
-                  : "Sin resultados con estos filtros."}
-              </td></tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      <p className="text-[11px] gp-text-muted mt-2">
-        "Equivale al mes" normaliza cada frecuencia: lo semanal se multiplica por 4.345 (52 semanas entre 12 meses),
-        lo quincenal por 2 y lo anual se divide entre 12. Así se pueden sumar entre sí.
-        Las renovaciones de <button onClick={() => onIrAVista("activos")} className="gp-text-gold">activos digitales</button> aparecen aquí solas, porque se registran como egreso recurrente.
-      </p>
-
-      {modal && (
-        <Modal title={modal.item.id ? "Editar recurrente" : "Nuevo movimiento recurrente"} onClose={() => setModal(null)}>
-          <FinanzaForm item={modal.item} proyectos={data.proyectos} contactos={data.contactos} onSave={(v) => { modal.item.id ? onEdit(modal.item.id, v) : onAdd(v); setModal(null); }} />
-        </Modal>
-      )}
-    </div>
-  );
 }
 
 function FinanzaForm({ item, proyectos, contactos, onSave }) {
@@ -11990,11 +11366,15 @@ function FacturaForm({ item, proyectos, contactos, finanzas, onAddFinanzas, onSa
 // especializada de Finanzas, filtrando egresos no recurrentes con saldo pendiente. Crear,
 // editar, marcar como pagada o borrar una "deuda" aquí en realidad opera sobre `finanzas`
 // (categoria="Deuda"), para que el movimiento real viva en un solo lugar.
-// POR PAGAR — qué debo. Es el módulo que se llamaba "Deudas" (4 oct 2026): pasó a ser hijo de
-// Finanzas y cambió de nombre, porque es el espejo exacto de Por cobrar y así se lee en pareja.
+// DEUDAS — qué debo, con su historial. Sigue siendo un módulo propio del grupo Dinero y una VISTA
+// de `finanzas` (un egreso con saldo pendiente), no una tabla aparte.
 //
-// Sigue siendo una VISTA de `finanzas`, no una tabla aparte: un egreso con saldo pendiente. Lo que
-// ganó al convertirse en hijo:
+// Se traslapa a propósito con la opción "Por pagar" del grid de Movimientos, y no es duplicar
+// datos: las dos leen los mismos movimientos y escriben los mismos abonos en pagos_finanzas. La
+// diferencia es para qué sirve cada una — en el grid se registra un pago de paso, aquí se revisa
+// una cuenta completa: su antigüedad, todos sus abonos y el comprobante de cada uno.
+//
+// Lo que ganó en la revisión del 4 oct 2026:
 //   - los recurrentes pendientes ya aparecen (antes los escondía a propósito, y la renta vencida
 //     es exactamente lo que uno quiere ver aquí). Se pueden ocultar con el interruptor.
 //   - el comprobante de cada pago se sube desde el mismo renglón, con el historial de abonos.
@@ -12069,7 +11449,7 @@ function Deudas({ data, onAddFinanzas, onEditFinanzas, onRemoveFinanzas, onAddPa
   return (
     <div>
       <CabeceraFinanzas
-        seccion="Por pagar" titulo="Por pagar" icono={<ArrowUpCircle size={20} className="gp-text-red" />}
+        seccion="Deudas" titulo="Deudas" icono={<AlertTriangle size={20} className="gp-text-red" />}
         subtitulo="A quién le debes, desde cuándo y cuánto. Al llegar el saldo a cero sale solo de esta lista."
         acciones={<>
           <button onClick={() => exportarFilasExcel(ordenados, columnasExport, "por-pagar")} className="gp-btn-ghost px-3 py-1.5 text-xs rounded flex items-center gap-1.5"><Download size={13} /> Excel</button>
@@ -12079,7 +11459,7 @@ function Deudas({ data, onAddFinanzas, onEditFinanzas, onRemoveFinanzas, onAddPa
       />
 
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2.5 mb-3">
-        <TarjetaResumenFin etiqueta="Total por pagar" valor={totalPorPagar} color="var(--red)" tinte="rgba(229,72,77,.14)" icono={<ArrowUpCircle size={16} />} />
+        <TarjetaResumenFin etiqueta="Total que debes" valor={totalPorPagar} color="var(--red)" tinte="rgba(229,72,77,.14)" icono={<ArrowUpCircle size={16} />} />
         <TarjetaResumenFin etiqueta="Atrasado" valor={vencido} color="var(--red)" tinte="rgba(229,72,77,.14)" icono={<AlertTriangle size={16} />} />
         <TarjetaResumenFin etiqueta="Vence en 30 días" valor={porVencer} color="var(--gold)" tinte="rgba(212,175,55,.16)" icono={<Clock size={16} />} />
         <div className="gp-panel p-3.5">
@@ -20823,7 +20203,7 @@ function QuickCapture({ data, onAdd, onCrearRecordatorio, irAVista }) {
       {(tipo === "ingreso" || tipo === "egreso") && (
         <Modal title={tipo === "ingreso" ? "Nuevo ingreso" : "Nuevo egreso"} onClose={cerrar}>
           <MovimientoRapidoForm tipoInicial={tipo === "ingreso" ? "Ingreso" : "Egreso"}
-            onSave={(v) => { onAdd("finanzas", { ...v, id: uid() }); cerrar(); irAVista("fin-movimientos"); }} />
+            onSave={(v) => { onAdd("finanzas", { ...v, id: uid() }); cerrar(); irAVista("finanzas"); }} />
         </Modal>
       )}
       {tipo === "glucosa" && (
