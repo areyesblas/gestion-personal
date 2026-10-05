@@ -1539,13 +1539,21 @@ if (typeof window !== "undefined") {
 // Borrador de un formulario en línea: mantiene una copia local de los campos, dice si hay algo
 // distinto de lo guardado y se apunta en el registro mientras lo haya.
 function useBorrador(original) {
-  const [borrador, setBorrador] = useState(original);
   const firma = JSON.stringify(original);
   const marcaRef = useRef({});
-
-  // Si el registro cambia desde fuera (se eligió otra tarea, llegó un refresco), el borrador se
-  // reinicia con lo nuevo: lo que se está editando es siempre lo que está en pantalla.
-  useEffect(() => { setBorrador(original); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [firma]);
+  // El borrador guarda JUNTO con los datos la firma del registro del que salieron. Así, cuando
+  // se elige otro registro, el reinicio pasa durante el render y no en un efecto posterior.
+  //
+  // Antes el reinicio vivía en un useEffect y eso causaba un bug de verdad, no solo cosmético
+  // (reportado el 4 oct 2026 en Notas, pero pasaba igual en la ficha de tarea y en la de
+  // proyecto): al cambiar de registro quedaba un render con los datos del ANTERIOR y la firma
+  // del NUEVO, así que la barra de "Guardar cambios" aparecía sola —el botón amarillo que se ve
+  // y se va— y, si alguien alcanzaba a picarla, escribía el contenido del registro anterior
+  // encima del que acababa de abrir.
+  const [estado, setEstado] = useState({ firma, datos: original });
+  if (estado.firma !== firma) setEstado({ firma, datos: original });
+  const borrador = estado.firma === firma ? estado.datos : original;
+  const setBorrador = (fn) => setEstado((prev) => ({ firma, datos: typeof fn === "function" ? fn(prev.datos) : fn }));
 
   const sucio = JSON.stringify(borrador) !== firma;
   useEffect(() => {
@@ -9690,6 +9698,7 @@ function Pendientes({ data, activeOwnerId, onAdd, onEdit, onEditProyecto, onRemo
       {tareaSel && (
         <div className="w-full shrink-0 lg:sticky lg:top-4" style={estiloPanel}>
           <FichaTarea
+            key={tareaSel.id}
             t={tareaSel}
             data={data}
             onCerrar={() => setTareaSelId(null)}
@@ -17802,6 +17811,7 @@ function Notas({ data, ownerId, onAdd, onEdit, onRemove, onAddComentario }) {
       {nota && (
         <div className="w-full shrink-0 lg:sticky lg:top-4" style={estiloPanel}>
           <EditorNota
+            key={nota.id}
             nota={nota} data={data} etiquetasExistentes={etiquetas}
             onEdit={onEdit} onAddComentario={onAddComentario}
             onCerrar={() => setSeleccionada(null)}
