@@ -33,7 +33,7 @@ import {
   ChevronRight, Bell, Lightbulb, Rocket, MessageCircle, Mail, Globe,
   Target, Contact, BarChart3, FileText, Flame, HeartPulse, Check, Menu, PieChart as PieChartIcon, User, Home,
   PiggyBank, Camera, Film, Upload, MapPin, Clock, Mic, Gift, Receipt, Megaphone, ChevronUp, Gem, Download, Sun, Moon, Shield, LogOut, ChevronLeft, Lock, Pill, CalendarClock, Zap, StickyNote, Search, Sparkles, Send, Bot, Square, Settings, CalendarRange, Palette, Eye, EyeOff, Sliders, Volume2, VolumeX, Play, Copy, Phone, MessageSquare, MoreHorizontal,
-  Heart, Code2, Music, Tag, Archive, ExternalLink, ListChecks, Info,
+  Heart, Code2, Music, Tag, Archive, ExternalLink, ListChecks, Info, TrendingDown,
   ChevronsDownUp, ChevronsUpDown, Briefcase, Building2, ArrowRight,
 } from "lucide-react";
 import {
@@ -10145,17 +10145,6 @@ function calcularSaldo(data) {
   return { fecha: activo.fecha, efectivo, cuenta, total: efectivo + cuenta, checkpoints };
 }
 
-// Agrupa movimientos NO recurrentes por mes (YYYY-MM) para la vista tipo "estado de cuenta".
-// Los recurrentes no se agrupan aquí — viven en su propia pestaña porque no tienen "un mes", se repiten.
-function agruparFinanzasPorMes(movs) {
-  const grupos = {};
-  for (const f of movs) {
-    const mes = (f.fecha || "").slice(0, 7) || "sin-fecha";
-    if (!grupos[mes]) grupos[mes] = [];
-    grupos[mes].push(f);
-  }
-  return Object.entries(grupos).sort((a, b) => b[0].localeCompare(a[0]));
-}
 function fmtMesLabel(mes) {
   if (mes === "sin-fecha") return "Sin fecha";
   const [y, m] = mes.split("-").map(Number);
@@ -10178,243 +10167,526 @@ function FinanzasYFacturas({ data, tabInicial, finanzasProps, facturasProps }) {
     </div>
   );
 }
+// Rangos de fecha del encabezado de Movimientos. "Este mes" es el de siempre; los demás están
+// para revisar un periodo cerrado sin tener que filtrar a mano.
+const RANGOS_MOVIMIENTOS = [
+  { id: "mes", label: "Este mes" },
+  { id: "mesAnterior", label: "Mes anterior" },
+  { id: "trimestre", label: "Últimos 3 meses" },
+  { id: "anio", label: "Este año" },
+  { id: "todo", label: "Todo" },
+];
+function rangoFechas(id) {
+  const hoy = new Date();
+  const iso = (d) => dateStr(d);
+  const primeroDeMes = (a, m) => new Date(a, m, 1);
+  const ultimoDeMes = (a, m) => new Date(a, m + 1, 0);
+  const a = hoy.getFullYear(), m = hoy.getMonth();
+  if (id === "mesAnterior") return { desde: iso(primeroDeMes(a, m - 1)), hasta: iso(ultimoDeMes(a, m - 1)) };
+  if (id === "trimestre") return { desde: iso(primeroDeMes(a, m - 2)), hasta: iso(ultimoDeMes(a, m)) };
+  if (id === "anio") return { desde: `${a}-01-01`, hasta: `${a}-12-31` };
+  if (id === "todo") return { desde: "", hasta: "" };
+  return { desde: iso(primeroDeMes(a, m)), hasta: iso(ultimoDeMes(a, m)) };
+}
+// El mismo rango, corrido un periodo hacia atrás: es contra lo que se compara cada tarjeta.
+function rangoAnterior(id) {
+  const hoy = new Date();
+  const a = hoy.getFullYear(), m = hoy.getMonth();
+  const iso = (d) => dateStr(d);
+  const p = (y, mm) => new Date(y, mm, 1), u = (y, mm) => new Date(y, mm + 1, 0);
+  if (id === "mes") return { desde: iso(p(a, m - 1)), hasta: iso(u(a, m - 1)) };
+  if (id === "mesAnterior") return { desde: iso(p(a, m - 2)), hasta: iso(u(a, m - 2)) };
+  if (id === "trimestre") return { desde: iso(p(a, m - 5)), hasta: iso(u(a, m - 3)) };
+  if (id === "anio") return { desde: `${a - 1}-01-01`, hasta: `${a - 1}-12-31` };
+  return { desde: "", hasta: "" };
+}
+
+// Tarjeta de resumen con su variación contra el periodo anterior y el desglose de qué la compone.
+function TarjetaResumenFin({ etiqueta, valor, color, icono, variacion, filas, destacada }) {
+  return (
+    <div className={destacada ? "gp-bloque rounded-xl p-3.5" : "gp-panel p-3.5"} style={destacada ? { borderLeft: "3px solid var(--violeta, #8B5CF6)" } : undefined}>
+      <div className="flex items-start justify-between gap-2">
+        <p className="text-xs font-medium">{etiqueta}</p>
+        <span className="shrink-0" style={{ color }}>{icono}</span>
+      </div>
+      <p className="gp-serif text-2xl mt-1" style={{ color }}>{fmtMoney(valor)}</p>
+      {variacion !== null && variacion !== undefined && (
+        <p className="text-[11px] mt-0.5" style={{ color: variacion >= 0 ? "var(--teal)" : "var(--red)" }}>
+          {variacion >= 0 ? "↑" : "↓"} {Math.abs(variacion)}% vs. periodo anterior
+        </p>
+      )}
+      {filas?.length > 0 && (
+        <div className="flex flex-col gap-0.5 mt-2.5 pt-2.5 border-t gp-border">
+          {filas.map((f) => (
+            <div key={f.label} className="flex items-center justify-between gap-2 text-[11px]">
+              <span className="gp-text-muted truncate">{f.label}</span>
+              <span className="gp-mono shrink-0" style={f.color ? { color: f.color } : undefined}>{fmtMoney(f.valor)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Finanzas({ data, onAdd, onEdit, onRemove, crearAlEntrar, onConsumirCrearAlEntrar }) {
   const [modal, setModal] = useState(null);
   const [importarAbierto, setImportarAbierto] = useState(false);
-  const [vista, setVista] = useState("todos");
-  const [filtroTipoRecurrente, setFiltroTipoRecurrente] = useState("Todos");
-  const [filtroVigencia, setFiltroVigencia] = useState("Vigentes");
-  const [orden, setOrden] = useState("default");
-  const [ordenDir, setOrdenDir] = useState("asc");
+  const [rango, setRango] = useState("mes");
+  const [pestana, setPestana] = useState("todos"); // todos | proyectos | clientes | colaboradores | ingresos | egresos | recurrentes
   const [busqueda, setBusqueda] = useState("");
-  const toggleOrden = (key) => { if (orden === key) setOrdenDir((d) => (d === "asc" ? "desc" : "asc")); else { setOrden(key); setOrdenDir("asc"); } };
+  const [filtroProyecto, setFiltroProyecto] = useState("Todos");
+  const [filtroCategoria, setFiltroCategoria] = useState("Todas");
+  const [filtroEstado, setFiltroEstado] = useState("Todos");
+  const [orden, setOrden] = useState("fecha");
+  const [ordenDir, setOrdenDir] = useState("desc");
+  const [pagina, setPagina] = useState(1);
+  const [porPagina, setPorPagina] = useState(100);
+  const [menuFila, setMenuFila] = useState(null);
+
   const empty = { concepto: "", tipo: "Ingreso", proyectoId: "", contactoId: "", fecha: todayISO(), fechaVencimiento: "", monto: "", moneda: MONEDA_BASE, tipoCambio: 1, montoBase: "", categoria: "", forma: "Transferencia", estatus: "Cobrado", pautando: false, esRecurrente: false, frecuencia: "Mensual", fechaFin: "" };
 
   useEffect(() => {
     if (crearAlEntrar) { setModal({ item: { ...empty, ...(crearAlEntrar.preset || {}) } }); onConsumirCrearAlEntrar(); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [crearAlEntrar]);
+
   const nombreProyecto = (id) => data.proyectos.find((p) => p.id === id)?.nombre || "—";
-  const nombreCliente = (id) => data.contactos.find((c) => c.id === id)?.nombre || "—";
+  const nombreContacto = (id) => data.contactos.find((c) => c.id === id)?.nombre || "—";
   const hoy = todayISO();
-  const mesActual = hoy.slice(0, 7);
-  const esVigente = (f) => !f.fechaFin || f.fechaFin >= hoy;
 
-  // La búsqueda por contenido filtra las listas de abajo; los KPIs de arriba (ingresos/egresos/
-  // neto del mes) se quedan globales para no confundir con un resumen "recortado".
-  const finanzasFiltradas = filtrarPorBusqueda(data.finanzas, busqueda,
-    [(f) => f.concepto, (f) => f.categoria, (f) => f.forma, (f) => nombreProyecto(f.proyectoId), (f) => nombreCliente(f.contactoId)]);
+  const { desde, hasta } = rangoFechas(rango);
+  const dentroDe = (f, d, h) => (!d || (f.fecha || "") >= d) && (!h || (f.fecha || "") <= h);
+  const enRango = (data.finanzas || []).filter((f) => dentroDe(f, desde, hasta));
+  const anterior = rangoAnterior(rango);
+  const enRangoPrevio = (data.finanzas || []).filter((f) => dentroDe(f, anterior.desde, anterior.hasta));
 
-  const cobrosPendientes = finanzasFiltradas
-    .filter((f) => f.tipo === "Ingreso" && f.estatus === "Pendiente")
-    .sort((a, b) => (a.fechaVencimiento || "9999").localeCompare(b.fechaVencimiento || "9999"));
-  const totalCobrosPendientes = cobrosPendientes.reduce((s, f) => s + montoBaseDe(f), 0);
+  const suma = (lista) => lista.reduce((t, f) => t + montoBaseDe(f), 0);
+  const variacion = (ahora, antes) => (antes > 0 ? Math.round(((ahora - antes) / antes) * 100) : null);
 
-  let recurrentes = finanzasFiltradas.filter((f) => f.esRecurrente);
-  if (filtroTipoRecurrente !== "Todos") recurrentes = recurrentes.filter((f) => f.tipo === filtroTipoRecurrente);
-  if (filtroVigencia !== "Todos") recurrentes = recurrentes.filter((f) => (filtroVigencia === "Vigentes" ? esVigente(f) : !esVigente(f)));
-  const totalRecurrentes = recurrentes.reduce((s, f) => s + montoBaseDe(f) * (f.tipo === "Ingreso" ? 1 : -1), 0);
+  // --- Las cuatro cifras de arriba ---
+  const ingresos = enRango.filter((f) => f.tipo === "Ingreso");
+  const egresos = enRango.filter((f) => f.tipo === "Egreso");
+  const ingresosTotal = suma(ingresos);
+  const egresosTotal = suma(egresos);
+  const ingresosDeCliente = suma(ingresos.filter((f) => f.contactoId));
+  const egresosColaboradores = suma(egresos.filter((f) => f.categoria === "Pago a colaborador"));
+  const egresosProyecto = suma(egresos.filter((f) => f.proyectoId && f.categoria !== "Pago a colaborador"));
+  const egresosGenerales = egresosTotal - egresosColaboradores - egresosProyecto;
 
-  // Resumen del mes: movimientos puntuales de este mes ya cobrados, más los recurrentes vigentes
-  // (esos ocurren cada mes, incluido este, sin importar en qué mes se hayan dado de alta).
-  const movsDelMes = data.finanzas.filter((f) => {
-    if (f.estatus !== "Cobrado") return false;
-    if (f.esRecurrente) return esVigente(f);
-    return (f.fecha || "").startsWith(mesActual);
+  // El saldo son los movimientos ya liquidados; lo pendiente va aparte, en el proyectado.
+  const enCuentas = suma(ingresos.filter((f) => f.estatus === "Cobrado")) - suma(egresos.filter((f) => f.estatus === "Cobrado"));
+  const porCobrar = suma(ingresos.filter((f) => f.estatus !== "Cobrado"));
+  const porPagar = suma(egresos.filter((f) => f.estatus !== "Cobrado"));
+  const proyectado = enCuentas + porCobrar - porPagar;
+
+  // --- Gráfica: ingresos y egresos por día, con el saldo acumulado encima ---
+  const porDia = {};
+  enRango.forEach((f) => {
+    const d = (f.fecha || "").slice(0, 10);
+    if (!d) return;
+    if (!porDia[d]) porDia[d] = { dia: d, ingreso: 0, egreso: 0 };
+    if (f.estatus !== "Cobrado") return;
+    if (f.tipo === "Ingreso") porDia[d].ingreso += montoBaseDe(f); else porDia[d].egreso += montoBaseDe(f);
   });
-  const ingresosMes = movsDelMes.filter((f) => f.tipo === "Ingreso").reduce((s, f) => s + montoBaseDe(f), 0);
-  const egresosMes = movsDelMes.filter((f) => f.tipo === "Egreso").reduce((s, f) => s + montoBaseDe(f), 0);
-  const netoMes = ingresosMes - egresosMes;
+  let acum = 0;
+  const evolucion = Object.values(porDia).sort((a, b) => a.dia.localeCompare(b.dia)).map((d) => {
+    acum += d.ingreso - d.egreso;
+    return { ...d, saldo: acum, etiqueta: fmtFechaCorta(d.dia).slice(0, 6) };
+  });
 
+  // --- Dona de egresos por categoría ---
+  const porCategoria = {};
+  egresos.forEach((f) => {
+    const k = (f.categoria || "").trim() || "Otros";
+    porCategoria[k] = (porCategoria[k] || 0) + montoBaseDe(f);
+  });
+  const desglose = Object.entries(porCategoria)
+    .map(([nombre, monto]) => ({ nombre, monto, pct: egresosTotal ? Math.round((monto / egresosTotal) * 100) : 0 }))
+    .sort((a, b) => b.monto - a.monto);
+
+  // --- Paneles de la derecha ---
+  const cobrosPendientes = (data.finanzas || [])
+    .filter((f) => f.tipo === "Ingreso" && f.estatus !== "Cobrado")
+    .sort((a, b) => (a.fechaVencimiento || a.fecha || "9999").localeCompare(b.fechaVencimiento || b.fecha || "9999"));
+  const pagosPendientes = (data.finanzas || [])
+    .filter((f) => f.tipo === "Egreso" && f.estatus !== "Cobrado")
+    .sort((a, b) => (a.fechaVencimiento || a.fecha || "9999").localeCompare(b.fechaVencimiento || b.fecha || "9999"));
+
+  // --- Pestañas: son filtros rápidos sobre la misma lista ---
+  const PESTANAS = [
+    { id: "todos", label: "Todos", icono: <Info size={13} /> },
+    { id: "proyectos", label: "Proyectos", icono: <FolderKanban size={13} /> },
+    { id: "clientes", label: "Clientes", icono: <Contact size={13} /> },
+    { id: "colaboradores", label: "Colaboradores", icono: <Users size={13} /> },
+    { id: "ingresos", label: "Ingresos", icono: <TrendingDown size={13} style={{ transform: "scaleY(-1)" }} /> },
+    { id: "egresos", label: "Egresos", icono: <TrendingDown size={13} /> },
+    { id: "recurrentes", label: "Recurrentes", icono: <Clock size={13} /> },
+  ];
+  const pasaPestana = (f) => {
+    switch (pestana) {
+      case "proyectos": return !!f.proyectoId;
+      case "clientes": return f.tipo === "Ingreso" && !!f.contactoId;
+      case "colaboradores": return f.categoria === "Pago a colaborador";
+      case "ingresos": return f.tipo === "Ingreso";
+      case "egresos": return f.tipo === "Egreso";
+      case "recurrentes": return !!f.esRecurrente;
+      default: return true;
+    }
+  };
+
+  const categorias = [...new Set((data.finanzas || []).map((f) => f.categoria).filter(Boolean))].sort((a, b) => compararEs(a, b));
+  const filtrados = enRango
+    .filter(pasaPestana)
+    .filter((f) => filtroProyecto === "Todos" || f.proyectoId === filtroProyecto)
+    .filter((f) => filtroCategoria === "Todas" || f.categoria === filtroCategoria)
+    .filter((f) => filtroEstado === "Todos" || f.estatus === filtroEstado);
+  const buscados = filtrarPorBusqueda(filtrados, busqueda, [
+    (f) => f.concepto, (f) => f.categoria, (f) => nombreProyecto(f.proyectoId),
+    (f) => nombreContacto(f.contactoId), (f) => f.forma,
+  ]);
   const camposOrden = {
     fecha: { get: (f) => f.fecha, tipo: "fecha" },
-    registro: { get: (f) => f.createdAt, tipo: "fecha" },
-    alfabetico: { get: (f) => f.concepto, tipo: "texto" },
     monto: { get: (f) => montoBaseDe(f), tipo: "numero" },
+    concepto: { get: (f) => f.concepto, tipo: "texto" },
   };
-  const opcionesOrden = [
-    { key: "fecha", label: "fecha del movimiento" },
-    { key: "registro", label: "fecha de registro" },
-    { key: "alfabetico", label: "alfabético" },
-    { key: "monto", label: "monto" },
-  ];
-  const movsPuntuales = finanzasFiltradas.filter((f) => !f.esRecurrente);
-  const gruposMes = agruparFinanzasPorMes(movsPuntuales);
-  const [mesesAbiertos, setMesesAbiertos] = useState(() => new Set([mesActual]));
-  const toggleMes = (mes) => setMesesAbiertos((prev) => { const next = new Set(prev); next.has(mes) ? next.delete(mes) : next.add(mes); return next; });
-  const [expandido, setExpandido] = useState(null);
-
-  const recurrentesOrdenados = ordenarLista(recurrentes, orden, camposOrden, ordenDir);
+  const ordenados = ordenarLista(buscados, orden, camposOrden, ordenDir);
+  const totalPaginas = Math.max(1, Math.ceil(ordenados.length / porPagina));
+  const paginaActual = Math.min(pagina, totalPaginas);
+  const inicio = (paginaActual - 1) * porPagina;
+  const enPagina = ordenados.slice(inicio, inicio + porPagina);
+  const toggleOrden = (key) => { if (orden === key) setOrdenDir((d) => (d === "asc" ? "desc" : "asc")); else { setOrden(key); setOrdenDir("desc"); } };
 
   const columnasExport = [
-    { label: "Concepto", get: (f) => f.concepto }, { label: "Tipo", get: (f) => f.tipo },
     { label: "Fecha", get: (f) => f.fecha },
+    { label: "Tipo", get: (f) => f.tipo },
+    { label: "Descripción", get: (f) => f.concepto },
+    { label: "Proyecto", get: (f) => (f.proyectoId ? nombreProyecto(f.proyectoId) : "") },
+    { label: "Categoría", get: (f) => f.categoria },
+    { label: "Cliente / Colaborador", get: (f) => (f.contactoId ? nombreContacto(f.contactoId) : "") },
+    { label: "Forma de pago", get: (f) => f.forma },
     { label: "Monto (MXN)", get: (f) => montoBaseDe(f) },
     { label: "Moneda original", get: (f) => (f.moneda && f.moneda !== MONEDA_BASE ? `${f.monto} ${f.moneda} @ ${Number(f.tipoCambio) || 1}` : "") },
-    { label: "Categoría", get: (f) => f.categoria }, { label: "Forma", get: (f) => f.forma },
-    { label: "Estatus", get: (f) => f.estatus }, { label: "Proyecto", get: (f) => nombreProyecto(f.proyectoId) },
-    { label: "Contacto", get: (f) => nombreCliente(f.contactoId) },
+    { label: "Estado", get: (f) => f.estatus },
   ];
-  const filasVisiblesExport = vista === "cobros" ? cobrosPendientes : vista === "recurrentes" ? recurrentesOrdenados : gruposMes.flatMap(([, movs]) => movs);
-  const nombreVista = vista === "cobros" ? "cobros_pendientes" : vista === "recurrentes" ? "pagos_recurrentes" : "movimientos";
-  const tituloVista = vista === "cobros" ? "Cobros pendientes" : vista === "recurrentes" ? "Pagos recurrentes" : "Movimientos financieros";
+
+  const nuevo = (preset) => setModal({ item: { ...empty, ...preset } });
+  const ACCIONES = [
+    { titulo: "Cobro del cliente", sub: "Registra un ingreso", icono: <Plus size={15} className="gp-text-teal" />, preset: { tipo: "Ingreso", categoria: "Proyectos", estatus: "Pendiente" } },
+    { titulo: "Gasto del proyecto", sub: "Viáticos, materiales, servicios…", icono: <Plus size={15} className="gp-text-red" />, preset: { tipo: "Egreso", categoria: "Viáticos" } },
+    { titulo: "Pago a colaborador", sub: "Registra un pago", icono: <Users size={15} className="gp-text-gold" />, preset: { tipo: "Egreso", categoria: "Pago a colaborador" } },
+  ];
+
+  const chips = [
+    { id: "todos", label: "Todos los movimientos", n: enRango.filter(() => true).length },
+    { id: "ingresos", label: "Ingresos", n: enRango.filter((f) => f.tipo === "Ingreso").length },
+    { id: "egresos", label: "Egresos", n: enRango.filter((f) => f.tipo === "Egreso").length },
+    { id: "colaboradores", label: "Pagos a colaboradores", n: enRango.filter((f) => f.categoria === "Pago a colaborador").length },
+  ];
 
   return (
     <div>
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-1">
-        <h2 className="gp-serif text-2xl">Movimientos</h2>
-        <div className="flex gap-2 w-full sm:w-auto">
-          <button onClick={() => setImportarAbierto(true)} className="gp-btn-ghost flex items-center justify-center gap-1 px-3 py-1.5 text-sm flex-1 sm:flex-initial"><Upload size={14} /> Importar</button>
-          <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm flex-1 sm:flex-initial"><Plus size={14} /> Nuevo</button>
+      {/* Encabezado */}
+      <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
+        <div className="min-w-0">
+          <p className="text-[11px] gp-text-muted">Finanzas · Movimientos</p>
+          <h2 className="gp-serif text-2xl flex items-center gap-2"><Wallet size={20} className="gp-text-gold" /> Movimientos</h2>
+          <p className="text-sm gp-text-muted">Control de ingresos y gastos de todos tus proyectos, tareas y colaboradores.</p>
         </div>
-      </div>
-      <p className="text-sm gp-text-muted mb-4">Incluye pagos recurrentes (luz, agua, compras a meses) con fecha de inicio y fin, o indefinidos.</p>
-
-      {/* Resumen arriba: lo primero que ves, antes de cualquier tabla o filtro. */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4">
-        <div className="gp-panel-hi p-3">
-          <p className="text-xs gp-text-muted">Ingresos de {fmtMesLabel(mesActual)}</p>
-          <p className="gp-serif text-xl gp-text-teal">{fmtMoney(ingresosMes)}</p>
-        </div>
-        <div className="gp-panel-hi p-3">
-          <p className="text-xs gp-text-muted">Egresos de {fmtMesLabel(mesActual)}</p>
-          <p className="gp-serif text-xl gp-text-red">{fmtMoney(egresosMes)}</p>
-        </div>
-        <div className="gp-panel-hi p-3">
-          <p className="text-xs gp-text-muted">Neto de {fmtMesLabel(mesActual)}</p>
-          <p className={`gp-serif text-xl ${netoMes >= 0 ? "gp-text-teal" : "gp-text-red"}`}>{fmtMoney(netoMes)}</p>
-        </div>
-        <div className="gp-panel-hi p-3">
-          <p className="text-xs gp-text-muted">Por cobrar</p>
-          <p className="gp-serif text-xl gp-text-gold">{fmtMoney(totalCobrosPendientes)}</p>
+        <div className="flex items-center gap-2 flex-wrap">
+          <select className="gp-input text-xs py-1.5" style={{ width: "auto" }} value={rango} onChange={(e) => { setRango(e.target.value); setPagina(1); }} aria-label="Periodo">
+            {RANGOS_MOVIMIENTOS.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
+          </select>
+          <button onClick={() => setImportarAbierto(true)} className="gp-btn-ghost px-3 py-1.5 text-xs rounded flex items-center gap-1.5"><Upload size={13} /> Importar</button>
+          <button onClick={() => exportarFilasExcel(ordenados, columnasExport, "movimientos")} className="gp-btn-ghost px-3 py-1.5 text-xs rounded flex items-center gap-1.5"><Download size={13} /> Excel</button>
+          <button onClick={() => exportarFilasPDF(ordenados, columnasExport, "movimientos", "Movimientos", `${desde || "inicio"} a ${hasta || "hoy"}`)} className="gp-btn-ghost px-3 py-1.5 text-xs rounded flex items-center gap-1.5"><Download size={13} /> PDF</button>
+          <button onClick={() => nuevo({})} className="gp-btn px-3 py-1.5 text-sm rounded flex items-center gap-1.5"><Plus size={14} /> Nuevo movimiento</button>
         </div>
       </div>
 
-      <BarraListaEstandar busqueda={busqueda} onBusqueda={setBusqueda} placeholder="Buscar por concepto, categoría, proyecto o contacto…"
-        onExportExcel={() => exportarFilasExcel(filasVisiblesExport, columnasExport, nombreVista)}
-        onExportPDF={() => exportarFilasPDF(filasVisiblesExport, columnasExport, nombreVista, tituloVista, busqueda ? `búsqueda: "${busqueda}"` : "")} />
-
-      <div className="flex flex-wrap items-center gap-2 mb-4">
-        <button onClick={() => setVista("todos")} className={`text-xs px-3 py-1.5 rounded-full border ${vista === "todos" ? "gp-btn" : "gp-text-muted"}`}>Todos los movimientos</button>
-        <button onClick={() => setVista("cobros")} className={`text-xs px-3 py-1.5 rounded-full border flex items-center gap-1 ${vista === "cobros" ? "gp-btn" : "gp-text-muted"}`}>
-          Cobros pendientes {cobrosPendientes.length > 0 && <Badge tone="gold">{cobrosPendientes.length}</Badge>}
-        </button>
-        <button onClick={() => setVista("recurrentes")} className={`text-xs px-3 py-1.5 rounded-full border flex items-center gap-1 ${vista === "recurrentes" ? "gp-btn" : "gp-text-muted"}`}>
-          Pagos recurrentes
-        </button>
-        {vista === "recurrentes" && <OrdenSelector opciones={opcionesOrden} value={orden} onChange={setOrden} />}
+      {/* Pestañas de filtro rápido */}
+      <div className="flex items-center gap-1.5 flex-wrap mb-4">
+        {PESTANAS.map((t) => (
+          <button key={t.id} onClick={() => { setPestana(t.id); setPagina(1); }}
+            className={`text-xs px-3 py-1.5 rounded-full border inline-flex items-center gap-1.5 ${pestana === t.id ? "gp-btn" : "gp-btn-ghost"}`}>
+            {t.icono} {t.label}
+          </button>
+        ))}
       </div>
 
-      {vista === "cobros" && (
-        <div className="gp-panel p-4 mb-4 flex items-center justify-between">
-          <div>
-            <p className="text-xs gp-text-muted">Total por cobrar</p>
-            <p className="gp-serif text-xl gp-text-teal">{fmtMoney(totalCobrosPendientes)}</p>
+      <div className="flex flex-col xl:flex-row gap-3 items-start">
+        <div className="min-w-0 flex-1 w-full">
+          {/* Las cuatro cifras */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2.5 mb-3">
+            <TarjetaResumenFin
+              etiqueta="Ingresos totales" valor={ingresosTotal} color="var(--teal)" icono={<TrendingDown size={16} style={{ transform: "scaleY(-1)" }} />}
+              variacion={variacion(ingresosTotal, suma(enRangoPrevio.filter((f) => f.tipo === "Ingreso")))}
+              filas={[
+                { label: "De clientes", valor: ingresosDeCliente },
+                { label: "Otros ingresos", valor: ingresosTotal - ingresosDeCliente },
+              ]}
+            />
+            <TarjetaResumenFin
+              etiqueta="Egresos totales" valor={egresosTotal} color="var(--red)" icono={<TrendingDown size={16} />}
+              variacion={variacion(egresosTotal, suma(enRangoPrevio.filter((f) => f.tipo === "Egreso")))}
+              filas={[
+                { label: "Proyectos", valor: egresosProyecto },
+                { label: "Colaboradores", valor: egresosColaboradores },
+                { label: "Gastos generales", valor: egresosGenerales },
+              ]}
+            />
+            <TarjetaResumenFin
+              etiqueta="Saldo del periodo" valor={enCuentas} color={enCuentas >= 0 ? "#087CF5" : "var(--red)"} icono={<Wallet size={16} />}
+              variacion={null}
+              filas={[
+                { label: "Ya liquidado", valor: enCuentas },
+                { label: "Por cobrar", valor: porCobrar, color: "var(--teal)" },
+                { label: "Por pagar", valor: porPagar, color: "var(--red)" },
+              ]}
+            />
+            <TarjetaResumenFin
+              destacada etiqueta="Resultado proyectado" valor={proyectado} color="var(--violeta, #8B5CF6)" icono={<Sparkles size={16} />}
+              variacion={null}
+              filas={[
+                { label: "Saldo del periodo", valor: enCuentas },
+                { label: "+ Por cobrar", valor: porCobrar, color: "var(--teal)" },
+                { label: "− Por pagar", valor: porPagar, color: "var(--red)" },
+              ]}
+            />
           </div>
-          <p className="text-xs gp-text-muted text-right">Rentas, shows, sistemas, publicidad — ordenado por fecha de vencimiento, para saber con qué dinero cuentas y cuándo.</p>
-        </div>
-      )}
 
-      {vista === "recurrentes" && (
-        <>
-          <div className="flex flex-wrap items-center gap-2 mb-4">
-            <div className="flex gap-1">
-              {["Todos", "Ingreso", "Egreso"].map((t) => (
-                <button key={t} onClick={() => setFiltroTipoRecurrente(t)} className={`text-xs px-2.5 py-1 rounded-full border ${filtroTipoRecurrente === t ? "gp-btn" : "gp-text-muted"}`}>{t === "Todos" ? "Todos" : t + "s"}</button>
-              ))}
-            </div>
-            <div className="flex gap-1">
-              {["Vigentes", "No vigentes", "Todos"].map((v) => (
-                <button key={v} onClick={() => setFiltroVigencia(v)} className={`text-xs px-2.5 py-1 rounded-full border ${filtroVigencia === v ? "gp-btn" : "gp-text-muted"}`}>{v}</button>
-              ))}
-            </div>
-          </div>
-          <div className="gp-panel p-4 mb-4">
-            <p className="text-xs gp-text-muted">Neto de esta vista ({recurrentes.length} pago{recurrentes.length === 1 ? "" : "s"})</p>
-            <p className={`gp-serif text-xl ${totalRecurrentes >= 0 ? "gp-text-teal" : "gp-text-red"}`}>{fmtMoney(totalRecurrentes)}</p>
-            <p className="text-xs gp-text-muted mt-1">Vigente = sin fecha de fin, o con fecha de fin en el futuro. No vigente = ya pasó su fecha de fin.</p>
-          </div>
-        </>
-      )}
-
-      {/* Fila compacta reutilizada tanto en "Todos" (agrupado por mes) como en cobros/recurrentes */}
-      {(() => {
-        const Fila = (f) => {
-          const vencido = f.fechaVencimiento && daysUntil(f.fechaVencimiento) < 0;
-          const abierta = expandido === f.id;
-          return (
-            <div key={f.id} className="gp-panel p-3">
-              <div className="flex items-center gap-2 cursor-pointer" onClick={() => setExpandido(abierta ? null : f.id)}>
-                {abierta ? <ChevronDown size={13} className="gp-text-muted shrink-0" /> : <ChevronRight size={13} className="gp-text-muted shrink-0" />}
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-sm font-medium truncate">{f.concepto || "—"}</span>
-                    <Badge tone={f.estatus === "Cobrado" ? "teal" : "gold"}>{f.estatus}</Badge>
-                    {f.esRecurrente && <Badge tone="gold">{f.frecuencia || "Mensual"}{f.fechaFin ? ` · hasta ${f.fechaFin}` : " · indefinido"}</Badge>}
-                    {f.eventoId && <Badge tone="muted">🔗 Desde Eventos</Badge>}
-                    {f.activoId && <Badge tone="muted">🔗 Desde Activos digitales</Badge>}
-                  </div>
-                  <p className="text-xs gp-text-muted mt-0.5">
-                    {f.esRecurrente ? `Día de pago: ${f.fecha ? Number(f.fecha.slice(8, 10)) : "—"}` : (f.fecha || "—")}
-                    {vista === "cobros" && f.fechaVencimiento && <span style={{ color: vencido ? "var(--red)" : undefined }}> · vence {f.fechaVencimiento}{vencido ? " (vencido)" : ""}</span>}
-                  </p>
+          {/* Gráficas */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-2.5 mb-3">
+            {evolucion.length > 0 && (
+              <div className="gp-panel p-3.5">
+                <p className="text-xs font-medium mb-2">Evolución de movimientos</p>
+                <div style={{ height: 180 }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <ComposedChart data={evolucion} margin={{ top: 4, right: 4, left: -16, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+                      <XAxis dataKey="etiqueta" tick={{ fontSize: 9, fill: "var(--muted)" }} />
+                      <YAxis tick={{ fontSize: 9, fill: "var(--muted)" }} tickFormatter={(n) => `${Math.round(n / 1000)}k`} />
+                      <Tooltip formatter={(v) => fmtMoney(v)} contentStyle={{ background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 8, fontSize: 11 }} />
+                      <Legend wrapperStyle={{ fontSize: 10 }} />
+                      <Bar dataKey="ingreso" name="Ingresos" fill="#16A36A" radius={[3, 3, 0, 0]} />
+                      <Bar dataKey="egreso" name="Egresos" fill="#E5484D" radius={[3, 3, 0, 0]} />
+                      <Line type="monotone" dataKey="saldo" name="Saldo acumulado" stroke="#087CF5" strokeWidth={2} dot={false} />
+                    </ComposedChart>
+                  </ResponsiveContainer>
                 </div>
-                <MontoMovimiento f={f} className="text-sm shrink-0" />
               </div>
-              {abierta && (
-                <div className="mt-2.5 pt-2.5 border-t gp-border pl-5">
-                  {f.eventoId && <p className="text-xs gp-text-gold mb-2">Este movimiento se generó solo desde un Evento — para cambiarlo, edita el evento en el módulo Eventos (si lo cambias aquí, se sobrescribe la próxima vez que se guarde ese evento).</p>}
-                  {f.activoId && <p className="text-xs gp-text-gold mb-2">Este movimiento se generó solo desde un Activo digital con renovación automática — para cambiarlo, edita el activo en el módulo Activos digitales (si lo cambias aquí, se sobrescribe la próxima vez que se guarde ese activo).</p>}
-                  <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-xs gp-text-muted mb-3">
-                    <div>Proyecto: <span className="gp-text-teal">{nombreProyecto(f.proyectoId)}</span></div>
-                    <div>Cliente: <span className="gp-text-teal">{f.contactoId ? nombreCliente(f.contactoId) : "—"}</span></div>
-                    <div>Categoría: {f.categoria || "—"}</div>
-                    <div>Forma: {f.forma || "—"}</div>
+            )}
+
+            {desglose.length > 0 && (
+              <div className="gp-panel p-3.5">
+                <p className="text-xs font-medium mb-2">Egresos por categoría</p>
+                <div className="flex items-center gap-3">
+                  <div style={{ width: 120, height: 120 }} className="shrink-0 relative">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie data={desglose} dataKey="monto" nameKey="nombre" innerRadius={36} outerRadius={56} paddingAngle={2}>
+                          {desglose.map((x, i) => <Cell key={x.nombre} fill={COLORES_DESGLOSE[i % COLORES_DESGLOSE.length]} />)}
+                        </Pie>
+                        <Tooltip formatter={(v) => fmtMoney(v)} contentStyle={{ background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 8, fontSize: 11 }} />
+                      </PieChart>
+                    </ResponsiveContainer>
+                    <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                      <span className="gp-mono text-xs">{fmtMoney(egresosTotal)}</span>
+                      <span className="text-[9px] gp-text-muted">Total</span>
+                    </div>
                   </div>
-                  <div className="flex gap-1">
-                    <button onClick={(e) => { e.stopPropagation(); setModal({ item: f }); }} className="gp-btn-ghost px-3 py-1 text-xs flex items-center gap-1"><Pencil size={12} /> Editar</button>
-                    <button onClick={(e) => { e.stopPropagation(); onRemove(f.id); }} className="gp-btn-ghost px-3 py-1 text-xs flex items-center gap-1"><Trash2 size={12} /> Eliminar</button>
+                  <div className="flex-1 min-w-0 flex flex-col gap-1">
+                    {desglose.slice(0, 6).map((x, i) => (
+                      <div key={x.nombre} className="flex items-center gap-1.5 text-[11px]">
+                        <span className="rounded-full shrink-0" style={{ width: 8, height: 8, background: COLORES_DESGLOSE[i % COLORES_DESGLOSE.length] }} />
+                        <span className="truncate flex-1">{x.nombre}</span>
+                        <span className="gp-mono shrink-0">{fmtMoney(x.monto)}</span>
+                        <span className="gp-text-muted shrink-0" style={{ width: 30, textAlign: "right" }}>{x.pct}%</span>
+                      </div>
+                    ))}
                   </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Filtros de la tabla */}
+          <div className="flex flex-wrap items-center gap-2 mb-2">
+            <div className="relative flex-1" style={{ minWidth: 180, maxWidth: 300 }}>
+              <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 gp-text-muted" style={{ pointerEvents: "none" }} />
+              <input className="gp-input gp-buscador text-sm" style={{ paddingLeft: 32 }} placeholder="Buscar movimientos…"
+                value={busqueda} onChange={(e) => { setBusqueda(e.target.value); setPagina(1); }} />
+            </div>
+            <select className="gp-input text-xs py-1.5" style={{ width: "auto" }} value={filtroProyecto} onChange={(e) => { setFiltroProyecto(e.target.value); setPagina(1); }} aria-label="Proyecto">
+              <option value="Todos">Proyecto: Todos</option>
+              {ordenadosPorNombre(data.proyectos).map((pr) => <option key={pr.id} value={pr.id}>{pr.nombre}</option>)}
+            </select>
+            <select className="gp-input text-xs py-1.5" style={{ width: "auto" }} value={filtroCategoria} onChange={(e) => { setFiltroCategoria(e.target.value); setPagina(1); }} aria-label="Categoría">
+              <option value="Todas">Categoría: Todas</option>
+              {categorias.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+            <select className="gp-input text-xs py-1.5" style={{ width: "auto" }} value={filtroEstado} onChange={(e) => { setFiltroEstado(e.target.value); setPagina(1); }} aria-label="Estado">
+              <option value="Todos">Estado: Todos</option>
+              <option value="Cobrado">Cobrado / Pagado</option>
+              <option value="Pendiente">Pendiente</option>
+              <option value="Parcial">Parcial</option>
+            </select>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-1.5 mb-2">
+            {chips.map((c) => (
+              <button key={c.id} onClick={() => { setPestana(c.id); setPagina(1); }}
+                className={`text-[11px] px-2.5 py-1 rounded-full border inline-flex items-center gap-1.5 ${pestana === c.id ? "gp-btn" : "gp-btn-ghost"}`}>
+                {c.label} <span className="gp-mono">{c.n}</span>
+              </button>
+            ))}
+          </div>
+
+          {/* Tabla */}
+          <div className="gp-panel overflow-x-auto">
+            <table className="gp-table">
+              <thead>
+                <tr>
+                  <Th label="Fecha" sortKey="fecha" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} />
+                  <th>Tipo</th>
+                  <Th label="Descripción" sortKey="concepto" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} />
+                  <th className="hidden md:table-cell">Proyecto</th>
+                  <th className="hidden md:table-cell">Categoría</th>
+                  <th className="hidden lg:table-cell">Cliente / Colaborador</th>
+                  <th className="hidden lg:table-cell">Forma de pago</th>
+                  <Th label="Monto" sortKey="monto" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} />
+                  <th>Estado</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {enPagina.map((f) => (
+                  <tr key={f.id}>
+                    <td className="gp-mono">{fmtFechaCorta(f.fecha)}</td>
+                    <td>
+                      <Badge tone={f.tipo === "Ingreso" ? "teal" : "red"}>
+                        {f.categoria === "Pago a colaborador" ? "Pago colaborador" : f.tipo === "Ingreso" ? "Cobro cliente" : "Gasto"}
+                      </Badge>
+                    </td>
+                    <td style={{ maxWidth: 260 }}><span className="truncate block">{f.concepto}</span></td>
+                    <td className="hidden md:table-cell gp-text-gold">{f.proyectoId ? nombreProyecto(f.proyectoId) : "—"}</td>
+                    <td className="hidden md:table-cell gp-text-muted">{f.categoria || "—"}</td>
+                    <td className="hidden lg:table-cell gp-text-muted">{f.contactoId ? nombreContacto(f.contactoId) : "—"}</td>
+                    <td className="hidden lg:table-cell gp-text-muted">{f.forma || "—"}</td>
+                    <td><MontoMovimiento f={f} /></td>
+                    <td>
+                      <SelectGuardable
+                        valor={f.estatus || "Pendiente"} opciones={["Cobrado", "Pendiente", "Parcial"]}
+                        ariaLabel="Estado del movimiento" onGuardar={(nuevoEstado) => onEdit(f.id, { estatus: nuevoEstado })}
+                      />
+                    </td>
+                    <td>
+                      <div className="flex gap-1">
+                        <IconBtn title="Editar" onClick={() => setModal({ item: f })}><Pencil size={13} /></IconBtn>
+                        <IconBtn title="Eliminar" onClick={() => onRemove(f.id)}><Trash2 size={13} /></IconBtn>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+                {enPagina.length === 0 && (
+                  <tr><td colSpan={10} className="text-center gp-text-muted py-8">Sin movimientos con estos filtros.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {ordenados.length > 0 && (
+            <div className="flex flex-wrap items-center justify-between gap-3 mt-3 text-xs gp-text-muted">
+              <span>Mostrando {inicio + 1}–{Math.min(inicio + porPagina, ordenados.length)} de {ordenados.length} movimiento{ordenados.length === 1 ? "" : "s"}</span>
+              <div className="flex items-center gap-2">
+                <label className="flex items-center gap-1.5">
+                  Filas por página
+                  <select className="gp-input text-xs py-1" style={{ width: "auto" }} value={porPagina} onChange={(e) => { setPorPagina(Number(e.target.value)); setPagina(1); }}>
+                    {[12, 24, 50, 100, 250].map((n) => <option key={n} value={n}>{n}</option>)}
+                  </select>
+                </label>
+                {totalPaginas > 1 && (
+                  <div className="flex items-center gap-1">
+                    <button onClick={() => setPagina(Math.max(1, paginaActual - 1))} disabled={paginaActual === 1} className="px-2 py-1 rounded gp-btn-ghost disabled:opacity-40" aria-label="Página anterior"><ChevronLeft size={13} /></button>
+                    {paginasVisibles(paginaActual, totalPaginas).map((x, i) => (
+                      x === "…" ? <span key={`s-${i}`} className="px-1">…</span>
+                        : <button key={x} onClick={() => setPagina(x)} className={`px-2.5 py-1 rounded ${x === paginaActual ? "gp-btn" : "gp-btn-ghost"}`}>{x}</button>
+                    ))}
+                    <button onClick={() => setPagina(Math.min(totalPaginas, paginaActual + 1))} disabled={paginaActual === totalPaginas} className="px-2 py-1 rounded gp-btn-ghost disabled:opacity-40" aria-label="Página siguiente"><ChevronRight size={13} /></button>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Columna derecha: lo que hay que hacer */}
+        <div className="w-full xl:w-[300px] shrink-0 flex flex-col gap-2.5">
+          <div className="gp-panel p-3.5">
+            <p className="text-xs font-medium mb-2">Acciones rápidas</p>
+            <div className="flex flex-col gap-1.5">
+              {ACCIONES.map((a) => (
+                <button key={a.titulo} onClick={() => nuevo(a.preset)} className="gp-bloque rounded-lg p-2.5 text-left flex items-center gap-2.5">
+                  <span className="shrink-0">{a.icono}</span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-xs font-medium">{a.titulo}</span>
+                    <span className="block text-[10px] gp-text-muted">{a.sub}</span>
+                  </span>
+                  <ChevronRight size={13} className="gp-text-muted shrink-0" />
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="gp-panel p-3.5">
+            <p className="text-xs font-medium mb-2">Cobros pendientes</p>
+            {cobrosPendientes.length === 0
+              ? <p className="text-[11px] gp-text-muted">Nada por cobrar. </p>
+              : (
+                <div className="flex flex-col gap-1.5">
+                  {cobrosPendientes.slice(0, 5).map((f) => {
+                    const vence = f.fechaVencimiento || f.fecha;
+                    const vencido = vence && daysUntil(vence) < 0;
+                    return (
+                      <button key={f.id} onClick={() => setModal({ item: f })} className="flex items-start justify-between gap-2 text-[11px] text-left">
+                        <span className="min-w-0">
+                          <span className="block truncate">{f.concepto}</span>
+                          <span className="block" style={{ color: vencido ? "var(--red)" : "var(--muted)" }}>Vence {fmtFechaCorta(vence) || "—"}</span>
+                        </span>
+                        <span className="gp-mono gp-text-teal shrink-0">{fmtMoney(montoBaseDe(f))}</span>
+                      </button>
+                    );
+                  })}
+                  {cobrosPendientes.length > 5 && <p className="text-[10px] gp-text-muted">y {cobrosPendientes.length - 5} más.</p>}
                 </div>
               )}
-            </div>
-          );
-        };
-
-        if (vista === "cobros") {
-          return <div className="space-y-2">{cobrosPendientes.map(Fila)}{cobrosPendientes.length === 0 && <p className="text-center gp-text-muted py-6 text-sm">No tienes cobros pendientes.</p>}</div>;
-        }
-        if (vista === "recurrentes") {
-          return <div className="space-y-2">{recurrentesOrdenados.map(Fila)}{recurrentesOrdenados.length === 0 && <p className="text-center gp-text-muted py-6 text-sm">No hay pagos recurrentes con este filtro.</p>}</div>;
-        }
-        // "todos": agrupado por mes, como un estado de cuenta — el mes actual abierto por default.
-        return (
-          <div className="space-y-3">
-            {gruposMes.map(([mes, movs]) => {
-              const ingMes = movs.filter((f) => f.tipo === "Ingreso").reduce((s, f) => s + montoBaseDe(f), 0);
-              const egMes = movs.filter((f) => f.tipo === "Egreso").reduce((s, f) => s + montoBaseDe(f), 0);
-              const abierto = mesesAbiertos.has(mes);
-              return (
-                <div key={mes}>
-                  <button onClick={() => toggleMes(mes)} className="w-full gp-panel-hi p-3 flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-2">
-                      {abierto ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                      <span className="text-sm font-medium">{fmtMesLabel(mes)}</span>
-                      <span className="text-xs gp-text-muted">({movs.length})</span>
-                    </div>
-                    <div className="flex items-center gap-3 text-xs gp-mono">
-                      <span className="gp-text-teal">+{fmtMoney(ingMes)}</span>
-                      <span className="gp-text-red">−{fmtMoney(egMes)}</span>
-                      <span className={ingMes - egMes >= 0 ? "gp-text-teal" : "gp-text-red"}>{fmtMoney(ingMes - egMes)}</span>
-                    </div>
-                  </button>
-                  {abierto && <div className="space-y-2 mt-2 pl-2">{movs.map(Fila)}</div>}
-                </div>
-              );
-            })}
-            {gruposMes.length === 0 && <p className="text-center gp-text-muted py-6 text-sm">Sin movimientos registrados.</p>}
           </div>
-        );
-      })()}
+
+          <div className="gp-panel p-3.5">
+            <p className="text-xs font-medium mb-2">Pagos pendientes</p>
+            {pagosPendientes.length === 0
+              ? <p className="text-[11px] gp-text-muted">Nada por pagar.</p>
+              : (
+                <div className="flex flex-col gap-1.5">
+                  {pagosPendientes.slice(0, 5).map((f) => {
+                    const vence = f.fechaVencimiento || f.fecha;
+                    const vencido = vence && daysUntil(vence) < 0;
+                    return (
+                      <button key={f.id} onClick={() => setModal({ item: f })} className="flex items-start justify-between gap-2 text-[11px] text-left">
+                        <span className="min-w-0">
+                          <span className="block truncate">{f.contactoId ? nombreContacto(f.contactoId) : f.concepto}</span>
+                          <span className="block" style={{ color: vencido ? "var(--red)" : "var(--muted)" }}>Vence {fmtFechaCorta(vence) || "—"}</span>
+                        </span>
+                        <span className="gp-mono gp-text-red shrink-0">{fmtMoney(montoBaseDe(f))}</span>
+                      </button>
+                    );
+                  })}
+                  {pagosPendientes.length > 5 && <p className="text-[10px] gp-text-muted">y {pagosPendientes.length - 5} más.</p>}
+                </div>
+              )}
+          </div>
+        </div>
+      </div>
 
       {modal && (
         <Modal title={modal.item.id ? "Editar movimiento" : "Nuevo movimiento"} onClose={() => setModal(null)}>
