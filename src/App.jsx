@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useLayoutEffect, useMemo, useRef, Suspense, lazy } from "react";
+import React, { useState, useEffect, useLayoutEffect, useMemo, useRef, Suspense, lazy, Fragment } from "react";
 import { createPortal } from "react-dom";
 import { supabase } from "./supabaseClient";
 import LoginScreenNuevo from "./components/auth/LoginScreen";
@@ -1339,6 +1339,68 @@ function IconBtn({ onClick, children, title }) {
   );
 }
 
+// Ítem del menú lateral que tiene hijos (hoy solo Finanzas, 4 oct 2026). El padre NO navega: es
+// un interruptor, y los hijos son los que llevan a algún lado. Si el padre también navegara
+// habría dos botones distintos apuntando a la misma pantalla —él y su hijo "Resumen"— y los dos
+// se pintarían activos a la vez.
+//
+// Se abre solo cuando ya estás en uno de los hijos, para no perder de vista dónde andas, y la
+// preferencia de abierto/cerrado se recuerda en este navegador.
+//
+// Colapsado (modo solo íconos en escritorio) no hay padre: se dibujan los hijos sueltos con su
+// tooltip. Esconderlos dejaría ocho pantallas sin forma de llegar, y el punto de ese modo es
+// ahorrar ancho, no ahorrar navegación.
+function NavItemConHijos({ item, view, colapsado, onIr }) {
+  const CLAVE = `arkeyone_nav_hijos_${item.id}`;
+  const hijoActivo = item.hijos.some((h) => h.id === view);
+  const [abiertoManual, setAbiertoManual] = useState(() => {
+    try { return localStorage.getItem(CLAVE) === "1"; } catch { return false; }
+  });
+  const abierto = hijoActivo || abiertoManual;
+  const alternar = () => {
+    const siguiente = !abierto;
+    setAbiertoManual(siguiente);
+    try { localStorage.setItem(CLAVE, siguiente ? "1" : "0"); } catch { /* modo privado */ }
+  };
+
+  if (colapsado) {
+    return (
+      <div className="hidden md:flex flex-col gap-0.5">
+        {item.hijos.map((h) => (
+          <button key={h.id} onClick={() => onIr(h.id)} title={`${item.label} · ${h.label}`}
+            className={`gp-navitem flex items-center justify-center px-2 py-2 ${view === h.id ? "gp-navitem-active" : ""}`}>
+            <h.icon size={15} />
+          </button>
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <button
+        onClick={alternar}
+        title={`${item.label} — ${abierto ? "ocultar" : "ver"} secciones`}
+        className={`gp-navitem flex items-center gap-2 px-3 py-2.5 md:py-2 text-[15px] text-left w-full ${hijoActivo ? "gp-navitem-active" : ""}`}
+      >
+        <item.icon size={15} />
+        <span className="flex-1">{item.label}</span>
+        {abierto ? <ChevronDown size={13} className="shrink-0" /> : <ChevronRight size={13} className="shrink-0" />}
+      </button>
+      {abierto && (
+        <div className="flex flex-col gap-0.5 mt-0.5 mb-1" style={{ marginLeft: 14, paddingLeft: 10, borderLeft: "1px solid var(--sidebar-borde, var(--border))" }}>
+          {item.hijos.map((h) => (
+            <button key={h.id} onClick={() => onIr(h.id)} title={h.label}
+              className={`gp-navitem flex items-center gap-2 px-2.5 py-2 md:py-1.5 text-[13px] text-left ${view === h.id ? "gp-navitem-active" : ""}`}>
+              <h.icon size={13} /> {h.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // OJO: esto es un <div>, no un <label>, y es a propósito. Cuando era <label>, el navegador
 // reenviaba CUALQUIER clic dentro del campo al primer botón que hubiera adentro — así que tocar
 // el texto de un chip (proyecto vinculado, tag, tipo de contacto) equivalía a picarle su "✕" y lo
@@ -2467,7 +2529,7 @@ function AvisoInstalarPWA() {
 // etc. Eso baja el nivel de protección a propósito y es una decisión del dueño del producto.
 const CANDADO_SENSIBLE_ACTIVO = false;
 
-const VISTAS_SENSIBLES_NO_RESTAURAR = ["finanzas", "facturas", "reportes", "estimaciones", "deudas", "apartados", "patrimonio", "activos", "documentos", "salud", "medicamentos", "actividades", "presupuesto"];
+const VISTAS_SENSIBLES_NO_RESTAURAR = ["finanzas", "fin-movimientos", "fin-cobrar", "fin-ingresos", "fin-egresos", "fin-recurrentes", "facturas", "reportes", "estimaciones", "deudas", "apartados", "patrimonio", "activos", "documentos", "salud", "medicamentos", "actividades", "presupuesto"];
 function leerVistaGuardadaTrasReload() {
   try {
     const cruda = localStorage.getItem("arkeyone_reload_vista");
@@ -2582,6 +2644,12 @@ const VIEW_TO_MODULO = {
   empresas: "empresas", proyectos: "proyectos", metas: "metas", pendientes: "pendientes",
   finanzas: "finanzas", facturas: "facturas", deudas: "deudas", apartados: "apartados",
   presupuesto: "presupuestos",
+  // Los hijos de Finanzas (4 oct 2026) son cortes de la MISMA tabla, así que todos piden el
+  // mismo permiso: quien tiene el módulo finanzas ve los siete, igual que antes veía la pantalla
+  // completa. Si algún día hace falta que alguien vea solo "Por cobrar", eso es un permiso nuevo
+  // y no se resuelve aquí.
+  "fin-movimientos": "finanzas", "fin-cobrar": "finanzas",
+  "fin-ingresos": "finanzas", "fin-egresos": "finanzas", "fin-recurrentes": "finanzas",
   patrimonio: "patrimonio", activos: "activos", documentos: "documentos",
   equipo: "equipo", contactos: "contactos", regalos: "regalos",
   redes: "redes_metricas", marketing: "campanas",
@@ -2878,7 +2946,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
   // reautenticación o actividad. Si se cumple el plazo, se pide contraseña de nuevo antes de
   // entrar/seguir en el módulo — independiente del cierre general de sesión a los 30 min.
   const SENSIBLE_MS = 15 * 60 * 1000;
-  const VISTAS_SENSIBLES = ["finanzas", "facturas", "reportes", "estimaciones", "deudas", "apartados", "patrimonio", "activos", "documentos", "salud", "medicamentos", "presupuesto"];
+  const VISTAS_SENSIBLES = ["finanzas", "fin-movimientos", "fin-cobrar", "fin-ingresos", "fin-egresos", "fin-recurrentes", "facturas", "reportes", "estimaciones", "deudas", "apartados", "patrimonio", "activos", "documentos", "salud", "medicamentos", "presupuesto"];
   // Sentinel para "solo desbloquear, sin navegar a ningún lado" — se usa cuando el candado
   // aparece dentro de otra pantalla (Centro de Mando, pestañas de un proyecto) para revelar
   // información ya enmascarada ahí mismo, en vez de mandar al usuario al módulo completo.
@@ -3719,8 +3787,19 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
       { id: "notas", label: "Notas", icon: StickyNote },
     ]},
     { label: "Dinero", items: [
-      { id: "finanzas", label: "Finanzas", icon: Wallet },
-      { id: "deudas", label: "Deudas", icon: AlertTriangle },
+      // Finanzas tiene hijos (4 oct 2026): cada uno es un corte distinto de la MISMA tabla
+      // `finanzas`, con otras columnas y otras acciones. "Por pagar" es el módulo que se llamaba
+      // Deudas — conserva su id para no romper los deep links de las notificaciones push.
+      { id: "finanzas", label: "Finanzas", icon: Wallet, hijos: [
+        { id: "finanzas", label: "Resumen", icon: BarChart3 },
+        { id: "fin-movimientos", label: "Movimientos", icon: ListChecks },
+        { id: "fin-cobrar", label: "Por cobrar", icon: ArrowDownCircle },
+        { id: "deudas", label: "Por pagar", icon: ArrowUpCircle },
+        { id: "fin-ingresos", label: "Ingresos", icon: TrendingUp },
+        { id: "fin-egresos", label: "Egresos", icon: TrendingDown },
+        { id: "fin-recurrentes", label: "Recurrentes", icon: Clock },
+        { id: "facturas", label: "Facturas e IVA", icon: Receipt },
+      ]},
       { id: "apartados", label: "Apartados", icon: PiggyBank },
       { id: "presupuesto", label: "Presupuesto", icon: Target },
       { id: "reportes", label: "Reportes", icon: PieChartIcon },
@@ -3759,16 +3838,22 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
     { id: "mi-calendario", label: "Mi calendario", icon: CalendarClock },
     { id: "mis-pagos", label: "Mis pagos", icon: Wallet },
   ]};
+  const puedeVer = (id) =>
+    (VIEW_TO_MODULO[id] && modulosPermitidos.includes(VIEW_TO_MODULO[id]))
+    // "medicamentos" ya no es un id de navGroups (es tab de Salud) — un cuidador sin
+    // módulo completo solo necesita ver "salud" para llegar a esa pestaña.
+    || (esCuidadorSinModuloCompleto && id === "salud");
   const navGroupsFiltrados = modulosPermitidos === null
     ? navGroups
     : [
         GRUPO_TRABAJO_COLABORADOR,
         ...navGroups
-          .map((g) => ({ ...g, items: g.items.filter((it) =>
-            (VIEW_TO_MODULO[it.id] && modulosPermitidos.includes(VIEW_TO_MODULO[it.id]))
-            // "medicamentos" ya no es un id de navGroups (es tab de Salud) — un cuidador sin
-            // módulo completo solo necesita ver "salud" para llegar a esa pestaña.
-            || (esCuidadorSinModuloCompleto && it.id === "salud")) }))
+          .map((g) => ({ ...g, items: g.items
+            // Un ítem con hijos sobrevive si al menos un hijo es visible, y se queda solo con
+            // esos: así un colaborador con permiso de Finanzas pero no de Facturas ve el módulo
+            // sin el hijo que no le toca, en vez de perder Finanzas entera.
+            .map((it) => (it.hijos ? { ...it, hijos: it.hijos.filter((h) => puedeVer(h.id)) } : it))
+            .filter((it) => (it.hijos ? it.hijos.length > 0 : puedeVer(it.id))) }))
           .filter((g) => g.items.length > 0),
       ];
 
@@ -3931,6 +4016,12 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
                 {mostrarItems && (
                   <div className="flex flex-col gap-0.5">
                     {itemsOrdenados.map((n) => (
+                      n.hijos ? (
+                        <NavItemConHijos
+                          key={n.id} item={n} view={view} colapsado={sidebarColapsado}
+                          onIr={(id) => { irAVista(id); setMobileNavOpen(false); }}
+                        />
+                      ) : (
                       <button
                         key={n.id}
                         onClick={() => { irAVista(n.id); setMobileNavOpen(false); }}
@@ -3949,6 +4040,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
                       >
                         <n.icon size={15} /> <span className={sidebarColapsado ? "md:hidden" : ""}>{n.label}</span>
                       </button>
+                      )
                     ))}
                   </div>
                 )}
@@ -4145,19 +4237,59 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
               onConsumirCrearAlEntrar={consumirAccionRapidaCrear}
             />
           )}
-          {(view === "finanzas" || view === "facturas") && (
-            <FinanzasYFacturas
-              key={view}
+          {/* Los siete hijos de Finanzas. Todos leen la misma tabla y comparten los mismos
+              handlers; lo que cambia es el corte que presenta cada uno. */}
+          {view === "finanzas" && (
+            <FinanzasResumen
               data={data}
-              tabInicial={view === "facturas" ? "facturas" : "movimientos"}
-              finanzasProps={{ onAdd: (i) => addItem("finanzas", i), onEdit: (id, p) => editItem("finanzas", id, p), onRemove: (id) => askDelete("finanzas", id), crearAlEntrar: accionRapidaCrear?.modulo === "finanzas" ? accionRapidaCrear : null, onConsumirCrearAlEntrar: consumirAccionRapidaCrear }}
-              facturasProps={{ onAdd: (i) => addItem("facturas", i), onEdit: (id, p) => editItem("facturas", id, p), onRemove: (id) => askDelete("facturas", id), onAddComentario: (i) => addItem("comentarios", i), onRemoveComentario: (id) => askDelete("comentarios", id), onAddFinanzas: (i) => addItem("finanzas", i) }}
+              onAdd={(i) => addItem("finanzas", i)} onEdit={(id, p) => editItem("finanzas", id, p)}
+              onIrAVista={irAVista}
+              crearAlEntrar={accionRapidaCrear?.modulo === "finanzas" ? accionRapidaCrear : null}
+              onConsumirCrearAlEntrar={consumirAccionRapidaCrear}
+            />
+          )}
+          {view === "fin-movimientos" && (
+            <FinanzasMovimientos
+              data={data}
+              onAdd={(i) => addItem("finanzas", i)} onEdit={(id, p) => editItem("finanzas", id, p)} onRemove={(id) => askDelete("finanzas", id)}
+              crearAlEntrar={accionRapidaCrear?.modulo === "finanzas" ? accionRapidaCrear : null}
+              onConsumirCrearAlEntrar={consumirAccionRapidaCrear}
+            />
+          )}
+          {view === "fin-cobrar" && (
+            <FinanzasPorCobrar
+              data={data}
+              onEdit={(id, p) => editItem("finanzas", id, p)} onRemove={(id) => askDelete("finanzas", id)}
+              onAddPago={(i) => addItem("pagosFinanzas", i)} onIrAVista={irAVista}
+            />
+          )}
+          {view === "fin-ingresos" && (
+            <FinanzasIngresos data={data} onEdit={(id, p) => editItem("finanzas", id, p)} onIrAVista={irAVista} />
+          )}
+          {view === "fin-egresos" && (
+            <FinanzasEgresos data={data} onEdit={(id, p) => editItem("finanzas", id, p)} onIrAVista={irAVista} />
+          )}
+          {view === "fin-recurrentes" && (
+            <FinanzasRecurrentes
+              data={data}
+              onAdd={(i) => addItem("finanzas", i)} onEdit={(id, p) => editItem("finanzas", id, p)} onRemove={(id) => askDelete("finanzas", id)}
+              onIrAVista={irAVista}
+            />
+          )}
+          {view === "facturas" && (
+            <Facturas
+              data={data}
+              onAdd={(i) => addItem("facturas", i)} onEdit={(id, p) => editItem("facturas", id, p)} onRemove={(id) => askDelete("facturas", id)}
+              onAddComentario={(i) => addItem("comentarios", i)} onRemoveComentario={(id) => askDelete("comentarios", id)}
+              onAddFinanzas={(i) => addItem("finanzas", i)}
             />
           )}
           {view === "reportes" && <Reportes data={data} />}
           {view === "estimaciones" && <Estimaciones data={data} />}
+          {/* "Por pagar" en el menú; el id sigue siendo "deudas" para no romper los deep links
+              de las notificaciones push, que mandan recurso_tabla="deudas". */}
           {view === "deudas" && (
-            <Deudas data={data} onAddFinanzas={(i) => addItem("finanzas", i)} onEditFinanzas={(id, p) => editItem("finanzas", id, p)} onRemoveFinanzas={(id) => askDelete("finanzas", id)} onAddPago={(i) => addItem("pagosFinanzas", i)} onCrearTarea={(t) => addItem("pendientes", t)} />
+            <Deudas data={data} onAddFinanzas={(i) => addItem("finanzas", i)} onEditFinanzas={(id, p) => editItem("finanzas", id, p)} onRemoveFinanzas={(id) => askDelete("finanzas", id)} onAddPago={(i) => addItem("pagosFinanzas", i)} onCrearTarea={(t) => addItem("pendientes", t)} onAddComentario={(i) => addItem("comentarios", i)} />
           )}
           {view === "apartados" && (
             <Apartados data={data} onAdd={(i) => addItem("apartados", i)} onEdit={(id, p) => editItem("apartados", id, p)} onRemove={(id) => askDelete("apartados", id)} onAportar={aportarApartado} onRetirar={retirarApartado} />
@@ -5605,7 +5737,7 @@ function Dashboard({ data: datosCompletos, empresas = [], contextos = [], contex
   data.finanzas.forEach((f) => {
     if (f.tipo === "Ingreso" && f.estatus === "Pendiente" && f.fechaVencimiento) {
       const dd = daysUntil(f.fechaVencimiento);
-      if (dd <= 7) acciones.push({ id: `cobro-${f.id}`, origen: "Cobro pendiente", tipo: "finanzas", texto: sensibleDesbloqueado ? (f.concepto || "Cobro") : "Cobro pendiente", sub: sensibleDesbloqueado ? fmtMoney(f.monto) : "🔒 Verifica tu contraseña para ver el detalle", dd, irA: () => setView("finanzas") });
+      if (dd <= 7) acciones.push({ id: `cobro-${f.id}`, origen: "Cobro pendiente", tipo: "finanzas", texto: sensibleDesbloqueado ? (f.concepto || "Cobro") : "Cobro pendiente", sub: sensibleDesbloqueado ? fmtMoney(f.monto) : "🔒 Verifica tu contraseña para ver el detalle", dd, irA: () => setView("fin-cobrar") });
     }
   });
   deudasDeFinanzas(data.finanzas).forEach((d) => {
@@ -5688,7 +5820,7 @@ function Dashboard({ data: datosCompletos, empresas = [], contextos = [], contex
     ...accionesProximas.map((a) => ({ id: a.id, texto: a.texto || a.origen, sub: a.sub, irA: a.irA, tono: a.dd === 0 ? "gold" : "muted", etiqueta: a.dd === 1 ? "Mañana" : `${a.dd}d` })),
     ...documentosProximos.map((d) => ({ id: `doc-${d.id}`, texto: sensibleDesbloqueado ? `Documento — ${d.nombre}` : "🔒 Documento próximo a vencer", irA: () => setView("documentos"), tono: "gold", etiqueta: `${daysUntil(d.fechaVencimiento)}d` })),
     ...activosProximos.map((a) => ({ id: `act-${a.id}`, texto: sensibleDesbloqueado ? `Renovación — ${a.nombre}` : "🔒 Renovación próxima", irA: () => setView("activos"), tono: "gold", etiqueta: `${daysUntil(a.fechaVencimiento)}d` })),
-    ...facturasPendientes.map((f) => ({ id: `fact-${f.id}`, texto: sensibleDesbloqueado ? `Factura — ${f.concepto || f.folio || "sin folio"}` : "🔒 Factura pendiente", irA: () => setView("finanzas"), tono: "red", etiqueta: "Factura" })),
+    ...facturasPendientes.map((f) => ({ id: `fact-${f.id}`, texto: sensibleDesbloqueado ? `Factura — ${f.concepto || f.folio || "sin folio"}` : "🔒 Factura pendiente", irA: () => setView("facturas"), tono: "red", etiqueta: "Factura" })),
     ...proyectosAtencion.map((p) => ({ id: `proy-${p.id}`, texto: p.nombre, sub: p.motivo, irA: () => onVerProyecto(p.id), tono: p.motivo.includes("vencid") ? "red" : "gold", etiqueta: "Proyecto" })),
     ...(medicamentosHoy.length > 0 ? [{ id: "medicamentos-hoy", texto: sensibleDesbloqueado ? `${medicamentosHoy.length} medicamento${medicamentosHoy.length === 1 ? "" : "s"} hoy` : "🔒 Medicamentos pendientes hoy", irA: () => setView("medicamentos"), tono: "muted", etiqueta: "Salud" }] : []),
     ...regalosProximos.map((r) => ({ id: `regalo-${r.id}`, texto: `${r.ocasion || "Atención"} — ${r.descripcion || "por comprar"}`, irA: () => setView("regalos"), tono: "gold", etiqueta: `${daysUntil(r.fecha)}d` })),
@@ -10153,21 +10285,101 @@ function fmtMesLabel(mes) {
   return txt.charAt(0).toUpperCase() + txt.slice(1);
 }
 
-// Envoltura de pestañas: Movimientos (Finanzas) y Facturas e IVA viven en la misma pantalla
-// ahora, porque son la misma cosa vista desde dos ángulos (dinero que entra/sale, y el papeleo
-// fiscal de ese dinero). No se tocó nada de la lógica interna de cada una, solo se agruparon.
-function FinanzasYFacturas({ data, tabInicial, finanzasProps, facturasProps }) {
-  const [tab, setTab] = useState(tabInicial || "movimientos");
+// Finanzas dejó de ser una pantalla sola (4 oct 2026). Es un módulo con hijos, cada uno con UNA
+// pregunta que contestar:
+//
+//   Resumen        ¿cómo voy este mes?        tarjetas y gráficas, sin tabla
+//   Movimientos    ¿dónde está ese registro?  el libro completo, todos los filtros
+//   Por cobrar     ¿quién me debe?            pendientes de ingreso, por antigüedad
+//   Por pagar      ¿qué debo?                 es el módulo Deudas, que ya existía
+//   Ingresos       ¿quién me paga?            un renglón por cliente, no por movimiento
+//   Egresos        ¿en qué se me va?          un renglón por categoría, contra su tope
+//   Recurrentes    ¿cuánto me cuesta el mes?  lo que se repite, mensualizado
+//   Facturas e IVA ¿qué papeleo falta?        ya existía
+//
+// Ninguno es una entidad nueva: TODOS leen la misma tabla `finanzas`. Lo que cambia entre ellos
+// es el corte, las columnas y las acciones — por eso son hijos y no módulos aparte, y por eso
+// Ingresos/Egresos agrupan en vez de solo filtrar: un filtro ya lo hacen los chips de Movimientos.
+//
+// La fila de pestañas "Movimientos / Facturas e IVA" que vivía aquí se quitó: ahora eso lo hace
+// el panel izquierdo, y tenerla además era hacer lo mismo dos veces.
+
+// Todas las cifras de un periodo en un solo lugar. Resumen las dibuja como tarjetas y gráficas;
+// los demás hijos reusan las que les toquen en su propio encabezado. Cualquier cambio en cómo se
+// calcula el dinero se hace aquí y los siete quedan consistentes.
+function cifrasFinanzas(finanzas, desde, hasta) {
+  const dentro = (f) => (!desde || (f.fecha || "") >= desde) && (!hasta || (f.fecha || "") <= hasta);
+  const enRango = (finanzas || []).filter(dentro);
+  const suma = (lista) => lista.reduce((t, f) => t + montoBaseDe(f), 0);
+
+  const ingresos = enRango.filter((f) => f.tipo === "Ingreso");
+  const egresos = enRango.filter((f) => f.tipo === "Egreso");
+  const ingresosTotal = suma(ingresos);
+  const egresosTotal = suma(egresos);
+  const egresosColaboradores = suma(egresos.filter((f) => f.categoria === "Pago a colaborador"));
+  const egresosProyecto = suma(egresos.filter((f) => f.proyectoId && f.categoria !== "Pago a colaborador"));
+
+  // El saldo son los movimientos ya liquidados; lo pendiente va aparte, en el proyectado.
+  const enCuentas = suma(ingresos.filter((f) => f.estatus === "Cobrado")) - suma(egresos.filter((f) => f.estatus === "Cobrado"));
+  const porCobrar = suma(ingresos.filter((f) => f.estatus !== "Cobrado"));
+  const porPagar = suma(egresos.filter((f) => f.estatus !== "Cobrado"));
+
+  return {
+    enRango, ingresos, egresos, suma,
+    ingresosTotal, egresosTotal,
+    ingresosDeCliente: suma(ingresos.filter((f) => f.contactoId)),
+    egresosColaboradores, egresosProyecto,
+    egresosGenerales: egresosTotal - egresosColaboradores - egresosProyecto,
+    enCuentas, porCobrar, porPagar,
+    proyectado: enCuentas + porCobrar - porPagar,
+  };
+}
+
+// Encabezado común de los hijos de Finanzas: migaja, título, para qué sirve la pantalla, selector
+// de periodo y los botones de la derecha. Está aquí para que los siete se vean como el mismo
+// módulo y no como siete pantallas que alguien pegó una junto a otra.
+function CabeceraFinanzas({ seccion, titulo, icono, subtitulo, rango, onRango, acciones }) {
   return (
-    <div>
-      <div className="flex gap-1 mb-4">
-        <button onClick={() => setTab("movimientos")} className={`text-sm px-3 py-1.5 rounded-full border ${tab === "movimientos" ? "gp-btn" : "gp-btn-ghost"}`}>Movimientos</button>
-        <button onClick={() => setTab("facturas")} className={`text-sm px-3 py-1.5 rounded-full border ${tab === "facturas" ? "gp-btn" : "gp-btn-ghost"}`}>Facturas e IVA</button>
+    <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
+      <div className="min-w-0">
+        <p className="text-[11px] gp-text-muted">Finanzas · {seccion}</p>
+        <h2 className="gp-serif text-2xl flex items-center gap-2">{icono} {titulo}</h2>
+        {subtitulo && <p className="text-sm gp-text-muted">{subtitulo}</p>}
       </div>
-      {tab === "movimientos" ? <Finanzas data={data} {...finanzasProps} /> : <Facturas data={data} {...facturasProps} />}
+      <div className="flex items-center gap-2 flex-wrap">
+        {onRango && (
+          <select className="gp-input text-xs py-1.5" style={{ width: "auto" }} value={rango} onChange={(e) => onRango(e.target.value)} aria-label="Periodo">
+            {RANGOS_MOVIMIENTOS.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
+          </select>
+        )}
+        {acciones}
+      </div>
     </div>
   );
 }
+
+// Días de atraso (positivo) o que faltan (negativo) para una fecha de vencimiento, con su texto
+// ya resuelto. Lo usan Por cobrar y Por pagar, que son las dos pantallas donde el atraso importa.
+function vencimientoDe(f) {
+  const fecha = f.fechaVencimiento || f.fecha || "";
+  if (!fecha) return { fecha: "", dias: null, texto: "Sin fecha", vencido: false };
+  const dias = -daysUntil(fecha);
+  if (dias > 0) return { fecha, dias, texto: `${dias} día${dias === 1 ? "" : "s"} de atraso`, vencido: true };
+  if (dias === 0) return { fecha, dias, texto: "Vence hoy", vencido: true };
+  return { fecha, dias, texto: `Faltan ${-dias} día${dias === -1 ? "" : "s"}`, vencido: false };
+}
+
+// Cubetas de antigüedad. Un saldo de hace tres meses no es lo mismo que uno de la semana pasada,
+// y es la primera cosa que se quiere ver en una lista de cobros.
+// Las cuatro parten el total sin huecos ni traslapes, y "vencido" es el MISMO criterio que usa
+// vencimientoDe() — si no, la tarjeta de "Vencido" y el chip de "Vencido" darían números
+// distintos por lo que vence hoy, que es un caso que cae justo en la frontera.
+const CUBETAS_ANTIGUEDAD = [
+  { id: "vencido", label: "Vencido", test: (v) => v.vencido },
+  { id: "semana", label: "Esta semana", test: (v) => !v.vencido && v.dias !== null && v.dias >= -7 },
+  { id: "mes", label: "Este mes", test: (v) => !v.vencido && v.dias !== null && v.dias < -7 && v.dias >= -30 },
+  { id: "despues", label: "Más adelante", test: (v) => v.dias === null || (!v.vencido && v.dias < -30) },
+];
 // Rangos de fecha del encabezado de Movimientos. "Este mes" es el de siempre; los demás están
 // para revisar un periodo cerrado sin tener que filtrar a mano.
 const RANGOS_MOVIMIENTOS = [
@@ -10250,7 +10462,10 @@ function TarjetaResumenFin({ etiqueta, valor, color, tinte, icono, variacion, fi
   );
 }
 
-function Finanzas({ data, onAdd, onEdit, onRemove, crearAlEntrar, onConsumirCrearAlEntrar }) {
+// MOVIMIENTOS — el libro completo. Es la pantalla a la que se entra a BUSCAR: cada registro, un
+// renglón, con todos los filtros encima. Las tarjetas y las gráficas que antes vivían aquí se
+// fueron a Resumen; aquí estorbaban, porque empujaban la tabla fuera de la primera pantalla.
+function FinanzasMovimientos({ data, onAdd, onEdit, onRemove, crearAlEntrar, onConsumirCrearAlEntrar }) {
   const [modal, setModal] = useState(null);
   const [importarAbierto, setImportarAbierto] = useState(false);
   const [rango, setRango] = useState("mes");
@@ -10263,7 +10478,6 @@ function Finanzas({ data, onAdd, onEdit, onRemove, crearAlEntrar, onConsumirCrea
   const [ordenDir, setOrdenDir] = useState("desc");
   const [pagina, setPagina] = useState(1);
   const [porPagina, setPorPagina] = useState(100);
-  const [menuFila, setMenuFila] = useState(null);
 
   const empty = { concepto: "", tipo: "Ingreso", proyectoId: "", contactoId: "", fecha: todayISO(), fechaVencimiento: "", monto: "", moneda: MONEDA_BASE, tipoCambio: 1, montoBase: "", categoria: "", forma: "Transferencia", estatus: "Cobrado", pautando: false, esRecurrente: false, frecuencia: "Mensual", fechaFin: "" };
 
@@ -10274,67 +10488,10 @@ function Finanzas({ data, onAdd, onEdit, onRemove, crearAlEntrar, onConsumirCrea
 
   const nombreProyecto = (id) => data.proyectos.find((p) => p.id === id)?.nombre || "—";
   const nombreContacto = (id) => data.contactos.find((c) => c.id === id)?.nombre || "—";
-  const hoy = todayISO();
 
   const { desde, hasta } = rangoFechas(rango);
-  const dentroDe = (f, d, h) => (!d || (f.fecha || "") >= d) && (!h || (f.fecha || "") <= h);
-  const enRango = (data.finanzas || []).filter((f) => dentroDe(f, desde, hasta));
-  const anterior = rangoAnterior(rango);
-  const enRangoPrevio = (data.finanzas || []).filter((f) => dentroDe(f, anterior.desde, anterior.hasta));
+  const { enRango } = cifrasFinanzas(data.finanzas, desde, hasta);
 
-  const suma = (lista) => lista.reduce((t, f) => t + montoBaseDe(f), 0);
-  const variacion = (ahora, antes) => (antes > 0 ? Math.round(((ahora - antes) / antes) * 100) : null);
-
-  // --- Las cuatro cifras de arriba ---
-  const ingresos = enRango.filter((f) => f.tipo === "Ingreso");
-  const egresos = enRango.filter((f) => f.tipo === "Egreso");
-  const ingresosTotal = suma(ingresos);
-  const egresosTotal = suma(egresos);
-  const ingresosDeCliente = suma(ingresos.filter((f) => f.contactoId));
-  const egresosColaboradores = suma(egresos.filter((f) => f.categoria === "Pago a colaborador"));
-  const egresosProyecto = suma(egresos.filter((f) => f.proyectoId && f.categoria !== "Pago a colaborador"));
-  const egresosGenerales = egresosTotal - egresosColaboradores - egresosProyecto;
-
-  // El saldo son los movimientos ya liquidados; lo pendiente va aparte, en el proyectado.
-  const enCuentas = suma(ingresos.filter((f) => f.estatus === "Cobrado")) - suma(egresos.filter((f) => f.estatus === "Cobrado"));
-  const porCobrar = suma(ingresos.filter((f) => f.estatus !== "Cobrado"));
-  const porPagar = suma(egresos.filter((f) => f.estatus !== "Cobrado"));
-  const proyectado = enCuentas + porCobrar - porPagar;
-
-  // --- Gráfica: ingresos y egresos por día, con el saldo acumulado encima ---
-  const porDia = {};
-  enRango.forEach((f) => {
-    const d = (f.fecha || "").slice(0, 10);
-    if (!d) return;
-    if (!porDia[d]) porDia[d] = { dia: d, ingreso: 0, egreso: 0 };
-    if (f.estatus !== "Cobrado") return;
-    if (f.tipo === "Ingreso") porDia[d].ingreso += montoBaseDe(f); else porDia[d].egreso += montoBaseDe(f);
-  });
-  let acum = 0;
-  const evolucion = Object.values(porDia).sort((a, b) => a.dia.localeCompare(b.dia)).map((d) => {
-    acum += d.ingreso - d.egreso;
-    return { ...d, saldo: acum, etiqueta: fmtFechaCorta(d.dia).slice(0, 6) };
-  });
-
-  // --- Dona de egresos por categoría ---
-  const porCategoria = {};
-  egresos.forEach((f) => {
-    const k = (f.categoria || "").trim() || "Otros";
-    porCategoria[k] = (porCategoria[k] || 0) + montoBaseDe(f);
-  });
-  const desglose = Object.entries(porCategoria)
-    .map(([nombre, monto]) => ({ nombre, monto, pct: egresosTotal ? Math.round((monto / egresosTotal) * 100) : 0 }))
-    .sort((a, b) => b.monto - a.monto);
-
-  // --- Paneles de la derecha ---
-  const cobrosPendientes = (data.finanzas || [])
-    .filter((f) => f.tipo === "Ingreso" && f.estatus !== "Cobrado")
-    .sort((a, b) => (a.fechaVencimiento || a.fecha || "9999").localeCompare(b.fechaVencimiento || b.fecha || "9999"));
-  const pagosPendientes = (data.finanzas || [])
-    .filter((f) => f.tipo === "Egreso" && f.estatus !== "Cobrado")
-    .sort((a, b) => (a.fechaVencimiento || a.fecha || "9999").localeCompare(b.fechaVencimiento || b.fecha || "9999"));
-
-  // --- Pestañas: son filtros rápidos sobre la misma lista ---
   const PESTANAS = [
     { id: "todos", label: "Todos", icono: <ListChecks size={13} /> },
     { id: "proyectos", label: "Proyectos", icono: <FolderKanban size={13} /> },
@@ -10376,7 +10533,7 @@ function Finanzas({ data, onAdd, onEdit, onRemove, crearAlEntrar, onConsumirCrea
   const paginaActual = Math.min(pagina, totalPaginas);
   const inicio = (paginaActual - 1) * porPagina;
   const enPagina = ordenados.slice(inicio, inicio + porPagina);
-  const toggleOrden = (key) => { if (orden === key) setOrdenDir((d) => (d === "asc" ? "desc" : "asc")); else { setOrden(key); setOrdenDir("desc"); } };
+  const toggleOrden = (key) => { if (orden === key) setOrdenDir((d) => (d === "asc" ? "desc" : "asc")); else { setOrden(key); setOrdenDir(key === "concepto" ? "asc" : "desc"); } };
 
   const columnasExport = [
     { label: "Fecha", get: (f) => f.fecha },
@@ -10386,20 +10543,15 @@ function Finanzas({ data, onAdd, onEdit, onRemove, crearAlEntrar, onConsumirCrea
     { label: "Categoría", get: (f) => f.categoria },
     { label: "Cliente / Colaborador", get: (f) => (f.contactoId ? nombreContacto(f.contactoId) : "") },
     { label: "Forma de pago", get: (f) => f.forma },
-    { label: "Monto (MXN)", get: (f) => montoBaseDe(f) },
-    { label: "Moneda original", get: (f) => (f.moneda && f.moneda !== MONEDA_BASE ? `${f.monto} ${f.moneda} @ ${Number(f.tipoCambio) || 1}` : "") },
+    { label: "Moneda", get: (f) => f.moneda || MONEDA_BASE },
+    { label: "Monto", get: (f) => f.monto },
+    { label: `Monto en ${MONEDA_BASE}`, get: (f) => montoBaseDe(f) },
     { label: "Estado", get: (f) => f.estatus },
   ];
 
   const nuevo = (preset) => setModal({ item: { ...empty, ...preset } });
-  const ACCIONES = [
-    { titulo: "Cobro del cliente", sub: "Registra un ingreso", icono: <Banknote size={16} className="gp-text-teal" />, tinte: "rgba(22,163,106,.14)", preset: { tipo: "Ingreso", categoria: "Proyectos", estatus: "Pendiente" } },
-    { titulo: "Gasto del proyecto", sub: "Viáticos, materiales, servicios…", icono: <Receipt size={16} className="gp-text-red" />, tinte: "rgba(229,72,77,.14)", preset: { tipo: "Egreso", categoria: "Viáticos" } },
-    { titulo: "Pago a colaborador", sub: "Registra un pago", icono: <HandCoins size={16} className="gp-text-gold" />, tinte: "rgba(212,175,55,.16)", preset: { tipo: "Egreso", categoria: "Pago a colaborador" } },
-  ];
-
   const chips = [
-    { id: "todos", label: "Todos los movimientos", n: enRango.filter(() => true).length },
+    { id: "todos", label: "Todos los movimientos", n: enRango.length },
     { id: "ingresos", label: "Ingresos", n: enRango.filter((f) => f.tipo === "Ingreso").length },
     { id: "egresos", label: "Egresos", n: enRango.filter((f) => f.tipo === "Egreso").length },
     { id: "colaboradores", label: "Pagos a colaboradores", n: enRango.filter((f) => f.categoria === "Pago a colaborador").length },
@@ -10407,23 +10559,17 @@ function Finanzas({ data, onAdd, onEdit, onRemove, crearAlEntrar, onConsumirCrea
 
   return (
     <div>
-      {/* Encabezado */}
-      <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
-        <div className="min-w-0">
-          <p className="text-[11px] gp-text-muted">Finanzas · Movimientos</p>
-          <h2 className="gp-serif text-2xl flex items-center gap-2"><Wallet size={20} className="gp-text-gold" /> Movimientos</h2>
-          <p className="text-sm gp-text-muted">Control de ingresos y gastos de todos tus proyectos, tareas y colaboradores.</p>
-        </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          <select className="gp-input text-xs py-1.5" style={{ width: "auto" }} value={rango} onChange={(e) => { setRango(e.target.value); setPagina(1); }} aria-label="Periodo">
-            {RANGOS_MOVIMIENTOS.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
-          </select>
+      <CabeceraFinanzas
+        seccion="Movimientos" titulo="Movimientos" icono={<ListChecks size={20} className="gp-text-gold" />}
+        subtitulo="Cada ingreso y cada gasto, uno por renglón. Es donde se busca."
+        rango={rango} onRango={(v) => { setRango(v); setPagina(1); }}
+        acciones={<>
           <button onClick={() => setImportarAbierto(true)} className="gp-btn-ghost px-3 py-1.5 text-xs rounded flex items-center gap-1.5"><Upload size={13} /> Importar</button>
           <button onClick={() => exportarFilasExcel(ordenados, columnasExport, "movimientos")} className="gp-btn-ghost px-3 py-1.5 text-xs rounded flex items-center gap-1.5"><Download size={13} /> Excel</button>
           <button onClick={() => exportarFilasPDF(ordenados, columnasExport, "movimientos", "Movimientos", `${desde || "inicio"} a ${hasta || "hoy"}`)} className="gp-btn-ghost px-3 py-1.5 text-xs rounded flex items-center gap-1.5"><Download size={13} /> PDF</button>
           <button onClick={() => nuevo({})} className="gp-btn px-3 py-1.5 text-sm rounded flex items-center gap-1.5"><Plus size={14} /> Nuevo movimiento</button>
-        </div>
-      </div>
+        </>}
+      />
 
       {/* Pestañas de filtro rápido */}
       <div className="flex items-center gap-1.5 flex-wrap mb-4">
@@ -10435,50 +10581,244 @@ function Finanzas({ data, onAdd, onEdit, onRemove, crearAlEntrar, onConsumirCrea
         ))}
       </div>
 
+      {/* Filtros de la tabla */}
+      <div className="flex flex-wrap items-center gap-2 mb-2">
+        <div className="relative flex-1" style={{ minWidth: 180, maxWidth: 300 }}>
+          <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 gp-text-muted" style={{ pointerEvents: "none" }} />
+          <input className="gp-input gp-buscador text-sm" style={{ paddingLeft: 32 }} placeholder="Buscar movimientos…"
+            value={busqueda} onChange={(e) => { setBusqueda(e.target.value); setPagina(1); }} />
+        </div>
+        <select className="gp-input text-xs py-1.5" style={{ width: "auto" }} value={filtroProyecto} onChange={(e) => { setFiltroProyecto(e.target.value); setPagina(1); }} aria-label="Proyecto">
+          <option value="Todos">Proyecto: Todos</option>
+          {ordenadosPorNombre(data.proyectos).map((pr) => <option key={pr.id} value={pr.id}>{pr.nombre}</option>)}
+        </select>
+        <select className="gp-input text-xs py-1.5" style={{ width: "auto" }} value={filtroCategoria} onChange={(e) => { setFiltroCategoria(e.target.value); setPagina(1); }} aria-label="Categoría">
+          <option value="Todas">Categoría: Todas</option>
+          {categorias.map((c) => <option key={c} value={c}>{c}</option>)}
+        </select>
+        <select className="gp-input text-xs py-1.5" style={{ width: "auto" }} value={filtroEstado} onChange={(e) => { setFiltroEstado(e.target.value); setPagina(1); }} aria-label="Estado">
+          <option value="Todos">Estado: Todos</option>
+          <option value="Cobrado">Cobrado / Pagado</option>
+          <option value="Pendiente">Pendiente</option>
+          <option value="Parcial">Parcial</option>
+        </select>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-1.5 mb-2">
+        {chips.map((c) => (
+          <button key={c.id} onClick={() => { setPestana(c.id); setPagina(1); }}
+            className={`text-[11px] px-2.5 py-1 rounded-full border inline-flex items-center gap-1.5 ${pestana === c.id ? "gp-btn" : "gp-btn-ghost"}`}>
+            {c.label} <span className="gp-mono">{c.n}</span>
+          </button>
+        ))}
+      </div>
+
+      {/* Tabla */}
+      <div className="gp-panel overflow-x-auto">
+        <table className="gp-table">
+          <thead>
+            <tr>
+              <Th label="Fecha" sortKey="fecha" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} />
+              <th>Tipo</th>
+              <Th label="Descripción" sortKey="concepto" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} />
+              <th className="hidden md:table-cell">Proyecto</th>
+              <th className="hidden md:table-cell">Categoría</th>
+              <th className="hidden lg:table-cell">Cliente / Colaborador</th>
+              <th className="hidden lg:table-cell">Forma de pago</th>
+              <Th label="Monto" sortKey="monto" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} />
+              <th>Estado</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {enPagina.map((f) => (
+              <tr key={f.id}>
+                <td className="gp-mono">{fmtFechaCorta(f.fecha)}</td>
+                <td>
+                  <Badge tone={f.tipo === "Ingreso" ? "teal" : "red"}>
+                    {f.categoria === "Pago a colaborador" ? "Pago colaborador" : f.tipo === "Ingreso" ? "Cobro cliente" : "Gasto"}
+                  </Badge>
+                </td>
+                <td style={{ maxWidth: 260 }}><span className="truncate block">{f.concepto}</span></td>
+                <td className="hidden md:table-cell gp-text-gold">{f.proyectoId ? nombreProyecto(f.proyectoId) : "—"}</td>
+                <td className="hidden md:table-cell gp-text-muted">{f.categoria || "—"}</td>
+                <td className="hidden lg:table-cell gp-text-muted">{f.contactoId ? nombreContacto(f.contactoId) : "—"}</td>
+                <td className="hidden lg:table-cell gp-text-muted">{f.forma || "—"}</td>
+                <td><MontoMovimiento f={f} /></td>
+                <td>
+                  <SelectGuardable
+                    valor={f.estatus || "Pendiente"} opciones={["Cobrado", "Pendiente", "Parcial"]}
+                    ariaLabel="Estado del movimiento" onGuardar={(nuevoEstado) => onEdit(f.id, { estatus: nuevoEstado })}
+                  />
+                </td>
+                <td>
+                  <div className="flex gap-1">
+                    <IconBtn title="Editar" onClick={() => setModal({ item: f })}><Pencil size={13} /></IconBtn>
+                    <IconBtn title="Eliminar" onClick={() => onRemove(f.id)}><Trash2 size={13} /></IconBtn>
+                  </div>
+                </td>
+              </tr>
+            ))}
+            {enPagina.length === 0 && (
+              <tr><td colSpan={10} className="text-center gp-text-muted py-8">Sin movimientos con estos filtros.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {ordenados.length > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-3 mt-3 text-xs gp-text-muted">
+          <span>Mostrando {inicio + 1}–{Math.min(inicio + porPagina, ordenados.length)} de {ordenados.length} movimiento{ordenados.length === 1 ? "" : "s"}</span>
+          <div className="flex items-center gap-2">
+            <label className="flex items-center gap-1.5">
+              Filas por página
+              <select className="gp-input text-xs py-1" style={{ width: "auto" }} value={porPagina} onChange={(e) => { setPorPagina(Number(e.target.value)); setPagina(1); }}>
+                {[12, 24, 50, 100, 250].map((n) => <option key={n} value={n}>{n}</option>)}
+              </select>
+            </label>
+            {totalPaginas > 1 && (
+              <div className="flex items-center gap-1">
+                <button onClick={() => setPagina(Math.max(1, paginaActual - 1))} disabled={paginaActual === 1} className="px-2 py-1 rounded gp-btn-ghost disabled:opacity-40" aria-label="Página anterior"><ChevronLeft size={13} /></button>
+                {paginasVisibles(paginaActual, totalPaginas).map((x, i) => (
+                  x === "…" ? <span key={`s-${i}`} className="px-1">…</span>
+                    : <button key={x} onClick={() => setPagina(x)} className={`px-2.5 py-1 rounded ${x === paginaActual ? "gp-btn" : "gp-btn-ghost"}`}>{x}</button>
+                ))}
+                <button onClick={() => setPagina(Math.min(totalPaginas, paginaActual + 1))} disabled={paginaActual === totalPaginas} className="px-2 py-1 rounded gp-btn-ghost disabled:opacity-40" aria-label="Página siguiente"><ChevronRight size={13} /></button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {modal && (
+        <Modal title={modal.item.id ? "Editar movimiento" : "Nuevo movimiento"} onClose={() => setModal(null)}>
+          <FinanzaForm item={modal.item} proyectos={data.proyectos} contactos={data.contactos} onSave={(v) => { modal.item.id ? onEdit(modal.item.id, v) : onAdd(v); setModal(null); }} />
+        </Modal>
+      )}
+
+      {importarAbierto && (
+        <Modal title="Importar movimientos desde Excel" onClose={() => setImportarAbierto(false)}>
+          <Suspense fallback={<p className="text-sm gp-text-muted">Cargando…</p>}>
+            <ImportarExcelModal tipo="finanzas" proyectos={data.proyectos} XLSX={XLSX} onImportarFila={(item) => onAdd(item)} onCerrar={() => setImportarAbierto(false)} />
+          </Suspense>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// RESUMEN — la pantalla a la que se entra a VER, no a buscar. Las cuatro cifras del periodo, cómo
+// se movieron, en qué se fue el dinero y qué falta cobrar o pagar. Sin tabla: para la lista están
+// Movimientos y los demás hijos, y a cada uno se llega desde aquí.
+function FinanzasResumen({ data, onAdd, onEdit, onIrAVista, crearAlEntrar, onConsumirCrearAlEntrar }) {
+  const [modal, setModal] = useState(null);
+  const [rango, setRango] = useState("mes");
+
+  const empty = { concepto: "", tipo: "Ingreso", proyectoId: "", contactoId: "", fecha: todayISO(), fechaVencimiento: "", monto: "", moneda: MONEDA_BASE, tipoCambio: 1, montoBase: "", categoria: "", forma: "Transferencia", estatus: "Cobrado", pautando: false, esRecurrente: false, frecuencia: "Mensual", fechaFin: "" };
+  useEffect(() => {
+    if (crearAlEntrar) { setModal({ item: { ...empty, ...(crearAlEntrar.preset || {}) } }); onConsumirCrearAlEntrar(); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [crearAlEntrar]);
+
+  const nombreContacto = (id) => data.contactos.find((c) => c.id === id)?.nombre || "—";
+  const { desde, hasta } = rangoFechas(rango);
+  const c = cifrasFinanzas(data.finanzas, desde, hasta);
+  const anterior = rangoAnterior(rango);
+  const previo = cifrasFinanzas(data.finanzas, anterior.desde, anterior.hasta);
+  const variacion = (ahora, antes) => (antes > 0 ? Math.round(((ahora - antes) / antes) * 100) : null);
+
+  // Gráfica: ingresos y egresos por día, con el saldo acumulado encima.
+  const porDia = {};
+  c.enRango.forEach((f) => {
+    const d = (f.fecha || "").slice(0, 10);
+    if (!d) return;
+    if (!porDia[d]) porDia[d] = { dia: d, ingreso: 0, egreso: 0 };
+    if (f.estatus !== "Cobrado") return;
+    if (f.tipo === "Ingreso") porDia[d].ingreso += montoBaseDe(f); else porDia[d].egreso += montoBaseDe(f);
+  });
+  let acum = 0;
+  const evolucion = Object.values(porDia).sort((a, b) => a.dia.localeCompare(b.dia)).map((d) => {
+    acum += d.ingreso - d.egreso;
+    return { ...d, saldo: acum, etiqueta: fmtFechaCorta(d.dia).slice(0, 6) };
+  });
+
+  const porCategoria = {};
+  c.egresos.forEach((f) => {
+    const k = (f.categoria || "").trim() || "Otros";
+    porCategoria[k] = (porCategoria[k] || 0) + montoBaseDe(f);
+  });
+  const desglose = Object.entries(porCategoria)
+    .map(([nombre, monto]) => ({ nombre, monto, pct: c.egresosTotal ? Math.round((monto / c.egresosTotal) * 100) : 0 }))
+    .sort((a, b) => b.monto - a.monto);
+
+  // Lo pendiente NO se filtra por periodo: un cobro de hace tres meses sigue pendiente hoy, y
+  // esconderlo porque no cae en el mes elegido sería justo lo contrario de lo que sirve aquí.
+  const cobrosPendientes = (data.finanzas || [])
+    .filter((f) => f.tipo === "Ingreso" && f.estatus !== "Cobrado")
+    .sort((a, b) => (a.fechaVencimiento || a.fecha || "9999").localeCompare(b.fechaVencimiento || b.fecha || "9999"));
+  const pagosPendientes = (data.finanzas || [])
+    .filter((f) => f.tipo === "Egreso" && f.estatus !== "Cobrado")
+    .sort((a, b) => (a.fechaVencimiento || a.fecha || "9999").localeCompare(b.fechaVencimiento || b.fecha || "9999"));
+  const totalPendiente = (lista) => lista.reduce((t, f) => t + montoBaseDe(f), 0);
+
+  const nuevo = (preset) => setModal({ item: { ...empty, ...preset } });
+  const ACCIONES = [
+    { titulo: "Cobro del cliente", sub: "Registra un ingreso", icono: <Banknote size={16} className="gp-text-teal" />, tinte: "rgba(22,163,106,.14)", preset: { tipo: "Ingreso", categoria: "Proyectos", estatus: "Pendiente" } },
+    { titulo: "Gasto del proyecto", sub: "Viáticos, materiales, servicios…", icono: <Receipt size={16} className="gp-text-red" />, tinte: "rgba(229,72,77,.14)", preset: { tipo: "Egreso", categoria: "Viáticos" } },
+    { titulo: "Pago a colaborador", sub: "Registra un pago", icono: <HandCoins size={16} className="gp-text-gold" />, tinte: "rgba(212,175,55,.16)", preset: { tipo: "Egreso", categoria: "Pago a colaborador" } },
+  ];
+
+  return (
+    <div>
+      <CabeceraFinanzas
+        seccion="Resumen" titulo="Resumen" icono={<Wallet size={20} className="gp-text-gold" />}
+        subtitulo="Cómo vas en el periodo: lo que entró, lo que salió y lo que falta."
+        rango={rango} onRango={setRango}
+        acciones={<button onClick={() => nuevo({})} className="gp-btn px-3 py-1.5 text-sm rounded flex items-center gap-1.5"><Plus size={14} /> Nuevo movimiento</button>}
+      />
+
       <div className="flex flex-col xl:flex-row gap-3 items-start">
         <div className="min-w-0 flex-1 w-full">
-          {/* Las cuatro cifras */}
           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2.5 mb-3">
             <TarjetaResumenFin
-              etiqueta="Ingresos totales" valor={ingresosTotal} color="var(--teal)" tinte="rgba(22,163,106,.14)" icono={<TrendingUp size={16} />}
-              variacion={variacion(ingresosTotal, suma(enRangoPrevio.filter((f) => f.tipo === "Ingreso")))}
+              etiqueta="Ingresos totales" valor={c.ingresosTotal} color="var(--teal)" tinte="rgba(22,163,106,.14)" icono={<TrendingUp size={16} />}
+              variacion={variacion(c.ingresosTotal, previo.ingresosTotal)}
               filas={[
-                { label: "De clientes", valor: ingresosDeCliente },
-                { label: "Otros ingresos", valor: ingresosTotal - ingresosDeCliente },
+                { label: "De clientes", valor: c.ingresosDeCliente },
+                { label: "Otros ingresos", valor: c.ingresosTotal - c.ingresosDeCliente },
               ]}
             />
             <TarjetaResumenFin
-              etiqueta="Egresos totales" valor={egresosTotal} color="var(--red)" tinte="rgba(229,72,77,.14)" icono={<TrendingDown size={16} />}
-              variacion={variacion(egresosTotal, suma(enRangoPrevio.filter((f) => f.tipo === "Egreso")))}
+              etiqueta="Egresos totales" valor={c.egresosTotal} color="var(--red)" tinte="rgba(229,72,77,.14)" icono={<TrendingDown size={16} />}
+              variacion={variacion(c.egresosTotal, previo.egresosTotal)}
               filas={[
-                { label: "Proyectos", valor: egresosProyecto },
-                { label: "Colaboradores", valor: egresosColaboradores },
-                { label: "Gastos generales", valor: egresosGenerales },
+                { label: "Proyectos", valor: c.egresosProyecto },
+                { label: "Colaboradores", valor: c.egresosColaboradores },
+                { label: "Gastos generales", valor: c.egresosGenerales },
               ]}
             />
             <TarjetaResumenFin
-              etiqueta="Saldo del periodo" valor={enCuentas} color={enCuentas >= 0 ? "#087CF5" : "var(--red)"}
-              tinte={enCuentas >= 0 ? "rgba(8,124,245,.14)" : "rgba(229,72,77,.14)"} icono={<Wallet size={16} />}
+              etiqueta="Saldo del periodo" valor={c.enCuentas} color={c.enCuentas >= 0 ? "#087CF5" : "var(--red)"}
+              tinte={c.enCuentas >= 0 ? "rgba(8,124,245,.14)" : "rgba(229,72,77,.14)"} icono={<Wallet size={16} />}
               variacion={null}
               filas={[
-                { label: "Ya liquidado", valor: enCuentas },
-                { label: "Por cobrar", valor: porCobrar, color: "var(--teal)" },
-                { label: "Por pagar", valor: porPagar, color: "var(--red)" },
+                { label: "Ya liquidado", valor: c.enCuentas },
+                { label: "Por cobrar", valor: c.porCobrar, color: "var(--teal)" },
+                { label: "Por pagar", valor: c.porPagar, color: "var(--red)" },
               ]}
             />
             <TarjetaResumenFin
-              destacada etiqueta="Resultado proyectado" valor={proyectado} color="var(--violeta, #8B5CF6)" tinte="rgba(139,92,246,.16)" icono={<Sparkles size={16} />}
+              destacada etiqueta="Resultado proyectado" valor={c.proyectado} color="var(--violeta, #8B5CF6)" tinte="rgba(139,92,246,.16)" icono={<Sparkles size={16} />}
               variacion={null}
               filas={[
-                { label: "Saldo del periodo", valor: enCuentas },
-                { label: "+ Por cobrar", valor: porCobrar, color: "var(--teal)" },
-                { label: "− Por pagar", valor: porPagar, color: "var(--red)" },
+                { label: "Saldo del periodo", valor: c.enCuentas },
+                { label: "+ Por cobrar", valor: c.porCobrar, color: "var(--teal)" },
+                { label: "− Por pagar", valor: c.porPagar, color: "var(--red)" },
               ]}
             />
           </div>
 
-          {/* Gráficas */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-2.5 mb-3">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-2.5">
             {evolucion.length > 0 && (
               <div className="gp-panel p-3.5">
                 <TituloBloque icono={<Activity size={15} />} color="#087CF5">Evolución de movimientos</TituloBloque>
@@ -10501,7 +10841,12 @@ function Finanzas({ data, onAdd, onEdit, onRemove, crearAlEntrar, onConsumirCrea
 
             {desglose.length > 0 && (
               <div className="gp-panel p-3.5">
-                <TituloBloque icono={<PieChartIcon size={15} />} color="var(--red)">Egresos por categoría</TituloBloque>
+                <TituloBloque
+                  icono={<PieChartIcon size={15} />} color="var(--red)"
+                  derecha={<button onClick={() => onIrAVista("fin-egresos")} className="text-[10px] gp-text-gold shrink-0">Ver detalle</button>}
+                >
+                  Egresos por categoría
+                </TituloBloque>
                 <div className="flex items-center gap-3">
                   <div style={{ width: 120, height: 120 }} className="shrink-0 relative">
                     <ResponsiveContainer width="100%" height="100%">
@@ -10513,7 +10858,7 @@ function Finanzas({ data, onAdd, onEdit, onRemove, crearAlEntrar, onConsumirCrea
                       </PieChart>
                     </ResponsiveContainer>
                     <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                      <span className="gp-mono text-xs">{fmtMoney(egresosTotal)}</span>
+                      <span className="gp-mono text-xs">{fmtMoney(c.egresosTotal)}</span>
                       <span className="text-[9px] gp-text-muted">Total</span>
                     </div>
                   </div>
@@ -10532,117 +10877,15 @@ function Finanzas({ data, onAdd, onEdit, onRemove, crearAlEntrar, onConsumirCrea
             )}
           </div>
 
-          {/* Filtros de la tabla */}
-          <div className="flex flex-wrap items-center gap-2 mb-2">
-            <div className="relative flex-1" style={{ minWidth: 180, maxWidth: 300 }}>
-              <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 gp-text-muted" style={{ pointerEvents: "none" }} />
-              <input className="gp-input gp-buscador text-sm" style={{ paddingLeft: 32 }} placeholder="Buscar movimientos…"
-                value={busqueda} onChange={(e) => { setBusqueda(e.target.value); setPagina(1); }} />
-            </div>
-            <select className="gp-input text-xs py-1.5" style={{ width: "auto" }} value={filtroProyecto} onChange={(e) => { setFiltroProyecto(e.target.value); setPagina(1); }} aria-label="Proyecto">
-              <option value="Todos">Proyecto: Todos</option>
-              {ordenadosPorNombre(data.proyectos).map((pr) => <option key={pr.id} value={pr.id}>{pr.nombre}</option>)}
-            </select>
-            <select className="gp-input text-xs py-1.5" style={{ width: "auto" }} value={filtroCategoria} onChange={(e) => { setFiltroCategoria(e.target.value); setPagina(1); }} aria-label="Categoría">
-              <option value="Todas">Categoría: Todas</option>
-              {categorias.map((c) => <option key={c} value={c}>{c}</option>)}
-            </select>
-            <select className="gp-input text-xs py-1.5" style={{ width: "auto" }} value={filtroEstado} onChange={(e) => { setFiltroEstado(e.target.value); setPagina(1); }} aria-label="Estado">
-              <option value="Todos">Estado: Todos</option>
-              <option value="Cobrado">Cobrado / Pagado</option>
-              <option value="Pendiente">Pendiente</option>
-              <option value="Parcial">Parcial</option>
-            </select>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-1.5 mb-2">
-            {chips.map((c) => (
-              <button key={c.id} onClick={() => { setPestana(c.id); setPagina(1); }}
-                className={`text-[11px] px-2.5 py-1 rounded-full border inline-flex items-center gap-1.5 ${pestana === c.id ? "gp-btn" : "gp-btn-ghost"}`}>
-                {c.label} <span className="gp-mono">{c.n}</span>
-              </button>
-            ))}
-          </div>
-
-          {/* Tabla */}
-          <div className="gp-panel overflow-x-auto">
-            <table className="gp-table">
-              <thead>
-                <tr>
-                  <Th label="Fecha" sortKey="fecha" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} />
-                  <th>Tipo</th>
-                  <Th label="Descripción" sortKey="concepto" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} />
-                  <th className="hidden md:table-cell">Proyecto</th>
-                  <th className="hidden md:table-cell">Categoría</th>
-                  <th className="hidden lg:table-cell">Cliente / Colaborador</th>
-                  <th className="hidden lg:table-cell">Forma de pago</th>
-                  <Th label="Monto" sortKey="monto" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} />
-                  <th>Estado</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {enPagina.map((f) => (
-                  <tr key={f.id}>
-                    <td className="gp-mono">{fmtFechaCorta(f.fecha)}</td>
-                    <td>
-                      <Badge tone={f.tipo === "Ingreso" ? "teal" : "red"}>
-                        {f.categoria === "Pago a colaborador" ? "Pago colaborador" : f.tipo === "Ingreso" ? "Cobro cliente" : "Gasto"}
-                      </Badge>
-                    </td>
-                    <td style={{ maxWidth: 260 }}><span className="truncate block">{f.concepto}</span></td>
-                    <td className="hidden md:table-cell gp-text-gold">{f.proyectoId ? nombreProyecto(f.proyectoId) : "—"}</td>
-                    <td className="hidden md:table-cell gp-text-muted">{f.categoria || "—"}</td>
-                    <td className="hidden lg:table-cell gp-text-muted">{f.contactoId ? nombreContacto(f.contactoId) : "—"}</td>
-                    <td className="hidden lg:table-cell gp-text-muted">{f.forma || "—"}</td>
-                    <td><MontoMovimiento f={f} /></td>
-                    <td>
-                      <SelectGuardable
-                        valor={f.estatus || "Pendiente"} opciones={["Cobrado", "Pendiente", "Parcial"]}
-                        ariaLabel="Estado del movimiento" onGuardar={(nuevoEstado) => onEdit(f.id, { estatus: nuevoEstado })}
-                      />
-                    </td>
-                    <td>
-                      <div className="flex gap-1">
-                        <IconBtn title="Editar" onClick={() => setModal({ item: f })}><Pencil size={13} /></IconBtn>
-                        <IconBtn title="Eliminar" onClick={() => onRemove(f.id)}><Trash2 size={13} /></IconBtn>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-                {enPagina.length === 0 && (
-                  <tr><td colSpan={10} className="text-center gp-text-muted py-8">Sin movimientos con estos filtros.</td></tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-
-          {ordenados.length > 0 && (
-            <div className="flex flex-wrap items-center justify-between gap-3 mt-3 text-xs gp-text-muted">
-              <span>Mostrando {inicio + 1}–{Math.min(inicio + porPagina, ordenados.length)} de {ordenados.length} movimiento{ordenados.length === 1 ? "" : "s"}</span>
-              <div className="flex items-center gap-2">
-                <label className="flex items-center gap-1.5">
-                  Filas por página
-                  <select className="gp-input text-xs py-1" style={{ width: "auto" }} value={porPagina} onChange={(e) => { setPorPagina(Number(e.target.value)); setPagina(1); }}>
-                    {[12, 24, 50, 100, 250].map((n) => <option key={n} value={n}>{n}</option>)}
-                  </select>
-                </label>
-                {totalPaginas > 1 && (
-                  <div className="flex items-center gap-1">
-                    <button onClick={() => setPagina(Math.max(1, paginaActual - 1))} disabled={paginaActual === 1} className="px-2 py-1 rounded gp-btn-ghost disabled:opacity-40" aria-label="Página anterior"><ChevronLeft size={13} /></button>
-                    {paginasVisibles(paginaActual, totalPaginas).map((x, i) => (
-                      x === "…" ? <span key={`s-${i}`} className="px-1">…</span>
-                        : <button key={x} onClick={() => setPagina(x)} className={`px-2.5 py-1 rounded ${x === paginaActual ? "gp-btn" : "gp-btn-ghost"}`}>{x}</button>
-                    ))}
-                    <button onClick={() => setPagina(Math.min(totalPaginas, paginaActual + 1))} disabled={paginaActual === totalPaginas} className="px-2 py-1 rounded gp-btn-ghost disabled:opacity-40" aria-label="Página siguiente"><ChevronRight size={13} /></button>
-                  </div>
-                )}
-              </div>
+          {evolucion.length === 0 && desglose.length === 0 && (
+            <div className="gp-panel p-8 text-center">
+              <p className="text-sm gp-text-muted">No hay movimientos en este periodo.</p>
+              <button onClick={() => nuevo({})} className="gp-btn px-3 py-1.5 text-sm rounded mt-3 inline-flex items-center gap-1.5"><Plus size={14} /> Registrar el primero</button>
             </div>
           )}
         </div>
 
-        {/* Columna derecha: lo que hay que hacer */}
+        {/* Columna derecha: lo que hay que hacer. Cada bloque lleva a su propio hijo. */}
         <div className="w-full xl:w-[300px] shrink-0 flex flex-col gap-2.5">
           <div className="gp-panel p-3.5">
             <TituloBloque icono={<Zap size={15} />} color="var(--gold)">Acciones rápidas</TituloBloque>
@@ -10668,24 +10911,28 @@ function Finanzas({ data, onAdd, onEdit, onRemove, crearAlEntrar, onConsumirCrea
               Cobros pendientes
             </TituloBloque>
             {cobrosPendientes.length === 0
-              ? <p className="text-[11px] gp-text-muted">Nada por cobrar. </p>
+              ? <p className="text-[11px] gp-text-muted">Nada por cobrar.</p>
               : (
-                <div className="flex flex-col gap-1.5">
-                  {cobrosPendientes.slice(0, 5).map((f) => {
-                    const vence = f.fechaVencimiento || f.fecha;
-                    const vencido = vence && daysUntil(vence) < 0;
-                    return (
-                      <button key={f.id} onClick={() => setModal({ item: f })} className="flex items-start justify-between gap-2 text-[11px] text-left">
-                        <span className="min-w-0">
-                          <span className="block truncate">{f.concepto}</span>
-                          <span className="block" style={{ color: vencido ? "var(--red)" : "var(--muted)" }}>Vence {fmtFechaCorta(vence) || "—"}</span>
-                        </span>
-                        <span className="gp-mono gp-text-teal shrink-0">{fmtMoney(montoBaseDe(f))}</span>
-                      </button>
-                    );
-                  })}
-                  {cobrosPendientes.length > 5 && <p className="text-[10px] gp-text-muted">y {cobrosPendientes.length - 5} más.</p>}
-                </div>
+                <>
+                  <p className="gp-serif text-lg gp-text-teal mb-1.5">{fmtMoney(totalPendiente(cobrosPendientes))}</p>
+                  <div className="flex flex-col gap-1.5">
+                    {cobrosPendientes.slice(0, 5).map((f) => {
+                      const v = vencimientoDe(f);
+                      return (
+                        <button key={f.id} onClick={() => setModal({ item: f })} className="flex items-start justify-between gap-2 text-[11px] text-left">
+                          <span className="min-w-0">
+                            <span className="block truncate">{f.contactoId ? nombreContacto(f.contactoId) : f.concepto}</span>
+                            <span className="block" style={{ color: v.vencido ? "var(--red)" : "var(--muted)" }}>{v.texto}</span>
+                          </span>
+                          <span className="gp-mono gp-text-teal shrink-0">{fmtMoney(montoBaseDe(f))}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <button onClick={() => onIrAVista("fin-cobrar")} className="text-[10px] gp-text-gold mt-2 flex items-center gap-1">
+                    Ver los {cobrosPendientes.length} <ArrowRight size={10} />
+                  </button>
+                </>
               )}
           </div>
 
@@ -10699,22 +10946,26 @@ function Finanzas({ data, onAdd, onEdit, onRemove, crearAlEntrar, onConsumirCrea
             {pagosPendientes.length === 0
               ? <p className="text-[11px] gp-text-muted">Nada por pagar.</p>
               : (
-                <div className="flex flex-col gap-1.5">
-                  {pagosPendientes.slice(0, 5).map((f) => {
-                    const vence = f.fechaVencimiento || f.fecha;
-                    const vencido = vence && daysUntil(vence) < 0;
-                    return (
-                      <button key={f.id} onClick={() => setModal({ item: f })} className="flex items-start justify-between gap-2 text-[11px] text-left">
-                        <span className="min-w-0">
-                          <span className="block truncate">{f.contactoId ? nombreContacto(f.contactoId) : f.concepto}</span>
-                          <span className="block" style={{ color: vencido ? "var(--red)" : "var(--muted)" }}>Vence {fmtFechaCorta(vence) || "—"}</span>
-                        </span>
-                        <span className="gp-mono gp-text-red shrink-0">{fmtMoney(montoBaseDe(f))}</span>
-                      </button>
-                    );
-                  })}
-                  {pagosPendientes.length > 5 && <p className="text-[10px] gp-text-muted">y {pagosPendientes.length - 5} más.</p>}
-                </div>
+                <>
+                  <p className="gp-serif text-lg gp-text-red mb-1.5">{fmtMoney(totalPendiente(pagosPendientes))}</p>
+                  <div className="flex flex-col gap-1.5">
+                    {pagosPendientes.slice(0, 5).map((f) => {
+                      const v = vencimientoDe(f);
+                      return (
+                        <button key={f.id} onClick={() => setModal({ item: f })} className="flex items-start justify-between gap-2 text-[11px] text-left">
+                          <span className="min-w-0">
+                            <span className="block truncate">{f.contactoId ? nombreContacto(f.contactoId) : f.concepto}</span>
+                            <span className="block" style={{ color: v.vencido ? "var(--red)" : "var(--muted)" }}>{v.texto}</span>
+                          </span>
+                          <span className="gp-mono gp-text-red shrink-0">{fmtMoney(montoBaseDe(f))}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <button onClick={() => onIrAVista("deudas")} className="text-[10px] gp-text-gold mt-2 flex items-center gap-1">
+                    Ver los {pagosPendientes.length} <ArrowRight size={10} />
+                  </button>
+                </>
               )}
           </div>
         </div>
@@ -10725,12 +10976,724 @@ function Finanzas({ data, onAdd, onEdit, onRemove, crearAlEntrar, onConsumirCrea
           <FinanzaForm item={modal.item} proyectos={data.proyectos} contactos={data.contactos} onSave={(v) => { modal.item.id ? onEdit(modal.item.id, v) : onAdd(v); setModal(null); }} />
         </Modal>
       )}
+    </div>
+  );
+}
 
-      {importarAbierto && (
-        <Modal title="Importar movimientos desde Excel" onClose={() => setImportarAbierto(false)}>
-          <Suspense fallback={<p className="text-sm gp-text-muted">Cargando…</p>}>
-            <ImportarExcelModal tipo="finanzas" proyectos={data.proyectos} XLSX={XLSX} onImportarFila={(item) => onAdd(item)} onCerrar={() => setImportarAbierto(false)} />
-          </Suspense>
+// POR COBRAR — quién me debe. Es el espejo de Por pagar (el módulo Deudas), que existía desde el
+// principio mientras que del lado del dinero que ENTRA no había nada: lo pendiente de cobro solo
+// se veía como un total en una tarjeta, sin poder abrirlo.
+//
+// No lleva selector de periodo a propósito: un cobro de hace tres meses sigue pendiente hoy, y
+// filtrarlo por mes lo esconde justo cuando más urge. El corte aquí es la ANTIGÜEDAD.
+function FinanzasPorCobrar({ data, onEdit, onRemove, onAddPago, onIrAVista }) {
+  const [modal, setModal] = useState(null); // { item } | { item, paso:"cobrar" }
+  const [cubeta, setCubeta] = useState("todas");
+  const [busqueda, setBusqueda] = useState("");
+  const [orden, setOrden] = useState("vencimiento");
+  const [ordenDir, setOrdenDir] = useState("asc");
+  const toggleOrden = (key) => { if (orden === key) setOrdenDir((d) => (d === "asc" ? "desc" : "asc")); else { setOrden(key); setOrdenDir("asc"); } };
+
+  const nombreProyecto = (id) => data.proyectos.find((p) => p.id === id)?.nombre || "—";
+  const contactoDe = (id) => data.contactos.find((c) => c.id === id);
+  const nombreContacto = (id) => contactoDe(id)?.nombre || "";
+
+  const pendientes = (data.finanzas || []).filter((f) => f.tipo === "Ingreso" && f.estatus !== "Cobrado");
+  // Saldo real: el monto menos lo que ya se abonó en pagos_finanzas (mismo mecanismo que Deudas).
+  const yaPagado = (id) => (data.pagosFinanzas || []).filter((p) => p.finanzasId === id).reduce((s, p) => s + (Number(p.monto) || 0), 0);
+  const saldoDe = (f) => Math.max(0, montoBaseDe(f) - yaPagado(f.id));
+
+  const conVencimiento = pendientes.map((f) => ({ f, v: vencimientoDe(f), saldo: saldoDe(f) }));
+  const totalPorCobrar = conVencimiento.reduce((t, x) => t + x.saldo, 0);
+  const vencido = conVencimiento.filter((x) => x.v.vencido).reduce((t, x) => t + x.saldo, 0);
+  const porVencer = conVencimiento.filter((x) => !x.v.vencido && x.v.dias !== null && x.v.dias >= -30).reduce((t, x) => t + x.saldo, 0);
+  const clientesQueDeben = new Set(pendientes.filter((f) => f.contactoId).map((f) => f.contactoId)).size;
+
+  const cubetas = CUBETAS_ANTIGUEDAD.map((cu) => ({
+    ...cu,
+    n: conVencimiento.filter((x) => cu.test(x.v)).length,
+    monto: conVencimiento.filter((x) => cu.test(x.v)).reduce((t, x) => t + x.saldo, 0),
+  }));
+
+  const enCubeta = cubeta === "todas"
+    ? conVencimiento
+    : conVencimiento.filter((x) => CUBETAS_ANTIGUEDAD.find((cu) => cu.id === cubeta)?.test(x.v));
+  const buscados = filtrarPorBusqueda(enCubeta, busqueda, [
+    (x) => x.f.concepto, (x) => nombreContacto(x.f.contactoId), (x) => nombreProyecto(x.f.proyectoId),
+  ]);
+  const camposOrden = {
+    vencimiento: { get: (x) => x.v.fecha || "9999-12-31", tipo: "fecha" },
+    cliente: { get: (x) => nombreContacto(x.f.contactoId) || "zzz", tipo: "texto" },
+    monto: { get: (x) => x.saldo, tipo: "numero" },
+  };
+  const ordenados = ordenarLista(buscados, orden, camposOrden, ordenDir);
+
+  const columnasExport = [
+    { label: "Cliente", get: (x) => nombreContacto(x.f.contactoId) },
+    { label: "Concepto", get: (x) => x.f.concepto },
+    { label: "Proyecto", get: (x) => (x.f.proyectoId ? nombreProyecto(x.f.proyectoId) : "") },
+    { label: "Vence", get: (x) => x.v.fecha },
+    { label: "Antigüedad", get: (x) => x.v.texto },
+    { label: "Monto", get: (x) => montoBaseDe(x.f) },
+    { label: "Saldo por cobrar", get: (x) => x.saldo },
+    { label: "Estado", get: (x) => x.f.estatus },
+  ];
+
+  // Registra un abono y recalcula el estatus: si el saldo llega a cero queda Cobrado, si no Parcial.
+  const registrarCobro = async (f, { monto, fecha }) => {
+    await onAddPago({ id: uid(), finanzasId: f.id, fecha, monto, comentario: "" });
+    const restante = saldoDe(f) - monto;
+    onEdit(f.id, { estatus: restante <= 0 ? "Cobrado" : "Parcial" });
+    setModal(null);
+  };
+
+  // Recordatorio al cliente: WhatsApp si lo tiene (es lo que de verdad se usa), si no correo. El
+  // texto va prellenado pero se manda desde la app del teléfono, nunca desde aquí.
+  const recordatorio = (f) => {
+    const c = contactoDe(f.contactoId);
+    if (!c) return null;
+    const v = vencimientoDe(f);
+    const texto = encodeURIComponent(
+      `Hola${c.nombre ? ` ${c.nombre.split(" ")[0]}` : ""}, te escribo por el pago de ${f.concepto || "nuestro servicio"} por ${fmtMoney(montoBaseDe(f))}${v.fecha ? ` con vencimiento ${fmtFechaCorta(v.fecha)}` : ""}. ¿Me confirmas cuándo lo podemos ver? Gracias.`
+    );
+    if (c.whatsapp) return { url: `https://wa.me/${(c.whatsapp || "").replace(/\D/g, "")}?text=${texto}`, tipo: "whatsapp" };
+    if (c.correo) return { url: `mailto:${c.correo}?subject=${encodeURIComponent(`Pago pendiente — ${f.concepto || ""}`)}&body=${texto}`, tipo: "correo" };
+    return null;
+  };
+
+  return (
+    <div>
+      <CabeceraFinanzas
+        seccion="Por cobrar" titulo="Por cobrar" icono={<ArrowDownCircle size={20} className="gp-text-teal" />}
+        subtitulo="Quién te debe, desde cuándo y cuánto. Sin filtro de periodo: lo pendiente no caduca."
+        acciones={<>
+          <button onClick={() => exportarFilasExcel(ordenados, columnasExport, "por-cobrar")} className="gp-btn-ghost px-3 py-1.5 text-xs rounded flex items-center gap-1.5"><Download size={13} /> Excel</button>
+          <button onClick={() => exportarFilasPDF(ordenados, columnasExport, "por-cobrar", "Por cobrar", `Al ${fmtFechaCorta(todayISO())}`)} className="gp-btn-ghost px-3 py-1.5 text-xs rounded flex items-center gap-1.5"><Download size={13} /> PDF</button>
+          <button onClick={() => onIrAVista("fin-movimientos")} className="gp-btn-ghost px-3 py-1.5 text-xs rounded flex items-center gap-1.5"><ListChecks size={13} /> Ver movimientos</button>
+        </>}
+      />
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2.5 mb-3">
+        <TarjetaResumenFin etiqueta="Total por cobrar" valor={totalPorCobrar} color="var(--teal)" tinte="rgba(22,163,106,.14)" icono={<ArrowDownCircle size={16} />} />
+        <TarjetaResumenFin etiqueta="Vencido" valor={vencido} color="var(--red)" tinte="rgba(229,72,77,.14)" icono={<AlertTriangle size={16} />} />
+        <TarjetaResumenFin etiqueta="Vence en 30 días" valor={porVencer} color="var(--gold)" tinte="rgba(212,175,55,.16)" icono={<Clock size={16} />} />
+        <div className="gp-panel p-3.5">
+          <div className="flex items-start justify-between gap-2">
+            <p className="text-xs font-medium">Clientes que deben</p>
+            <span className="shrink-0 inline-flex items-center justify-center rounded-lg" style={{ color: "#087CF5", background: "rgba(8,124,245,.14)", width: 30, height: 30 }}><Contact size={16} /></span>
+          </div>
+          <p className="gp-serif text-2xl mt-1" style={{ color: "#087CF5" }}>{clientesQueDeben}</p>
+          <p className="text-[11px] gp-text-muted mt-0.5">{pendientes.length} cobro{pendientes.length === 1 ? "" : "s"} pendiente{pendientes.length === 1 ? "" : "s"}</p>
+        </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2 mb-2">
+        <div className="relative flex-1" style={{ minWidth: 180, maxWidth: 300 }}>
+          <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 gp-text-muted" style={{ pointerEvents: "none" }} />
+          <input className="gp-input gp-buscador text-sm" style={{ paddingLeft: 32 }} placeholder="Buscar cliente o concepto…" value={busqueda} onChange={(e) => setBusqueda(e.target.value)} />
+        </div>
+        <button onClick={() => setCubeta("todas")} className={`text-[11px] px-2.5 py-1 rounded-full border ${cubeta === "todas" ? "gp-btn" : "gp-btn-ghost"}`}>
+          Todas <span className="gp-mono">{conVencimiento.length}</span>
+        </button>
+        {cubetas.map((cu) => (
+          <button key={cu.id} onClick={() => setCubeta(cu.id)} className={`text-[11px] px-2.5 py-1 rounded-full border inline-flex items-center gap-1.5 ${cubeta === cu.id ? "gp-btn" : "gp-btn-ghost"}`}>
+            {cu.label} <span className="gp-mono">{cu.n}</span>
+            {cu.monto > 0 && <span className="gp-text-muted">{fmtMoney(cu.monto)}</span>}
+          </button>
+        ))}
+      </div>
+
+      <div className="gp-panel overflow-x-auto">
+        <table className="gp-table">
+          <thead>
+            <tr>
+              <Th label="Cliente" sortKey="cliente" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} />
+              <th>Concepto</th>
+              <th className="hidden md:table-cell">Proyecto</th>
+              <Th label="Vence" sortKey="vencimiento" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} />
+              <th>Antigüedad</th>
+              <Th label="Por cobrar" sortKey="monto" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} />
+              <th>Estado</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {ordenados.map(({ f, v, saldo }) => {
+              const rec = recordatorio(f);
+              const abonado = montoBaseDe(f) - saldo;
+              return (
+                <tr key={f.id}>
+                  <td>{f.contactoId ? nombreContacto(f.contactoId) : <span className="gp-text-muted">Sin cliente</span>}</td>
+                  <td style={{ maxWidth: 220 }}><span className="truncate block">{f.concepto}</span></td>
+                  <td className="hidden md:table-cell gp-text-gold">{f.proyectoId ? nombreProyecto(f.proyectoId) : "—"}</td>
+                  <td className="gp-mono">{v.fecha ? fmtFechaCorta(v.fecha) : "—"}</td>
+                  <td><span className="text-xs" style={{ color: v.vencido ? "var(--red)" : "var(--muted)" }}>{v.texto}</span></td>
+                  <td>
+                    <span className="gp-mono gp-text-teal">{fmtMoney(saldo)}</span>
+                    {abonado > 0 && <span className="block text-[10px] gp-text-muted">de {fmtMoney(montoBaseDe(f))}</span>}
+                  </td>
+                  <td><Badge tone={f.estatus === "Parcial" ? "gold" : "muted"}>{f.estatus || "Pendiente"}</Badge></td>
+                  <td>
+                    <div className="flex gap-1">
+                      <IconBtn title="Registrar cobro" onClick={() => setModal({ item: f, paso: "cobrar" })}><Banknote size={13} /></IconBtn>
+                      {rec && (
+                        <a href={rec.url} target="_blank" rel="noopener noreferrer" title={rec.tipo === "whatsapp" ? "Recordar por WhatsApp" : "Recordar por correo"}
+                          className="p-1.5 rounded gp-btn-ghost" style={{ lineHeight: 0, color: rec.tipo === "whatsapp" ? "#25D366" : "var(--gold)" }}>
+                          {rec.tipo === "whatsapp" ? <MessageCircle size={13} /> : <Mail size={13} />}
+                        </a>
+                      )}
+                      <IconBtn title="Editar" onClick={() => setModal({ item: f })}><Pencil size={13} /></IconBtn>
+                      <IconBtn title="Eliminar" onClick={() => onRemove(f.id)}><Trash2 size={13} /></IconBtn>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+            {ordenados.length === 0 && (
+              <tr><td colSpan={8} className="text-center gp-text-muted py-8">
+                {pendientes.length === 0 ? "No hay nada por cobrar. " : "Sin resultados con estos filtros."}
+              </td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {modal && !modal.paso && (
+        <Modal title="Editar cobro" onClose={() => setModal(null)}>
+          <FinanzaForm item={modal.item} proyectos={data.proyectos} contactos={data.contactos} onSave={(v) => { onEdit(modal.item.id, v); setModal(null); }} />
+        </Modal>
+      )}
+      {modal && modal.paso === "cobrar" && (
+        <Modal title={`Registrar cobro — ${modal.item.concepto || ""}`} onClose={() => setModal(null)}>
+          <PagoDeudaForm
+            saldoPendiente={saldoDe(modal.item)}
+            textoSaldado="Con este cobro la cuenta queda liquidada."
+            etiquetaBoton="Registrar cobro"
+            onPagar={(p) => registrarCobro(modal.item, p)}
+          />
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// INGRESOS — un renglón por cliente (o por proyecto), no por movimiento. La pregunta no es "qué
+// cobré el martes" (eso es Movimientos) sino "quién me paga y cuánto me falta cobrarle".
+// Por eso agrupa en vez de filtrar: un filtro ya lo hacen los chips de Movimientos.
+function FinanzasIngresos({ data, onEdit, onIrAVista }) {
+  const [modal, setModal] = useState(null);
+  const [rango, setRango] = useState("anio");
+  const [agrupar, setAgrupar] = useState("cliente"); // cliente | proyecto
+  const [busqueda, setBusqueda] = useState("");
+  const [abierto, setAbierto] = useState(null);
+  const [orden, setOrden] = useState("total");
+  const [ordenDir, setOrdenDir] = useState("desc");
+  const toggleOrden = (key) => { if (orden === key) setOrdenDir((d) => (d === "asc" ? "desc" : "asc")); else { setOrden(key); setOrdenDir(key === "nombre" ? "asc" : "desc"); } };
+
+  const nombreProyecto = (id) => data.proyectos.find((p) => p.id === id)?.nombre || "";
+  const nombreContacto = (id) => data.contactos.find((c) => c.id === id)?.nombre || "";
+  const { desde, hasta } = rangoFechas(rango);
+  const { ingresos, ingresosTotal } = cifrasFinanzas(data.finanzas, desde, hasta);
+
+  // Un grupo por clave; los que no traen cliente (o proyecto) caen en un grupo propio en vez de
+  // desaparecer — si no, los totales de la pantalla no cuadrarían con los del Resumen.
+  const grupos = {};
+  ingresos.forEach((f) => {
+    const clave = agrupar === "cliente" ? (f.contactoId || "__sin__") : (f.proyectoId || "__sin__");
+    const nombre = agrupar === "cliente"
+      ? (f.contactoId ? nombreContacto(f.contactoId) || "Cliente eliminado" : "Sin cliente")
+      : (f.proyectoId ? nombreProyecto(f.proyectoId) || "Proyecto eliminado" : "Sin proyecto");
+    if (!grupos[clave]) grupos[clave] = { clave, nombre, movs: [], cobrado: 0, porCobrar: 0, total: 0, ultimo: "" };
+    const g = grupos[clave];
+    const m = montoBaseDe(f);
+    g.movs.push(f);
+    g.total += m;
+    if (f.estatus === "Cobrado") { g.cobrado += m; if ((f.fecha || "") > g.ultimo) g.ultimo = f.fecha || ""; }
+    else g.porCobrar += m;
+  });
+  const lista = Object.values(grupos);
+  const buscados = filtrarPorBusqueda(lista, busqueda, [(g) => g.nombre]);
+  const camposOrden = {
+    nombre: { get: (g) => g.nombre, tipo: "texto" },
+    cobrado: { get: (g) => g.cobrado, tipo: "numero" },
+    porCobrar: { get: (g) => g.porCobrar, tipo: "numero" },
+    total: { get: (g) => g.total, tipo: "numero" },
+  };
+  const ordenados = ordenarLista(buscados, orden, camposOrden, ordenDir);
+
+  const columnasExport = [
+    { label: agrupar === "cliente" ? "Cliente" : "Proyecto", get: (g) => g.nombre },
+    { label: "Movimientos", get: (g) => g.movs.length },
+    { label: "Cobrado", get: (g) => g.cobrado },
+    { label: "Por cobrar", get: (g) => g.porCobrar },
+    { label: "Total", get: (g) => g.total },
+    { label: "Último cobro", get: (g) => g.ultimo },
+  ];
+
+  return (
+    <div>
+      <CabeceraFinanzas
+        seccion="Ingresos" titulo="Ingresos" icono={<TrendingUp size={20} className="gp-text-teal" />}
+        subtitulo={agrupar === "cliente" ? "Quién te paga, cuánto llevas cobrado y cuánto falta." : "Cuánto ha dejado cada proyecto y cuánto falta cobrar."}
+        rango={rango} onRango={setRango}
+        acciones={<>
+          <div className="flex items-center gap-1">
+            <button onClick={() => setAgrupar("cliente")} className={`text-xs px-3 py-1.5 rounded-full border ${agrupar === "cliente" ? "gp-btn" : "gp-btn-ghost"}`}>Por cliente</button>
+            <button onClick={() => setAgrupar("proyecto")} className={`text-xs px-3 py-1.5 rounded-full border ${agrupar === "proyecto" ? "gp-btn" : "gp-btn-ghost"}`}>Por proyecto</button>
+          </div>
+          <button onClick={() => exportarFilasExcel(ordenados, columnasExport, "ingresos")} className="gp-btn-ghost px-3 py-1.5 text-xs rounded flex items-center gap-1.5"><Download size={13} /> Excel</button>
+          <button onClick={() => exportarFilasPDF(ordenados, columnasExport, "ingresos", "Ingresos", `${desde || "inicio"} a ${hasta || "hoy"}`)} className="gp-btn-ghost px-3 py-1.5 text-xs rounded flex items-center gap-1.5"><Download size={13} /> PDF</button>
+        </>}
+      />
+
+      <div className="flex flex-wrap items-center gap-2 mb-2">
+        <div className="relative flex-1" style={{ minWidth: 180, maxWidth: 300 }}>
+          <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 gp-text-muted" style={{ pointerEvents: "none" }} />
+          <input className="gp-input gp-buscador text-sm" style={{ paddingLeft: 32 }} placeholder={agrupar === "cliente" ? "Buscar cliente…" : "Buscar proyecto…"} value={busqueda} onChange={(e) => setBusqueda(e.target.value)} />
+        </div>
+        <span className="text-xs gp-text-muted">
+          {ordenados.length} {agrupar === "cliente" ? "cliente" : "proyecto"}{ordenados.length === 1 ? "" : "s"} · {fmtMoney(ingresosTotal)} en el periodo
+        </span>
+      </div>
+
+      <div className="gp-panel overflow-x-auto">
+        <table className="gp-table">
+          <thead>
+            <tr>
+              <th style={{ width: 28 }}></th>
+              <Th label={agrupar === "cliente" ? "Cliente" : "Proyecto"} sortKey="nombre" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} />
+              <th className="hidden md:table-cell">Movs.</th>
+              <Th label="Cobrado" sortKey="cobrado" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} />
+              <Th label="Por cobrar" sortKey="porCobrar" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} />
+              <Th label="Total" sortKey="total" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} />
+              <th className="hidden lg:table-cell">Último cobro</th>
+              <th className="hidden lg:table-cell">Peso</th>
+            </tr>
+          </thead>
+          <tbody>
+            {ordenados.map((g) => (
+              <Fragment key={g.clave}>
+                <tr onClick={() => setAbierto(abierto === g.clave ? null : g.clave)} style={{ cursor: "pointer" }}>
+                  <td>{abierto === g.clave ? <ChevronDown size={14} className="gp-text-muted" /> : <ChevronRight size={14} className="gp-text-muted" />}</td>
+                  <td>{g.nombre}</td>
+                  <td className="hidden md:table-cell gp-text-muted gp-mono">{g.movs.length}</td>
+                  <td className="gp-mono gp-text-teal">{fmtMoney(g.cobrado)}</td>
+                  <td className="gp-mono" style={{ color: g.porCobrar > 0 ? "var(--gold)" : "var(--muted)" }}>{g.porCobrar > 0 ? fmtMoney(g.porCobrar) : "—"}</td>
+                  <td className="gp-mono">{fmtMoney(g.total)}</td>
+                  <td className="hidden lg:table-cell gp-mono gp-text-muted">{g.ultimo ? fmtFechaCorta(g.ultimo) : "—"}</td>
+                  <td className="hidden lg:table-cell">
+                    <div className="flex items-center gap-1.5">
+                      <div className="rounded-full overflow-hidden" style={{ width: 54, height: 5, background: "var(--panel-2)" }}>
+                        <div style={{ width: `${ingresosTotal ? Math.round((g.total / ingresosTotal) * 100) : 0}%`, height: "100%", background: "var(--teal)" }} />
+                      </div>
+                      <span className="text-[10px] gp-text-muted">{ingresosTotal ? Math.round((g.total / ingresosTotal) * 100) : 0}%</span>
+                    </div>
+                  </td>
+                </tr>
+                {abierto === g.clave && (
+                  <tr>
+                    <td colSpan={8} style={{ padding: 0 }}>
+                      <div className="gp-bloque p-2.5">
+                        <div className="flex flex-col gap-1">
+                          {[...g.movs].sort((a, b) => (b.fecha || "").localeCompare(a.fecha || "")).map((f) => (
+                            <button key={f.id} onClick={() => setModal({ item: f })} title="Editar este movimiento" className="flex items-center justify-between gap-2 text-[11px] text-left px-1.5 py-1 rounded gp-btn-ghost">
+                              <span className="gp-mono gp-text-muted shrink-0" style={{ width: 60 }}>{fmtFechaCorta(f.fecha)}</span>
+                              <span className="flex-1 min-w-0 truncate">{f.concepto}</span>
+                              {agrupar === "cliente" && f.proyectoId && <span className="gp-text-gold shrink-0 hidden sm:inline truncate" style={{ maxWidth: 120 }}>{nombreProyecto(f.proyectoId)}</span>}
+                              <Badge tone={f.estatus === "Cobrado" ? "teal" : "gold"}>{f.estatus || "Pendiente"}</Badge>
+                              <span className="gp-mono shrink-0">{fmtMoney(montoBaseDe(f))}</span>
+                            </button>
+                          ))}
+                        </div>
+                        <button onClick={() => onIrAVista("fin-movimientos")} className="text-[10px] gp-text-gold mt-1.5 flex items-center gap-1">
+                          Abrir en Movimientos <ArrowRight size={10} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </Fragment>
+            ))}
+            {ordenados.length === 0 && (
+              <tr><td colSpan={8} className="text-center gp-text-muted py-8">No hay ingresos en este periodo.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {modal && (
+        <Modal title="Editar movimiento" onClose={() => setModal(null)}>
+          <FinanzaForm item={modal.item} proyectos={data.proyectos} contactos={data.contactos} onSave={(v) => { onEdit(modal.item.id, v); setModal(null); }} />
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// EGRESOS — un renglón por categoría. "En qué se me va el dinero", con el tope de Presupuesto
+// encima cuando esa categoría tiene uno, y comparado contra el periodo anterior.
+function FinanzasEgresos({ data, onEdit, onIrAVista }) {
+  const [modal, setModal] = useState(null);
+  const [rango, setRango] = useState("mes");
+  const [busqueda, setBusqueda] = useState("");
+  const [abierto, setAbierto] = useState(null);
+  const [orden, setOrden] = useState("total");
+  const [ordenDir, setOrdenDir] = useState("desc");
+  const toggleOrden = (key) => { if (orden === key) setOrdenDir((d) => (d === "asc" ? "desc" : "asc")); else { setOrden(key); setOrdenDir(key === "nombre" ? "asc" : "desc"); } };
+
+  const nombreProyecto = (id) => data.proyectos.find((p) => p.id === id)?.nombre || "";
+  const nombreContacto = (id) => data.contactos.find((c) => c.id === id)?.nombre || "";
+  const { desde, hasta } = rangoFechas(rango);
+  const { egresos, egresosTotal } = cifrasFinanzas(data.finanzas, desde, hasta);
+  const anterior = rangoAnterior(rango);
+  const previo = cifrasFinanzas(data.finanzas, anterior.desde, anterior.hasta);
+
+  const categoriaDe = (f) => (f.categoria || "").trim() || "Sin categoría";
+  const grupos = {};
+  egresos.forEach((f) => {
+    const k = categoriaDe(f);
+    if (!grupos[k]) grupos[k] = { clave: k, nombre: k, movs: [], total: 0, pagado: 0, porPagar: 0 };
+    const g = grupos[k];
+    const m = montoBaseDe(f);
+    g.movs.push(f);
+    g.total += m;
+    if (f.estatus === "Cobrado") g.pagado += m; else g.porPagar += m;
+  });
+  // Lo mismo del periodo anterior, para la columna de variación.
+  const previoPorCategoria = {};
+  previo.egresos.forEach((f) => {
+    const k = categoriaDe(f);
+    previoPorCategoria[k] = (previoPorCategoria[k] || 0) + montoBaseDe(f);
+  });
+  // Tope de gasto de esa categoría, si hay uno capturado en Presupuesto.
+  const topeDe = (categoria) => {
+    const p = (data.presupuestos || []).find((x) => x.tipo === "categoria" && (x.categoria || "") === categoria);
+    return p ? Number(p.monto) || 0 : 0;
+  };
+
+  const lista = Object.values(grupos).map((g) => ({
+    ...g,
+    antes: previoPorCategoria[g.clave] || 0,
+    tope: topeDe(g.clave),
+    pct: egresosTotal ? Math.round((g.total / egresosTotal) * 100) : 0,
+  }));
+  const buscados = filtrarPorBusqueda(lista, busqueda, [(g) => g.nombre]);
+  const camposOrden = {
+    nombre: { get: (g) => g.nombre, tipo: "texto" },
+    total: { get: (g) => g.total, tipo: "numero" },
+    porPagar: { get: (g) => g.porPagar, tipo: "numero" },
+  };
+  const ordenados = ordenarLista(buscados, orden, camposOrden, ordenDir);
+
+  const columnasExport = [
+    { label: "Categoría", get: (g) => g.nombre },
+    { label: "Movimientos", get: (g) => g.movs.length },
+    { label: "Pagado", get: (g) => g.pagado },
+    { label: "Por pagar", get: (g) => g.porPagar },
+    { label: "Total", get: (g) => g.total },
+    { label: "Periodo anterior", get: (g) => g.antes },
+    { label: "Tope mensual", get: (g) => g.tope },
+  ];
+
+  return (
+    <div>
+      <CabeceraFinanzas
+        seccion="Egresos" titulo="Egresos" icono={<TrendingDown size={20} className="gp-text-red" />}
+        subtitulo="En qué se te va el dinero, por categoría, contra el periodo anterior y contra su tope."
+        rango={rango} onRango={setRango}
+        acciones={<>
+          <button onClick={() => onIrAVista("presupuesto")} className="gp-btn-ghost px-3 py-1.5 text-xs rounded flex items-center gap-1.5"><Target size={13} /> Topes</button>
+          <button onClick={() => exportarFilasExcel(ordenados, columnasExport, "egresos")} className="gp-btn-ghost px-3 py-1.5 text-xs rounded flex items-center gap-1.5"><Download size={13} /> Excel</button>
+          <button onClick={() => exportarFilasPDF(ordenados, columnasExport, "egresos", "Egresos por categoría", `${desde || "inicio"} a ${hasta || "hoy"}`)} className="gp-btn-ghost px-3 py-1.5 text-xs rounded flex items-center gap-1.5"><Download size={13} /> PDF</button>
+        </>}
+      />
+
+      <div className="flex flex-wrap items-center gap-2 mb-2">
+        <div className="relative flex-1" style={{ minWidth: 180, maxWidth: 300 }}>
+          <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 gp-text-muted" style={{ pointerEvents: "none" }} />
+          <input className="gp-input gp-buscador text-sm" style={{ paddingLeft: 32 }} placeholder="Buscar categoría…" value={busqueda} onChange={(e) => setBusqueda(e.target.value)} />
+        </div>
+        <span className="text-xs gp-text-muted">
+          {ordenados.length} categoría{ordenados.length === 1 ? "" : "s"} · {fmtMoney(egresosTotal)} en el periodo
+        </span>
+      </div>
+
+      <div className="gp-panel overflow-x-auto">
+        <table className="gp-table">
+          <thead>
+            <tr>
+              <th style={{ width: 28 }}></th>
+              <Th label="Categoría" sortKey="nombre" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} />
+              <th className="hidden md:table-cell">Movs.</th>
+              <Th label="Total" sortKey="total" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} />
+              <Th label="Por pagar" sortKey="porPagar" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} />
+              <th className="hidden lg:table-cell">vs. anterior</th>
+              <th>Peso / tope</th>
+            </tr>
+          </thead>
+          <tbody>
+            {ordenados.map((g) => {
+              const dif = g.antes > 0 ? Math.round(((g.total - g.antes) / g.antes) * 100) : null;
+              const pctTope = g.tope > 0 ? Math.min(100, Math.round((g.total / g.tope) * 100)) : 0;
+              const pasado = g.tope > 0 && g.total > g.tope;
+              return (
+                <Fragment key={g.clave}>
+                  <tr onClick={() => setAbierto(abierto === g.clave ? null : g.clave)} style={{ cursor: "pointer" }}>
+                    <td>{abierto === g.clave ? <ChevronDown size={14} className="gp-text-muted" /> : <ChevronRight size={14} className="gp-text-muted" />}</td>
+                    <td>{g.nombre}</td>
+                    <td className="hidden md:table-cell gp-text-muted gp-mono">{g.movs.length}</td>
+                    <td className="gp-mono gp-text-red">{fmtMoney(g.total)}</td>
+                    <td className="gp-mono" style={{ color: g.porPagar > 0 ? "var(--gold)" : "var(--muted)" }}>{g.porPagar > 0 ? fmtMoney(g.porPagar) : "—"}</td>
+                    <td className="hidden lg:table-cell">
+                      {dif === null
+                        ? <span className="text-[11px] gp-text-muted">nuevo</span>
+                        : <span className="text-[11px]" style={{ color: dif > 0 ? "var(--red)" : "var(--teal)" }}>{dif > 0 ? "↑" : "↓"} {Math.abs(dif)}%</span>}
+                    </td>
+                    <td>
+                      <div className="flex items-center gap-1.5">
+                        <div className="rounded-full overflow-hidden" style={{ width: 54, height: 5, background: "var(--panel-2)" }}>
+                          <div style={{ width: `${g.tope > 0 ? pctTope : g.pct}%`, height: "100%", background: pasado ? "var(--red)" : g.tope > 0 ? "var(--gold)" : "var(--red)" }} />
+                        </div>
+                        <span className="text-[10px]" style={{ color: pasado ? "var(--red)" : "var(--muted)" }}>
+                          {g.tope > 0 ? `${pctTope}% de ${fmtMoney(g.tope)}` : `${g.pct}%`}
+                        </span>
+                      </div>
+                    </td>
+                  </tr>
+                  {abierto === g.clave && (
+                    <tr>
+                      <td colSpan={7} style={{ padding: 0 }}>
+                        <div className="gp-bloque p-2.5">
+                          <div className="flex flex-col gap-1">
+                            {[...g.movs].sort((a, b) => (b.fecha || "").localeCompare(a.fecha || "")).map((f) => (
+                              <button key={f.id} onClick={() => setModal({ item: f })} title="Editar este movimiento" className="flex items-center justify-between gap-2 text-[11px] text-left px-1.5 py-1 rounded gp-btn-ghost">
+                                <span className="gp-mono gp-text-muted shrink-0" style={{ width: 60 }}>{fmtFechaCorta(f.fecha)}</span>
+                                <span className="flex-1 min-w-0 truncate">{f.concepto}</span>
+                                {f.contactoId && <span className="gp-text-muted shrink-0 hidden sm:inline truncate" style={{ maxWidth: 110 }}>{nombreContacto(f.contactoId)}</span>}
+                                {f.proyectoId && <span className="gp-text-gold shrink-0 hidden sm:inline truncate" style={{ maxWidth: 110 }}>{nombreProyecto(f.proyectoId)}</span>}
+                                <Badge tone={f.estatus === "Cobrado" ? "teal" : "gold"}>{f.estatus === "Cobrado" ? "Pagado" : f.estatus || "Pendiente"}</Badge>
+                                <span className="gp-mono shrink-0">{fmtMoney(montoBaseDe(f))}</span>
+                              </button>
+                            ))}
+                          </div>
+                          <button onClick={() => onIrAVista("fin-movimientos")} className="text-[10px] gp-text-gold mt-1.5 flex items-center gap-1">
+                            Abrir en Movimientos <ArrowRight size={10} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              );
+            })}
+            {ordenados.length === 0 && (
+              <tr><td colSpan={7} className="text-center gp-text-muted py-8">No hay egresos en este periodo.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {modal && (
+        <Modal title="Editar movimiento" onClose={() => setModal(null)}>
+          <FinanzaForm item={modal.item} proyectos={data.proyectos} contactos={data.contactos} onSave={(v) => { onEdit(modal.item.id, v); setModal(null); }} />
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// Cuánto representa al mes un movimiento recurrente, según su frecuencia. 4.345 es el promedio de
+// semanas por mes (52/12): sin eso, un pago semanal se vería como si costara cuatro veces al mes
+// en los meses de cuatro semanas y cinco en los de cinco.
+function montoMensualizado(f) {
+  const m = montoBaseDe(f);
+  if (f.frecuencia === "Semanal") return m * 4.345;
+  if (f.frecuencia === "Quincenal") return m * 2;
+  if (f.frecuencia === "Anual") return m / 12;
+  return m; // Mensual
+}
+// Próxima fecha en que toca, avanzando desde la fecha de arranque según la frecuencia. Devuelve
+// null si el recurrente ya terminó (tiene fecha fin y quedó atrás).
+function proximoCargoRecurrente(f) {
+  if (!f.fecha) return null;
+  // El "T00:00:00" no es decoración: sin él el navegador lee "2026-01-05" como medianoche UTC,
+  // que en México son las 18:00 del día 4, y como setMonth/getDate trabajan en hora local la
+  // fecha calculada salía un día ANTES. Se detectó con una prueba de las fechas, no en pantalla.
+  const hoy = new Date(todayISO() + "T00:00:00");
+  const fin = f.fechaFin ? new Date(String(f.fechaFin).slice(0, 10) + "T00:00:00") : null;
+  const d = new Date(String(f.fecha).slice(0, 10) + "T00:00:00");
+  let guarda = 0;
+  while (d < hoy && guarda < 600) {
+    if (f.frecuencia === "Semanal") d.setDate(d.getDate() + 7);
+    else if (f.frecuencia === "Quincenal") d.setDate(d.getDate() + 15);
+    else if (f.frecuencia === "Anual") d.setFullYear(d.getFullYear() + 1);
+    else d.setMonth(d.getMonth() + 1);
+    guarda++;
+  }
+  if (fin && d > fin) return null;
+  return dateStr(d);
+}
+
+// RECURRENTES — lo que se repite. No es "qué pasó" sino "qué va a pasar": la renta, las
+// suscripciones, los dominios. Lo que se quiere saber aquí es cuánto cuesta vivir cada mes, y ese
+// número no lo da ninguna otra pantalla porque hay que mensualizar cada frecuencia por separado.
+function FinanzasRecurrentes({ data, onEdit, onRemove, onAdd, onIrAVista }) {
+  const [modal, setModal] = useState(null);
+  const [tipo, setTipo] = useState("todos"); // todos | Ingreso | Egreso
+  const [busqueda, setBusqueda] = useState("");
+  const [verTerminados, setVerTerminados] = useState(false);
+  const [orden, setOrden] = useState("proximo");
+  const [ordenDir, setOrdenDir] = useState("asc");
+  const toggleOrden = (key) => { if (orden === key) setOrdenDir((d) => (d === "asc" ? "desc" : "asc")); else { setOrden(key); setOrdenDir("asc"); } };
+
+  const nombreProyecto = (id) => data.proyectos.find((p) => p.id === id)?.nombre || "";
+  const empty = { concepto: "", tipo: "Egreso", proyectoId: "", contactoId: "", fecha: todayISO(), fechaVencimiento: "", monto: "", moneda: MONEDA_BASE, tipoCambio: 1, montoBase: "", categoria: "", forma: "Transferencia", estatus: "Cobrado", pautando: false, esRecurrente: true, frecuencia: "Mensual", fechaFin: "" };
+
+  const todos = (data.finanzas || []).filter((f) => f.esRecurrente).map((f) => ({
+    f,
+    mensual: montoMensualizado(f),
+    proximo: proximoCargoRecurrente(f),
+  }));
+  const vivos = todos.filter((x) => x.proximo);
+  const terminados = todos.filter((x) => !x.proximo);
+
+  const egresoMensual = vivos.filter((x) => x.f.tipo === "Egreso").reduce((t, x) => t + x.mensual, 0);
+  const ingresoMensual = vivos.filter((x) => x.f.tipo === "Ingreso").reduce((t, x) => t + x.mensual, 0);
+
+  const base = verTerminados ? todos : vivos;
+  const filtrados = base.filter((x) => tipo === "todos" || x.f.tipo === tipo);
+  const buscados = filtrarPorBusqueda(filtrados, busqueda, [
+    (x) => x.f.concepto, (x) => x.f.categoria, (x) => nombreProyecto(x.f.proyectoId),
+  ]);
+  const camposOrden = {
+    proximo: { get: (x) => x.proximo || "9999-12-31", tipo: "fecha" },
+    concepto: { get: (x) => x.f.concepto, tipo: "texto" },
+    mensual: { get: (x) => x.mensual, tipo: "numero" },
+  };
+  const ordenados = ordenarLista(buscados, orden, camposOrden, ordenDir);
+
+  const columnasExport = [
+    { label: "Concepto", get: (x) => x.f.concepto },
+    { label: "Tipo", get: (x) => x.f.tipo },
+    { label: "Frecuencia", get: (x) => x.f.frecuencia },
+    { label: "Monto", get: (x) => montoBaseDe(x.f) },
+    { label: "Equivale al mes", get: (x) => Math.round(x.mensual) },
+    { label: "Próximo", get: (x) => x.proximo || "terminado" },
+    { label: "Termina", get: (x) => x.f.fechaFin || "" },
+    { label: "Categoría", get: (x) => x.f.categoria },
+  ];
+
+  return (
+    <div>
+      <CabeceraFinanzas
+        seccion="Recurrentes" titulo="Recurrentes" icono={<Clock size={20} className="gp-text-gold" />}
+        subtitulo="Lo que se repite solo: renta, suscripciones, renovaciones. Sin periodo, porque esto mira hacia adelante."
+        acciones={<>
+          <button onClick={() => exportarFilasExcel(ordenados, columnasExport, "recurrentes")} className="gp-btn-ghost px-3 py-1.5 text-xs rounded flex items-center gap-1.5"><Download size={13} /> Excel</button>
+          <button onClick={() => setModal({ item: { ...empty } })} className="gp-btn px-3 py-1.5 text-sm rounded flex items-center gap-1.5"><Plus size={14} /> Nuevo recurrente</button>
+        </>}
+      />
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2.5 mb-3">
+        <TarjetaResumenFin
+          etiqueta="Gasto fijo al mes" valor={egresoMensual} color="var(--red)" tinte="rgba(229,72,77,.14)" icono={<TrendingDown size={16} />}
+          filas={[{ label: "Al año", valor: egresoMensual * 12 }]}
+        />
+        <TarjetaResumenFin
+          etiqueta="Ingreso fijo al mes" valor={ingresoMensual} color="var(--teal)" tinte="rgba(22,163,106,.14)" icono={<TrendingUp size={16} />}
+          filas={[{ label: "Al año", valor: ingresoMensual * 12 }]}
+        />
+        <TarjetaResumenFin
+          etiqueta="Neto fijo al mes" valor={ingresoMensual - egresoMensual}
+          color={ingresoMensual - egresoMensual >= 0 ? "#087CF5" : "var(--red)"}
+          tinte={ingresoMensual - egresoMensual >= 0 ? "rgba(8,124,245,.14)" : "rgba(229,72,77,.14)"} icono={<Wallet size={16} />}
+          filas={[{ label: "Lo que queda cada mes antes de lo demás", valor: ingresoMensual - egresoMensual }]}
+        />
+        <div className="gp-panel p-3.5">
+          <div className="flex items-start justify-between gap-2">
+            <p className="text-xs font-medium">Activos</p>
+            <span className="shrink-0 inline-flex items-center justify-center rounded-lg" style={{ color: "var(--gold)", background: "rgba(212,175,55,.16)", width: 30, height: 30 }}><Clock size={16} /></span>
+          </div>
+          <p className="gp-serif text-2xl mt-1 gp-text-gold">{vivos.length}</p>
+          <p className="text-[11px] gp-text-muted mt-0.5">
+            {terminados.length > 0 ? `${terminados.length} ya terminado${terminados.length === 1 ? "" : "s"}` : "ninguno terminado"}
+          </p>
+        </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2 mb-2">
+        <div className="relative flex-1" style={{ minWidth: 180, maxWidth: 300 }}>
+          <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 gp-text-muted" style={{ pointerEvents: "none" }} />
+          <input className="gp-input gp-buscador text-sm" style={{ paddingLeft: 32 }} placeholder="Buscar recurrente…" value={busqueda} onChange={(e) => setBusqueda(e.target.value)} />
+        </div>
+        {[{ id: "todos", label: "Todos" }, { id: "Egreso", label: "Egresos" }, { id: "Ingreso", label: "Ingresos" }].map((t) => (
+          <button key={t.id} onClick={() => setTipo(t.id)} className={`text-[11px] px-2.5 py-1 rounded-full border ${tipo === t.id ? "gp-btn" : "gp-btn-ghost"}`}>{t.label}</button>
+        ))}
+        {terminados.length > 0 && (
+          <label className="flex items-center gap-1.5 text-[11px] gp-text-muted cursor-pointer">
+            <input type="checkbox" checked={verTerminados} onChange={(e) => setVerTerminados(e.target.checked)} />
+            Ver terminados
+          </label>
+        )}
+      </div>
+
+      <div className="gp-panel overflow-x-auto">
+        <table className="gp-table">
+          <thead>
+            <tr>
+              <Th label="Concepto" sortKey="concepto" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} />
+              <th>Tipo</th>
+              <th>Frecuencia</th>
+              <th className="hidden md:table-cell">Categoría</th>
+              <th>Monto</th>
+              <Th label="Equivale al mes" sortKey="mensual" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} />
+              <Th label="Próximo" sortKey="proximo" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} />
+              <th className="hidden lg:table-cell">Termina</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {ordenados.map(({ f, mensual, proximo }) => (
+              <tr key={f.id} style={proximo ? undefined : { opacity: 0.55 }}>
+                <td style={{ maxWidth: 220 }}>
+                  <span className="truncate block">{f.concepto}</span>
+                  {f.proyectoId && <span className="block text-[10px] gp-text-gold truncate">{nombreProyecto(f.proyectoId)}</span>}
+                </td>
+                <td><Badge tone={f.tipo === "Ingreso" ? "teal" : "red"}>{f.tipo}</Badge></td>
+                <td className="gp-text-muted">{f.frecuencia || "Mensual"}</td>
+                <td className="hidden md:table-cell gp-text-muted">{f.categoria || "—"}</td>
+                <td><MontoMovimiento f={f} /></td>
+                <td className="gp-mono" style={{ color: f.tipo === "Ingreso" ? "var(--teal)" : "var(--red)" }}>{fmtMoney(Math.round(mensual))}</td>
+                <td className="gp-mono">{proximo ? fmtFechaCorta(proximo) : <span className="gp-text-muted">terminado</span>}</td>
+                <td className="hidden lg:table-cell gp-mono gp-text-muted">{f.fechaFin ? fmtFechaCorta(f.fechaFin) : "sin fin"}</td>
+                <td>
+                  <div className="flex gap-1">
+                    <IconBtn title="Editar" onClick={() => setModal({ item: f })}><Pencil size={13} /></IconBtn>
+                    <IconBtn title="Eliminar" onClick={() => onRemove(f.id)}><Trash2 size={13} /></IconBtn>
+                  </div>
+                </td>
+              </tr>
+            ))}
+            {ordenados.length === 0 && (
+              <tr><td colSpan={9} className="text-center gp-text-muted py-8">
+                {todos.length === 0
+                  ? "No tienes movimientos recurrentes. Un movimiento se vuelve recurrente al marcarlo así en su formulario."
+                  : "Sin resultados con estos filtros."}
+              </td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      <p className="text-[11px] gp-text-muted mt-2">
+        "Equivale al mes" normaliza cada frecuencia: lo semanal se multiplica por 4.345 (52 semanas entre 12 meses),
+        lo quincenal por 2 y lo anual se divide entre 12. Así se pueden sumar entre sí.
+        Las renovaciones de <button onClick={() => onIrAVista("activos")} className="gp-text-gold">activos digitales</button> aparecen aquí solas, porque se registran como egreso recurrente.
+      </p>
+
+      {modal && (
+        <Modal title={modal.item.id ? "Editar recurrente" : "Nuevo movimiento recurrente"} onClose={() => setModal(null)}>
+          <FinanzaForm item={modal.item} proyectos={data.proyectos} contactos={data.contactos} onSave={(v) => { modal.item.id ? onEdit(modal.item.id, v) : onAdd(v); setModal(null); }} />
         </Modal>
       )}
     </div>
@@ -11027,36 +11990,71 @@ function FacturaForm({ item, proyectos, contactos, finanzas, onAddFinanzas, onSa
 // especializada de Finanzas, filtrando egresos no recurrentes con saldo pendiente. Crear,
 // editar, marcar como pagada o borrar una "deuda" aquí en realidad opera sobre `finanzas`
 // (categoria="Deuda"), para que el movimiento real viva en un solo lugar.
-function Deudas({ data, onAddFinanzas, onEditFinanzas, onRemoveFinanzas, onAddPago, onCrearTarea }) {
+// POR PAGAR — qué debo. Es el módulo que se llamaba "Deudas" (4 oct 2026): pasó a ser hijo de
+// Finanzas y cambió de nombre, porque es el espejo exacto de Por cobrar y así se lee en pareja.
+//
+// Sigue siendo una VISTA de `finanzas`, no una tabla aparte: un egreso con saldo pendiente. Lo que
+// ganó al convertirse en hijo:
+//   - los recurrentes pendientes ya aparecen (antes los escondía a propósito, y la renta vencida
+//     es exactamente lo que uno quiere ver aquí). Se pueden ocultar con el interruptor.
+//   - el comprobante de cada pago se sube desde el mismo renglón, con el historial de abonos.
+//   - cubetas de antigüedad, las mismas que Por cobrar.
+// Lo que NO cambió: el saldo sigue saliendo de pagos_finanzas, así que los pagos parciales ya
+// registrados valen igual que antes.
+function Deudas({ data, onAddFinanzas, onEditFinanzas, onRemoveFinanzas, onAddPago, onCrearTarea, onAddComentario }) {
   const [modal, setModal] = useState(null); // {item} en captura/edición | {item, paso:"tarea", origenId} tras crear | {item, paso:"pagar"}
-  const [orden, setOrden] = useState("default");
+  const [orden, setOrden] = useState("vencimiento");
   const [ordenDir, setOrdenDir] = useState("asc");
   const [busqueda, setBusqueda] = useState("");
+  const [cubeta, setCubeta] = useState("todas");
+  const [incluirRecurrentes, setIncluirRecurrentes] = useState(true);
+  const [abierto, setAbierto] = useState(null);
   const toggleOrden = (key) => { if (orden === key) setOrdenDir((d) => (d === "asc" ? "desc" : "asc")); else { setOrden(key); setOrdenDir("asc"); } };
   const empty = { concepto: "", proyectoId: "", monto: "", fechaVencimiento: todayISO(), notas: "" };
   const nombreProyecto = (id) => data.proyectos.find((p) => p.id === id)?.nombre || "—";
-  const deudas = filtrarPorBusqueda(deudasDeFinanzas(data.finanzas), busqueda, [(d) => d.concepto, (d) => nombreProyecto(d.proyectoId)]);
-  // Saldo pendiente = monto original de la deuda menos la suma de pagos ya registrados en pagos_finanzas.
+  const nombreContacto = (id) => data.contactos.find((c) => c.id === id)?.nombre || "";
+
   const totalPagado = (finanzasId) => (data.pagosFinanzas || []).filter((p) => p.finanzasId === finanzasId).reduce((s, p) => s + (Number(p.monto) || 0), 0);
-  const saldoPendiente = (d) => Math.max(0, (Number(d.monto) || 0) - totalPagado(d.id));
+  const saldoPendiente = (d) => Math.max(0, montoBaseDe(d) - totalPagado(d.id));
+  const pagosDe = (id) => (data.pagosFinanzas || []).filter((p) => p.finanzasId === id).sort((a, b) => (b.fecha || "").localeCompare(a.fecha || ""));
+
+  const pendientes = (data.finanzas || [])
+    .filter((f) => f.tipo === "Egreso" && (f.estatus === "Pendiente" || f.estatus === "Parcial"))
+    .filter((f) => incluirRecurrentes || !f.esRecurrente);
+  const conVencimiento = pendientes.map((f) => ({ f, v: vencimientoDe(f), saldo: saldoPendiente(f) }));
+
+  const totalPorPagar = conVencimiento.reduce((t, x) => t + x.saldo, 0);
+  const vencido = conVencimiento.filter((x) => x.v.vencido).reduce((t, x) => t + x.saldo, 0);
+  const porVencer = conVencimiento.filter((x) => !x.v.vencido && x.v.dias !== null && x.v.dias >= -30).reduce((t, x) => t + x.saldo, 0);
+  const aQuienes = new Set(pendientes.map((f) => f.contactoId || f.concepto || "")).size;
+
+  const cubetas = CUBETAS_ANTIGUEDAD.map((cu) => ({
+    ...cu,
+    n: conVencimiento.filter((x) => cu.test(x.v)).length,
+    monto: conVencimiento.filter((x) => cu.test(x.v)).reduce((t, x) => t + x.saldo, 0),
+  }));
+  const enCubeta = cubeta === "todas"
+    ? conVencimiento
+    : conVencimiento.filter((x) => CUBETAS_ANTIGUEDAD.find((cu) => cu.id === cubeta)?.test(x.v));
+  const buscados = filtrarPorBusqueda(enCubeta, busqueda, [
+    (x) => x.f.concepto, (x) => nombreContacto(x.f.contactoId), (x) => nombreProyecto(x.f.proyectoId), (x) => x.f.categoria,
+  ]);
   const camposOrden = {
-    vencimiento: { get: (d) => d.fechaVencimiento, tipo: "fecha" },
-    registro: { get: (d) => d.createdAt, tipo: "fecha" },
-    alfabetico: { get: (d) => d.concepto, tipo: "texto" },
-    monto: { get: (d) => Number(d.monto) || 0, tipo: "numero" },
+    vencimiento: { get: (x) => x.v.fecha || "9999-12-31", tipo: "fecha" },
+    alfabetico: { get: (x) => x.f.concepto, tipo: "texto" },
+    monto: { get: (x) => x.saldo, tipo: "numero" },
   };
-  const opcionesOrden = [
-    { key: "vencimiento", label: "fecha de vencimiento" },
-    { key: "registro", label: "fecha de registro" },
-    { key: "alfabetico", label: "alfabético" },
-    { key: "monto", label: "monto" },
-  ];
-  const base = orden === "default" ? [...deudas].sort((a, b) => (a.fechaVencimiento || "").localeCompare(b.fechaVencimiento || "")) : deudas;
-  const ordenados = ordenarLista(base, orden, camposOrden, ordenDir);
+  const ordenados = ordenarLista(buscados, orden, camposOrden, ordenDir);
+
   const columnasExport = [
-    { label: "Acreedor", get: (d) => d.concepto }, { label: "Proyecto", get: (d) => nombreProyecto(d.proyectoId) },
-    { label: "Vence", get: (d) => d.fechaVencimiento }, { label: "Monto", get: (d) => d.monto },
-    { label: "Saldo pendiente", get: (d) => saldoPendiente(d) },
+    { label: "A quién", get: (x) => x.f.concepto },
+    { label: "Contacto", get: (x) => nombreContacto(x.f.contactoId) },
+    { label: "Proyecto", get: (x) => (x.f.proyectoId ? nombreProyecto(x.f.proyectoId) : "") },
+    { label: "Categoría", get: (x) => x.f.categoria },
+    { label: "Vence", get: (x) => x.v.fecha },
+    { label: "Antigüedad", get: (x) => x.v.texto },
+    { label: "Monto", get: (x) => montoBaseDe(x.f) },
+    { label: "Saldo pendiente", get: (x) => x.saldo },
   ];
 
   // Registra un pago (total o parcial) en pagos_finanzas y recalcula el estatus del movimiento:
@@ -11070,43 +12068,128 @@ function Deudas({ data, onAddFinanzas, onEditFinanzas, onRemoveFinanzas, onAddPa
 
   return (
     <div>
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-1">
-        <h2 className="gp-serif text-2xl">Deudas</h2>
-        <button onClick={() => setModal({ item: empty })} className="gp-btn flex items-center justify-center gap-1 px-3 py-1.5 text-sm w-full sm:w-auto"><Plus size={14} /> Nueva</button>
+      <CabeceraFinanzas
+        seccion="Por pagar" titulo="Por pagar" icono={<ArrowUpCircle size={20} className="gp-text-red" />}
+        subtitulo="A quién le debes, desde cuándo y cuánto. Al llegar el saldo a cero sale solo de esta lista."
+        acciones={<>
+          <button onClick={() => exportarFilasExcel(ordenados, columnasExport, "por-pagar")} className="gp-btn-ghost px-3 py-1.5 text-xs rounded flex items-center gap-1.5"><Download size={13} /> Excel</button>
+          <button onClick={() => exportarFilasPDF(ordenados, columnasExport, "por-pagar", "Por pagar", `Al ${fmtFechaCorta(todayISO())}`)} className="gp-btn-ghost px-3 py-1.5 text-xs rounded flex items-center gap-1.5"><Download size={13} /> PDF</button>
+          <button onClick={() => setModal({ item: empty })} className="gp-btn px-3 py-1.5 text-sm rounded flex items-center gap-1.5"><Plus size={14} /> Nueva deuda</button>
+        </>}
+      />
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2.5 mb-3">
+        <TarjetaResumenFin etiqueta="Total por pagar" valor={totalPorPagar} color="var(--red)" tinte="rgba(229,72,77,.14)" icono={<ArrowUpCircle size={16} />} />
+        <TarjetaResumenFin etiqueta="Atrasado" valor={vencido} color="var(--red)" tinte="rgba(229,72,77,.14)" icono={<AlertTriangle size={16} />} />
+        <TarjetaResumenFin etiqueta="Vence en 30 días" valor={porVencer} color="var(--gold)" tinte="rgba(212,175,55,.16)" icono={<Clock size={16} />} />
+        <div className="gp-panel p-3.5">
+          <div className="flex items-start justify-between gap-2">
+            <p className="text-xs font-medium">Cuentas abiertas</p>
+            <span className="shrink-0 inline-flex items-center justify-center rounded-lg" style={{ color: "#087CF5", background: "rgba(8,124,245,.14)", width: 30, height: 30 }}><Users size={16} /></span>
+          </div>
+          <p className="gp-serif text-2xl mt-1" style={{ color: "#087CF5" }}>{aQuienes}</p>
+          <p className="text-[11px] gp-text-muted mt-0.5">{pendientes.length} pago{pendientes.length === 1 ? "" : "s"} pendiente{pendientes.length === 1 ? "" : "s"}</p>
+        </div>
       </div>
-      <p className="text-sm gp-text-muted mb-3">Atrasadas, próximas a vencer y al corriente, todo calculado por fecha. Puedes registrar pagos parciales — el saldo pendiente se calcula solo, y al llegar a $0 desaparece de aquí.</p>
-      <div className="mb-2"><OrdenSelector opciones={opcionesOrden} value={orden} onChange={setOrden} /></div>
-      <BarraListaEstandar busqueda={busqueda} onBusqueda={setBusqueda} placeholder="Buscar por acreedor o proyecto…"
-        onExportExcel={() => exportarFilasExcel(ordenados, columnasExport, "deudas")}
-        onExportPDF={() => exportarFilasPDF(ordenados, columnasExport, "deudas", "Deudas", busqueda ? `búsqueda: "${busqueda}"` : "")} />
+
+      <div className="flex flex-wrap items-center gap-2 mb-2">
+        <div className="relative flex-1" style={{ minWidth: 180, maxWidth: 300 }}>
+          <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 gp-text-muted" style={{ pointerEvents: "none" }} />
+          <input className="gp-input gp-buscador text-sm" style={{ paddingLeft: 32 }} placeholder="Buscar acreedor, proyecto o categoría…" value={busqueda} onChange={(e) => setBusqueda(e.target.value)} />
+        </div>
+        <button onClick={() => setCubeta("todas")} className={`text-[11px] px-2.5 py-1 rounded-full border ${cubeta === "todas" ? "gp-btn" : "gp-btn-ghost"}`}>
+          Todas <span className="gp-mono">{conVencimiento.length}</span>
+        </button>
+        {cubetas.map((cu) => (
+          <button key={cu.id} onClick={() => setCubeta(cu.id)} className={`text-[11px] px-2.5 py-1 rounded-full border inline-flex items-center gap-1.5 ${cubeta === cu.id ? "gp-btn" : "gp-btn-ghost"}`}>
+            {cu.label} <span className="gp-mono">{cu.n}</span>
+            {cu.monto > 0 && <span className="gp-text-muted">{fmtMoney(cu.monto)}</span>}
+          </button>
+        ))}
+        <label className="flex items-center gap-1.5 text-[11px] gp-text-muted cursor-pointer">
+          <input type="checkbox" checked={incluirRecurrentes} onChange={(e) => setIncluirRecurrentes(e.target.checked)} />
+          Incluir recurrentes
+        </label>
+      </div>
 
       <div className="gp-panel overflow-x-auto">
         <table className="gp-table">
-          <thead><tr><Th label="Acreedor" sortKey="alfabetico" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} /><th>Proyecto</th><Th label="Vence" sortKey="vencimiento" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} /><th>Estatus</th><Th label="Saldo pendiente" sortKey="monto" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} /><th></th></tr></thead>
+          <thead>
+            <tr>
+              <th style={{ width: 28 }}></th>
+              <Th label="A quién" sortKey="alfabetico" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} />
+              <th className="hidden md:table-cell">Proyecto</th>
+              <th className="hidden lg:table-cell">Categoría</th>
+              <Th label="Vence" sortKey="vencimiento" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} />
+              <th>Antigüedad</th>
+              <Th label="Saldo pendiente" sortKey="monto" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} />
+              <th></th>
+            </tr>
+          </thead>
           <tbody>
-            {ordenados.map((d) => {
-              const dd = daysUntil(d.fechaVencimiento);
-              const tone = !d.fechaVencimiento ? "muted" : dd < 0 ? "red" : dd <= 7 ? "gold" : "teal";
-              const label = !d.fechaVencimiento ? "Sin fecha" : dd < 0 ? `Atrasada (${Math.abs(dd)}d)` : dd <= 7 ? `Vence en ${dd}d` : "Al corriente";
-              const pagado = totalPagado(d.id);
+            {ordenados.map(({ f, v, saldo }) => {
+              const pagado = totalPagado(f.id);
+              const pagos = pagosDe(f.id);
               return (
-                <tr key={d.id}>
-                  <td>{d.concepto}</td>
-                  <td className="gp-text-muted">{nombreProyecto(d.proyectoId)}</td>
-                  <td className="gp-mono">{d.fechaVencimiento || "—"}</td>
-                  <td>
-                    <Badge tone={tone}>{label}</Badge>
-                    {pagado > 0 && <span className="block text-xs gp-text-muted mt-1">Pagado: {fmtMoney(pagado)} de {fmtMoney(d.monto)}</span>}
-                  </td>
-                  <td className="gp-mono">{fmtMoney(saldoPendiente(d))}</td>
-                  <td><div className="flex gap-1">
-                    <button title="Registrar un pago" onClick={() => setModal({ item: d, paso: "pagar" })} className="text-xs px-2 py-1 rounded gp-btn-ghost gp-text-teal">Pagar</button>
-                    <IconBtn title="Editar" onClick={() => setModal({ item: d })}><Pencil size={13} /></IconBtn><IconBtn title="Eliminar" onClick={() => onRemoveFinanzas(d.id)}><Trash2 size={13} /></IconBtn>
-                  </div></td>
-                </tr>
+                <Fragment key={f.id}>
+                  <tr>
+                    <td onClick={() => setAbierto(abierto === f.id ? null : f.id)} style={{ cursor: "pointer" }}>
+                      {abierto === f.id ? <ChevronDown size={14} className="gp-text-muted" /> : <ChevronRight size={14} className="gp-text-muted" />}
+                    </td>
+                    <td>
+                      <span className="block">{f.concepto}</span>
+                      {f.contactoId && <span className="block text-[10px] gp-text-muted">{nombreContacto(f.contactoId)}</span>}
+                      {f.esRecurrente && <Badge tone="muted">{f.frecuencia || "Recurrente"}</Badge>}
+                    </td>
+                    <td className="hidden md:table-cell gp-text-gold">{f.proyectoId ? nombreProyecto(f.proyectoId) : "—"}</td>
+                    <td className="hidden lg:table-cell gp-text-muted">{f.categoria || "—"}</td>
+                    <td className="gp-mono">{v.fecha ? fmtFechaCorta(v.fecha) : "—"}</td>
+                    <td><span className="text-xs" style={{ color: v.vencido ? "var(--red)" : "var(--muted)" }}>{v.texto}</span></td>
+                    <td>
+                      <span className="gp-mono gp-text-red">{fmtMoney(saldo)}</span>
+                      {pagado > 0 && <span className="block text-[10px] gp-text-muted">pagado {fmtMoney(pagado)} de {fmtMoney(montoBaseDe(f))}</span>}
+                    </td>
+                    <td>
+                      <div className="flex gap-1">
+                        <button title="Registrar un pago" onClick={() => setModal({ item: f, paso: "pagar" })} className="text-xs px-2 py-1 rounded gp-btn-ghost gp-text-teal">Pagar</button>
+                        <IconBtn title="Editar" onClick={() => setModal({ item: f })}><Pencil size={13} /></IconBtn>
+                        <IconBtn title="Eliminar" onClick={() => onRemoveFinanzas(f.id)}><Trash2 size={13} /></IconBtn>
+                      </div>
+                    </td>
+                  </tr>
+                  {abierto === f.id && (
+                    <tr>
+                      <td colSpan={8} style={{ padding: 0 }}>
+                        <div className="gp-bloque p-2.5">
+                          <p className="text-[11px] font-medium mb-1">Pagos registrados</p>
+                          {pagos.length === 0
+                            ? <p className="text-[11px] gp-text-muted">Todavía no hay abonos a esta cuenta.</p>
+                            : (
+                              <div className="flex flex-col gap-0.5">
+                                {pagos.map((p) => (
+                                  <div key={p.id} className="flex items-center justify-between gap-2 text-[11px]">
+                                    <span className="gp-mono gp-text-muted">{fmtFechaCorta(p.fecha)}</span>
+                                    <span className="flex-1 min-w-0 truncate gp-text-muted">{p.comentario || "Abono"}</span>
+                                    <span className="gp-mono gp-text-teal">{fmtMoney(p.monto)}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          {/* El comprobante de la transferencia o el depósito: desde la galería o
+                              tomándole foto ahí mismo, que es como se hace en el celular. */}
+                          {onAddComentario && <ComprobantePago movimiento={f} data={data} onAddComentario={onAddComentario} />}
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
               );
             })}
-            {ordenados.length === 0 && <tr><td colSpan={6} className="text-center gp-text-muted py-6">Sin deudas registradas.</td></tr>}
+            {ordenados.length === 0 && (
+              <tr><td colSpan={8} className="text-center gp-text-muted py-8">
+                {pendientes.length === 0 ? "No debes nada. " : "Sin resultados con estos filtros."}
+              </td></tr>
+            )}
           </tbody>
         </table>
       </div>
@@ -11150,7 +12233,9 @@ function Deudas({ data, onAddFinanzas, onEditFinanzas, onRemoveFinanzas, onAddPa
   );
 }
 
-function PagoDeudaForm({ saldoPendiente, onPagar }) {
+// Sirve para los dos lados del dinero: registrar un pago en Por pagar y registrar un cobro en Por
+// cobrar. Solo cambian los textos, porque el mecanismo es el mismo (un abono en pagos_finanzas).
+function PagoDeudaForm({ saldoPendiente, onPagar, textoSaldado = "Con este pago la deuda queda saldada.", etiquetaBoton = "Registrar pago" }) {
   const [monto, setMonto] = useState(saldoPendiente);
   const [fecha, setFecha] = useState(todayISO());
   const [error, setError] = useState("");
@@ -11164,14 +12249,14 @@ function PagoDeudaForm({ saldoPendiente, onPagar }) {
         <Field label="Fecha del pago"><input type="date" className="gp-input" value={fecha} onChange={(e) => setFecha(e.target.value)} /></Field>
       </div>
       <p className="text-xs gp-text-muted mb-3">
-        {montoNum > 0 && (saldoRestante <= 0 ? "Con este pago la deuda queda saldada." : `Saldo pendiente después de este pago: ${fmtMoney(saldoRestante)}`)}
+        {montoNum > 0 && (saldoRestante <= 0 ? textoSaldado : `Saldo pendiente después de este pago: ${fmtMoney(saldoRestante)}`)}
       </p>
       {error && <p className="text-xs gp-text-red mb-2">{error}</p>}
       <button className="gp-btn w-full py-2 text-sm mt-1" onClick={() => {
         if (!montoNum || montoNum <= 0) { setError("Captura un monto válido."); return; }
         onPagar({ monto: montoNum, fecha });
       }}>
-        Registrar pago
+        {etiquetaBoton}
       </button>
     </div>
   );
@@ -19738,7 +20823,7 @@ function QuickCapture({ data, onAdd, onCrearRecordatorio, irAVista }) {
       {(tipo === "ingreso" || tipo === "egreso") && (
         <Modal title={tipo === "ingreso" ? "Nuevo ingreso" : "Nuevo egreso"} onClose={cerrar}>
           <MovimientoRapidoForm tipoInicial={tipo === "ingreso" ? "Ingreso" : "Egreso"}
-            onSave={(v) => { onAdd("finanzas", { ...v, id: uid() }); cerrar(); irAVista("finanzas"); }} />
+            onSave={(v) => { onAdd("finanzas", { ...v, id: uid() }); cerrar(); irAVista("fin-movimientos"); }} />
         </Modal>
       )}
       {tipo === "glucosa" && (
