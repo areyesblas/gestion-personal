@@ -35,6 +35,7 @@ import {
   PiggyBank, Camera, Film, Upload, MapPin, Clock, Mic, Gift, Receipt, Megaphone, ChevronUp, Gem, Download, Sun, Moon, Shield, LogOut, ChevronLeft, Lock, Pill, CalendarClock, Zap, StickyNote, Search, Sparkles, Send, Bot, Square, Settings, CalendarRange, Palette, Eye, EyeOff, Sliders, Volume2, VolumeX, Play, Copy, Phone, MessageSquare, MoreHorizontal,
   Heart, Code2, Music, Tag, Archive, ExternalLink, ListChecks, Info, TrendingDown,
   ChevronsDownUp, ChevronsUpDown, Briefcase, Building2, ArrowRight,
+  TrendingUp, ArrowDownCircle, ArrowUpCircle, Banknote, HandCoins,
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
@@ -10201,13 +10202,33 @@ function rangoAnterior(id) {
   return { desde: "", hasta: "" };
 }
 
+// Encabezado de bloque: icono en su color + título. Todas las secciones de Movimientos lo usan,
+// para que el ojo distinga una tarjeta de otra sin leer el texto.
+function TituloBloque({ icono, color, children, derecha }) {
+  return (
+    <div className="flex items-center gap-2 mb-2">
+      <span className="shrink-0 inline-flex" style={color ? { color } : undefined}>{icono}</span>
+      <p className="text-xs font-medium flex-1 min-w-0 truncate">{children}</p>
+      {derecha}
+    </div>
+  );
+}
+
 // Tarjeta de resumen con su variación contra el periodo anterior y el desglose de qué la compone.
-function TarjetaResumenFin({ etiqueta, valor, color, icono, variacion, filas, destacada }) {
+// El icono va en una placa redondeada con el tinte de su propio color (el verde del ingreso, el
+// rojo del egreso): el tinte se pasa explícito en lugar de calcularlo con color-mix, que no todos
+// los navegadores del iPhone soportan todavía.
+function TarjetaResumenFin({ etiqueta, valor, color, tinte, icono, variacion, filas, destacada }) {
   return (
     <div className={destacada ? "gp-bloque rounded-xl p-3.5" : "gp-panel p-3.5"} style={destacada ? { borderLeft: "3px solid var(--violeta, #8B5CF6)" } : undefined}>
       <div className="flex items-start justify-between gap-2">
         <p className="text-xs font-medium">{etiqueta}</p>
-        <span className="shrink-0" style={{ color }}>{icono}</span>
+        <span
+          className="shrink-0 inline-flex items-center justify-center rounded-lg"
+          style={{ color, background: tinte || "var(--panel-2)", width: 30, height: 30 }}
+        >
+          {icono}
+        </span>
       </div>
       <p className="gp-serif text-2xl mt-1" style={{ color }}>{fmtMoney(valor)}</p>
       {variacion !== null && variacion !== undefined && (
@@ -10315,11 +10336,11 @@ function Finanzas({ data, onAdd, onEdit, onRemove, crearAlEntrar, onConsumirCrea
 
   // --- Pestañas: son filtros rápidos sobre la misma lista ---
   const PESTANAS = [
-    { id: "todos", label: "Todos", icono: <Info size={13} /> },
+    { id: "todos", label: "Todos", icono: <ListChecks size={13} /> },
     { id: "proyectos", label: "Proyectos", icono: <FolderKanban size={13} /> },
     { id: "clientes", label: "Clientes", icono: <Contact size={13} /> },
     { id: "colaboradores", label: "Colaboradores", icono: <Users size={13} /> },
-    { id: "ingresos", label: "Ingresos", icono: <TrendingDown size={13} style={{ transform: "scaleY(-1)" }} /> },
+    { id: "ingresos", label: "Ingresos", icono: <TrendingUp size={13} /> },
     { id: "egresos", label: "Egresos", icono: <TrendingDown size={13} /> },
     { id: "recurrentes", label: "Recurrentes", icono: <Clock size={13} /> },
   ];
@@ -10372,9 +10393,9 @@ function Finanzas({ data, onAdd, onEdit, onRemove, crearAlEntrar, onConsumirCrea
 
   const nuevo = (preset) => setModal({ item: { ...empty, ...preset } });
   const ACCIONES = [
-    { titulo: "Cobro del cliente", sub: "Registra un ingreso", icono: <Plus size={15} className="gp-text-teal" />, preset: { tipo: "Ingreso", categoria: "Proyectos", estatus: "Pendiente" } },
-    { titulo: "Gasto del proyecto", sub: "Viáticos, materiales, servicios…", icono: <Plus size={15} className="gp-text-red" />, preset: { tipo: "Egreso", categoria: "Viáticos" } },
-    { titulo: "Pago a colaborador", sub: "Registra un pago", icono: <Users size={15} className="gp-text-gold" />, preset: { tipo: "Egreso", categoria: "Pago a colaborador" } },
+    { titulo: "Cobro del cliente", sub: "Registra un ingreso", icono: <Banknote size={16} className="gp-text-teal" />, tinte: "rgba(22,163,106,.14)", preset: { tipo: "Ingreso", categoria: "Proyectos", estatus: "Pendiente" } },
+    { titulo: "Gasto del proyecto", sub: "Viáticos, materiales, servicios…", icono: <Receipt size={16} className="gp-text-red" />, tinte: "rgba(229,72,77,.14)", preset: { tipo: "Egreso", categoria: "Viáticos" } },
+    { titulo: "Pago a colaborador", sub: "Registra un pago", icono: <HandCoins size={16} className="gp-text-gold" />, tinte: "rgba(212,175,55,.16)", preset: { tipo: "Egreso", categoria: "Pago a colaborador" } },
   ];
 
   const chips = [
@@ -10419,7 +10440,7 @@ function Finanzas({ data, onAdd, onEdit, onRemove, crearAlEntrar, onConsumirCrea
           {/* Las cuatro cifras */}
           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2.5 mb-3">
             <TarjetaResumenFin
-              etiqueta="Ingresos totales" valor={ingresosTotal} color="var(--teal)" icono={<TrendingDown size={16} style={{ transform: "scaleY(-1)" }} />}
+              etiqueta="Ingresos totales" valor={ingresosTotal} color="var(--teal)" tinte="rgba(22,163,106,.14)" icono={<TrendingUp size={16} />}
               variacion={variacion(ingresosTotal, suma(enRangoPrevio.filter((f) => f.tipo === "Ingreso")))}
               filas={[
                 { label: "De clientes", valor: ingresosDeCliente },
@@ -10427,7 +10448,7 @@ function Finanzas({ data, onAdd, onEdit, onRemove, crearAlEntrar, onConsumirCrea
               ]}
             />
             <TarjetaResumenFin
-              etiqueta="Egresos totales" valor={egresosTotal} color="var(--red)" icono={<TrendingDown size={16} />}
+              etiqueta="Egresos totales" valor={egresosTotal} color="var(--red)" tinte="rgba(229,72,77,.14)" icono={<TrendingDown size={16} />}
               variacion={variacion(egresosTotal, suma(enRangoPrevio.filter((f) => f.tipo === "Egreso")))}
               filas={[
                 { label: "Proyectos", valor: egresosProyecto },
@@ -10436,7 +10457,8 @@ function Finanzas({ data, onAdd, onEdit, onRemove, crearAlEntrar, onConsumirCrea
               ]}
             />
             <TarjetaResumenFin
-              etiqueta="Saldo del periodo" valor={enCuentas} color={enCuentas >= 0 ? "#087CF5" : "var(--red)"} icono={<Wallet size={16} />}
+              etiqueta="Saldo del periodo" valor={enCuentas} color={enCuentas >= 0 ? "#087CF5" : "var(--red)"}
+              tinte={enCuentas >= 0 ? "rgba(8,124,245,.14)" : "rgba(229,72,77,.14)"} icono={<Wallet size={16} />}
               variacion={null}
               filas={[
                 { label: "Ya liquidado", valor: enCuentas },
@@ -10445,7 +10467,7 @@ function Finanzas({ data, onAdd, onEdit, onRemove, crearAlEntrar, onConsumirCrea
               ]}
             />
             <TarjetaResumenFin
-              destacada etiqueta="Resultado proyectado" valor={proyectado} color="var(--violeta, #8B5CF6)" icono={<Sparkles size={16} />}
+              destacada etiqueta="Resultado proyectado" valor={proyectado} color="var(--violeta, #8B5CF6)" tinte="rgba(139,92,246,.16)" icono={<Sparkles size={16} />}
               variacion={null}
               filas={[
                 { label: "Saldo del periodo", valor: enCuentas },
@@ -10459,7 +10481,7 @@ function Finanzas({ data, onAdd, onEdit, onRemove, crearAlEntrar, onConsumirCrea
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-2.5 mb-3">
             {evolucion.length > 0 && (
               <div className="gp-panel p-3.5">
-                <p className="text-xs font-medium mb-2">Evolución de movimientos</p>
+                <TituloBloque icono={<Activity size={15} />} color="#087CF5">Evolución de movimientos</TituloBloque>
                 <div style={{ height: 180 }}>
                   <ResponsiveContainer width="100%" height="100%">
                     <ComposedChart data={evolucion} margin={{ top: 4, right: 4, left: -16, bottom: 0 }}>
@@ -10479,7 +10501,7 @@ function Finanzas({ data, onAdd, onEdit, onRemove, crearAlEntrar, onConsumirCrea
 
             {desglose.length > 0 && (
               <div className="gp-panel p-3.5">
-                <p className="text-xs font-medium mb-2">Egresos por categoría</p>
+                <TituloBloque icono={<PieChartIcon size={15} />} color="var(--red)">Egresos por categoría</TituloBloque>
                 <div className="flex items-center gap-3">
                   <div style={{ width: 120, height: 120 }} className="shrink-0 relative">
                     <ResponsiveContainer width="100%" height="100%">
@@ -10623,11 +10645,11 @@ function Finanzas({ data, onAdd, onEdit, onRemove, crearAlEntrar, onConsumirCrea
         {/* Columna derecha: lo que hay que hacer */}
         <div className="w-full xl:w-[300px] shrink-0 flex flex-col gap-2.5">
           <div className="gp-panel p-3.5">
-            <p className="text-xs font-medium mb-2">Acciones rápidas</p>
+            <TituloBloque icono={<Zap size={15} />} color="var(--gold)">Acciones rápidas</TituloBloque>
             <div className="flex flex-col gap-1.5">
               {ACCIONES.map((a) => (
                 <button key={a.titulo} onClick={() => nuevo(a.preset)} className="gp-bloque rounded-lg p-2.5 text-left flex items-center gap-2.5">
-                  <span className="shrink-0">{a.icono}</span>
+                  <span className="shrink-0 inline-flex items-center justify-center rounded-lg" style={{ background: a.tinte, width: 30, height: 30 }}>{a.icono}</span>
                   <span className="min-w-0 flex-1">
                     <span className="block text-xs font-medium">{a.titulo}</span>
                     <span className="block text-[10px] gp-text-muted">{a.sub}</span>
@@ -10639,7 +10661,12 @@ function Finanzas({ data, onAdd, onEdit, onRemove, crearAlEntrar, onConsumirCrea
           </div>
 
           <div className="gp-panel p-3.5">
-            <p className="text-xs font-medium mb-2">Cobros pendientes</p>
+            <TituloBloque
+              icono={<ArrowDownCircle size={15} />} color="var(--teal)"
+              derecha={cobrosPendientes.length > 0 ? <Badge tone="teal">{cobrosPendientes.length}</Badge> : null}
+            >
+              Cobros pendientes
+            </TituloBloque>
             {cobrosPendientes.length === 0
               ? <p className="text-[11px] gp-text-muted">Nada por cobrar. </p>
               : (
@@ -10663,7 +10690,12 @@ function Finanzas({ data, onAdd, onEdit, onRemove, crearAlEntrar, onConsumirCrea
           </div>
 
           <div className="gp-panel p-3.5">
-            <p className="text-xs font-medium mb-2">Pagos pendientes</p>
+            <TituloBloque
+              icono={<ArrowUpCircle size={15} />} color="var(--red)"
+              derecha={pagosPendientes.length > 0 ? <Badge tone="red">{pagosPendientes.length}</Badge> : null}
+            >
+              Pagos pendientes
+            </TituloBloque>
             {pagosPendientes.length === 0
               ? <p className="text-[11px] gp-text-muted">Nada por pagar.</p>
               : (
