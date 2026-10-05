@@ -1572,7 +1572,10 @@ function useBorrador(original) {
 // barra completa, así que al cambiarlo aparecen un ✓ y una ✕ junto a él, en su propia fila
 // (Angel, 1 oct 2026: "una barra por renglón"). Mientras no se confirme, nada se escribe, y el
 // renglón cuenta como cambio pendiente para el aviso de salir.
-function SelectGuardable({ valor, opciones, onGuardar, ariaLabel, style }) {
+// `etiquetas` permite que lo GUARDADO y lo MOSTRADO difieran. Hace falta porque el estado
+// "Cobrado" de la base vale para los dos lados del dinero, pero en un egreso leerlo como
+// "cobrado" confunde: ahí se dice "Pagado". El valor en la tabla no cambia, solo la palabra.
+function SelectGuardable({ valor, opciones, onGuardar, ariaLabel, style, etiquetas }) {
   const { borrador, cambiar, descartar, sucio } = useBorrador({ v: valor });
   return (
     <span className="inline-flex items-center gap-1">
@@ -1580,7 +1583,7 @@ function SelectGuardable({ valor, opciones, onGuardar, ariaLabel, style }) {
         className="gp-input" style={{ padding: "2px 6px", ...(style || {}) }}
         value={borrador.v} onChange={(e) => cambiar({ v: e.target.value })} aria-label={ariaLabel}
       >
-        {opciones.map((o) => <option key={o}>{o}</option>)}
+        {opciones.map((o) => <option key={o} value={o}>{etiquetas?.[o] || o}</option>)}
       </select>
       {sucio && (
         <>
@@ -2467,7 +2470,7 @@ function AvisoInstalarPWA() {
 // etc. Eso baja el nivel de protección a propósito y es una decisión del dueño del producto.
 const CANDADO_SENSIBLE_ACTIVO = false;
 
-const VISTAS_SENSIBLES_NO_RESTAURAR = ["finanzas", "facturas", "reportes", "estimaciones", "deudas", "apartados", "patrimonio", "activos", "documentos", "salud", "medicamentos", "actividades", "presupuesto"];
+const VISTAS_SENSIBLES_NO_RESTAURAR = ["finanzas", "movimientos", "facturas", "reportes", "estimaciones", "deudas", "apartados", "patrimonio", "activos", "documentos", "salud", "medicamentos", "actividades", "presupuesto"];
 function leerVistaGuardadaTrasReload() {
   try {
     const cruda = localStorage.getItem("arkeyone_reload_vista");
@@ -2581,7 +2584,7 @@ export default function App() {
 const VIEW_TO_MODULO = {
   empresas: "empresas", proyectos: "proyectos", metas: "metas", pendientes: "pendientes",
   finanzas: "finanzas", facturas: "facturas", deudas: "deudas", apartados: "apartados",
-  presupuesto: "presupuestos",
+  presupuesto: "presupuestos", movimientos: "finanzas",
   patrimonio: "patrimonio", activos: "activos", documentos: "documentos",
   equipo: "equipo", contactos: "contactos", regalos: "regalos",
   redes: "redes_metricas", marketing: "campanas",
@@ -2814,6 +2817,10 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
     });
   };
   const [confirmDelete, setConfirmDelete] = useState(null); // { key, id, label }
+  // Con qué lado y qué estado abrir Movimientos cuando se llega desde un bloque del Resumen
+  // ("Ver los 7" de cobros pendientes abre Ingresos > Por cobrar, no la lista completa).
+  // Mismo patrón que regalosFiltroContacto: se pone antes de navegar y la pantalla lo consume.
+  const [movimientosFoco, setMovimientosFoco] = useState(null); // { grupo, sub } | null
 
   // Orden personalizado de los ítems dentro de cada grupo del menú lateral (arrastrar para reordenar).
   // Los grupos (encabezados) y la sección fija de abajo NO se reordenan, solo los ítems hijos de cada grupo.
@@ -2878,7 +2885,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
   // reautenticación o actividad. Si se cumple el plazo, se pide contraseña de nuevo antes de
   // entrar/seguir en el módulo — independiente del cierre general de sesión a los 30 min.
   const SENSIBLE_MS = 15 * 60 * 1000;
-  const VISTAS_SENSIBLES = ["finanzas", "facturas", "reportes", "estimaciones", "deudas", "apartados", "patrimonio", "activos", "documentos", "salud", "medicamentos", "presupuesto"];
+  const VISTAS_SENSIBLES = ["finanzas", "movimientos", "facturas", "reportes", "estimaciones", "deudas", "apartados", "patrimonio", "activos", "documentos", "salud", "medicamentos", "presupuesto"];
   // Sentinel para "solo desbloquear, sin navegar a ningún lado" — se usa cuando el candado
   // aparece dentro de otra pantalla (Centro de Mando, pestañas de un proyecto) para revelar
   // información ya enmascarada ahí mismo, en vez de mandar al usuario al módulo completo.
@@ -3707,7 +3714,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
   // "Centro de mando" ya no vive dentro de un grupo colapsable — va fijo hasta arriba del
   // sidebar, con ícono de casita, como un botón "Inicio" propio (ver render más abajo, justo
   // antes de navGroupsFiltrados.map). Ajuste 22 sept 2026 sobre la propuesta visual: Agenda,
-  // Notas y Atenciones se unen a "Principal"; Eventos pasa a "Dinero" (son shows/eventos
+  // Notas y Atenciones se unen a "Principal"; Eventos pasa al grupo del dinero (son shows/eventos
   // pagados, ligados a Finanzas por su naturaleza).
   const navGroups = [
     { label: "Principal", items: [
@@ -3718,13 +3725,18 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
       { id: "pendientes", label: "Tareas", icon: CheckSquare },
       { id: "notas", label: "Notas", icon: StickyNote },
     ]},
-    { label: "Dinero", items: [
-      // Finanzas vuelve a ser UN ítem (4 oct 2026, decisión de Angel): los cortes que por un rato
-      // fueron hijos del menú ahora viven dentro de la pantalla — Resumen y Movimientos como
-      // secciones, y las opciones (Ingresos, Egresos, Por cobrar, Por pagar, Recurrentes) como
-      // pestañas del grid. Un menú lateral con ocho hijos pesaba más de lo que ayudaba.
-      { id: "finanzas", label: "Finanzas", icon: Wallet },
+    // El grupo se llama FINANZAS (antes "Dinero") y su primera pantalla se llama Resumen (antes
+    // era la que se llamaba "Finanzas"). Movimientos queda a su lado, al mismo nivel: adentro
+    // están Ingresos y Egresos, y dentro de cada uno su estado. Decisión de Angel, 4 oct 2026.
+    //
+    // OJO: el id de la vista del Resumen sigue siendo "finanzas" y el del módulo de deudas
+    // "deudas". Lo que cambió es la ETIQUETA, no el id: los ids viajan en los deep links de las
+    // notificaciones push y en los permisos de colaborador, y renombrarlos rompería ambos.
+    { label: "Finanzas", items: [
+      { id: "finanzas", label: "Resumen", icon: BarChart3 },
+      { id: "movimientos", label: "Movimientos", icon: ListChecks },
       { id: "deudas", label: "Deudas", icon: AlertTriangle },
+      { id: "facturas", label: "Facturas e IVA", icon: Receipt },
       { id: "apartados", label: "Apartados", icon: PiggyBank },
       { id: "presupuesto", label: "Presupuesto", icon: Target },
       { id: "reportes", label: "Reportes", icon: PieChartIcon },
@@ -4149,29 +4161,38 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
               onConsumirCrearAlEntrar={consumirAccionRapidaCrear}
             />
           )}
-          {/* Finanzas y Facturas e IVA son la misma pantalla con secciones; el id de la vista
-              decide en cuál abre. Los cortes de los movimientos (Ingresos, Egresos, Por cobrar,
-              Por pagar, Recurrentes) son pestañas del grid, adentro. */}
-          {(view === "finanzas" || view === "facturas") && (
-            <FinanzasPantalla
-              key={view}
+          {/* Resumen (id "finanzas"), Movimientos y Facturas e IVA: tres pantallas del grupo
+              FINANZAS, todas sobre la misma tabla. */}
+          {view === "finanzas" && (
+            <FinanzasResumen
               data={data}
-              seccionInicial={view === "facturas" ? "facturas" : "resumen"}
-              onAdd={(i) => addItem("finanzas", i)} onEdit={(id, p) => editItem("finanzas", id, p)} onRemove={(id) => askDelete("finanzas", id)}
-              onAddPago={(i) => addItem("pagosFinanzas", i)}
+              onAdd={(i) => addItem("finanzas", i)} onEdit={(id, p) => editItem("finanzas", id, p)}
+              onVerMovimientos={(grupo, sub) => { setMovimientosFoco({ grupo, sub }); irAVista("movimientos"); }}
               crearAlEntrar={accionRapidaCrear?.modulo === "finanzas" ? accionRapidaCrear : null}
               onConsumirCrearAlEntrar={consumirAccionRapidaCrear}
-              facturasProps={{
-                onAdd: (i) => addItem("facturas", i), onEdit: (id, p) => editItem("facturas", id, p), onRemove: (id) => askDelete("facturas", id),
-                onAddComentario: (i) => addItem("comentarios", i), onRemoveComentario: (id) => askDelete("comentarios", id),
-                onAddFinanzas: (i) => addItem("finanzas", i),
-              }}
+            />
+          )}
+          {view === "movimientos" && (
+            <FinanzasMovimientos
+              data={data}
+              onAdd={(i) => addItem("finanzas", i)} onEdit={(id, p) => editItem("finanzas", id, p)} onRemove={(id) => askDelete("finanzas", id)}
+              onAddPago={(i) => addItem("pagosFinanzas", i)}
+              foco={movimientosFoco} onConsumirFoco={() => setMovimientosFoco(null)}
+              onIrAVista={irAVista}
+              crearAlEntrar={accionRapidaCrear?.modulo === "finanzas" ? accionRapidaCrear : null}
+              onConsumirCrearAlEntrar={consumirAccionRapidaCrear}
+            />
+          )}
+          {view === "facturas" && (
+            <Facturas
+              data={data}
+              onAdd={(i) => addItem("facturas", i)} onEdit={(id, p) => editItem("facturas", id, p)} onRemove={(id) => askDelete("facturas", id)}
+              onAddComentario={(i) => addItem("comentarios", i)} onRemoveComentario={(id) => askDelete("comentarios", id)}
+              onAddFinanzas={(i) => addItem("finanzas", i)}
             />
           )}
           {view === "reportes" && <Reportes data={data} />}
           {view === "estimaciones" && <Estimaciones data={data} />}
-          {/* "Por pagar" en el menú; el id sigue siendo "deudas" para no romper los deep links
-              de las notificaciones push, que mandan recurso_tabla="deudas". */}
           {view === "deudas" && (
             <Deudas data={data} onAddFinanzas={(i) => addItem("finanzas", i)} onEditFinanzas={(id, p) => editItem("finanzas", id, p)} onRemoveFinanzas={(id) => askDelete("finanzas", id)} onAddPago={(i) => addItem("pagosFinanzas", i)} onCrearTarea={(t) => addItem("pendientes", t)} onAddComentario={(i) => addItem("comentarios", i)} />
           )}
@@ -10346,6 +10367,65 @@ function TarjetaResumenFin({ etiqueta, valor, color, tinte, icono, variacion, fi
   );
 }
 
+// Los dos mundos del dinero, y dentro de cada uno sus estados. Esta es la estructura que pidió
+// Angel el 4 oct 2026, y está escrita como una sola constante a propósito: el nombre que ve el
+// usuario, el filtro que aplica y la palabra con que se lee el estado salen todos de aquí, así que
+// no pueden decir una cosa en la pestaña y otra en la columna.
+//
+// Ojo con "Cobrado": en la base es el único valor que significa "ya se liquidó", para las dos
+// direcciones del dinero. En un ingreso se lee "Cobrado" y en un egreso "Pagado" — misma fila en
+// la tabla, palabra distinta en la pantalla.
+const GRUPOS_MOVIMIENTOS = [
+  {
+    id: "ingresos",
+    label: "Ingresos",
+    ayuda: "Dinero que entra",
+    icono: ArrowDownCircle,
+    color: "var(--teal)",
+    tinte: "rgba(22,163,106,.14)",
+    base: (f) => f.tipo === "Ingreso",
+    etiquetasEstado: { Cobrado: "Cobrado", Pendiente: "Por cobrar", Parcial: "Parcial" },
+    subs: [
+      { id: "todos", label: "Todos", test: () => true },
+      { id: "cobrados", label: "Ya cobrados", test: (f) => f.estatus === "Cobrado" },
+      { id: "cobrar", label: "Por cobrar", test: (f) => f.estatus !== "Cobrado", pendiente: true },
+    ],
+  },
+  {
+    id: "egresos",
+    label: "Egresos",
+    ayuda: "Dinero que sale",
+    icono: ArrowUpCircle,
+    color: "var(--red)",
+    tinte: "rgba(229,72,77,.14)",
+    base: (f) => f.tipo === "Egreso",
+    etiquetasEstado: { Cobrado: "Pagado", Pendiente: "Por pagar", Parcial: "Parcial" },
+    subs: [
+      { id: "todos", label: "Todos", test: () => true },
+      { id: "pagados", label: "Ya pagados", test: (f) => f.estatus === "Cobrado" },
+      { id: "pagar", label: "Por pagar", test: (f) => f.estatus !== "Cobrado", pendiente: true },
+      // Las deudas son egresos con categoría "Deuda" — las crea así el módulo Deudas. No es otra
+      // tabla ni otro concepto: es por dónde entraron.
+      { id: "deudas", label: "Deudas", test: (f) => f.categoria === "Deuda" },
+    ],
+  },
+  {
+    id: "todos",
+    label: "Todos",
+    ayuda: "Entra y sale, junto",
+    icono: ListChecks,
+    color: "var(--gold)",
+    tinte: "rgba(212,175,55,.16)",
+    base: () => true,
+    etiquetasEstado: { Cobrado: "Liquidado", Pendiente: "Pendiente", Parcial: "Parcial" },
+    subs: [
+      { id: "todos", label: "Todos", test: () => true },
+      { id: "liquidados", label: "Ya liquidados", test: (f) => f.estatus === "Cobrado" },
+      { id: "pendientes", label: "Pendientes", test: (f) => f.estatus !== "Cobrado", pendiente: true },
+    ],
+  },
+];
+
 // Totales de lo que está seleccionado en el grid: cuánto es, cuánto ya se liquidó y cuánto falta.
 // Va pegado arriba de la tabla porque la pregunta "¿y de esto cuánto ya cobré?" aparece justo al
 // cambiar de pestaña, no al entrar a la pantalla.
@@ -10362,7 +10442,7 @@ function TotalesSeleccion({ titulo, total, liquidado, pendiente, etiquetaLiquida
         <p className="gp-serif text-xl gp-text-teal">{fmtMoney(liquidado)}</p>
       </div>
       <div>
-        <p className="text-[10px] gp-text-muted uppercase" style={{ letterSpacing: ".05em" }}>Pendiente</p>
+        <p className="text-[10px] gp-text-muted uppercase" style={{ letterSpacing: ".05em" }}>Falta</p>
         <p className="gp-serif text-xl" style={{ color: pendiente > 0 ? "var(--gold)" : "var(--muted)" }}>{fmtMoney(pendiente)}</p>
       </div>
       {extra}
@@ -10370,91 +10450,36 @@ function TotalesSeleccion({ titulo, total, liquidado, pendiente, etiquetaLiquida
         <div className="rounded-full overflow-hidden" style={{ height: 6, background: "var(--panel)" }}>
           <div style={{ width: `${pct}%`, height: "100%", background: "var(--teal)" }} />
         </div>
-        <p className="text-[10px] gp-text-muted mt-1">{pct}% de lo seleccionado ya está liquidado</p>
+        <p className="text-[10px] gp-text-muted mt-1">{pct}% de lo que estás viendo ya se liquidó</p>
       </div>
     </div>
   );
 }
 
-// FINANZAS — una sola pantalla con secciones (4 oct 2026, decisión de Angel después de probar la
-// versión con hijos en el menú lateral):
+// MOVIMIENTOS — sección propia, al mismo nivel que Resumen. Dos niveles y nada más:
 //
-//   Resumen         cómo vas: las cuatro cifras del periodo, la evolución y en qué se va el dinero
-//   Movimientos     el grid, con sus opciones (Ingresos, Egresos, Por cobrar, Por pagar,
-//                   Recurrentes), los totales de lo seleccionado y los pagos ahí mismo
-//   Facturas e IVA  el papeleo fiscal de ese dinero
+//   1. INGRESOS / EGRESOS / Todos      — tres tarjetas grandes con su total del periodo
+//   2. dentro del elegido, el estado   — Ingresos: Ya cobrados · Por cobrar
+//                                        Egresos:  Ya pagados · Por pagar · Deudas
 //
-// Las secciones son pestañas, no vistas del menú: el panel izquierdo vuelve a tener un solo ítem
-// "Finanzas". El id de la vista (`finanzas` o `facturas`) decide en qué sección abre, para que los
-// avisos del Centro de Mando y los deep links sigan cayendo donde deben.
-function FinanzasPantalla({ data, seccionInicial, onAdd, onEdit, onRemove, onAddPago, crearAlEntrar, onConsumirCrearAlEntrar, facturasProps }) {
-  const [seccion, setSeccion] = useState(seccionInicial || "resumen");
-  // Qué opción del grid se abre al entrar a Movimientos. El Resumen la usa para mandar directo a
-  // "Por cobrar" o "Por pagar" desde sus bloques, en vez de dejar al usuario buscando la pestaña.
-  const [opcionGrid, setOpcionGrid] = useState("todos");
-
-  const SECCIONES = [
-    { id: "resumen", label: "Resumen", icono: <BarChart3 size={14} /> },
-    { id: "movimientos", label: "Movimientos", icono: <ListChecks size={14} /> },
-    { id: "facturas", label: "Facturas e IVA", icono: <Receipt size={14} /> },
-  ];
-  const verMovimientos = (opcion) => { setOpcionGrid(opcion || "todos"); setSeccion("movimientos"); };
-
-  return (
-    <div>
-      <div className="mb-3">
-        <p className="text-[11px] gp-text-muted">Dinero · Finanzas</p>
-        <h2 className="gp-serif text-2xl flex items-center gap-2"><Wallet size={20} className="gp-text-gold" /> Finanzas</h2>
-        <p className="text-sm gp-text-muted">Todo el dinero que entra y sale: proyectos, clientes, colaboradores y gastos.</p>
-      </div>
-
-      <div className="flex gap-1.5 mb-4 flex-wrap">
-        {SECCIONES.map((s) => (
-          <button key={s.id} onClick={() => setSeccion(s.id)}
-            className={`text-sm px-3.5 py-2 rounded-full border inline-flex items-center gap-1.5 ${seccion === s.id ? "gp-btn" : "gp-btn-ghost"}`}>
-            {s.icono} {s.label}
-          </button>
-        ))}
-      </div>
-
-      {seccion === "resumen" && (
-        <FinanzasResumen
-          data={data} onAdd={onAdd} onEdit={onEdit}
-          onVerMovimientos={verMovimientos}
-          crearAlEntrar={crearAlEntrar} onConsumirCrearAlEntrar={onConsumirCrearAlEntrar}
-        />
-      )}
-      {seccion === "movimientos" && (
-        // key: al entrar desde un bloque del Resumen hay que arrancar en esa opción, y remontar es
-        // la forma honesta de hacerlo sin sincronizar dos estados que pueden discrepar.
-        <FinanzasMovimientos
-          key={opcionGrid}
-          data={data} onAdd={onAdd} onEdit={onEdit} onRemove={onRemove} onAddPago={onAddPago}
-          opcionInicial={opcionGrid}
-          crearAlEntrar={crearAlEntrar} onConsumirCrearAlEntrar={onConsumirCrearAlEntrar}
-        />
-      )}
-      {seccion === "facturas" && <Facturas data={data} {...facturasProps} />}
-    </div>
-  );
-}
-
-// MOVIMIENTOS — el grid. Las opciones de arriba (Ingresos, Egresos, Por cobrar, Por pagar,
-// Recurrentes) son cortes de la misma lista, no pantallas distintas: cambian qué renglones se ven,
-// qué columnas aparecen y los totales de arriba. Desde cualquier renglón pendiente se registra el
-// pago o el cobro, parcial o total, con el mismo mecanismo de pagos_finanzas que usa Deudas — así
-// un abono registrado aquí es el mismo abono que se ve allá.
-function FinanzasMovimientos({ data, onAdd, onEdit, onRemove, onAddPago, opcionInicial, crearAlEntrar, onConsumirCrearAlEntrar }) {
+// Lo que se ve en la tabla cambia con la elección: la columna Tipo solo aparece en "Todos" (en
+// Ingresos todos son ingresos, repetirlo en cada renglón es ruido), y Vence/Antigüedad solo
+// cuando se está viendo lo pendiente, que es cuando el atraso importa.
+//
+// Desde cualquier renglón pendiente se registra el pago o el cobro, parcial o total, con el mismo
+// mecanismo de pagos_finanzas que usa Deudas: un abono hecho aquí es el mismo que se ve allá.
+function FinanzasMovimientos({ data, onAdd, onEdit, onRemove, onAddPago, foco, onConsumirFoco, onIrAVista, crearAlEntrar, onConsumirCrearAlEntrar }) {
   const [modal, setModal] = useState(null); // { item } | { item, paso: "pagar" }
   const [importarAbierto, setImportarAbierto] = useState(false);
-  const [pestana, setPestana] = useState(opcionInicial || "todos");
-  // Las opciones que miran lo pendiente o lo que viene arrancan sin recorte de periodo: si no, al
-  // entrar a "Por cobrar" desde el Resumen desaparecería justo el adeudo viejo que se iba a ver.
-  const [rango, setRango] = useState(["cobrar", "pagar", "recurrentes"].includes(opcionInicial) ? "todo" : "mes");
+  const [grupoId, setGrupoId] = useState(foco?.grupo || "ingresos");
+  const [subId, setSubId] = useState(foco?.sub || "todos");
+  // Al entrar directo a lo pendiente el periodo arranca en "Todo": un adeudo de hace tres meses
+  // sigue pendiente hoy, y recortarlo por mes lo esconde justo cuando se iba a ver.
+  const [rango, setRango] = useState(foco?.sub === "cobrar" || foco?.sub === "pagar" ? "todo" : "mes");
+  const [soloRecurrentes, setSoloRecurrentes] = useState(false);
   const [busqueda, setBusqueda] = useState("");
   const [filtroProyecto, setFiltroProyecto] = useState("Todos");
   const [filtroCategoria, setFiltroCategoria] = useState("Todas");
-  const [filtroEstado, setFiltroEstado] = useState("Todos");
   const [orden, setOrden] = useState("fecha");
   const [ordenDir, setOrdenDir] = useState("desc");
   const [pagina, setPagina] = useState(1);
@@ -10466,6 +10491,8 @@ function FinanzasMovimientos({ data, onAdd, onEdit, onRemove, onAddPago, opcionI
     if (crearAlEntrar) { setModal({ item: { ...empty, ...(crearAlEntrar.preset || {}) } }); onConsumirCrearAlEntrar(); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [crearAlEntrar]);
+  // El foco (de dónde venía el usuario) se consume una sola vez: ya quedó en el estado inicial.
+  useEffect(() => { if (foco) onConsumirFoco?.(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
 
   const nombreProyecto = (id) => data.proyectos.find((p) => p.id === id)?.nombre || "—";
   const nombreContacto = (id) => data.contactos.find((c) => c.id === id)?.nombre || "—";
@@ -10474,36 +10501,29 @@ function FinanzasMovimientos({ data, onAdd, onEdit, onRemove, onAddPago, opcionI
   const yaAbonado = (id) => (data.pagosFinanzas || []).filter((p) => p.finanzasId === id).reduce((s, p) => s + (Number(p.monto) || 0), 0);
   const saldoDe = (f) => Math.max(0, montoBaseDe(f) - yaAbonado(f.id));
 
-  // Qué hace cada opción. `sinPeriodo` marca las que no se deben cortar por mes: un cobro de hace
-  // tres meses sigue pendiente hoy, y un recurrente mira hacia adelante — filtrarlos por periodo
-  // los esconde justo cuando importan.
-  const OPCIONES = [
-    { id: "todos", label: "Todos", icono: <ListChecks size={13} />, test: () => true },
-    { id: "ingresos", label: "Ingresos", icono: <TrendingUp size={13} />, test: (f) => f.tipo === "Ingreso" },
-    { id: "egresos", label: "Egresos", icono: <TrendingDown size={13} />, test: (f) => f.tipo === "Egreso" },
-    { id: "cobrar", label: "Por cobrar", icono: <ArrowDownCircle size={13} />, test: (f) => f.tipo === "Ingreso" && f.estatus !== "Cobrado", sinPeriodo: true },
-    { id: "pagar", label: "Por pagar", icono: <ArrowUpCircle size={13} />, test: (f) => f.tipo === "Egreso" && f.estatus !== "Cobrado", sinPeriodo: true },
-    { id: "recurrentes", label: "Recurrentes", icono: <Clock size={13} />, test: (f) => !!f.esRecurrente, sinPeriodo: true },
-  ];
-  const opcion = OPCIONES.find((o) => o.id === pestana) || OPCIONES[0];
-  // Al elegir una opción sin periodo se pasa el selector a "Todo" en vez de ignorarlo en silencio:
-  // así el usuario VE por qué está viendo movimientos de otros meses y lo puede volver a cerrar.
-  const elegirOpcion = (o) => {
-    setPestana(o.id);
-    setPagina(1);
-    if (o.sinPeriodo) setRango("todo");
-  };
+  const grupo = GRUPOS_MOVIMIENTOS.find((g) => g.id === grupoId) || GRUPOS_MOVIMIENTOS[0];
+  const sub = grupo.subs.find((x) => x.id === subId) || grupo.subs[0];
 
   const { desde, hasta } = rangoFechas(rango);
   const { enRango } = cifrasFinanzas(data.finanzas, desde, hasta);
-  const conteo = (o) => enRango.filter(o.test).length;
+  const suma = (lista) => lista.reduce((t, f) => t + montoBaseDe(f), 0);
 
-  const categorias = [...new Set((data.finanzas || []).map((f) => f.categoria).filter(Boolean))].sort((a, b) => compararEs(a, b));
-  const filtrados = enRango
-    .filter(opcion.test)
+  // Al cambiar de mundo (ingresos <-> egresos) el estado vuelve a "Todos": "Deudas" no existe en
+  // Ingresos, y dejar seleccionado un sub que el grupo nuevo no tiene mostraría una lista vacía
+  // sin explicar por qué.
+  const elegirGrupo = (g) => { setGrupoId(g.id); setSubId("todos"); setPagina(1); };
+  const elegirSub = (x) => {
+    setSubId(x.id);
+    setPagina(1);
+    if (x.pendiente) setRango("todo");
+  };
+
+  const delGrupo = enRango.filter(grupo.base);
+  const filtrados = delGrupo
+    .filter(sub.test)
+    .filter((f) => !soloRecurrentes || f.esRecurrente)
     .filter((f) => filtroProyecto === "Todos" || f.proyectoId === filtroProyecto)
-    .filter((f) => filtroCategoria === "Todas" || f.categoria === filtroCategoria)
-    .filter((f) => filtroEstado === "Todos" || f.estatus === filtroEstado);
+    .filter((f) => filtroCategoria === "Todas" || f.categoria === filtroCategoria);
   const buscados = filtrarPorBusqueda(filtrados, busqueda, [
     (f) => f.concepto, (f) => f.categoria, (f) => nombreProyecto(f.proyectoId),
     (f) => nombreContacto(f.contactoId), (f) => f.forma,
@@ -10521,19 +10541,19 @@ function FinanzasMovimientos({ data, onAdd, onEdit, onRemove, onAddPago, opcionI
   const enPagina = ordenados.slice(inicio, inicio + porPagina);
   const toggleOrden = (key) => { if (orden === key) setOrdenDir((d) => (d === "asc" ? "desc" : "asc")); else { setOrden(key); setOrdenDir(key === "concepto" || key === "vencimiento" ? "asc" : "desc"); } };
 
-  // --- Totales de lo seleccionado (lo que pidió Angel: cobrado/pagado de lo que está a la vista) ---
-  const totalSel = buscados.reduce((t, f) => t + montoBaseDe(f), 0);
-  // Lo liquidado cuenta los abonos parciales, no solo los movimientos marcados como Cobrado: un
+  // --- Totales de lo que está a la vista ---
+  const totalSel = suma(buscados);
+  // Lo liquidado cuenta los abonos parciales, no solo los movimientos marcados como liquidados: un
   // movimiento de 10,000 con 4,000 abonados aporta 4,000, no 0 ni 10,000.
   const liquidadoSel = buscados.reduce((t, f) => t + (f.estatus === "Cobrado" ? montoBaseDe(f) : yaAbonado(f.id)), 0);
-  const pendienteSel = Math.max(0, totalSel - liquidadoSel);
-  const etiquetaLiquidado = pestana === "egresos" || pestana === "pagar" ? "Ya pagado"
-    : pestana === "ingresos" || pestana === "cobrar" ? "Ya cobrado"
-    : "Ya liquidado";
-  const mensualSel = pestana === "recurrentes" ? buscados.reduce((t, f) => t + montoMensualizado(f) * (f.tipo === "Ingreso" ? 1 : -1), 0) : null;
+  const etiquetaLiquidado = grupo.id === "ingresos" ? "Ya cobrado" : grupo.id === "egresos" ? "Ya pagado" : "Ya liquidado";
+  const mensualSel = soloRecurrentes
+    ? buscados.reduce((t, f) => t + montoMensualizado(f) * (f.tipo === "Ingreso" ? 1 : -1), 0)
+    : null;
 
-  const columnaVencimiento = pestana === "cobrar" || pestana === "pagar";
-  const columnaRecurrencia = pestana === "recurrentes";
+  const verVencimiento = !!sub.pendiente || sub.id === "deudas";
+  const verTipo = grupo.id === "todos";
+  const categorias = [...new Set(delGrupo.map((f) => f.categoria).filter(Boolean))].sort((a, b) => compararEs(a, b));
 
   const columnasExport = [
     { label: "Fecha", get: (f) => f.fecha },
@@ -10543,20 +10563,23 @@ function FinanzasMovimientos({ data, onAdd, onEdit, onRemove, onAddPago, opcionI
     { label: "Categoría", get: (f) => f.categoria },
     { label: "Cliente / Colaborador", get: (f) => (f.contactoId ? nombreContacto(f.contactoId) : "") },
     { label: "Forma de pago", get: (f) => f.forma },
+    { label: "Vence", get: (f) => f.fechaVencimiento || "" },
     { label: "Moneda", get: (f) => f.moneda || MONEDA_BASE },
     { label: "Monto", get: (f) => f.monto },
     { label: `Monto en ${MONEDA_BASE}`, get: (f) => montoBaseDe(f) },
     { label: "Abonado", get: (f) => yaAbonado(f.id) },
-    { label: "Saldo", get: (f) => saldoDe(f) },
-    { label: "Estado", get: (f) => f.estatus },
+    { label: "Falta", get: (f) => saldoDe(f) },
+    { label: "Estado", get: (f) => grupo.etiquetasEstado[f.estatus] || f.estatus },
+    { label: "Recurrente", get: (f) => (f.esRecurrente ? (f.frecuencia || "Sí") : "") },
     { label: "Próximo cargo", get: (f) => (f.esRecurrente ? (proximoCargoRecurrente(f) || "terminado") : "") },
   ];
 
-  const nuevo = (preset) => setModal({ item: { ...empty, ...preset } });
+  // Un movimiento nuevo arranca del lado en que está parado el usuario: en Egresos no tiene
+  // sentido que el formulario abra en Ingreso.
+  const nuevo = (preset) => setModal({ item: { ...empty, tipo: grupo.id === "egresos" ? "Egreso" : "Ingreso", ...preset } });
 
-  // Registra un abono (parcial o total) y recalcula el estatus: si el saldo llega a cero el
-  // movimiento queda Cobrado, si queda algo queda Parcial. Es el mismo flujo de Deudas, a
-  // propósito: el abono se guarda en pagos_finanzas y se ve igual desde las dos pantallas.
+  // Registra un abono (parcial o total) y recalcula el estado: si el saldo llega a cero el
+  // movimiento queda liquidado, si queda algo queda Parcial.
   const registrarAbono = async (f, { monto, fecha }) => {
     await onAddPago({ id: uid(), finanzasId: f.id, fecha, monto, comentario: "" });
     const restante = saldoDe(f) - monto;
@@ -10566,27 +10589,75 @@ function FinanzasMovimientos({ data, onAdd, onEdit, onRemove, onAddPago, opcionI
 
   return (
     <div>
-      {/* Opciones del grid */}
-      <div className="flex items-center gap-1.5 flex-wrap mb-3">
-        {OPCIONES.map((o) => (
-          <button key={o.id} onClick={() => elegirOpcion(o)}
-            title={o.sinPeriodo ? `${o.label} — se muestra sin recortar por periodo` : o.label}
-            className={`text-xs px-3 py-1.5 rounded-full border inline-flex items-center gap-1.5 ${pestana === o.id ? "gp-btn" : "gp-btn-ghost"}`}>
-            {o.icono} {o.label} <span className="gp-mono">{conteo(o)}</span>
-          </button>
-        ))}
+      <CabeceraFinanzas
+        seccion="Movimientos" titulo="Movimientos" icono={<ListChecks size={20} className="gp-text-gold" />}
+        subtitulo="Todo el dinero que entra y sale. Elige un lado y, dentro, qué estado quieres ver."
+        rango={rango} onRango={(v) => { setRango(v); setPagina(1); }}
+        acciones={<>
+          <button onClick={() => setImportarAbierto(true)} className="gp-btn-ghost px-3 py-1.5 text-xs rounded flex items-center gap-1.5"><Upload size={13} /> Importar</button>
+          <button onClick={() => exportarFilasExcel(ordenados, columnasExport, "movimientos")} className="gp-btn-ghost px-3 py-1.5 text-xs rounded flex items-center gap-1.5"><Download size={13} /> Excel</button>
+          <button onClick={() => exportarFilasPDF(ordenados, columnasExport, "movimientos", `${grupo.label} · ${sub.label}`, `${desde || "inicio"} a ${hasta || "hoy"}`)} className="gp-btn-ghost px-3 py-1.5 text-xs rounded flex items-center gap-1.5"><Download size={13} /> PDF</button>
+          <button onClick={() => nuevo({})} className="gp-btn px-3 py-1.5 text-sm rounded flex items-center gap-1.5"><Plus size={14} /> Nuevo</button>
+        </>}
+      />
+
+      {/* NIVEL 1 — de qué lado del dinero estamos */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 mb-2.5">
+        {GRUPOS_MOVIMIENTOS.map((g) => {
+          const propios = enRango.filter(g.base);
+          const activo = g.id === grupoId;
+          const Icono = g.icono;
+          return (
+            <button
+              key={g.id} onClick={() => elegirGrupo(g)} aria-pressed={activo}
+              className="gp-panel p-3 text-left flex items-center gap-3"
+              style={activo
+                ? { borderColor: g.color, boxShadow: `inset 0 0 0 1px ${g.color}`, background: g.tinte }
+                : undefined}
+            >
+              <span className="shrink-0 inline-flex items-center justify-center rounded-lg"
+                style={{ color: g.color, background: activo ? "var(--panel)" : g.tinte, width: 34, height: 34 }}>
+                <Icono size={18} />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm font-medium">{g.label}</span>
+                <span className="block gp-serif text-xl" style={{ color: g.color }}>{fmtMoney(suma(propios))}</span>
+                <span className="block text-[10px] gp-text-muted">{g.ayuda} · {propios.length} movimiento{propios.length === 1 ? "" : "s"}</span>
+              </span>
+            </button>
+          );
+        })}
       </div>
 
-      {/* Filtros */}
+      {/* NIVEL 2 — qué estado, dentro del lado elegido */}
+      <div className="flex items-center gap-1.5 flex-wrap mb-2.5">
+        <span className="text-[11px] gp-text-muted mr-0.5">{grupo.label}:</span>
+        {grupo.subs.map((x) => {
+          const propios = delGrupo.filter(x.test);
+          return (
+            <button key={x.id} onClick={() => elegirSub(x)}
+              title={x.pendiente ? `${x.label} — se muestra sin recortar por periodo` : x.label}
+              className={`text-xs px-3 py-1.5 rounded-full border inline-flex items-center gap-1.5 ${subId === x.id ? "gp-btn" : "gp-btn-ghost"}`}>
+              {x.label} <span className="gp-mono">{propios.length}</span>
+              {propios.length > 0 && <span className="gp-text-muted">{fmtMoney(suma(propios))}</span>}
+            </button>
+          );
+        })}
+        {sub.id === "deudas" && (
+          <button onClick={() => onIrAVista("deudas")} className="text-[11px] gp-text-gold flex items-center gap-1 ml-1">
+            Ver con su historial de abonos <ArrowRight size={11} />
+          </button>
+        )}
+      </div>
+
+      {/* Filtros. No hay filtro de "estado": eso lo decide el renglón de arriba, y tenerlo dos
+          veces hacía que una elección contradijera a la otra. */}
       <div className="flex flex-wrap items-center gap-2 mb-2">
         <div className="relative flex-1" style={{ minWidth: 180, maxWidth: 300 }}>
           <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 gp-text-muted" style={{ pointerEvents: "none" }} />
           <input className="gp-input gp-buscador text-sm" style={{ paddingLeft: 32 }} placeholder="Buscar movimientos…"
             value={busqueda} onChange={(e) => { setBusqueda(e.target.value); setPagina(1); }} />
         </div>
-        <select className="gp-input text-xs py-1.5" style={{ width: "auto" }} value={rango} onChange={(e) => { setRango(e.target.value); setPagina(1); }} aria-label="Periodo">
-          {RANGOS_MOVIMIENTOS.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
-        </select>
         <select className="gp-input text-xs py-1.5" style={{ width: "auto" }} value={filtroProyecto} onChange={(e) => { setFiltroProyecto(e.target.value); setPagina(1); }} aria-label="Proyecto">
           <option value="Todos">Proyecto: Todos</option>
           {ordenadosPorNombre(data.proyectos).map((pr) => <option key={pr.id} value={pr.id}>{pr.nombre}</option>)}
@@ -10595,26 +10666,19 @@ function FinanzasMovimientos({ data, onAdd, onEdit, onRemove, onAddPago, opcionI
           <option value="Todas">Categoría: Todas</option>
           {categorias.map((c) => <option key={c} value={c}>{c}</option>)}
         </select>
-        <select className="gp-input text-xs py-1.5" style={{ width: "auto" }} value={filtroEstado} onChange={(e) => { setFiltroEstado(e.target.value); setPagina(1); }} aria-label="Estado">
-          <option value="Todos">Estado: Todos</option>
-          <option value="Cobrado">Cobrado / Pagado</option>
-          <option value="Pendiente">Pendiente</option>
-          <option value="Parcial">Parcial</option>
-        </select>
-        <div className="flex items-center gap-1.5">
-          <button onClick={() => setImportarAbierto(true)} className="gp-btn-ghost px-2.5 py-1.5 text-xs rounded flex items-center gap-1.5" title="Importar desde Excel"><Upload size={13} /></button>
-          <button onClick={() => exportarFilasExcel(ordenados, columnasExport, "movimientos")} className="gp-btn-ghost px-2.5 py-1.5 text-xs rounded flex items-center gap-1.5" title="Exportar a Excel"><Download size={13} /> Excel</button>
-          <button onClick={() => exportarFilasPDF(ordenados, columnasExport, "movimientos", `Movimientos — ${opcion.label}`, `${desde || "inicio"} a ${hasta || "hoy"}`)} className="gp-btn-ghost px-2.5 py-1.5 text-xs rounded flex items-center gap-1.5" title="Exportar a PDF"><Download size={13} /> PDF</button>
-          <button onClick={() => nuevo({})} className="gp-btn px-3 py-1.5 text-sm rounded flex items-center gap-1.5"><Plus size={14} /> Nuevo</button>
-        </div>
+        <label className="flex items-center gap-1.5 text-[11px] gp-text-muted cursor-pointer" title="Solo lo que se repite solo: renta, suscripciones, renovaciones">
+          <input type="checkbox" checked={soloRecurrentes} onChange={(e) => { setSoloRecurrentes(e.target.checked); setPagina(1); }} />
+          Solo recurrentes
+        </label>
       </div>
 
       <TotalesSeleccion
-        titulo={`${opcion.label} · ${buscados.length} movimiento${buscados.length === 1 ? "" : "s"}`}
-        total={totalSel} liquidado={liquidadoSel} pendiente={pendienteSel} etiquetaLiquidado={etiquetaLiquidado}
+        titulo={`${grupo.label} · ${sub.label} · ${buscados.length} movimiento${buscados.length === 1 ? "" : "s"}`}
+        total={totalSel} liquidado={liquidadoSel} pendiente={Math.max(0, totalSel - liquidadoSel)}
+        etiquetaLiquidado={etiquetaLiquidado}
         extra={mensualSel !== null ? (
           <div>
-            <p className="text-[10px] gp-text-muted uppercase" style={{ letterSpacing: ".05em" }}>Neto al mes</p>
+            <p className="text-[10px] gp-text-muted uppercase" style={{ letterSpacing: ".05em" }}>Equivale al mes</p>
             <p className="gp-serif text-xl" style={{ color: mensualSel >= 0 ? "var(--teal)" : "var(--red)" }}>{fmtMoney(Math.round(mensualSel))}</p>
           </div>
         ) : null}
@@ -10626,17 +10690,17 @@ function FinanzasMovimientos({ data, onAdd, onEdit, onRemove, onAddPago, opcionI
           <thead>
             <tr>
               <Th label="Fecha" sortKey="fecha" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} />
-              <th>Tipo</th>
+              {verTipo && <th>Tipo</th>}
               <Th label="Descripción" sortKey="concepto" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} />
               <th className="hidden md:table-cell">Proyecto</th>
               <th className="hidden md:table-cell">Categoría</th>
-              <th className="hidden lg:table-cell">Cliente / Colaborador</th>
-              {columnaVencimiento && <Th label="Vence" sortKey="vencimiento" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} />}
-              {columnaVencimiento && <th>Antigüedad</th>}
-              {columnaRecurrencia && <th>Frecuencia</th>}
-              {columnaRecurrencia && <th>Al mes</th>}
-              {columnaRecurrencia && <th>Próximo</th>}
-              {!columnaVencimiento && !columnaRecurrencia && <th className="hidden lg:table-cell">Forma de pago</th>}
+              <th className="hidden lg:table-cell">{grupo.id === "ingresos" ? "Cliente" : grupo.id === "egresos" ? "A quién" : "Cliente / A quién"}</th>
+              {verVencimiento && <Th label="Vence" sortKey="vencimiento" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} />}
+              {verVencimiento && <th>Antigüedad</th>}
+              {soloRecurrentes && <th>Frecuencia</th>}
+              {soloRecurrentes && <th>Al mes</th>}
+              {soloRecurrentes && <th>Próximo</th>}
+              {!verVencimiento && !soloRecurrentes && <th className="hidden lg:table-cell">Forma de pago</th>}
               <Th label="Monto" sortKey="monto" orden={orden} ordenDir={ordenDir} onToggle={toggleOrden} />
               <th>Estado</th>
               <th></th>
@@ -10648,30 +10712,29 @@ function FinanzasMovimientos({ data, onAdd, onEdit, onRemove, onAddPago, opcionI
               const saldo = saldoDe(f);
               const pendiente = f.estatus !== "Cobrado";
               const v = vencimientoDe(f);
+              const esIngreso = f.tipo === "Ingreso";
               return (
                 <tr key={f.id}>
                   <td className="gp-mono">{fmtFechaCorta(f.fecha)}</td>
-                  <td>
-                    <Badge tone={f.tipo === "Ingreso" ? "teal" : "red"}>
-                      {f.categoria === "Pago a colaborador" ? "Pago colaborador" : f.tipo === "Ingreso" ? "Cobro cliente" : "Gasto"}
-                    </Badge>
-                  </td>
+                  {verTipo && (
+                    <td>
+                      <Badge tone={esIngreso ? "teal" : "red"}>{esIngreso ? "Ingreso" : "Egreso"}</Badge>
+                    </td>
+                  )}
                   <td style={{ maxWidth: 260 }}><span className="truncate block">{f.concepto}</span></td>
                   <td className="hidden md:table-cell gp-text-gold">{f.proyectoId ? nombreProyecto(f.proyectoId) : "—"}</td>
                   <td className="hidden md:table-cell gp-text-muted">{f.categoria || "—"}</td>
                   <td className="hidden lg:table-cell gp-text-muted">{f.contactoId ? nombreContacto(f.contactoId) : "—"}</td>
-                  {columnaVencimiento && <td className="gp-mono">{v.fecha ? fmtFechaCorta(v.fecha) : "—"}</td>}
-                  {columnaVencimiento && <td><span className="text-xs" style={{ color: v.vencido ? "var(--red)" : "var(--muted)" }}>{v.texto}</span></td>}
-                  {columnaRecurrencia && <td className="gp-text-muted">{f.frecuencia || "Mensual"}</td>}
-                  {columnaRecurrencia && <td className="gp-mono" style={{ color: f.tipo === "Ingreso" ? "var(--teal)" : "var(--red)" }}>{fmtMoney(Math.round(montoMensualizado(f)))}</td>}
-                  {columnaRecurrencia && (
+                  {verVencimiento && <td className="gp-mono">{v.fecha ? fmtFechaCorta(v.fecha) : "—"}</td>}
+                  {verVencimiento && <td><span className="text-xs" style={{ color: v.vencido ? "var(--red)" : "var(--muted)" }}>{v.texto}</span></td>}
+                  {soloRecurrentes && <td className="gp-text-muted">{f.frecuencia || "Mensual"}</td>}
+                  {soloRecurrentes && <td className="gp-mono" style={{ color: esIngreso ? "var(--teal)" : "var(--red)" }}>{fmtMoney(Math.round(montoMensualizado(f)))}</td>}
+                  {soloRecurrentes && (
                     <td className="gp-mono">
-                      {proximoCargoRecurrente(f)
-                        ? fmtFechaCorta(proximoCargoRecurrente(f))
-                        : <span className="gp-text-muted">terminado</span>}
+                      {proximoCargoRecurrente(f) ? fmtFechaCorta(proximoCargoRecurrente(f)) : <span className="gp-text-muted">terminado</span>}
                     </td>
                   )}
-                  {!columnaVencimiento && !columnaRecurrencia && <td className="hidden lg:table-cell gp-text-muted">{f.forma || "—"}</td>}
+                  {!verVencimiento && !soloRecurrentes && <td className="hidden lg:table-cell gp-text-muted">{f.forma || "—"}</td>}
                   <td>
                     <MontoMovimiento f={f} />
                     {abonado > 0 && pendiente && (
@@ -10681,6 +10744,9 @@ function FinanzasMovimientos({ data, onAdd, onEdit, onRemove, onAddPago, opcionI
                   <td>
                     <SelectGuardable
                       valor={f.estatus || "Pendiente"} opciones={["Cobrado", "Pendiente", "Parcial"]}
+                      etiquetas={esIngreso
+                        ? { Cobrado: "Cobrado", Pendiente: "Por cobrar", Parcial: "Parcial" }
+                        : { Cobrado: "Pagado", Pendiente: "Por pagar", Parcial: "Parcial" }}
                       ariaLabel="Estado del movimiento" onGuardar={(nuevoEstado) => onEdit(f.id, { estatus: nuevoEstado })}
                     />
                   </td>
@@ -10690,10 +10756,10 @@ function FinanzasMovimientos({ data, onAdd, onEdit, onRemove, onAddPago, opcionI
                       {pendiente && (
                         <button
                           onClick={() => setModal({ item: f, paso: "pagar" })}
-                          title={f.tipo === "Ingreso" ? "Registrar un cobro (parcial o total)" : "Registrar un pago (parcial o total)"}
-                          className={`text-xs px-2 py-1 rounded gp-btn-ghost ${f.tipo === "Ingreso" ? "gp-text-teal" : "gp-text-gold"}`}
+                          title={esIngreso ? "Registrar un cobro (parcial o total)" : "Registrar un pago (parcial o total)"}
+                          className={`text-xs px-2 py-1 rounded gp-btn-ghost ${esIngreso ? "gp-text-teal" : "gp-text-gold"}`}
                         >
-                          {f.tipo === "Ingreso" ? "Cobrar" : "Pagar"}
+                          {esIngreso ? "Cobrar" : "Pagar"}
                         </button>
                       )}
                       <IconBtn title="Editar" onClick={() => setModal({ item: f })}><Pencil size={13} /></IconBtn>
@@ -10704,11 +10770,13 @@ function FinanzasMovimientos({ data, onAdd, onEdit, onRemove, onAddPago, opcionI
               );
             })}
             {enPagina.length === 0 && (
-              <tr><td colSpan={12} className="text-center gp-text-muted py-8">
-                {pestana === "cobrar" ? "No hay nada por cobrar."
-                  : pestana === "pagar" ? "No hay nada por pagar."
-                  : pestana === "recurrentes" ? "No tienes movimientos recurrentes. Un movimiento se vuelve recurrente al marcarlo así en su formulario."
-                  : "Sin movimientos con estos filtros."}
+              <tr><td colSpan={13} className="text-center gp-text-muted py-8">
+                {busqueda || filtroProyecto !== "Todos" || filtroCategoria !== "Todas" || soloRecurrentes
+                  ? "Sin resultados con estos filtros."
+                  : sub.id === "cobrar" ? "No hay nada por cobrar. "
+                  : sub.id === "pagar" ? "No hay nada por pagar. "
+                  : sub.id === "deudas" ? "No tienes deudas registradas."
+                  : `No hay ${grupo.label.toLowerCase()} en este periodo.`}
               </td></tr>
             )}
           </tbody>
@@ -10833,13 +10901,12 @@ function FinanzasResumen({ data, onAdd, onEdit, onVerMovimientos, crearAlEntrar,
 
   return (
     <div>
-      {/* El título de la pantalla lo pone la envoltura; aquí solo va lo que el Resumen controla. */}
-      <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
-        <select className="gp-input text-xs py-1.5" style={{ width: "auto" }} value={rango} onChange={(e) => setRango(e.target.value)} aria-label="Periodo">
-          {RANGOS_MOVIMIENTOS.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
-        </select>
-        <button onClick={() => nuevo({})} className="gp-btn px-3 py-1.5 text-sm rounded flex items-center gap-1.5"><Plus size={14} /> Nuevo movimiento</button>
-      </div>
+      <CabeceraFinanzas
+        seccion="Resumen" titulo="Resumen" icono={<BarChart3 size={20} className="gp-text-gold" />}
+        subtitulo="Cómo vas en el periodo: lo que entró, lo que salió y lo que falta."
+        rango={rango} onRango={setRango}
+        acciones={<button onClick={() => nuevo({})} className="gp-btn px-3 py-1.5 text-sm rounded flex items-center gap-1.5"><Plus size={14} /> Nuevo movimiento</button>}
+      />
 
       <div className="flex flex-col xl:flex-row gap-3 items-start">
         <div className="min-w-0 flex-1 w-full">
@@ -10907,7 +10974,7 @@ function FinanzasResumen({ data, onAdd, onEdit, onVerMovimientos, crearAlEntrar,
               <div className="gp-panel p-3.5">
                 <TituloBloque
                   icono={<PieChartIcon size={15} />} color="var(--red)"
-                  derecha={<button onClick={() => onVerMovimientos("egresos")} className="text-[10px] gp-text-gold shrink-0">Ver detalle</button>}
+                  derecha={<button onClick={() => onVerMovimientos("egresos", "todos")} className="text-[10px] gp-text-gold shrink-0">Ver detalle</button>}
                 >
                   Egresos por categoría
                 </TituloBloque>
@@ -10993,7 +11060,7 @@ function FinanzasResumen({ data, onAdd, onEdit, onVerMovimientos, crearAlEntrar,
                       );
                     })}
                   </div>
-                  <button onClick={() => onVerMovimientos("cobrar")} className="text-[10px] gp-text-gold mt-2 flex items-center gap-1">
+                  <button onClick={() => onVerMovimientos("ingresos", "cobrar")} className="text-[10px] gp-text-gold mt-2 flex items-center gap-1">
                     Ver los {cobrosPendientes.length} <ArrowRight size={10} />
                   </button>
                 </>
@@ -11026,7 +11093,7 @@ function FinanzasResumen({ data, onAdd, onEdit, onVerMovimientos, crearAlEntrar,
                       );
                     })}
                   </div>
-                  <button onClick={() => onVerMovimientos("pagar")} className="text-[10px] gp-text-gold mt-2 flex items-center gap-1">
+                  <button onClick={() => onVerMovimientos("egresos", "pagar")} className="text-[10px] gp-text-gold mt-2 flex items-center gap-1">
                     Ver los {pagosPendientes.length} <ArrowRight size={10} />
                   </button>
                 </>
