@@ -12616,7 +12616,10 @@ function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
                       <AvatarContacto c={c} />
                       <div className="min-w-0">
                         <div className="flex items-center gap-1.5 flex-wrap">
-                          <span className="font-medium">{c.titulo ? `${c.titulo} ` : ""}{c.nombre}</span>
+                          {/* El título (Dr., Arq., M en C) NO va pegado al nombre: aquí solo el
+                              nombre y los apellidos. Se consulta en la ficha, y sigue entrando en
+                              la búsqueda y en las exportaciones. */}
+                          <span className="font-medium">{c.nombre}</span>
                           <BadgeCumpleContacto c={c} />
                           <ChipsEtiquetasContacto c={c} max={2} />
                         </div>
@@ -13064,7 +13067,8 @@ function FichaContacto({ c, data, proyectosVinculados, onCerrar, onEditar, onVer
         <div className="flex items-start gap-3 min-w-0">
           <AvatarContacto c={c} size={64} />
           <div className="min-w-0">
-            <p className="gp-serif text-lg leading-tight">{c.titulo ? `${c.titulo} ` : ""}{c.nombre}</p>
+            {/* Solo nombre y apellidos. El título va como dato, más abajo. */}
+            <p className="gp-serif text-lg leading-tight">{c.nombre}</p>
             <div className="mt-1 flex flex-wrap items-center gap-1"><ChipsTiposContacto c={c} /><ChipsEtiquetasContacto c={c} /></div>
             {c.puesto && <p className="text-xs gp-text-muted mt-1">{c.puesto}</p>}
             {c.empresa && <p className="text-xs gp-text-muted">{c.empresa}</p>}
@@ -13125,6 +13129,9 @@ function FichaContacto({ c, data, proyectosVinculados, onCerrar, onEditar, onVer
             <Dato label="Nombre(s)" valor={c.nombres} />
             <Dato label="Apellido paterno" valor={c.apellidoPaterno} />
             <Dato label="Apellido materno" valor={c.apellidoMaterno} />
+            {/* El título vive aquí desde que salió del nombre: se captura para dirigirse a la
+                persona ("Estimado M en C Quintana"), no para identificarla en una lista. */}
+            <Dato label="Título" valor={c.titulo} />
             <Dato label="Cumpleaños" valor={c.fechaNacimiento} />
             <Dato label="Parentesco" valor={c.parentesco} />
             <Dato label="Dónde lo conociste" valor={c.contexto} />
