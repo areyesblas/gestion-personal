@@ -50,3 +50,13 @@ export function BloqueFicha({ titulo, icono, accion, children }) {
     </div>
   );
 }
+
+// Tarjeta de cifra para los encabezados de Reportes y Estimaciones.
+export function Stat({ label, value, tone }) {
+  return (
+    <div className="gp-panel p-4">
+      <p className="text-xs gp-text-muted mb-1">{label}</p>
+      <p className={`gp-serif text-2xl ${tone === "teal" ? "gp-text-teal" : tone === "red" ? "gp-text-red" : ""}`}>{value}</p>
+    </div>
+  );
+}
