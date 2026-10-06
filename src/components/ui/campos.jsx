@@ -7,6 +7,9 @@
 import { useState, useEffect } from "react";
 import { Check, X, Pencil, Plus, Trash2 } from "lucide-react";
 import { IconBtn } from "./basicos";
+// SelectGuardable no guarda al vuelo: escribe en un borrador y enseña ✓/✗. Faltaba este import y
+// por eso tronaba al renderizar (bug del 5 oct 2026, ver borradores.js).
+import { useBorrador } from "./borradores";
 
 // Campo de captura de dinero: mientras escribes, va formateando con $ y comas (como una app de banco).
 // Por dentro sigue guardando un número plano (ej. "1234.5") para no romper nada de la base de datos;

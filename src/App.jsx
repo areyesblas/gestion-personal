@@ -39,6 +39,7 @@ import { Badge, IconBtn, Field, BloqueFicha } from "./components/ui/basicos";
 import { Modal } from "./components/ui/Modal";
 import { MoneyInput, SelectGuardable, ComboboxMultiBuscar } from "./components/ui/campos";
 import { Th, OrdenSelector, BarraListaEstandar } from "./components/ui/tablas";
+import { useBorrador, confirmarDescartarCambios } from "./components/ui/borradores";
 import {
   FolderKanban, CheckSquare, Wallet, AlertTriangle,
   Users, Activity, Plus, X, Trash2, Pencil, Github, ChevronDown,
@@ -1161,62 +1162,6 @@ function CamposMoneda({ monto, moneda, tipoCambio, fecha, onCambiar }) {
   );
 }
 
-/* ---------- Cambios sin guardar ----------
-   Hasta ahora varios controles escribían en la base en cuanto los movías —el avance de una
-   tarea, el estado de un proyecto— y no había forma de arrepentirse. Angel pidió lo contrario:
-   que cambiar un dato no guarde, que haya botón de Guardar, y que al salir con cambios
-   pendientes la app pregunte antes de perderlos.
-
-   El registro es global a propósito: quien quiera salir (cambiar de pantalla, cerrar el panel,
-   cerrar la pestaña) solo necesita preguntar "¿hay algo sin guardar?", sin saber quién lo tiene
-   ni dónde está. */
-const borradoresPendientes = new Set();
-
-function confirmarDescartarCambios() {
-  if (borradoresPendientes.size === 0) return true;
-  return window.confirm("Tienes cambios sin guardar. ¿Quieres descartarlos y salir?");
-}
-
-// Avisa también al cerrar la pestaña o recargar. El navegador enseña su propio texto; lo único
-// que podemos hacer es pedirle que pregunte.
-if (typeof window !== "undefined") {
-  window.addEventListener("beforeunload", (e) => {
-    if (borradoresPendientes.size === 0) return;
-    e.preventDefault();
-    e.returnValue = "";
-  });
-}
-
-// Borrador de un formulario en línea: mantiene una copia local de los campos, dice si hay algo
-// distinto de lo guardado y se apunta en el registro mientras lo haya.
-function useBorrador(original) {
-  const firma = JSON.stringify(original);
-  const marcaRef = useRef({});
-  // El borrador guarda JUNTO con los datos la firma del registro del que salieron. Así, cuando
-  // se elige otro registro, el reinicio pasa durante el render y no en un efecto posterior.
-  //
-  // Antes el reinicio vivía en un useEffect y eso causaba un bug de verdad, no solo cosmético
-  // (reportado el 4 oct 2026 en Notas, pero pasaba igual en la ficha de tarea y en la de
-  // proyecto): al cambiar de registro quedaba un render con los datos del ANTERIOR y la firma
-  // del NUEVO, así que la barra de "Guardar cambios" aparecía sola —el botón amarillo que se ve
-  // y se va— y, si alguien alcanzaba a picarla, escribía el contenido del registro anterior
-  // encima del que acababa de abrir.
-  const [estado, setEstado] = useState({ firma, datos: original });
-  if (estado.firma !== firma) setEstado({ firma, datos: original });
-  const borrador = estado.firma === firma ? estado.datos : original;
-  const setBorrador = (fn) => setEstado((prev) => ({ firma, datos: typeof fn === "function" ? fn(prev.datos) : fn }));
-
-  const sucio = JSON.stringify(borrador) !== firma;
-  useEffect(() => {
-    const marca = marcaRef.current;
-    if (sucio) borradoresPendientes.add(marca); else borradoresPendientes.delete(marca);
-    return () => borradoresPendientes.delete(marca);
-  }, [sucio]);
-
-  const cambiar = (parche) => setBorrador((prev) => ({ ...prev, ...parche }));
-  const descartar = () => setBorrador(original);
-  return { borrador, cambiar, descartar, sucio };
-}
 
 
 // Mismo patrón que SelectGuardable, para los campos numéricos de una tabla (el avance en el
