@@ -36,6 +36,7 @@ import { cargarXLSX, exportarFilasExcel, exportarFilasPDF } from "./lib/exportar
 // Primitivas de UI compartidas por todas las pantallas. Field tenía 393 usos y Modal 181 cuando
 // vivían aquí: eran la razón principal por la que no se podía extraer un módulo solo.
 import { Badge, IconBtn, Field, BloqueFicha, BarraGuardar } from "./components/ui/basicos";
+import { ErrorBoundary } from "./components/ui/ErrorBoundary";
 import { Modal } from "./components/ui/Modal";
 import { MoneyInput, SelectGuardable, ComboboxMultiBuscar, CampoPassword } from "./components/ui/campos";
 import { Th, OrdenSelector, BarraListaEstandar } from "./components/ui/tablas";
@@ -2880,6 +2881,11 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
               y nadie tiene que volver a tocar esta estructura. Las ramas de abajo no se re-indentaron
               a propósito —el diff quedaría de 280 líneas y taparía el cambio real— y a JSX le da
               igual la sangría. El fallback va fuera del área con scroll para que no la haga saltar. */}
+          {/* El ErrorBoundary va POR FUERA del Suspense: si el trozo de la pantalla no se puede
+              descargar, el error lo lanza el propio lazy() y hay que atraparlo aquí, no adentro.
+              `clave={view}` hace que al cambiar de pantalla se limpie el error — si falló Finanzas,
+              Contactos tiene que poder abrir igual. */}
+          <ErrorBoundary nombre={view} clave={view}>
           <Suspense fallback={<p className="text-sm gp-text-muted p-1">Cargando…</p>}>
           {view === "dashboard" && (
             <Dashboard
@@ -3164,6 +3170,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
               onAddComentario={(i) => addItem("comentarios", i)} />
           )}
           </Suspense>
+          </ErrorBoundary>
         </div>
       </div>
 
