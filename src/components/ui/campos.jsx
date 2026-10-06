@@ -5,7 +5,7 @@
 // solo cambio de comportamiento.
 
 import { useState, useEffect } from "react";
-import { Check, X, Pencil, Plus, Trash2 } from "lucide-react";
+import { Check, X, Pencil, Plus, Trash2, Eye, EyeOff } from "lucide-react";
 import { IconBtn } from "./basicos";
 // SelectGuardable no guarda al vuelo: escribe en un borrador y enseña ✓/✗. Faltaba este import y
 // por eso tronaba al renderizar (bug del 5 oct 2026, ver borradores.js).
@@ -173,6 +173,38 @@ export function ComboboxMultiBuscar({ seleccionados, opciones, onAgregar, onQuit
         )}
       </div>
       )}
+    </div>
+  );
+}
+
+// Input de contraseña con botón de ojo para mostrar/ocultar — se usa en todos los campos de
+// contraseña de la app (registro, cambio de contraseña, reautenticación, login de colaborador).
+export function CampoPassword({ value, onChange, required, className = "gp-input", autoFocus, autoComplete, placeholder, onKeyDown }) {
+  const [visible, setVisible] = useState(false);
+  return (
+    <div className="relative">
+      <input
+        type={visible ? "text" : "password"}
+        required={required}
+        className={className}
+        style={{ paddingRight: 34 }}
+        value={value}
+        onChange={onChange}
+        onKeyDown={onKeyDown}
+        autoFocus={autoFocus}
+        autoComplete={autoComplete}
+        placeholder={placeholder}
+      />
+      <button
+        type="button"
+        onClick={() => setVisible((v) => !v)}
+        tabIndex={-1}
+        className="absolute top-1/2 -translate-y-1/2 gp-text-muted"
+        style={{ right: 8 }}
+        title={visible ? "Ocultar contraseña" : "Mostrar contraseña"}
+      >
+        {visible ? <EyeOff size={15} /> : <Eye size={15} />}
+      </button>
     </div>
   );
 }

@@ -37,7 +37,7 @@ import { cargarXLSX, exportarFilasExcel, exportarFilasPDF } from "./lib/exportar
 // vivían aquí: eran la razón principal por la que no se podía extraer un módulo solo.
 import { Badge, IconBtn, Field, BloqueFicha, BarraGuardar } from "./components/ui/basicos";
 import { Modal } from "./components/ui/Modal";
-import { MoneyInput, SelectGuardable, ComboboxMultiBuscar } from "./components/ui/campos";
+import { MoneyInput, SelectGuardable, ComboboxMultiBuscar, CampoPassword } from "./components/ui/campos";
 import { Th, OrdenSelector, BarraListaEstandar } from "./components/ui/tablas";
 import { useBorrador, confirmarDescartarCambios } from "./components/ui/borradores";
 // Analítica de Finanzas. El Dashboard y Presupuesto también la usan y NO son perezosos, por eso
@@ -49,6 +49,10 @@ import { usePanelRedimensionable } from "./components/ui/usePanelRedimensionable
 import Bitacora from "./components/comunes/Bitacora";
 import ArchivosEntidad from "./components/comunes/ArchivosEntidad";
 import PresupuestoMensualForm from "./components/comunes/PresupuestoMensualForm";
+import AvatarForm from "./components/comunes/AvatarForm";
+import PromptTareaRelacionada from "./components/comunes/PromptTareaRelacionada";
+import { ESTATUS_TAREA, FRECUENCIA } from "./lib/catalogos";
+import { aplicaHoy } from "./lib/habitos";
 // Perezosos (Fase 1): Reportes y Estimaciones son capa analítica — se entra a ellas de vez en
 // cuando, no tienen por qué pesar en el arranque de todos los días.
 const Reportes = lazy(() => import("./components/modulos/Reportes"));
@@ -438,7 +442,6 @@ const MODO_PROYECTO = ["Finito", "Continuo"];
 const MONETIZACION = ordenAlfabetico(["Dinero", "Especie", "Intercambio", "No genera dinero"]);
 const PRIORIDADES = ["Alta", "Media", "Baja"];
 // 7 estados según el documento maestro v0.1 (antes eran solo 3: Pendiente/En progreso/Hecho).
-const ESTATUS_TAREA = ["Borrador", "No iniciada", "Pendiente", "En proceso", "En espera", "Completada", "Cancelada"];
 // Estados que cuentan como "ya no requiere trabajo activo" (para filtros de "abiertas" vs archivadas).
 const ESTATUS_TAREA_CERRADOS = ["Completada", "Cancelada"];
 const tareaAbierta = (estatus) => !ESTATUS_TAREA_CERRADOS.includes(estatus);
@@ -565,7 +568,6 @@ const CATEGORIA_POR_TIPO_NOTIF = {
   campana: "Proyectos", asignacion: "Colaboradores",
 };
 const PARENTESCOS = ordenAlfabetico(["Papá", "Mamá", "Hermano/a", "Hijo/a", "Esposo/a", "Abuelo/a", "Tío/a", "Primo/a", "Sobrino/a", "Cuñado/a", "Suegro/a", "Compadre/Comadre", "Amigo cercano", "Conocido"]);
-const FRECUENCIA = ["Semanal", "Quincenal", "Mensual", "Anual"];
 const TIPO_ACTIVO = ordenAlfabetico(["Dominio", "Hosting", "Marca (IMPI)", "Red social", "Otro"]);
 const ESTATUS_META = ["No iniciada", "En progreso", "Cumplida"];
 const TIPO_DOCUMENTO = ordenAlfabetico(["Contrato", "Registro de marca (IMPI)", "Acta constitutiva", "Otro"]);
@@ -964,37 +966,6 @@ async function migrateFromOldBlobIfNeeded(current, ownerId) {
 
 
 
-// Input de contraseña con botón de ojo para mostrar/ocultar — se usa en todos los campos de
-// contraseña de la app (registro, cambio de contraseña, reautenticación, login de colaborador).
-function CampoPassword({ value, onChange, required, className = "gp-input", autoFocus, autoComplete, placeholder, onKeyDown }) {
-  const [visible, setVisible] = useState(false);
-  return (
-    <div className="relative">
-      <input
-        type={visible ? "text" : "password"}
-        required={required}
-        className={className}
-        style={{ paddingRight: 34 }}
-        value={value}
-        onChange={onChange}
-        onKeyDown={onKeyDown}
-        autoFocus={autoFocus}
-        autoComplete={autoComplete}
-        placeholder={placeholder}
-      />
-      <button
-        type="button"
-        onClick={() => setVisible((v) => !v)}
-        tabIndex={-1}
-        className="absolute top-1/2 -translate-y-1/2 gp-text-muted"
-        style={{ right: 8 }}
-        title={visible ? "Ocultar contraseña" : "Mostrar contraseña"}
-      >
-        {visible ? <EyeOff size={15} /> : <Eye size={15} />}
-      </button>
-    </div>
-  );
-}
 
 
 // Monto en cualquier moneda, con su tipo de cambio del día. Lo usa el formulario de Finanzas y
@@ -1119,30 +1090,6 @@ function NumeroGuardable({ valor, placeholder, onGuardar, ariaLabel, style }) {
 
 
 
-// Prompt reutilizable: "¿Deseas crear una acción relacionada?" — tras guardar una Cita, Deuda,
-// Documento o Activo digital, ofrece crear una Tarea real ligada a ese origen (origenTabla/origenId),
-// sin obligar a hacerlo. Como pide el documento maestro v0.1: una Cita/Deuda/Documento/Activo no ES
-// una Tarea, pero puede GENERAR una.
-function PromptTareaRelacionada({ origenTabla, origenId, proyectoId, descripcionSugerida, fechaSugerida, onCrear, onOmitir }) {
-  const [descripcion, setDescripcion] = useState(descripcionSugerida || "");
-  const [fechaLimite, setFechaLimite] = useState(fechaSugerida || todayISO());
-  return (
-    <div>
-      <p className="text-sm gp-text-muted mb-3">¿Deseas crear una tarea relacionada con esto? Quedará ligada aquí para que puedas encontrarla desde ambos lados.</p>
-      <Field label="Descripción de la tarea"><input className="gp-input" value={descripcion} onChange={(e) => setDescripcion(e.target.value)} /></Field>
-      <Field label="Fecha límite"><input type="date" className="gp-input" value={fechaLimite} onChange={(e) => setFechaLimite(e.target.value)} /></Field>
-      <div className="flex gap-2 mt-3">
-        <button className="gp-btn-ghost flex-1 py-2 text-sm" onClick={onOmitir}>Omitir</button>
-        <button
-          className="gp-btn flex-1 py-2 text-sm"
-          onClick={() => { if (descripcion.trim()) onCrear({ descripcion: descripcion.trim(), fechaLimite, proyectoId: proyectoId || "", origenTabla, origenId, estatus: "Pendiente" }); }}
-        >
-          Crear tarea
-        </button>
-      </div>
-    </div>
-  );
-}
 
 /* ---------- login ---------- */
 // Evalúa la fortaleza de una contraseña (0 a 4) y qué requisitos le faltan.
@@ -4016,162 +3963,8 @@ function Configuracion({
   );
 }
 
-// Foto que se muestra en el avatar del Centro de mando — sube a Storage (bucket "adjuntos") y
-// guarda la URL pública en preferencias.avatar_url (ver subirAvatar en AppLoggedIn).
-function AvatarForm({ avatarUrl, subirAvatar, onSaved, helpText, forma = "circulo", iconoVacio, textoBoton }) {
-  const [archivoElegido, setArchivoElegido] = useState(null); // File recién elegido, pendiente de recortar
-  const [previa, setPrevia] = useState(avatarUrl || "");
 
-  // La vista previa se inicializaba con la imagen y después vivía por su cuenta: si el formulario
-  // de arriba borraba la imagen ("Quitar imagen"), aquí se seguía viendo la anterior y parecía que
-  // el botón no hacía nada. Ahora sigue lo que diga el formulario. Durante una subida no estorba:
-  // avatarUrl no cambia hasta que termina, y cuando cambia trae justo la imagen recién subida.
-  useEffect(() => { setPrevia(avatarUrl || ""); }, [avatarUrl]);
-  const [estado, setEstado] = useState("idle"); // idle | subiendo | listo
-  const [error, setError] = useState("");
 
-  const onArchivo = (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    if (file.size > 5 * 1024 * 1024) { setError("La imagen pesa más de 5 MB — usa una más chica."); return; }
-    setError("");
-    setArchivoElegido(file);
-    e.target.value = ""; // para poder elegir el mismo archivo otra vez si cancela y reintenta
-  };
-
-  const onRecortada = async (blob) => {
-    setArchivoElegido(null);
-    setPrevia(URL.createObjectURL(blob));
-    setEstado("subiendo");
-    const res = await subirAvatar(new File([blob], "avatar.jpg", { type: "image/jpeg" }));
-    if (res.error) { setError(res.error); setEstado("idle"); return; }
-    setEstado("listo");
-    setTimeout(() => onSaved?.(), 900);
-  };
-
-  if (archivoElegido) {
-    return <AvatarCropper file={archivoElegido} onCancel={() => setArchivoElegido(null)} onConfirm={onRecortada} />;
-  }
-
-  return (
-    <div>
-      <p className="text-xs gp-text-muted mb-3">{helpText || "Se muestra en el Centro de mando, junto al buscador. Si no subes una, se muestran tus iniciales."}</p>
-      <div className="flex flex-col items-center gap-3">
-        {previa ? (
-          <img src={previa} alt="" className={`w-24 h-24 object-cover ${forma === "cuadro" ? "rounded-2xl" : "rounded-full"}`} style={{ border: "1px solid var(--border)" }} />
-        ) : (
-          <div className={`w-24 h-24 flex items-center justify-center ${forma === "cuadro" ? "rounded-2xl" : "rounded-full"}`} style={{ background: "var(--panel-hi)" }}>
-            {iconoVacio || <Contact size={32} className="gp-text-muted" />}
-          </div>
-        )}
-        <label className="gp-btn-ghost px-3 py-2 text-sm rounded cursor-pointer">
-          {estado === "subiendo" ? "Subiendo…" : estado === "listo" ? "Guardado ✓" : (textoBoton || "Elegir foto…")}
-          <input type="file" accept="image/*" className="hidden" onChange={onArchivo} disabled={estado === "subiendo"} />
-        </label>
-        {error && <p className="text-xs gp-text-red">{error}</p>}
-      </div>
-    </div>
-  );
-}
-
-const AVATAR_CROPPER_VP = 260; // tamaño del visor circular en pantalla (px)
-const AVATAR_CROPPER_OUT = 480; // resolución del archivo exportado (px, cuadrado)
-
-// Mantiene el offset de arrastre siempre dentro de los límites de la imagen (que nunca deje
-// huecos en blanco dentro del visor circular), dado el tamaño mostrado (w × h) de la imagen.
-function clampOffsetAvatar(o, w, h) {
-  const minX = Math.min(0, AVATAR_CROPPER_VP - w);
-  const minY = Math.min(0, AVATAR_CROPPER_VP - h);
-  return { x: Math.max(minX, Math.min(0, o.x)), y: Math.max(minY, Math.min(0, o.y)) };
-}
-
-// Deja acomodar la foto (arrastrar para mover, deslizador para acercar) antes de fijarla como
-// avatar, en vez de subirla tal cual — pedido de Angel (21 sept 2026). Se exporta a un canvas
-// del mismo recorte que se ve en el visor, así "lo que ves es lo que se guarda".
-function AvatarCropper({ file, onCancel, onConfirm }) {
-  const [img, setImg] = useState(null); // HTMLImageElement ya cargado
-  const [zoom, setZoom] = useState(1);
-  const [offset, setOffset] = useState({ x: 0, y: 0 });
-  const arrastreRef = useRef(null); // { startX, startY, offsetX, offsetY } mientras se arrastra
-  const [guardando, setGuardando] = useState(false);
-
-  useEffect(() => {
-    const url = URL.createObjectURL(file);
-    const el = new Image();
-    el.onload = () => setImg(el);
-    el.src = url;
-    return () => URL.revokeObjectURL(url);
-  }, [file]);
-
-  const baseScale = img ? Math.max(AVATAR_CROPPER_VP / img.width, AVATAR_CROPPER_VP / img.height) : 1;
-  const scale = baseScale * zoom;
-  const dispW = img ? img.width * scale : 0;
-  const dispH = img ? img.height * scale : 0;
-
-  useEffect(() => {
-    if (!img) return;
-    setOffset((prev) => clampOffsetAvatar(prev, dispW, dispH));
-    // Solo debe re-centrar/acotar cuando cambia la imagen o el zoom, no en cada pixel de arrastre.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [img, zoom]);
-
-  const iniciarArrastre = (clientX, clientY) => { arrastreRef.current = { startX: clientX, startY: clientY, offsetX: offset.x, offsetY: offset.y }; };
-  const moverArrastre = (clientX, clientY) => {
-    if (!arrastreRef.current) return;
-    const dx = clientX - arrastreRef.current.startX;
-    const dy = clientY - arrastreRef.current.startY;
-    setOffset(clampOffsetAvatar({ x: arrastreRef.current.offsetX + dx, y: arrastreRef.current.offsetY + dy }, dispW, dispH));
-  };
-  const terminarArrastre = () => { arrastreRef.current = null; };
-
-  const confirmar = () => {
-    if (!img) return;
-    setGuardando(true);
-    const k = AVATAR_CROPPER_OUT / AVATAR_CROPPER_VP;
-    const canvas = document.createElement("canvas");
-    canvas.width = AVATAR_CROPPER_OUT;
-    canvas.height = AVATAR_CROPPER_OUT;
-    const ctx = canvas.getContext("2d");
-    ctx.drawImage(img, offset.x * k, offset.y * k, dispW * k, dispH * k);
-    canvas.toBlob((blob) => { setGuardando(false); if (blob) onConfirm(blob); }, "image/jpeg", 0.92);
-  };
-
-  return (
-    <div>
-      <p className="text-xs gp-text-muted mb-3">Arrastra la foto para acomodarla y usa el deslizador para acercar, antes de fijarla.</p>
-      <div className="flex flex-col items-center gap-3">
-        <div
-          className="rounded-full overflow-hidden relative"
-          style={{ width: AVATAR_CROPPER_VP, height: AVATAR_CROPPER_VP, background: "var(--panel-hi)", border: "1px solid var(--border)", cursor: img ? "grab" : "default", touchAction: "none" }}
-          onMouseDown={(e) => iniciarArrastre(e.clientX, e.clientY)}
-          onMouseMove={(e) => { if (arrastreRef.current) moverArrastre(e.clientX, e.clientY); }}
-          onMouseUp={terminarArrastre}
-          onMouseLeave={terminarArrastre}
-          onTouchStart={(e) => iniciarArrastre(e.touches[0].clientX, e.touches[0].clientY)}
-          onTouchMove={(e) => moverArrastre(e.touches[0].clientX, e.touches[0].clientY)}
-          onTouchEnd={terminarArrastre}
-        >
-          {img && (
-            <img
-              src={img.src}
-              alt=""
-              draggable={false}
-              style={{ position: "absolute", left: offset.x, top: offset.y, width: dispW, height: dispH, maxWidth: "none", userSelect: "none" }}
-            />
-          )}
-        </div>
-        <div className="flex items-center gap-2 w-full max-w-[260px]">
-          <span className="text-xs gp-text-muted shrink-0">Zoom</span>
-          <input type="range" min="1" max="3" step="0.05" value={zoom} onChange={(e) => setZoom(Number(e.target.value))} className="flex-1" />
-        </div>
-        <div className="flex gap-2 w-full max-w-[260px]">
-          <button onClick={onCancel} className="gp-btn-ghost flex-1 py-2 text-sm rounded">Cancelar</button>
-          <button onClick={confirmar} disabled={!img || guardando} className="gp-btn flex-1 py-2 text-sm rounded disabled:opacity-70">{guardando ? "…" : "Usar esta foto"}</button>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 // Nombre con el que el saludo del Centro de mando y Arkey (asistente de voz) te llaman, en vez
 // de derivarlo del correo. Vacío = se sigue usando el correo (ver guardarNombreMostrar).
@@ -12608,15 +12401,6 @@ const textoFrecuencia = (h) => {
   }
   if (h.frecuenciaTipo === "veces_semana") return `${h.frecuenciaVecesSemana || 1}x por semana`;
   return "Todos los días";
-};
-// ¿Este hábito "aplica" hoy según su frecuencia? (para el resumen del día — días específicos que no
-// tocan hoy no cuentan como pendientes; diario y X veces por semana siempre se consideran vigentes).
-const aplicaHoy = (h, hoyISO) => {
-  if (h.frecuenciaTipo === "dias_semana") {
-    const diaHoy = new Date(hoyISO + "T00:00:00").getDay();
-    return (h.frecuenciaDiasSemana || []).includes(diaHoy);
-  }
-  return true;
 };
 // % de cumplimiento en una ventana de N días, comparando lo registrado contra lo esperado según frecuencia.
 const porcentajeCumplimiento = (h, dias = 30) => {
