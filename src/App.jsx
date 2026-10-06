@@ -51,9 +51,23 @@ import ArchivosEntidad from "./components/comunes/ArchivosEntidad";
 import PresupuestoMensualForm from "./components/comunes/PresupuestoMensualForm";
 import AvatarForm from "./components/comunes/AvatarForm";
 import PromptTareaRelacionada from "./components/comunes/PromptTareaRelacionada";
-import { ESTATUS_TAREA, FRECUENCIA } from "./lib/catalogos";
+import {
+  ESTATUS_TAREA, FRECUENCIA, PRIORIDADES, ESTATUS_TAREA_CERRADOS, toneEstatusTarea,
+  ESTATUS_META, FORMA_PAGO, COLORES_DESGLOSE, CANDADO_SENSIBLE_ACTIVO,
+  etiquetaEstatusProyecto, COLOR_ESTATUS_PROYECTO, COLOR_CONTEXTO_PROYECTO,
+} from "./lib/catalogos";
 import { aplicaHoy } from "./lib/habitos";
 import { tokenDeSesion } from "./lib/sesion";
+// Núcleo que destraba el nudo de Proyectos/Tareas: lo comparten módulos perezosos con pantallas
+// que se quedan aquí (Dashboard, AppLoggedIn, Agenda, Contactos, Finanzas).
+import { buildTareaTree, flattenTareas, idsRamasTareas, calcAvanceTarea, descendientesDe, fmtFechaCompletado, reabrirTarea } from "./lib/tareas";
+import { paginasVisibles } from "./lib/paginacion";
+import { usarCatalogoEditable } from "./components/ui/usarCatalogoEditable";
+import { ComboFiltroColor } from "./components/ui/ComboFiltroColor";
+import { MontoMovimiento, CamposMoneda, ComprobantePago } from "./components/comunes/finanzas";
+import { AvatarContacto, tiposDeContacto } from "./components/comunes/contactos";
+import { BadgeEstatusProyecto } from "./components/comunes/proyectos";
+import { PendienteForm, MetaForm } from "./components/comunes/formularios";
 // Perezosos (Fase 1): Reportes y Estimaciones son capa analítica — se entra a ellas de vez en
 // cuando, no tienen por qué pesar en el arranque de todos los días.
 const Reportes = lazy(() => import("./components/modulos/Reportes"));
@@ -387,24 +401,10 @@ const ESTATUS_PROYECTO = ["Idea", "En validación", "En desarrollo", "Activo", "
 // Etiqueta corta SOLO para dibujar (chips de filtro, badges): el valor guardado en Supabase sigue
 // siendo el de ESTATUS_PROYECTO. No son estados nuevos — es el mismo estado escrito más corto para
 // que la fila de filtros no se convierta en una barra gigantesca (secc. 7 del rediseño).
-const ETIQUETA_ESTATUS_PROYECTO = { "En validación": "Validación", "En desarrollo": "Desarrollo", "Pausado": "En pausa" };
-const etiquetaEstatusProyecto = (e) => ETIQUETA_ESTATUS_PROYECTO[e] || e;
-// Colores semánticos del pipeline: de la idea (ámbar, todavía sin compromiso) al activo (verde,
-// produciendo), con el archivado en gris. Son los mismos colores que ya usa el resto de ARKEYONE.
-const COLOR_ESTATUS_PROYECTO = {
-  "Idea": "#F59E0B",
-  "En validación": "#8B5CF6",
-  "En desarrollo": "#087CF5",
-  "Activo": "#16A36A",
-  "Finalizado": "#5FBF8B",
-  "Pausado": "#F97316",
-  "Archivado": "#64748B",
-};
 // Contexto de vida del proyecto (secc. 12 del rediseño, 24 sept 2026). NO es un módulo por
 // contexto: es una propiedad del proyecto, como la categoría, para poder separar lo personal de
 // lo del negocio sin duplicar pantallas.
 const CONTEXTOS_PROYECTO = ["Personal", "Profesional", "Empresarial"];
-const COLOR_CONTEXTO_PROYECTO = { Personal: "#8B5CF6", Profesional: "#087CF5", Empresarial: "#16A36A" };
 // Los mismos tres contextos, con la cara que se les pone en el onboarding y en Configuración.
 // Se reutilizan los colores de arriba a propósito: el chip "Empresarial" de un proyecto y la
 // tarjeta "Empresarial" del onboarding tienen que ser el mismo verde, o parecen cosas distintas.
@@ -449,18 +449,7 @@ const COLOR_CATEGORIA_PROYECTO = {
 };
 const MODO_PROYECTO = ["Finito", "Continuo"];
 const MONETIZACION = ordenAlfabetico(["Dinero", "Especie", "Intercambio", "No genera dinero"]);
-const PRIORIDADES = ["Alta", "Media", "Baja"];
-// 7 estados según el documento maestro v0.1 (antes eran solo 3: Pendiente/En progreso/Hecho).
-// Estados que cuentan como "ya no requiere trabajo activo" (para filtros de "abiertas" vs archivadas).
-const ESTATUS_TAREA_CERRADOS = ["Completada", "Cancelada"];
 const tareaAbierta = (estatus) => !ESTATUS_TAREA_CERRADOS.includes(estatus);
-const toneEstatusTarea = (estatus) => (
-  estatus === "Completada" ? "teal" :
-  estatus === "Cancelada" ? "muted" :
-  estatus === "En proceso" ? "gold" :
-  estatus === "En espera" ? "red" :
-  "muted" // Borrador, No iniciada, Pendiente
-);
 const TIPO_FIN = ["Ingreso", "Egreso"];
 
 /* ---------- Divisas ----------
@@ -469,30 +458,6 @@ const TIPO_FIN = ["Ingreso", "Egreso"];
 
 // Tipo de cambio del DÍA del movimiento, no el de hoy: api.frankfurter.dev responde histórico
 // pidiéndole una fecha. Si falla (sin internet, fecha futura, moneda que la API no cubre) se
-// devuelve null y el formulario deja capturarlo a mano, que es lo que hay que hacer de todos
-// modos cuando el banco te cobró a otro tipo.
-const cacheTipoCambio = new Map();
-async function tipoCambioDelDia(moneda, fecha) {
-  if (!moneda || moneda === MONEDA_BASE) return 1;
-  const dia = (fecha || todayISO()).slice(0, 10);
-  const clave = `${moneda}|${dia}`;
-  if (cacheTipoCambio.has(clave)) return cacheTipoCambio.get(clave);
-  try {
-    const hoy = todayISO();
-    const ruta = dia >= hoy ? "latest" : dia;
-    const resp = await fetch(`https://api.frankfurter.dev/v1/${ruta}?base=${moneda}&symbols=${MONEDA_BASE}`);
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const json = await resp.json();
-    const valor = Number(json?.rates?.[MONEDA_BASE]);
-    const bueno = Number.isFinite(valor) && valor > 0 ? valor : null;
-    cacheTipoCambio.set(clave, bueno);
-    return bueno;
-  } catch (err) {
-    console.error("No se pudo consultar el tipo de cambio:", err);
-    return null;
-  }
-}
-const FORMA_PAGO = ordenAlfabetico(["Efectivo", "Transferencia", "Especie", "Intercambio"]);
 const OCASIONES_REGALO = ordenAlfabetico(["Cumpleaños", "Navidad", "Aniversario", "Felicitación", "Otro"]);
 const ESTATUS_REGALO = ["Por comprar", "Comprado", "Envuelto", "Entregado"];
 // Tipo de atención: distinto de la ocasión (Cumpleaños/Navidad/…). La ocasión es CUÁNDO/POR QUÉ;
@@ -524,40 +489,7 @@ const etiquetasDeContactos = (contactos) =>
 // una vez queda sugerido para los siguientes contactos. Así no hay que pedirle a nadie que
 // agregue "Mtro. en Arquitectura" a una lista del código para poder usarlo.
 // Renombra o quita un valor de catálogo en todos los registros que lo usan. `esLista` distingue
-// un campo de varios valores (etiquetas) de uno solo (título). Devuelve cuántos cambió.
-// Pasar `nuevo = null` borra.
-async function editarValorCatalogo({ registros, campo, esLista, viejo, nuevo, onEditar }) {
-  const afectados = (registros || []).filter((r) => (esLista ? (r[campo] || []).includes(viejo) : (r[campo] || "") === viejo));
-  for (const r of afectados) {
-    const valor = esLista
-      ? (nuevo
-          ? [...new Set((r[campo] || []).map((x) => (x === viejo ? nuevo : x)))]
-          : (r[campo] || []).filter((x) => x !== viejo))
-      : (nuevo || "");
-    await onEditar(r.id, { [campo]: valor });
-  }
-  return afectados.length;
-}
 
-// Pregunta y ejecuta. Se usa igual en Contactos, Proyectos y Citas, para que administrar un
-// catálogo se sienta igual en toda la app.
-function usarCatalogoEditable({ registros, campo, esLista, onEditar, nombreSingular }) {
-  const cuantos = (viejo) => (registros || []).filter((r) => (esLista ? (r[campo] || []).includes(viejo) : (r[campo] || "") === viejo)).length;
-  return {
-    renombrar: async (viejo) => {
-      const nuevo = window.prompt(`Renombrar "${viejo}". Se cambia en ${cuantos(viejo)} ficha(s).`, viejo);
-      if (nuevo === null) return;
-      const limpio = nuevo.trim();
-      if (!limpio || limpio === viejo) return;
-      await editarValorCatalogo({ registros, campo, esLista, viejo, nuevo: limpio, onEditar });
-    },
-    eliminar: async (viejo) => {
-      const n = cuantos(viejo);
-      if (!window.confirm(`Quitar ${nombreSingular} "${viejo}" de ${n} ficha(s). Esto no borra las fichas, solo les quita ese valor. ¿Continuar?`)) return;
-      await editarValorCatalogo({ registros, campo, esLista, viejo, nuevo: null, onEditar });
-    },
-  };
-}
 
 const titulosDeContactos = (contactos) =>
   [...new Set([...TITULOS_CONTACTO, ...(contactos || []).map((c) => (c.titulo || "").trim()).filter(Boolean)])]
@@ -574,7 +506,6 @@ const CATEGORIA_POR_TIPO_NOTIF = {
   campana: "Proyectos", asignacion: "Colaboradores",
 };
 const PARENTESCOS = ordenAlfabetico(["Papá", "Mamá", "Hermano/a", "Hijo/a", "Esposo/a", "Abuelo/a", "Tío/a", "Primo/a", "Sobrino/a", "Cuñado/a", "Suegro/a", "Compadre/Comadre", "Amigo cercano", "Conocido"]);
-const ESTATUS_META = ["No iniciada", "En progreso", "Cumplida"];
 
 const seed = () => ({
   proyectos: [
@@ -708,14 +639,6 @@ const diasParaCumple = (fechaNacimiento) => {
   return Math.round((proximo - hoy) / 86400000);
 };
 
-/* Números de página a dibujar, con "…" cuando hay muchas (1 2 3 4 5 … 11), para no llenar la
-   barra de paginación de botones. Devuelve números y la cadena "…" como separador. */
-function paginasVisibles(actual, total) {
-  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
-  if (actual <= 4) return [1, 2, 3, 4, 5, "…", total];
-  if (actual >= total - 3) return [1, "…", total - 4, total - 3, total - 2, total - 1, total];
-  return [1, "…", actual - 1, actual, actual + 1, "…", total];
-}
 
 
 
@@ -964,83 +887,7 @@ async function migrateFromOldBlobIfNeeded(current, ownerId) {
 // capturado hoy pero fechado el mes pasado se congela al tipo que había ese día. Y siempre queda
 // editable, porque el tipo que te cobró el banco casi nunca es el oficial.
 // Muestra el importe de un movimiento. Siempre en pesos, porque es la moneda con la que se
-// compara todo; si el movimiento fue en otra moneda, debajo va lo que realmente se pagó y el
-// tipo de cambio al que quedó congelado, que es el dato que hace cuadrar el histórico.
-function MontoMovimiento({ f, className = "" }) {
-  const signo = f.tipo === "Ingreso" ? "+" : "−";
-  const color = f.tipo === "Ingreso" ? "var(--teal)" : "var(--red)";
-  const otraMoneda = f.moneda && f.moneda !== MONEDA_BASE;
-  return (
-    <span className={`inline-flex flex-col items-end ${className}`}>
-      <span className="gp-mono" style={{ color }}>{f.monto ? `${signo}${fmtMoney(montoBaseDe(f))}` : "—"}</span>
-      {otraMoneda && (
-        <span className="gp-mono gp-text-muted" style={{ fontSize: 10 }}>
-          {fmtMonedaOriginal(f.monto, f.moneda)} @ {Number(f.tipoCambio) || 1}
-        </span>
-      )}
-    </span>
-  );
-}
 
-function CamposMoneda({ monto, moneda, tipoCambio, fecha, onCambiar }) {
-  const [buscando, setBuscando] = useState(false);
-  const [aviso, setAviso] = useState("");
-  // onCambiar cambia de identidad en cada render del padre; guardarlo en un ref evita que el
-  // efecto se vuelva a disparar solo por eso y se cicle.
-  const cbRef = useRef(onCambiar);
-  cbRef.current = onCambiar;
-
-  const consultar = async (cual, cuando) => {
-    if (!cual || cual === MONEDA_BASE) { cbRef.current({ tipoCambio: 1 }); setAviso(""); return; }
-    setBuscando(true); setAviso("");
-    const valor = await tipoCambioDelDia(cual, cuando);
-    setBuscando(false);
-    if (valor == null) setAviso("No se pudo consultar ese día. Captura el tipo de cambio a mano.");
-    else cbRef.current({ tipoCambio: valor });
-  };
-
-  useEffect(() => { consultar(moneda, fecha); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [moneda, fecha]);
-
-  const esBase = !moneda || moneda === MONEDA_BASE;
-  const equivalente = (Number(monto) || 0) * (Number(tipoCambio) || 0);
-
-  return (
-    <>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <Field label="Monto">
-          <MoneyInput value={monto} moneda={moneda || MONEDA_BASE} onChange={(val) => onCambiar({ monto: val })} />
-        </Field>
-        <Field label="Moneda">
-          <select className="gp-input" value={moneda || MONEDA_BASE} onChange={(e) => onCambiar({ moneda: e.target.value })}>
-            {MONEDAS.map((m) => <option key={m.codigo} value={m.codigo}>{m.codigo} — {m.nombre}</option>)}
-          </select>
-        </Field>
-      </div>
-      {!esBase && (
-        <div className="gp-bloque rounded-lg p-3 mb-3">
-          <div className="flex items-end gap-2">
-            <Field label={`Tipo de cambio del ${fecha || "día"}`}>
-              <input
-                type="number" step="0.0001" min="0" className="gp-input" inputMode="decimal"
-                value={tipoCambio ?? ""} onChange={(e) => onCambiar({ tipoCambio: e.target.value })}
-              />
-            </Field>
-            <button
-              type="button" onClick={() => consultar(moneda, fecha)} disabled={buscando}
-              className="gp-btn-ghost px-3 rounded text-xs shrink-0"
-              style={{ height: 34, marginBottom: 12, opacity: buscando ? 0.6 : 1 }}
-            >
-              {buscando ? "Consultando…" : "Actualizar"}
-            </button>
-          </div>
-          <p className="text-xs" style={{ color: aviso ? "var(--red)" : "var(--muted)" }}>
-            {aviso || `Equivale a ${fmtMoney(equivalente)} ${MONEDA_BASE}. Este número se guarda congelado: si el tipo de cambio se mueve después, este movimiento no cambia.`}
-          </p>
-        </div>
-      )}
-    </>
-  );
-}
 
 
 
@@ -1648,13 +1495,6 @@ function AvisoInstalarPWA() {
 // Por seguridad, las pantallas sensibles (Finanzas, Salud, etc.) NO se restauran automáticamente
 // -- tras una recarga, vuelven a pedir la contraseña de reautenticación como cualquier otra vez
 // que expira la sesión corta, así que se manda a "dashboard" en esos casos.
-// Candados de reautenticación de los módulos sensibles. Apagados a propósito el 1 oct 2026
-// (Angel: "de momento quítalos, al final vemos a qué se los ponemos y el mecanismo más
-// práctico"). Toda la maquinaria sigue intacta —las listas de vistas, el modal de contraseña,
-// las ventanas de 15 y 10 minutos—: volver a encenderlos es poner esta constante en true.
-// Mientras esté en false, la app NO pide contraseña para entrar a Finanzas, Salud, Documentos,
-// etc. Eso baja el nivel de protección a propósito y es una decisión del dueño del producto.
-const CANDADO_SENSIBLE_ACTIVO = false;
 
 const VISTAS_SENSIBLES_NO_RESTAURAR = ["finanzas", "movimientos", "facturas", "reportes", "estimaciones", "deudas", "apartados", "patrimonio", "activos", "documentos", "salud", "medicamentos", "actividades", "presupuesto"];
 function leerVistaGuardadaTrasReload() {
@@ -4653,8 +4493,6 @@ function SaldoInicialForm({ ultimo, onSave }) {
 // lista de Proyectos y en la pantalla de detalle, por eso vive fuera de ambos componentes).
 // Categorías típicas de gasto de un proyecto. Son sugerencias para el combo, no una lista
 // cerrada: Finanzas acepta cualquier categoría y el campo deja escribir una nueva.
-// Colores de la dona de gastos, en orden. Son los acentos de la app, no una paleta nueva.
-const COLORES_DESGLOSE = ["#087CF5", "#F59E0B", "#8B5CF6", "#16A36A", "#EC4899", "#64748B"];
 
 const CATEGORIAS_GASTO_PROYECTO = ordenAlfabetico([
   "Viáticos", "Traslados", "Materiales", "Software", "Subcontratación", "Comidas de trabajo",
@@ -5076,10 +4914,6 @@ function IconoProyecto({ p, size = 36 }) {
   );
 }
 
-function BadgeEstatusProyecto({ estatus }) {
-  const color = COLOR_ESTATUS_PROYECTO[estatus] || "#64748B";
-  return <span className="gp-badge whitespace-nowrap" style={{ color, background: `${color}22` }}>{etiquetaEstatusProyecto(estatus)}</span>;
-}
 
 function BadgeContextoProyecto({ contexto }) {
   if (!contexto) return <span className="gp-text-muted text-xs">—</span>;
@@ -5849,65 +5683,6 @@ function NotaRapidaProyecto({ p, onEdit }) {
 // movimiento), así que no hace falta columna nueva ni bucket nuevo.
 //
 // Dos formas de subirlo, porque en celular la diferencia importa: "Subir" abre la galería y
-// "Tomar foto" abre la cámara directo — eso lo hace el atributo capture, que en iPhone y
-// Android manda a la cámara trasera sin pasar por el carrete.
-function ComprobantePago({ movimiento, data, onAddComentario }) {
-  const [subiendo, setSubiendo] = useState(false);
-  const [error, setError] = useState("");
-  const adjuntos = (data.comentarios || [])
-    .filter((c) => c.entidadTipo === "finanzas" && c.entidadId === movimiento.id)
-    .flatMap((c) => c.adjuntos || []);
-
-  const subir = async (e) => {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (!file) return;
-    if (file.size > 25 * 1024 * 1024) { setError("La imagen pesa más de 25 MB."); return; }
-    setError("");
-    setSubiendo(true);
-    try {
-      const path = `finanzas/${movimiento.id}/${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
-      const { error: upErr } = await supabase.storage.from("adjuntos").upload(path, file);
-      if (upErr) { setError(`No se pudo subir: ${upErr.message}`); return; }
-      const { data: pub } = supabase.storage.from("adjuntos").getPublicUrl(path);
-      const tipo = file.type.startsWith("image/") ? "imagen" : "documento";
-      await onAddComentario({
-        entidadTipo: "finanzas", entidadId: movimiento.id, texto: "Comprobante de pago",
-        adjuntos: [{ tipo, nombre: file.name || "comprobante", url: pub.publicUrl }],
-      });
-    } finally {
-      setSubiendo(false);
-    }
-  };
-
-  const claseBoton = "gp-btn-ghost rounded text-[10px] px-2 py-1 flex items-center gap-1 cursor-pointer";
-  return (
-    <div className="mt-2 pt-2 border-t gp-border">
-      {adjuntos.length > 0 && (
-        <div className="flex flex-wrap gap-1.5 mb-1.5">
-          {adjuntos.map((a, i) => (
-            <a key={i} href={a.url} target="_blank" rel="noopener noreferrer"
-              className="text-[10px] gp-text-gold flex items-center gap-1">
-              <FileText size={11} /> {a.nombre || `Comprobante ${i + 1}`}
-            </a>
-          ))}
-        </div>
-      )}
-      <div className="flex items-center gap-1.5 flex-wrap">
-        <label className={claseBoton}>
-          <Upload size={11} /> {adjuntos.length > 0 ? "Otro comprobante" : "Subir comprobante"}
-          <input type="file" accept="image/*,application/pdf" className="hidden" onChange={subir} disabled={subiendo} />
-        </label>
-        <label className={claseBoton}>
-          <Camera size={11} /> Tomar foto
-          <input type="file" accept="image/*" capture="environment" className="hidden" onChange={subir} disabled={subiendo} />
-        </label>
-        {subiendo && <span className="text-[10px] gp-text-muted">Subiendo…</span>}
-      </div>
-      {error && <p className="text-[10px] gp-text-red mt-1">{error}</p>}
-    </div>
-  );
-}
 
 // Tope de gasto del proyecto. Usa la tabla `presupuestos`, que ya tenía proyecto_id.
 function PresupuestoProyectoForm({ proyecto, actual, onGuardar, onCancelar }) {
@@ -7363,40 +7138,7 @@ function ProyectoDetalle({ data, proyectoId, onVolver, onAddTarea, onEditTarea, 
 
 
 
-// Arma el árbol de subtareas (sin límite de profundidad) a partir de la lista plana.
-function buildTareaTree(items) {
-  const byParent = {};
-  for (const it of items) {
-    const key = it.parentId || "_root";
-    (byParent[key] = byParent[key] || []).push(it);
-  }
-  const attach = (key) => (byParent[key] || []).map((it) => ({ ...it, hijos: attach(it.id) }));
-  return attach("_root");
-}
 // Aplana el árbol a una lista con nivel de profundidad, para renderizar con indentación.
-// `colapsadas` (opcional) es un Set con los ids de las tareas cuya rama está cerrada: la tarea
-// sigue apareciendo, pero sus subtareas no se incluyen en el resultado.
-function flattenTareas(tree, nivel = 0, colapsadas = null) {
-  const out = [];
-  for (const nodo of tree) {
-    out.push({ item: nodo, nivel });
-    if (colapsadas && colapsadas.has(nodo.id)) continue;
-    out.push(...flattenTareas(nodo.hijos, nivel + 1, colapsadas));
-  }
-  return out;
-}
-// ids de todas las tareas que tienen al menos una subtarea, en cualquier nivel del árbol. Es lo
-// que necesita "Colapsar todo" para saber qué ramas existen.
-function idsRamasTareas(tree) {
-  const out = [];
-  for (const nodo of tree) {
-    if (nodo.hijos && nodo.hijos.length > 0) {
-      out.push(nodo.id);
-      out.push(...idsRamasTareas(nodo.hijos));
-    }
-  }
-  return out;
-}
 // Cuántas tareas cuelgan de este nodo contando todos los niveles — para poder decir cuántas se
 // están escondiendo al colapsar, en vez de esconderlas en silencio.
 function contarDescendientesTarea(nodo) {
@@ -7448,24 +7190,11 @@ function BotonArbolTareas({ idsRamas, colapsadas, onCambiar }) {
     </button>
   );
 }
-// % de avance: si la tarea tiene subtareas, es el promedio del avance de sus hijos (recursivo);
-// si es una tarea final (sin hijos), es binario según su estatus.
-function calcAvanceTarea(nodo) {
-  if (!nodo.hijos || nodo.hijos.length === 0) {
-    if (nodo.avance !== null && nodo.avance !== undefined && nodo.avance !== "") return Number(nodo.avance);
-    return nodo.estatus === "Completada" ? 100 : nodo.estatus === "En proceso" ? 50 : 0;
-  }
-  const suma = nodo.hijos.reduce((s, h) => s + calcAvanceTarea(h), 0);
-  return suma / nodo.hijos.length;
-}
 /* ---------- Completar tareas y proyectos (una sola regla para toda la app) ---------- */
 // El check de completar aparece en tres pantallas (Tareas, centro de proyecto y ficha del
 // proyecto). La regla vive aquí una sola vez para que se comporte igual en las tres: mismo texto
 // de confirmación, misma fecha registrada y mismo cierre automático del proyecto.
 
-// "2026-09-24T18:30:00Z" -> "24 Sep 2026". Para mostrar cuándo se completó algo. (Aparte de
-// fmtFechaHora(), que es el de Citas y no lleva año.)
-const fmtFechaCompletado = (iso) => (iso ? fmtFechaCorta(String(iso).slice(0, 10)) : "");
 
 // Subtareas todavía abiertas que cuelgan de una tarea.
 function subtareasAbiertas(tareaId, pendientes) {
@@ -7509,11 +7238,6 @@ function preguntaCompletarTarea({ tarea, data, onEditTarea, onEditProyecto, onAv
 }
 
 // Reabrir una tarea borra su fecha de completado: la fecha guardada tiene que ser la de la vez que
-// de verdad se terminó, no la de un clic que se deshizo. No pide confirmación porque no destruye
-// nada más que ese dato y se vuelve a generar al completarla otra vez.
-function reabrirTarea(tarea, onEditTarea) {
-  onEditTarea(tarea.id, { estatus: "Pendiente", completadaEn: null, avance: null });
-}
 
 // Pregunta de confirmación para completar un proyecto. Un proyecto SÍ se puede dar por terminado
 // con tareas abiertas (a veces se cierra algo dejando pendientes que ya no se van a hacer), pero
@@ -7562,11 +7286,6 @@ function CheckTareaHecha({ tarea, onCompletar, onReabrir, size = 17 }) {
   );
 }
 
-// ids de todos los descendientes de una tarea (para no permitir que se vuelva subtarea de sí misma).
-function descendientesDe(id, items) {
-  const hijos = items.filter((t) => t.parentId === id);
-  return hijos.reduce((acc, h) => [...acc, h.id, ...descendientesDe(h.id, items)], []);
-}
 
 // Vista mind-map: dibuja el proyecto en el centro y sus pendientes/subtareas ramificándose a la derecha.
 function MindMapPendientes({ proyecto, tareas, onNodoClick, onAgregar, onEliminar }) {
@@ -8128,183 +7847,6 @@ function FichaTarea({ t, data, onCerrar, onEditar, onAgregarSubtarea, onComentar
   );
 }
 
-function PendienteForm({ item, proyectos, contactos, pendientes, colaboradores, onCrearContacto, onCrearProyecto, onEnviarInvitacion, onAceptarEnNombre, onSave, proyectoFijoId }) {
-  const [v, setV] = useState({ ...item, colaboradorContactoId: item.colaboradorContactoId || null, fechaPagoAprox: item.fechaPagoAprox || "" });
-  const [error, setError] = useState("");
-  const [enviarCorreo, setEnviarCorreo] = useState(!item.id);
-  const [enviando, setEnviando] = useState(false);
-  const excluidos = item.id ? [item.id, ...descendientesDe(item.id, pendientes)] : [];
-  // Si el proyecto está fijo (venimos desde el detalle de un proyecto), solo se puede elegir
-  // como tarea principal a otra tarea de ESE mismo proyecto — no tiene sentido anidar entre proyectos distintos.
-  const opcionesParent = pendientes.filter((t) => !excluidos.includes(t.id) && (!proyectoFijoId || t.proyectoId === proyectoFijoId));
-
-  // Si es subtarea de algo, el proyecto se hereda de la tarea principal — no se elige aparte.
-  // Esto se sincroniza cada vez que cambias de qué tarea es subtarea (por si eliges otra tarea principal).
-  useEffect(() => {
-    if (v.parentId) {
-      const padre = pendientes.find((t) => t.id === v.parentId);
-      if (padre && padre.proyectoId !== v.proyectoId) setV((prev) => ({ ...prev, proyectoId: padre.proyectoId }));
-    }
-  }, [v.parentId]);
-
-  const proyectoHeredado = v.parentId ? proyectos.find((p) => p.id === v.proyectoId) : null;
-  const proyectoFijo = proyectoFijoId ? proyectos.find((p) => p.id === proyectoFijoId) : null;
-  const colaboradorElegido = v.colaboradorContactoId ? contactos.find((c) => c.id === v.colaboradorContactoId) : null;
-  const clienteElegido = v.contactoId ? (contactos || []).find((c) => c.id === v.contactoId) : null;
-  const proyectoElegido = v.proyectoId ? (proyectos || []).find((x) => x.id === v.proyectoId) : null;
-  const porNombre = (a, b) => (a.nombre || "").localeCompare(b.nombre || "", "es", { sensitivity: "base" });
-  const contactosOrdenados = useMemo(() => [...(contactos || [])].sort(porNombre), [contactos]);
-  const proyectosOrdenados = useMemo(() => [...(proyectos || [])].sort(porNombre), [proyectos]);
-
-  return (
-    <div>
-      <Field label="Descripción"><input className="gp-input" value={v.descripcion} onChange={(e) => setV({ ...v, descripcion: e.target.value })} /></Field>
-      <Field label="Es subtarea de (opcional)">
-        <select className="gp-input" value={v.parentId || ""} onChange={(e) => setV({ ...v, parentId: e.target.value })}>
-          <option value="">— tarea principal —</option>
-          {ordenadosPor(opcionesParent, (t) => t.descripcion).map((t) => <option key={t.id} value={t.id}>{t.descripcion}</option>)}
-        </select>
-      </Field>
-      <Field label="Proyecto">
-        {proyectoFijoId ? (
-          <div>
-            <input className="gp-input" disabled value={proyectoFijo ? proyectoFijo.nombre : "—"} style={{ opacity: 0.7 }} />
-            <p className="text-xs gp-text-muted mt-1">Estás creando este pendiente desde el detalle de este proyecto, así que no se puede cambiar aquí.</p>
-          </div>
-        ) : v.parentId ? (
-          <div>
-            <input className="gp-input" disabled value={proyectoHeredado ? proyectoHeredado.nombre : "— sin proyecto —"} style={{ opacity: 0.7 }} />
-            <p className="text-xs gp-text-muted mt-1">Hereda el proyecto de su tarea principal. Si necesitas cambiarlo, cambia el proyecto de esa tarea principal.</p>
-          </div>
-        ) : (
-          /* Buscador en vez de lista larga, y si el proyecto no existe todavía se crea desde aquí
-             mismo (pedido de Angel, 29 sept 2026): el proyecto queda creado de verdad en Proyectos
-             e ideas, como Idea, y luego se le completan los detalles allá. */
-          <ComboboxMultiBuscar
-            max={1}
-            seleccionados={proyectoElegido ? [{ id: proyectoElegido.id, label: proyectoElegido.nombre }] : []}
-            opciones={proyectosOrdenados.map((x) => ({ id: x.id, label: x.nombre }))}
-            onAgregar={(o) => setV({ ...v, proyectoId: o.id })}
-            onQuitar={() => setV({ ...v, proyectoId: "" })}
-            onCrear={onCrearProyecto ? (nombre) => setV({ ...v, proyectoId: onCrearProyecto(nombre) }) : undefined}
-            placeholder="Buscar proyecto… (opcional)"
-            crearLabel={(t) => `Crear proyecto "${t}"`}
-          />
-        )}
-      </Field>
-      <Field label="Cliente (a quién se le entrega)">
-        <ComboboxMultiBuscar
-          max={1}
-          seleccionados={clienteElegido ? [{ id: clienteElegido.id, label: clienteElegido.nombre }] : []}
-          opciones={contactosOrdenados.map((c) => ({ id: c.id, label: c.nombre }))}
-          onAgregar={(o) => setV({ ...v, contactoId: o.id })}
-          onQuitar={() => setV({ ...v, contactoId: "" })}
-          onCrear={onCrearContacto ? (nombre) => setV({ ...v, contactoId: onCrearContacto(nombre, ["Cliente"]) }) : undefined}
-          placeholder="Buscar cliente… (opcional)"
-          crearLabel={(t) => `Crear contacto "${t}"`}
-        />
-      </Field>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <Field label="Fecha límite"><input type="date" className="gp-input" value={v.fechaLimite} onChange={(e) => setV({ ...v, fechaLimite: e.target.value })} /></Field>
-        <Field label="Prioridad"><select className="gp-input" value={v.prioridad} onChange={(e) => setV({ ...v, prioridad: e.target.value })}>{PRIORIDADES.map((c) => <option key={c}>{c}</option>)}</select></Field>
-      </div>
-      <Field label="Fecha de revisión (opcional)"><input type="date" className="gp-input" value={v.fechaRevision || ""} onChange={(e) => setV({ ...v, fechaRevision: e.target.value })} /></Field>
-
-      {/* Cuándo la vas a HACER, que no es lo mismo que para cuándo debe estar lista (migración
-          20261002). Normalmente esto se llena arrastrando la tarea en la Agenda; aquí está para
-          poder verlo y corregirlo sin salir del formulario. Sin día programado, la tarea vive en
-          la franja "Tareas del día" de la Agenda en vez de ocupar una hora del horario. */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <Field label="Día en que la harás (opcional)">
-          <input type="date" className="gp-input" value={v.fechaProgramada || ""}
-            onChange={(e) => setV({ ...v, fechaProgramada: e.target.value, horaInicio: e.target.value ? v.horaInicio : "" })} />
-        </Field>
-        <Field label="Hora de inicio (opcional)">
-          <input type="time" className="gp-input" value={v.horaInicio || ""} disabled={!v.fechaProgramada}
-            onChange={(e) => setV({ ...v, horaInicio: e.target.value })} />
-        </Field>
-      </div>
-
-      <Field label="Colaborador (opcional — se le puede pagar y le llega correo para aceptar)">
-        <ComboboxMultiBuscar
-          max={1}
-          seleccionados={colaboradorElegido ? [{ id: colaboradorElegido.id, label: colaboradorElegido.nombre }] : []}
-          opciones={contactos.map((c) => ({ id: c.id, label: c.nombre }))}
-          onAgregar={(o) => setV({ ...v, colaboradorContactoId: o.id })}
-          onQuitar={() => setV({ ...v, colaboradorContactoId: null })}
-          onCrear={(nombre) => setV({ ...v, colaboradorContactoId: onCrearContacto(nombre, ["Colaborador"]) })}
-          placeholder="Buscar o agregar colaborador…"
-          crearLabel={(texto) => `Crear contacto "${texto}"`}
-        />
-      </Field>
-
-      {colaboradorElegido && (
-        <div className="gp-panel-hi p-3 mb-3 text-xs" style={{ border: "1px solid var(--border)", borderRadius: 6 }}>
-          {!colaboradorElegido.correo ? (
-            <p className="gp-text-gold">Este contacto no tiene correo — agrégaselo desde Contactos para poder enviarle la invitación.</p>
-          ) : !item.id ? (
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input type="checkbox" checked={enviarCorreo} onChange={(e) => setEnviarCorreo(e.target.checked)} />
-              Enviarle un correo a {colaboradorElegido.correo} en cuanto guarde, para que acepte o rechace esta tarea
-            </label>
-          ) : !v.estadoAceptacion ? (
-            <div className="flex items-center justify-between gap-2">
-              <span className="gp-text-muted">Aún no se le ha avisado.</span>
-              <button type="button" disabled={enviando} className="gp-btn-ghost px-2.5 py-1 rounded" onClick={async () => { setEnviando(true); await onEnviarInvitacion(item.id); setEnviando(false); }}>
-                {enviando ? "Enviando…" : "Enviar invitación por correo"}
-              </button>
-            </div>
-          ) : v.estadoAceptacion === "pendiente" ? (
-            <div className="flex items-center justify-between gap-2 flex-wrap">
-              <Badge tone="gold">Esperando que {colaboradorElegido.nombre} confirme</Badge>
-              <button type="button" className="gp-btn-ghost px-2.5 py-1 rounded" onClick={() => onAceptarEnNombre(item.id)}>Aceptar en su nombre</button>
-            </div>
-          ) : v.estadoAceptacion === "aceptada" ? (
-            <Badge tone="teal">Aceptada{v.aceptadaPorCreador ? " (por ti, en su nombre)" : ""}</Badge>
-          ) : (
-            <Badge tone="red">Rechazada</Badge>
-          )}
-        </div>
-      )}
-
-      {colaboradores && colaboradores.length > 0 && (
-        <Field label="Asignar a colaborador ARKEYONE (opcional — le llega notificación push)">
-          <select className="gp-input" value={v.asignadoA || ""} onChange={(e) => setV({ ...v, asignadoA: e.target.value })}>
-            <option value="">— sin asignar —</option>
-            {ordenadosPor(colaboradores, (c) => c.colaborador_email).map((c) => <option key={c.colaborador_user_id} value={c.colaborador_user_id}>{c.colaborador_email}</option>)}
-          </select>
-        </Field>
-      )}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <Field label="Precio pactado (si es delegado)"><MoneyInput className="gp-input" value={v.precio} onChange={(val) => setV({ ...v, precio: val })} /></Field>
-        <Field label="Fecha aprox. de pago (opcional)"><input type="date" className="gp-input" value={v.fechaPagoAprox} onChange={(e) => setV({ ...v, fechaPagoAprox: e.target.value })} /></Field>
-      </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <Field label="Tiempo estimado (horas)"><input type="number" className="gp-input" value={v.tiempoEstimado} onChange={(e) => setV({ ...v, tiempoEstimado: e.target.value })} /></Field>
-        <Field label="Tiempo real (horas, cuando termine)"><input type="number" className="gp-input" value={v.tiempoReal} onChange={(e) => setV({ ...v, tiempoReal: e.target.value })} /></Field>
-      </div>
-      {/* El % de avance se puede poner aquí, en la ficha de la derecha de Tareas o en el árbol del
-          centro de proyecto — es el mismo campo. Si la tarea tiene subtareas, este número se
-          ignora: ahí el avance es la ponderación de los hijos, para no tener dos verdades. */}
-      <Field label="Avance (%, opcional — se ignora si la tarea tiene subtareas)">
-        <input type="number" min={0} max={100} className="gp-input" value={v.avance ?? ""} placeholder="0"
-          onChange={(e) => setV({ ...v, avance: e.target.value === "" ? "" : Math.max(0, Math.min(100, Number(e.target.value))) })} />
-      </Field>
-      {error && <p className="text-xs gp-text-red mb-2">{error}</p>}
-
-      <button
-        className="gp-btn w-full py-2 text-sm mt-2"
-        onClick={() => {
-          if (!v.descripcion?.toString().trim()) { setError("La descripción del pendiente es obligatoria."); return; }
-          setError("");
-          onSave(v, !item.id && colaboradorElegido && colaboradorElegido.correo ? enviarCorreo : false);
-        }}
-      >
-        Guardar
-      </button>
-    </div>
-  );
-}
 
 /* ---------- Finanzas ---------- */
 
@@ -9923,50 +9465,11 @@ function Metas({ data, onAdd, onEdit, onRemove }) {
   );
 }
 
-function MetaForm({ item, proyectos, onSave }) {
-  const [v, setV] = useState(item);
-  const [error, setError] = useState("");
-  return (
-    <div>
-      <Field label="Proyecto">
-        <select className="gp-input" value={v.proyectoId} onChange={(e) => setV({ ...v, proyectoId: e.target.value })}>
-          <option value="">— sin proyecto —</option>
-          {ordenadosPorNombre(proyectos).map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
-        </select>
-      </Field>
-      <Field label="Meta"><input className="gp-input" placeholder="ej. Llegar a 1000 seguidores, cerrar 3 clientes" value={v.descripcion} onChange={(e) => setV({ ...v, descripcion: e.target.value })} /></Field>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <Field label="Fecha objetivo"><input type="date" className="gp-input" value={v.fechaObjetivo} onChange={(e) => setV({ ...v, fechaObjetivo: e.target.value })} /></Field>
-        <Field label="Estatus"><select className="gp-input" value={v.estatus} onChange={(e) => setV({ ...v, estatus: e.target.value })}>{ESTATUS_META.map((c) => <option key={c}>{c}</option>)}</select></Field>
-      </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <Field label="Prioridad"><select className="gp-input" value={v.prioridad || "Media"} onChange={(e) => setV({ ...v, prioridad: e.target.value })}>{PRIORIDADES.map((c) => <option key={c}>{c}</option>)}</select></Field>
-        <Field label="Fecha de revisión (opcional)"><input type="date" className="gp-input" value={v.fechaRevision || ""} onChange={(e) => setV({ ...v, fechaRevision: e.target.value })} /></Field>
-      </div>
-      {error && <p className="text-xs gp-text-red mb-2">{error}</p>}
-
-      <button className="gp-btn w-full py-2 text-sm mt-2" onClick={() => { if (!v.descripcion?.toString().trim()) { setError("La meta es obligatoria."); return; } setError(""); onSave(v); }}>Guardar</button>
-    </div>
-  );
-}
 
 /* ---------- Contactos / networking ---------- */
 
 // Piezas compartidas entre la lista y la ficha lateral. Viven aquí afuera a propósito: si se
-// declaran dentro de Contactos, React las trata como un tipo de componente nuevo en cada render
-// y vuelve a montar todas las filas (pierde estado y parpadea).
-const tiposDeContacto = (c) => (c.tipos && c.tipos.length ? c.tipos : [c.tipo || "Otro"]);
 
-function AvatarContacto({ c, size = 32 }) {
-  if (c.fotoUrl) {
-    return <img src={c.fotoUrl} alt="" className="rounded-full object-cover shrink-0" style={{ width: size, height: size, border: "1px solid var(--border)" }} />;
-  }
-  return (
-    <div className="rounded-full flex items-center justify-center shrink-0 font-semibold" style={{ width: size, height: size, fontSize: Math.round(size / 2.8), background: "var(--panel-hi)", color: "var(--gold)" }}>
-      {(c.nombre || "").slice(0, 2).toUpperCase()}
-    </div>
-  );
-}
 
 // Las etiquetas del contacto, en chips. Se ven en la lista y en la ficha: son justo el dato que
 // sirve para encontrar a alguien ("¿quiénes son de Gobierno?").
@@ -10067,63 +9570,6 @@ function MenuFilaContacto({ c, abierto, onToggle, onCerrar, onEditar, onComentar
 // Combo de filtro con color por opción, compartido por Contactos (tipo de contacto) y Proyectos
 // e ideas (etapa: Idea, Validación, Desarrollo…). A propósito NO es un <select> nativo: los
 // navegadores —Safari e iOS sobre todo— ignoran el estilo de <option>, así que no hay forma de
-// darle a cada categoría su color. Usa el mismo patrón de menú desplegable que el "···" de cada
-// fila. Cada opción trae su color y cuántos registros tiene; la cerrada muestra la seleccionada.
-function ComboFiltroColor({ opciones, valor, onCambiar }) {
-  const [abierto, setAbierto] = useState(false);
-  const sel = opciones.find((o) => o.id === valor) || opciones[0];
-  if (!sel) return null;
-  return (
-    <div className="relative">
-      <button
-        onClick={() => setAbierto((v) => !v)}
-        onKeyDown={(e) => { if (e.key === "Escape") setAbierto(false); }}
-        aria-haspopup="listbox" aria-expanded={abierto}
-        className="gp-btn-ghost rounded-full pl-1.5 pr-2.5 py-1.5 flex items-center gap-2"
-      >
-        <span
-          className="text-xs px-2.5 py-1 rounded-full whitespace-nowrap"
-          style={{ background: sel.color, color: "#0B2341", fontWeight: 600 }}
-        >
-          {sel.label}
-        </span>
-        {sel.n !== undefined && <span className="gp-mono text-xs gp-text-muted">{sel.n}</span>}
-        <ChevronDown size={14} className="gp-text-muted" />
-      </button>
-
-      {abierto && (
-        <>
-          <div className="fixed inset-0 z-10" onClick={() => setAbierto(false)} />
-          <div className="absolute left-0 top-11 z-20 gp-panel py-1" style={{ minWidth: 240 }} role="listbox">
-            {opciones.map((o) => {
-              const activo = o.id === valor;
-              return (
-                <button
-                  key={o.id} role="option" aria-selected={activo}
-                  onClick={() => { onCambiar(o.id); setAbierto(false); }}
-                  className="w-full px-2.5 py-2 gp-panel-hi flex items-center justify-between gap-3"
-                >
-                  <span
-                    className="text-xs px-2.5 py-1 rounded-full whitespace-nowrap"
-                    style={activo
-                      ? { background: o.color, color: "#0B2341", fontWeight: 600 }
-                      : { background: `${o.color}22`, color: o.color, fontWeight: 600 }}
-                  >
-                    {o.label}
-                  </span>
-                  <span className="flex items-center gap-2 shrink-0">
-                    {o.n !== undefined && <span className="gp-mono text-xs gp-text-muted">{o.n}</span>}
-                    {activo ? <Check size={13} style={{ color: o.color }} /> : <span style={{ width: 13 }} />}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
 
 function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveComentario, onVerRegalos, onVincularProyecto, onDesvincularProyecto, onAddNota, onAddCita, onAddEvento, onIrAVista, onVerProyecto, contactoSel, onSeleccionar, fichaTab, onFichaTab }) {
   // Ancho de la ficha de la derecha, arrastrable y recordado por pantalla.
