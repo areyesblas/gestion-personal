@@ -239,8 +239,18 @@ Deno.serve(async (_req) => {
   }
 
   if (horaMin >= 9 * 60 && horaMin < 9 * 60 + TOLERANCIA_MIN) {
-    const { data: usuarios } = await admin.auth.admin.listUsers({ perPage: 1000 });
-    for (const usuario of usuarios?.users || []) {
+    // Paginado, no `perPage: 1000`. Ese tope no daba error: simplemente devolvía los primeros mil
+    // y los demás usuarios NO recibían su resumen diario, en silencio y para siempre. Con una
+    // cuenta no se nota; es justo la clase de falla que aparece cuando la app empieza a crecer.
+    const usuariosTodos: { id: string }[] = [];
+    for (let pagina = 1; ; pagina++) {
+      const { data, error } = await admin.auth.admin.listUsers({ page: pagina, perPage: 200 });
+      if (error) { console.error("No se pudo listar usuarios para el resumen diario:", error); break; }
+      const lote = data?.users || [];
+      usuariosTodos.push(...lote);
+      if (lote.length < 200) break;
+    }
+    for (const usuario of usuariosTodos) {
       const uid = usuario.id;
       type Item = { tipo: string; tabla: string; id: string; texto: string };
       const items: Item[] = [];
@@ -248,13 +258,24 @@ Deno.serve(async (_req) => {
       const { data: contactosUsr } = await admin.from("contactos").select("id, nombre").eq("user_id", uid).is("deleted_at", null);
       const nombreContacto = (id: string | null) => contactosUsr?.find((c) => c.id === id)?.nombre || "\u2014";
 
-      { const { data } = await admin.from("deudas").select("id, acreedor, monto, fecha_vencimiento").eq("user_id", uid).is("deleted_at", null).gte("fecha_vencimiento", hoy).lte("fecha_vencimiento", limite);
-        (data || []).forEach((r) => items.push({ tipo: "deuda", tabla: "deudas", id: r.id, texto: textoSeguro("deuda", `${r.acreedor} \u2014 ${fmtMoney(r.monto)}, vence ${fmtFecha(r.fecha_vencimiento)}`) })); }
+      // Deudas, cobros pendientes y pagos recurrentes salen TODOS de finanzas, en una sola
+      // consulta. Antes las deudas se ped\u00edan aparte a una tabla `deudas` que YA NO EXISTE: se
+      // renombr\u00f3 a deudas_legado_migrado_a_finanzas cuando Deudas se fusion\u00f3 con Finanzas
+      // (9 sept 2026). La consulta fallaba, el error se descartaba con `const { data }` sin mirar
+      // el error, y el resultado era que el resumen diario NUNCA avisaba de una deuda por vencer.
+      //
+      // La definici\u00f3n de deuda es la misma que usa la app en deudasDeFinanzas (App.jsx): un
+      // egreso NO recurrente con saldo pendiente. El tabla_origen se queda en "deudas" a
+      // prop\u00f3sito: es lo que MODULO_TO_VIEW usa para mandar el push a la pantalla de Deudas.
       { const { data } = await admin.from("finanzas").select("id, concepto, monto, fecha, fecha_vencimiento, contacto_id, es_recurrente, tipo, estatus").eq("user_id", uid).is("deleted_at", null);
         (data || []).forEach((r) => {
           if (r.tipo === "Ingreso" && r.estatus === "Pendiente") {
             const f = r.fecha_vencimiento || r.fecha;
             if (f && f >= hoy && f <= limite) items.push({ tipo: "cobro_pendiente", tabla: "finanzas", id: r.id, texto: textoSeguro("cobro_pendiente", `${r.concepto || "Cobro"} \u2014 ${fmtMoney(r.monto)}, de ${nombreContacto(r.contacto_id)}`) });
+          }
+          if (r.tipo === "Egreso" && !r.es_recurrente && (r.estatus === "Pendiente" || r.estatus === "Parcial")) {
+            const f = r.fecha_vencimiento || r.fecha;
+            if (f && f >= hoy && f <= limite) items.push({ tipo: "deuda", tabla: "deudas", id: r.id, texto: textoSeguro("deuda", `${r.concepto || "Pago"} \u2014 ${fmtMoney(r.monto)}, vence ${fmtFecha(f)}`) });
           }
           if (r.es_recurrente && r.tipo === "Egreso" && r.fecha_vencimiento >= hoy && r.fecha_vencimiento <= limite) {
             items.push({ tipo: "pago_recurrente", tabla: "finanzas", id: r.id, texto: textoSeguro("pago_recurrente", `${r.concepto || "Pago recurrente"} \u2014 ${fmtMoney(r.monto)}, vence ${fmtFecha(r.fecha_vencimiento)}`) });
@@ -293,11 +314,14 @@ Deno.serve(async (_req) => {
       if (items.length === 0) continue;
 
       const fechaHoraDia = `${hoy}T09:00:00-06:00`;
-      const nuevos: Item[] = [];
-      for (const it of items) {
-        const { data: existente } = await admin.from("recordatorios").select("id").eq("user_id", uid).eq("tipo", it.tipo).eq("tabla_origen", it.tabla).eq("registro_origen_id", it.id).eq("fecha_hora", fechaHoraDia).maybeSingle();
-        if (!existente) nuevos.push(it);
-      }
+      // UNA consulta para saber cuáles ya se mandaron, en vez de una por item. Antes era un
+      // SELECT por cada cosa del resumen: con 30 vencimientos eran 30 viajes a la base por
+      // usuario, y el resumen corre para TODOS los usuarios en el mismo barrido de las 9am.
+      const { data: yaMandados } = await admin.from("recordatorios")
+        .select("tipo, tabla_origen, registro_origen_id")
+        .eq("user_id", uid).eq("fecha_hora", fechaHoraDia);
+      const vistos = new Set((yaMandados || []).map((r) => `${r.tipo}|${r.tabla_origen}|${r.registro_origen_id}`));
+      const nuevos: Item[] = items.filter((it) => !vistos.has(`${it.tipo}|${it.tabla}|${it.id}`));
       if (nuevos.length === 0) continue;
 
       await admin.from("recordatorios").insert(nuevos.map((it) => ({
