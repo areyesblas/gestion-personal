@@ -53,6 +53,7 @@ import AvatarForm from "./components/comunes/AvatarForm";
 import PromptTareaRelacionada from "./components/comunes/PromptTareaRelacionada";
 import { ESTATUS_TAREA, FRECUENCIA } from "./lib/catalogos";
 import { aplicaHoy } from "./lib/habitos";
+import { tokenDeSesion } from "./lib/sesion";
 // Perezosos (Fase 1): Reportes y Estimaciones son capa analítica — se entra a ellas de vez en
 // cuando, no tienen por qué pesar en el arranque de todos los días.
 const Reportes = lazy(() => import("./components/modulos/Reportes"));
@@ -1559,10 +1560,10 @@ function AvisoPendientesOffline({ pendientes, onActualizar, onGuardarComoNotas, 
   async function interpretar(texto) {
     setFase("procesando");
     try {
-      const { data: sesion } = await supabase.auth.getSession();
+      const token = await tokenDeSesion();
       const resp = await fetch(`${supabase.supabaseUrl}/functions/v1/asistente-ia`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${sesion.session.access_token}` },
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({
           mensaje: `El usuario acaba de responder esto sobre qué hacer con sus cambios pendientes guardados offline: "${texto}". Responde ÚNICAMENTE con una de estas tres palabras en mayúsculas, sin nada más alrededor: ACTUALIZAR, NOTAS o ELIMINAR.`,
           modo: "voz",
@@ -2161,10 +2162,10 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
   // reasignar desde su formulario de edición), así que es una sola función.
   const notificarAsignacionTarea = async (pendienteId) => {
     try {
-      const { data: sesion } = await supabase.auth.getSession();
+      const token = await tokenDeSesion();
       await fetch(`${supabase.supabaseUrl}/functions/v1/notificar-asignacion`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${sesion.session.access_token}` },
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ pendienteId }),
       });
     } catch (err) {
@@ -2177,10 +2178,10 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
   // invitacion_enviada_en si es el primer envío.
   const enviarInvitacionTarea = async (tareaId) => {
     try {
-      const { data: sesion } = await supabase.auth.getSession();
+      const token = await tokenDeSesion();
       const resp = await fetch(`${supabase.supabaseUrl}/functions/v1/notificar-tarea-asignada`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${sesion.session.access_token}` },
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ tareaId }),
       });
       if (!resp.ok) {
@@ -3683,10 +3684,10 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
                 onClick={async () => {
                   setEnviandoPrueba(true);
                   try {
-                    const { data: sesion } = await supabase.auth.getSession();
+                    const token = await tokenDeSesion();
                     await fetch(`${supabase.supabaseUrl}/functions/v1/enviar-push`, {
                       method: "POST",
-                      headers: { "Content-Type": "application/json", Authorization: `Bearer ${sesion.session.access_token}` },
+                      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
                       body: JSON.stringify({ titulo: "ARKEYONE", mensaje: "Esta es una notificación de prueba. Si la ves, el Push ya está funcionando 🎉", tipo: "prueba", url: "/" }),
                     });
                     setTimeout(cargarNotificaciones, 1000);
@@ -3808,10 +3809,10 @@ function Colaboradores({ misId, miEmail, contactos }) {
   // nunca debe dejar el botón pegado en "Invitando…" — siempre regresa un resultado.
   const enviarCorreoInvitacion = async (colaboradorId) => {
     try {
-      const { data: sesion } = await supabase.auth.getSession();
+      const token = await tokenDeSesion();
       const resp = await fetch(`${supabase.supabaseUrl}/functions/v1/invitar-colaborador`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${sesion.session.access_token}` },
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ colaboradorId }),
       });
       const json = await resp.json().catch(() => ({}));
@@ -4335,10 +4336,10 @@ function Dashboard({ data: datosCompletos, empresas = [], contextos = [], contex
   // pantalla, la pregunta ya trae todo lo que necesita.
   const preguntarArki = async (mensaje) => {
     try {
-      const { data: sesion } = await supabase.auth.getSession();
+      const token = await tokenDeSesion();
       const resp = await fetch(`${supabase.supabaseUrl}/functions/v1/asistente-ia`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${sesion.session.access_token}` },
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ mensaje, modo: "texto" }),
       });
       const json = await resp.json().catch(() => ({}));

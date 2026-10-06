@@ -7,6 +7,7 @@ import { AlertTriangle } from "lucide-react";
 import { Badge } from "../ui/basicos";
 import { CampoPassword } from "../ui/campos";
 import { supabase } from "../../supabaseClient";
+import { tokenDeSesion } from "../../lib/sesion";
 import { useEffect, useState } from "react";
 
 export default function AdminUsuarios({ adminUid, adminEmail }) {
@@ -18,10 +19,10 @@ export default function AdminUsuarios({ adminUid, adminEmail }) {
   const [confirmarError, setConfirmarError] = useState("");
 
   const llamar = async (action, userId) => {
-    const { data: sesion } = await supabase.auth.getSession();
+    const token = await tokenDeSesion();
     const resp = await fetch(`${supabase.supabaseUrl}/functions/v1/admin-usuarios`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${sesion.session.access_token}` },
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
       body: JSON.stringify({ action, userId }),
     });
     return resp.json();

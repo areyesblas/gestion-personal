@@ -7,6 +7,7 @@ import { Badge } from "../ui/basicos";
 import { ESTATUS_TAREA } from "../../lib/catalogos";
 import { daysUntil, fmtMoney } from "../../lib/formato";
 import { supabase } from "../../supabaseClient";
+import { tokenDeSesion } from "../../lib/sesion";
 import { useEffect, useState } from "react";
 
 // o una a la que cambiaste con el selector de cuentas), esta vista cruza TODAS las cuentas
@@ -30,10 +31,10 @@ export default function MiTrabajo({ misId }) {
   // Avisa por push al creador de la tarea (cuenta distinta a la mía) — no truena la UI si falla.
   const avisarCreador = async (tareaId, tipo) => {
     try {
-      const { data: sesion } = await supabase.auth.getSession();
+      const token = await tokenDeSesion();
       await fetch(`${supabase.supabaseUrl}/functions/v1/notificar-respuesta-tarea`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${sesion.session.access_token}` },
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ tareaId, tipo }),
       });
     } catch (err) {
