@@ -56,8 +56,9 @@ Revisado el 6 oct 2026. Esta sección reemplaza la lista de "bugs en investigaci
 
 ## Seguridad pendiente (6 oct 2026)
 
-- **"Leaked Password Protection" — bloqueado por plan, no por olvido.** Vive en el panel de Supabase, en *Authentication → Providers → Email* (`/dashboard/project/ciczwtsgtlaosmelawse/auth/providers?provider=Email`), no en Policies. **Requiere plan Pro**; el proyecto está en Free, así que el linter va a seguir reportándolo hasta que se suba de plan. No se puede por SQL.
-  - Lo que SÍ se puede en Free, en esa misma pantalla: subir la longitud mínima de contraseña (nunca menos de 8) y exigir dígitos + minúsculas + mayúsculas + símbolos. Más el MFA/TOTP que ya está implementado, que es la defensa fuerte contra una contraseña filtrada.
+- **Fuerza de contraseña: HECHO** (Angel, 6 oct 2026). Longitud mínima y caracteres requeridos ya están subidos en *Authentication → Providers → Email*. Ojo: esa configuración **no se puede leer desde las herramientas MCP** — solo se verifica en el panel, o intentando registrar una contraseña débil.
+- **"Leaked Password Protection" — bloqueado por plan, no por olvido.** Vive en la misma pantalla (`/dashboard/project/ciczwtsgtlaosmelawse/auth/providers?provider=Email`), no en Policies. **Requiere plan Pro**; el proyecto está en Free, así que el linter va a seguir reportándolo hasta que se suba de plan. No se puede por SQL.
+  - Mientras tanto, la defensa fuerte contra una contraseña filtrada es el MFA/TOTP, que ya está implementado.
 - El linter seguirá reportando `has_access`, `es_cuidador_de` y `es_colaborador_beneficiario` como ejecutables por `anon`: **es obligatorio**, se invocan dentro de políticas RLS que están `TO public`. Quitarles el permiso rompe el pre-login (las consultas anónimas pasan de devolver 0 filas a lanzar `permission denied`). Ver `supabase/migrations/20261007_seguridad_rpc_anon.sql`.
 
 ## Gotchas técnicos (caros de reaprender)
