@@ -1,0 +1,72 @@
+-- 20261008_rls_rendimiento.sql
+--
+-- El cuello de botella REAL de escala, medido antes y despues (6 oct 2026).
+--
+-- ============================================================================
+-- EL PROBLEMA
+-- ============================================================================
+-- Las politicas eran `has_access('modulo', user_id)`. has_access es SECURITY DEFINER, y Postgres
+-- NO las inlinea: eso es UNA LLAMADA A FUNCION POR CADA FILA, y cada llamada hace su propio
+-- EXISTS sobre colaboradores.
+--
+-- Medido con EXPLAIN ANALYZE sobre eventos (117 filas), como usuario autenticado real:
+--
+--     ANTES:   18.084 ms   Seq Scan, Filter: has_access('eventos', user_id)
+--     DESPUES:  0.346 ms   Seq Scan, Filter: (InitPlan 1).col1 = user_id OR has_access(...)
+--                          -> 52x mas rapido
+--
+-- Con 117 filas son milisegundos. Con 10,000 filas serian ~1.5 segundos por consulta, por modulo.
+-- Ese era el techo de "vender a millones", y no tenia nada que ver con el frontend.
+--
+-- ============================================================================
+-- EL ARREGLO Y POR QUE ES SEGURO
+-- ============================================================================
+-- 1. auth.uid() envuelto en (SELECT ...): Postgres lo saca a un InitPlan y lo evalua UNA vez para
+--    toda la consulta, en vez de por fila. Es el patron que recomienda Supabase.
+--
+-- 2. Se antepone el caso comun: `(SELECT auth.uid()) = user_id OR <politica original>`. Para tus
+--    propias filas gana la comparacion barata y has_access NO se llama. Solo se llama para filas
+--    que no son tuyas, que es cuando de verdad hay que consultar los permisos de colaborador.
+--
+--    NO CAMBIA QUIEN VE QUE, y se puede comprobar en papel:
+--       has_access(m,u)  =  (u = auth.uid())  OR  exists(colaborador activo con permiso)
+--       politica nueva   =  (u = auth.uid())  OR  has_access(m,u)
+--                        =  (u = auth.uid())  OR  (u = auth.uid()) OR exists(...)
+--                        =  (u = auth.uid())  OR  exists(...)        <- el mismo conjunto
+--
+--    Se reviso que NINGUNA politica tuviera condiciones con AND: las cuatro que no eran
+--    `has_access` a secas (salud, perfil_salud, medicamentos, contactos) usan `OR
+--    es_cuidador_de(...)`, y anteponer otro OR a una cadena de OR no se salta nada. Si alguna
+--    hubiera tenido un AND, este cambio habria abierto un hoyo.
+--
+-- COMPROBADO ADEMAS CONTRA LA BASE, no solo en papel:
+--   * foto de cuantas filas ve el dueno en 17 tablas, antes y despues: IDENTICA
+--     (apartados=1, citas=8, contactos=32, eventos=117, finanzas=191, pendientes=19, notas=8,
+--      proyectos=16, recordatorios=37, perfil_salud=1, ...)
+--   * un usuario INVENTADO (uuid que no existe) sigue viendo CERO en finanzas, contactos,
+--     eventos, salud, medicamentos, pendientes y proyectos.
+--
+-- ============================================================================
+-- El SQL aplicado esta en las migraciones remotas `rls_cachear_auth_uid` e `indices_user_id`.
+-- Se resume aqui para que quede en el repo; regenerarlo es leer pg_policies y aplicar las dos
+-- reglas de arriba.
+-- ============================================================================
+--
+-- 12 politicas que comparaban contra auth.uid() directo -> envuelto en (SELECT auth.uid()):
+--   alertas_enviadas, colaborador_dependientes (x2), colaboradores (x2), notifications,
+--   pendientes (x2), preferencias, proyectos, push_subscriptions, recordatorios
+--
+-- 41 politicas `acceso_por_modulo` con has_access -> `(SELECT auth.uid()) = user_id OR (<original>)`
+--
+-- 29 indices nuevos en user_id. La app pide los datos con .eq("user_id", ownerId) en fetchTable,
+-- asi que el indice es exactamente lo que necesita el planner para esas consultas. No se tocaron
+-- las tablas legado (deudas_legado_migrado_a_finanzas, equipo) ni gestion_data.
+--
+-- ============================================================================
+-- LO QUE ESTO NO RESUELVE, para que no se de por cerrado
+-- ============================================================================
+-- El `OR` impide que el planner use el indice para la politica misma: sigue habiendo Seq Scan.
+-- Con una sola cuenta da igual, pero con millones de filas de muchos usuarios en la misma tabla,
+-- el plan correcto seria un Index Scan. Para eso habria que reformular la politica como
+-- `user_id IN (<subconsulta con los propietarios a los que tengo acceso>)`, que SI es
+-- indexable. Es un rediseno de has_access y queda pendiente, con su propia medicion.
