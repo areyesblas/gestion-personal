@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useLayoutEffect, useMemo, useRef, Suspense, lazy, Fragment } from "react";
-import { createPortal } from "react-dom";
 import { supabase } from "./supabaseClient";
 import LoginScreenNuevo from "./components/auth/LoginScreen";
 import AuthCard, { AuthField, AuthPasswordField, AuthButton, AuthBanner, AuthBackLink } from "./components/auth/AuthCard";
@@ -34,12 +33,18 @@ import {
   normalizarTexto, filtrarPorBusqueda, PRIORIDAD_ORDEN, ordenarLista,
 } from "./lib/listas";
 import { cargarXLSX, exportarFilasExcel, exportarFilasPDF } from "./lib/exportar";
+// Primitivas de UI compartidas por todas las pantallas. Field tenía 393 usos y Modal 181 cuando
+// vivían aquí: eran la razón principal por la que no se podía extraer un módulo solo.
+import { Badge, IconBtn, Field, BloqueFicha } from "./components/ui/basicos";
+import { Modal } from "./components/ui/Modal";
+import { MoneyInput, SelectGuardable, ComboboxMultiBuscar } from "./components/ui/campos";
+import { Th, OrdenSelector, BarraListaEstandar } from "./components/ui/tablas";
 import {
   FolderKanban, CheckSquare, Wallet, AlertTriangle,
   Users, Activity, Plus, X, Trash2, Pencil, Github, ChevronDown,
   ChevronRight, Bell, Lightbulb, Rocket, MessageCircle, Mail, Globe,
   Target, Contact, BarChart3, FileText, Flame, HeartPulse, Check, Menu, PieChart as PieChartIcon, User, Home,
-  PiggyBank, Camera, Film, Upload, MapPin, Clock, Mic, Gift, Receipt, Megaphone, ChevronUp, Gem, Download, Sun, Moon, Shield, LogOut, ChevronLeft, Lock, Pill, CalendarClock, Zap, StickyNote, Search, Sparkles, Send, Bot, Square, Settings, CalendarRange, Palette, Eye, EyeOff, Sliders, Volume2, VolumeX, Play, Copy, Phone, MessageSquare, MoreHorizontal,
+  PiggyBank, Camera, Film, Upload, MapPin, Clock, Mic, Gift, Receipt, Megaphone, Gem, Download, Sun, Moon, Shield, LogOut, ChevronLeft, Lock, Pill, CalendarClock, Zap, StickyNote, Search, Sparkles, Send, Bot, Square, Settings, CalendarRange, Palette, Eye, EyeOff, Sliders, Volume2, VolumeX, Play, Copy, Phone, MessageSquare, MoreHorizontal,
   Heart, Code2, Music, Tag, Archive, ExternalLink, ListChecks, Info, TrendingDown,
   ChevronsDownUp, ChevronsUpDown, Briefcase, Building2, ArrowRight,
   TrendingUp, ArrowDownCircle, ArrowUpCircle, Banknote, HandCoins,
@@ -686,37 +691,7 @@ function paginasVisibles(actual, total) {
   return [1, "…", actual - 1, actual, actual + 1, "…", total];
 }
 
-/* Encabezado de tabla clicable para ordenar (como en Excel): clic ordena asc, clic de
-   nuevo invierte a desc. sortKey debe existir en el mismo objeto `campos` que usa OrdenSelector. */
-function Th({ label, sortKey, orden, ordenDir, onToggle, children }) {
-  if (!sortKey) return <th>{children || label}</th>;
-  const activo = orden === sortKey;
-  return (
-    <th onClick={() => onToggle(sortKey)} style={{ cursor: "pointer", userSelect: "none" }} title="Clic para ordenar">
-      <span className="inline-flex items-center gap-0.5">
-        {children || label}
-        {activo && (ordenDir === "desc" ? <ChevronDown size={11} /> : <ChevronUp size={11} />)}
-      </span>
-    </th>
-  );
-}
 
-/* Selector de orden reutilizable. `opciones` es [{ key, label }]. */
-function OrdenSelector({ opciones, value, onChange }) {
-  if (!opciones || opciones.length === 0) return null;
-  return (
-    <select
-      className="gp-input text-xs py-1.5"
-      style={{ width: "auto" }}
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      aria-label="Ordenar por"
-    >
-      <option value="default">Orden: más reciente</option>
-      {opciones.map((o) => <option key={o.key} value={o.key}>Orden: {o.label}</option>)}
-    </select>
-  );
-}
 
 /* Bitácora universal: comentarios + adjuntos (fotos/audio/video/documentos) para cualquier entidad. */
 function Bitacora({ data, entidadTipo, entidadId, onAdd, onRemove }) {
@@ -833,83 +808,6 @@ const camelToSnake = (s) => s.replace(/[A-Z]/g, (c) => "_" + c.toLowerCase());
 const snakeToCamel = (s) => s.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
 const tableName = (key) => camelToSnake(key);
 
-// Barra reutilizable: campo de búsqueda por contenido (independiente del buscador global) +
-// botones de exportar Excel/PDF, para el estándar transversal de listas.
-// `extra` es opcional (lo usa Contactos para su botón "Filtros"): se dibuja junto al buscador y,
-// cuando se pasa, empuja Excel/PDF al extremo derecho de la fila. Sin `extra` el diseño queda
-// idéntico al de siempre en las demás pantallas.
-function BarraListaEstandar({ busqueda, onBusqueda, placeholder, onExportExcel, onExportPDF, rangoExport, extra }) {
-  // rangoExport es opcional — solo Citas lo usa por ahora (Grupo B, punto 7). Cuando se pasa:
-  // { opciones: [{key,label}], contar: (rangoKey, desde, hasta) => number }. Si no se pasa,
-  // el comportamiento es exactamente el de antes: confirmar y exportar todo lo visible.
-  const [confirmando, setConfirmando] = useState(null); // null | "excel" | "pdf"
-  const [rango, setRango] = useState(rangoExport?.opciones?.[0]?.key || null);
-  const [desde, setDesde] = useState(todayISO());
-  const [hasta, setHasta] = useState(todayISO());
-  const cantidad = rangoExport ? rangoExport.contar(rango, desde, hasta) : null;
-  const avisoGrande = rangoExport && confirmando === "pdf" && cantidad > 500;
-
-  const confirmar = () => {
-    const opts = rangoExport ? { rango, desde, hasta } : undefined;
-    (confirmando === "excel" ? onExportExcel : onExportPDF)(opts);
-    setConfirmando(null);
-  };
-
-  return (
-    <div className="flex flex-wrap items-center gap-2 mb-4">
-      <div className="relative flex-1" style={{ minWidth: 180, maxWidth: 320 }}>
-        <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 gp-text-muted" style={{ pointerEvents: "none" }} />
-        <input className="gp-input gp-buscador text-sm" style={{ paddingLeft: 32 }} placeholder={placeholder || "Buscar en esta lista…"} value={busqueda} onChange={(e) => onBusqueda(e.target.value)} />
-      </div>
-      {extra}
-      <button onClick={() => setConfirmando("excel")} className={`text-xs px-2.5 py-1.5 rounded gp-btn-ghost flex items-center gap-1 ${extra ? "ml-auto" : ""}`}><Download size={12} /> Excel</button>
-      <button onClick={() => setConfirmando("pdf")} className="text-xs px-2.5 py-1.5 rounded gp-btn-ghost flex items-center gap-1"><Download size={12} /> PDF</button>
-
-      {confirmando && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,.6)" }} onClick={() => setConfirmando(null)}>
-          <div className="gp-panel w-full max-w-sm p-5" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center gap-2 mb-2">
-              <Download size={16} className="gp-text-gold" />
-              <h3 className="gp-serif text-lg">¿Exportar a {confirmando === "excel" ? "Excel" : "PDF"}?</h3>
-            </div>
-
-            {rangoExport ? (
-              <>
-                <p className="text-sm gp-text-muted mb-3">Elige qué rango de fechas exportar.</p>
-                <Field label="Rango">
-                  <select className="gp-input" value={rango} onChange={(e) => setRango(e.target.value)}>
-                    {rangoExport.opciones.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
-                  </select>
-                </Field>
-                {rango === "personalizado" && (
-                  <div className="grid grid-cols-2 gap-3">
-                    <Field label="Desde"><input type="date" className="gp-input" value={desde} onChange={(e) => setDesde(e.target.value)} /></Field>
-                    <Field label="Hasta"><input type="date" className="gp-input" value={hasta} onChange={(e) => setHasta(e.target.value)} /></Field>
-                  </div>
-                )}
-                <p className="text-xs gp-text-muted mb-3">Se exportarán <span className="gp-mono">{cantidad}</span> registro{cantidad === 1 ? "" : "s"}.</p>
-                {avisoGrande && (
-                  <p className="text-xs gp-text-gold mb-3 flex items-start gap-1.5">
-                    <AlertTriangle size={13} className="shrink-0 mt-0.5" /> Son muchos registros para un PDF — puede tardar o trabar tu navegador. Considera un rango más chico, o usa Excel.
-                  </p>
-                )}
-              </>
-            ) : (
-              <p className="text-sm gp-text-muted mb-5">
-                Se descargará {confirmando === "excel" ? "un archivo .xlsx" : "un archivo .pdf"} con lo que estás viendo ahora mismo (búsqueda, filtros y orden aplicados).
-              </p>
-            )}
-
-            <div className="flex gap-2">
-              <button onClick={() => setConfirmando(null)} className="gp-btn-ghost flex-1 py-2 text-sm">Cancelar</button>
-              <button onClick={confirmar} className="gp-btn flex-1 py-2 text-sm">Exportar</button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
 
 
 const ETIQUETA_TABLA = {
@@ -1142,41 +1040,8 @@ async function migrateFromOldBlobIfNeeded(current, ownerId) {
   }
 }
 
-/* ---------- UI genéricos ---------- */
-function Badge({ children, tone = "muted" }) {
-  const toneStyle = {
-    muted: { color: "var(--muted)", background: "rgba(141,146,163,.12)" },
-    gold: { color: "var(--gold)", background: "rgba(201,162,39,.14)" },
-    teal: { color: "var(--teal)", background: "rgba(79,168,143,.14)" },
-    red: { color: "var(--red)", background: "rgba(209,85,74,.14)" },
-  }[tone];
-  return <span className="gp-badge" style={toneStyle}>{children}</span>;
-}
 
-// Botón de solo ícono. `title` es obligatorio en la práctica: un ícono suelto no dice qué hace,
-// así que se usa como tooltip y, de paso, como nombre accesible del botón.
-function IconBtn({ onClick, children, title }) {
-  return (
-    <button onClick={onClick} title={title} aria-label={title}
-      className="p-1.5 rounded gp-btn-ghost" style={{ lineHeight: 0 }}>
-      {children}
-    </button>
-  );
-}
 
-// OJO: esto es un <div>, no un <label>, y es a propósito. Cuando era <label>, el navegador
-// reenviaba CUALQUIER clic dentro del campo al primer botón que hubiera adentro — así que tocar
-// el texto de un chip (proyecto vinculado, tag, tipo de contacto) equivalía a picarle su "✕" y lo
-// borraba (reportado por Angel el 24 sept 2026 y reproducido con Playwright). Se pierde el
-// "clic en la etiqueta para enfocar el campo", que vale mucho menos que borrar datos sin querer.
-function Field({ label, children }) {
-  return (
-    <div className="block mb-3">
-      <span className="block text-xs gp-text-muted mb-1">{label}</span>
-      {children}
-    </div>
-  );
-}
 
 // Input de contraseña con botón de ojo para mostrar/ocultar — se usa en todos los campos de
 // contraseña de la app (registro, cambio de contraseña, reautenticación, login de colaborador).
@@ -1210,46 +1075,6 @@ function CampoPassword({ value, onChange, required, className = "gp-input", auto
   );
 }
 
-// Campo de captura de dinero: mientras escribes, va formateando con $ y comas (como una app de banco).
-// Por dentro sigue guardando un número plano (ej. "1234.5") para no romper nada de la base de datos;
-// solo lo que se VE en pantalla lleva el formato.
-function MoneyInput({ value, onChange, className = "gp-input", placeholder, autoFocus, style, moneda = "MXN" }) {
-  const digitsFromValue = (val) => {
-    if (val === "" || val === null || val === undefined) return "";
-    const n = Math.round((Number(val) || 0) * 100);
-    return Number.isFinite(n) ? String(n) : "";
-  };
-  const [digits, setDigits] = useState(() => digitsFromValue(value));
-
-  // Si el valor cambia desde afuera (ej. al abrir el modal con datos ya existentes), lo reflejamos.
-  useEffect(() => { setDigits(digitsFromValue(value)); }, [value]);
-
-  const formatted = digits === "" ? "" : (() => {
-    const n = (Number(digits) || 0) / 100;
-    try { return n.toLocaleString("es-MX", { style: "currency", currency: moneda || "MXN" }); }
-    catch { return n.toLocaleString("es-MX"); }
-  })();
-
-  const handleChange = (e) => {
-    const soloDigitos = e.target.value.replace(/[^\d]/g, "");
-    const limpio = soloDigitos.replace(/^0+(?=\d)/, "");
-    setDigits(limpio);
-    onChange(limpio === "" ? "" : (Number(limpio) / 100).toString());
-  };
-
-  return (
-    <input
-      type="text"
-      inputMode="decimal"
-      autoFocus={autoFocus}
-      className={className}
-      style={style}
-      placeholder={placeholder}
-      value={formatted}
-      onChange={handleChange}
-    />
-  );
-}
 
 // Monto en cualquier moneda, con su tipo de cambio del día. Lo usa el formulario de Finanzas y
 // el de movimientos del proyecto, para que capturar en dólares se haga igual en los dos lados.
@@ -1393,34 +1218,6 @@ function useBorrador(original) {
   return { borrador, cambiar, descartar, sucio };
 }
 
-// Versión de renglón del patrón de guardar: un selector dentro de una tabla no puede abrir una
-// barra completa, así que al cambiarlo aparecen un ✓ y una ✕ junto a él, en su propia fila
-// (Angel, 1 oct 2026: "una barra por renglón"). Mientras no se confirme, nada se escribe, y el
-// renglón cuenta como cambio pendiente para el aviso de salir.
-// `etiquetas` permite que lo GUARDADO y lo MOSTRADO difieran. Hace falta porque el estado
-// "Cobrado" de la base vale para los dos lados del dinero, pero en un egreso leerlo como
-// "cobrado" confunde: ahí se dice "Pagado". El valor en la tabla no cambia, solo la palabra.
-function SelectGuardable({ valor, opciones, onGuardar, ariaLabel, style, etiquetas }) {
-  const { borrador, cambiar, descartar, sucio } = useBorrador({ v: valor });
-  return (
-    <span className="inline-flex items-center gap-1">
-      <select
-        className="gp-input" style={{ padding: "2px 6px", ...(style || {}) }}
-        value={borrador.v} onChange={(e) => cambiar({ v: e.target.value })} aria-label={ariaLabel}
-      >
-        {opciones.map((o) => <option key={o} value={o}>{etiquetas?.[o] || o}</option>)}
-      </select>
-      {sucio && (
-        <>
-          <IconBtn title="Guardar este cambio" onClick={() => { const v = borrador.v; descartar(); onGuardar(v); }}>
-            <Check size={13} className="gp-text-teal" />
-          </IconBtn>
-          <IconBtn title="Descartar" onClick={descartar}><X size={13} className="gp-text-red" /></IconBtn>
-        </>
-      )}
-    </span>
-  );
-}
 
 // Mismo patrón que SelectGuardable, para los campos numéricos de una tabla (el avance en el
 // árbol de tareas del centro de proyecto).
@@ -1538,161 +1335,7 @@ function BarraGuardar({ sucio, onGuardar, onDescartar, etiqueta = "Guardar cambi
   );
 }
 
-// A dónde se manda el modal con el portal. NO al <body>: todos los colores de la app son
-// variables CSS declaradas en .gp-root, así que un modal colgado del body se queda sin ellas y
-// se dibuja transparente —se ve "como si no pasara nada" al abrirlo— (pasó el 1 oct 2026).
-// Colgarlo de .gp-root conserva las variables y el tema activo, y aun así lo saca de cualquier
-// contenedor intermedio. Si por lo que sea no existiera, el body es mejor que nada.
-const raizPortal = () => (typeof document === "undefined" ? null : (document.querySelector(".gp-root") || document.body));
 
-// El modal se dibuja por un portal, no donde está escrito en el árbol.
-// Motivo (bug del 1 oct 2026): la ficha del proyecto vive en una columna con position:sticky,
-// y sticky crea su propio contexto de apilamiento. Un `fixed z-50` dentro de ahí queda atrapado
-// en ese contexto, así que el banner de la pantalla —que lleva un z-10 propio— se dibujaba
-// ENCIMA del modal. Con el portal el modal sale de cualquier contexto heredado y siempre queda
-// arriba, en este y en cualquier otro panel que use sticky o transform.
-function Modal({ title, onClose, children }) {
-  const [tocado, setTocado] = useState(false);
-  const [confirmando, setConfirmando] = useState(false);
-
-  const intentarCerrar = () => {
-    if (tocado) setConfirmando(true);
-    else onClose();
-  };
-
-  const destino = raizPortal();
-  if (!destino) return null;
-
-  return createPortal(
-    <div className="fixed inset-0 z-[95] flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,.55)" }} onClick={intentarCerrar}>
-      <div
-        className="gp-panel w-full max-w-lg max-h-[85vh] overflow-y-auto gp-scroll p-5"
-        onClick={(e) => e.stopPropagation()}
-        onInputCapture={() => setTocado(true)}
-        onChangeCapture={() => setTocado(true)}
-      >
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="gp-serif text-lg">{title}</h3>
-          <IconBtn title="Cerrar" onClick={intentarCerrar}><X size={16} /></IconBtn>
-        </div>
-        {children}
-
-        {confirmando && (
-          <div className="fixed inset-0 z-[70] flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,.5)" }} onClick={(e) => e.stopPropagation()}>
-            <div className="gp-panel w-full max-w-xs p-4">
-              <div className="flex items-center gap-2 mb-2">
-                <AlertTriangle size={15} className="gp-text-gold" />
-                <p className="text-sm font-medium">¿Descartar cambios?</p>
-              </div>
-              <p className="text-xs gp-text-muted mb-4">Hiciste cambios que no has guardado. Si sales ahora, se pierden.</p>
-              <div className="flex gap-2">
-                <button onClick={() => setConfirmando(false)} className="gp-btn-ghost flex-1 py-1.5 text-xs">Seguir editando</button>
-                <button onClick={onClose} className="flex-1 py-1.5 text-xs rounded" style={{ background: "var(--red)", color: "#fff" }}>Descartar</button>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-    </div>,
-    destino,
-  );
-}
-
-// Combobox reutilizable de "buscar y agregar": escribe para filtrar entre opciones existentes,
-// toca una para agregarla como chip, o si no existe aparece "Crear ..." al fondo para darla de
-// alta al vuelo (Grupo C — multi-contacto y tags en Citas, pensado para reusarse en otras
-// pantallas después). `opciones` y `seleccionados` son {id, label}. `onCrear` es opcional: si no
-// se pasa, no se ofrece crear (por ejemplo, si algún día se usa solo para elegir entre existentes).
-// `onRenombrarOpcion` y `onEliminarOpcion` son opcionales. Cuando se pasan, cada opción de la
-// lista trae su lápiz y su bote: sirven para corregir un valor mal escrito o quitar uno que ya
-// no se usa.
-//
-// OJO con lo que significan: estos catálogos NO son una tabla, son el conjunto de valores que
-// ya están capturados en las fichas. Por eso renombrar una opción es renombrarla en TODOS los
-// registros que la traen, y borrarla es quitarla de todos. Quien pasa los manejadores es quien
-// hace ese recorrido, y avisa a cuántas fichas va a afectar antes de tocarlas.
-function ComboboxMultiBuscar({ seleccionados, opciones, onAgregar, onQuitar, onCrear, placeholder, crearLabel, max, onRenombrarOpcion, onEliminarOpcion }) {
-  const [query, setQuery] = useState("");
-  const [abierto, setAbierto] = useState(false);
-  const idsSeleccionados = new Set(seleccionados.map((s) => s.id));
-  const q = query.trim().toLowerCase();
-  const filtradas = opciones.filter((o) => !idsSeleccionados.has(o.id) && o.label.toLowerCase().includes(q));
-  const coincideExacto = opciones.some((o) => o.label.toLowerCase() === q);
-  const lleno = max && seleccionados.length >= max;
-
-  return (
-    <div className="mb-3">
-      {seleccionados.length > 0 && (
-        <div className="flex flex-wrap gap-1.5 mb-2">
-          {seleccionados.map((s) => (
-            <span key={s.id} className="gp-bloque text-xs pl-2.5 pr-1.5 py-1 rounded-full flex items-center gap-1">
-              {s.label}
-              <button type="button" onClick={() => onQuitar(s.id)} className="gp-text-muted"><X size={11} /></button>
-            </span>
-          ))}
-        </div>
-      )}
-      {!lleno && (
-      <div className="relative">
-        <input
-          className="gp-input"
-          placeholder={placeholder}
-          value={query}
-          onChange={(e) => { setQuery(e.target.value); setAbierto(true); }}
-          onFocus={() => setAbierto(true)}
-          onBlur={() => setTimeout(() => setAbierto(false), 150)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && q && !coincideExacto && onCrear) {
-              e.preventDefault();
-              onCrear(query.trim());
-              setQuery("");
-            }
-          }}
-        />
-        {abierto && (q || filtradas.length > 0) && (
-          <div className="absolute z-10 mt-1 w-full gp-panel overflow-y-auto gp-scroll" style={{ maxHeight: 200 }}>
-            {filtradas.slice(0, 8).map((o) => (
-              <div key={o.id} className="flex items-center gap-1 gp-panel-hi">
-                <button
-                  type="button"
-                  className="flex-1 min-w-0 text-left px-3 py-2 text-sm truncate"
-                  onMouseDown={(e) => { e.preventDefault(); onAgregar(o); setQuery(""); }}
-                >
-                  {o.label}
-                </button>
-                {onRenombrarOpcion && (
-                  <button
-                    type="button" title={`Renombrar "${o.label}" en todas las fichas`}
-                    className="p-1.5 rounded gp-text-muted shrink-0"
-                    onMouseDown={(e) => { e.preventDefault(); onRenombrarOpcion(o.id); }}
-                  ><Pencil size={12} /></button>
-                )}
-                {onEliminarOpcion && (
-                  <button
-                    type="button" title={`Quitar "${o.label}" de todas las fichas`}
-                    className="p-1.5 rounded gp-text-red shrink-0 mr-1"
-                    onMouseDown={(e) => { e.preventDefault(); onEliminarOpcion(o.id); }}
-                  ><Trash2 size={12} /></button>
-                )}
-              </div>
-            ))}
-            {q && !coincideExacto && onCrear && (
-              <button
-                type="button"
-                className="w-full text-left px-3 py-2 text-sm gp-text-gold flex items-center gap-1.5"
-                style={filtradas.length ? { borderTop: "1px solid var(--border)" } : undefined}
-                onMouseDown={(e) => { e.preventDefault(); onCrear(query.trim()); setQuery(""); }}
-              >
-                <Plus size={13} /> {crearLabel ? crearLabel(query.trim()) : `Crear "${query.trim()}"`}
-              </button>
-            )}
-          </div>
-        )}
-      </div>
-      )}
-    </div>
-  );
-}
 
 // Prompt reutilizable: "¿Deseas crear una acción relacionada?" — tras guardar una Cita, Deuda,
 // Documento o Activo digital, ofrece crear una Tarea real ligada a ese origen (origenTabla/origenId),
@@ -6891,17 +6534,6 @@ function Proyectos({
 /* Piezas de presentación de la ficha del proyecto. Viven FUERA del componente a propósito: si se
    declararan adentro, React las trataría como un tipo de componente nuevo en cada render y
    desmontaría su contenido — un input de adentro perdería el foco en cada tecla. */
-function BloqueFicha({ titulo, icono, accion, children }) {
-  return (
-    <div className="gp-panel p-3.5 mb-3">
-      <div className="flex items-center justify-between gap-2 mb-2">
-        <p className="text-sm font-medium flex items-center gap-1.5">{icono} {titulo}</p>
-        {accion}
-      </div>
-      {children}
-    </div>
-  );
-}
 function DatoFicha({ label, valor, icono }) {
   return (
     <div className="flex items-start justify-between gap-3 py-1.5">
