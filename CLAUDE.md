@@ -37,8 +37,8 @@ Contactos es la entidad maestra de personas — se reutiliza transversalmente (S
 
 ## Modelo de seguridad (implementado)
 
-- Inactividad: auto-logout a los 30 min, advertencia al min 29
-- Sesión absoluta: 8h desde login, trackeada vía `localStorage arkeyone_login_at`
+- Inactividad: auto-logout a los 30 min, advertencia al min 28 (`INACTIVIDAD_AVISO_MS` en `App.jsx`)
+- Sesión absoluta: 8h desde el último login real, medida con `session.user.last_sign_in_at` (dato del servidor de Supabase). **NO** con localStorage: ese fue el origen del bug de logout prematuro (ver abajo)
 - Módulos sensibles (Finanzas, Salud, Medicamentos, Documentos, Deudas, Apartados, Patrimonio, Activos digitales, Reportes, Diario): ventana corta de 15 min que pide reautenticación; Diario tiene su propia ventana independiente de 10 min
 - MFA/TOTP vía Supabase auth.mfa, gate AAL2 en login
 - Cambiar contraseña revoca sesiones en otros dispositivos
@@ -46,15 +46,24 @@ Contactos es la entidad maestra de personas — se reutiliza transversalmente (S
 - **Gotcha importante:** `has_access()` y `vincular_invitaciones()` deben ser `security definer` para evitar recursión infinita en políticas RLS
 - La UI nunca es la barrera de seguridad — el servidor/RLS decide qué identidad puede leer o modificar
 
-## Bugs conocidos / en investigación (14 sept 2026)
+## Bugs cerrados (no reabrir sin evidencia nueva)
 
-- **Logout automático ~30-60 seg después del login**, confirmado en logs de Supabase (Auth + REST): el refresh de token y las lecturas de tablas responden 200 correctamente, así que NO es un problema de RLS ni de permisos backend. La causa está en el frontend — probablemente en la lógica de inactividad/sesión absoluta de `App.jsx` forzando un `signOut()` prematuro.
-- Reporte de que algunas entidades "no cargan" en la UI aunque el fetch a Supabase sea exitoso — sospecha de que es el mismo bug raíz (el estado se limpia por el signOut antes de que el usuario vea los datos ya cargados).
-- Todas las tablas de entidades reales tienen al menos una política RLS de SELECT activa (verificado). La única tabla sin política es `gestion_data`, que es legado de la migración de localStorage y no la usa ninguna entidad actual.
+Revisado el 6 oct 2026. Esta sección reemplaza la lista de "bugs en investigación" del 14 sept: los tres estaban resueltos o mal diagnosticados, y seguir citándolos frenaba decisiones sin razón.
+
+- **Logout automático ~30-60 seg después del login — CERRADO.** La causa era guardar la hora de login en `localStorage`: solo se escribía en el evento `SIGNED_IN`, pero al reabrir la PWA con sesión ya persistida Supabase dispara `TOKEN_REFRESHED`/`INITIAL_SESSION`, nunca `SIGNED_IN`. El valor se quedaba pegado en la fecha del primer login del dispositivo, así que pasadas 8h **cada** reapertura entraba ya "vencida" y el chequeo la cerraba a los segundos. Ya usa `session.user.last_sign_in_at`, que viene del servidor. Ver el comentario largo junto a `SESION_MAX_MS` en `App.jsx`.
+- **"Algunas entidades no cargan" — CERRADO, y no era el mismo bug.** Lo que se reportó después (Tareas, Atenciones y Movimientos en blanco, 5 oct 2026) fue un `ReferenceError`: `SelectGuardable` quedó sin su dependencia `useBorrador` al partir `App.jsx`, y React desmonta el árbol completo. Arreglado en `a2baa2f`. Un `vite build` en verde no detecta esa clase de error.
+- **`gestion_data` sin política RLS — NO es un hoyo.** RLS activo y cero políticas = nadie lee ni escribe, el estado más cerrado posible. 0 filas, legado de localStorage. Lo que sí queda pendiente es código muerto: `migrateFromOldBlobIfNeeded` intenta leerla en cada carga y nunca podrá.
+
+## Seguridad pendiente (6 oct 2026)
+
+- **Activar "Leaked Password Protection"** en el panel de Supabase (Authentication > Policies). No se puede por SQL; lo tiene que prender Angel a mano.
+- El linter seguirá reportando `has_access`, `es_cuidador_de` y `es_colaborador_beneficiario` como ejecutables por `anon`: **es obligatorio**, se invocan dentro de políticas RLS que están `TO public`. Quitarles el permiso rompe el pre-login (las consultas anónimas pasan de devolver 0 filas a lanzar `permission denied`). Ver `supabase/migrations/20261007_seguridad_rpc_anon.sql`.
 
 ## Gotchas técnicos (caros de reaprender)
 
 - **RLS insert vía MCP:** al insertar en bulk con `execute_sql`, los defaults de `auth.uid()` NO se disparan — las filas quedan con `user_id = null` e invisibles bajo RLS. Siempre seguir un insert masivo con un `UPDATE` explícito fijando `user_id`.
+- **Guardas de autorización en SQL: nunca comparar contra `auth.uid()` sin descartar NULL primero.** Sin sesión `auth.uid()` es NULL, y comparar contra NULL no da falso: da NULL. Un `IF <expresión que da NULL> THEN RAISE` **no entra**, así que la guarda se salta en silencio y solo para los anónimos (con sesión funciona bien, que es lo que la hace difícil de ver). Pasó en `vincular_colaborador_a_tarea`: un anónimo con un id de tarea podía cambiar su `asignado_a`. El patrón correcto es `IF auth.uid() IS NULL THEN RAISE` aparte y antes, más `coalesce(..., false)` alrededor de cualquier función que pueda devolver NULL.
+- **Revocar permisos de funciones: `REVOKE ... FROM anon` casi nunca basta.** Si la función también tiene EXECUTE concedido a `PUBLIC` (se ve como `-` al listar los permisos), `anon` lo sigue teniendo por ahí. Hay que revocar a `PUBLIC`. Y antes de revocar, revisar si la función se invoca dentro de alguna política RLS: las 56 políticas del esquema están `TO public`, así que quitarle el permiso a una función usada en una política rompe las consultas sin sesión.
 - **`alertas_enviadas`:** el constraint único compuesto (user_id + tipo + entidad_id + fecha_relevante) es esencial para deduplicación — siempre usar `onConflict` en upserts.
 - **iOS Web Push:** solo funciona desde la PWA instalada, no desde Safari normal. iOS ignora los botones de acción de notificación — siempre dar alternativa dentro de la app (Tomado/Posponer inline).
 - **Sidebar móvil:** la preferencia de localStorage de "solo íconos" en desktop NO debe afectar mobile — requiere detección real de viewport con `matchMedia`, no una bandera compartida.

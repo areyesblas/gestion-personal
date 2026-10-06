@@ -13516,12 +13516,12 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
 
   async function transcribirYEnviar(blob) {
     try {
-      const { data: sesion } = await supabase.auth.getSession();
+      const token = await tokenDeSesion();
       const form = new FormData();
       form.append("audio", blob, blob.type.includes("mp4") ? "audio.mp4" : "audio.webm");
       const resp = await fetch(`${supabase.supabaseUrl}/functions/v1/transcribir-voz`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${sesion.session.access_token}` },
+        headers: { Authorization: `Bearer ${token}` },
         body: form,
       });
       const json = await resp.json().catch(() => ({}));
@@ -13600,10 +13600,10 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
     cambiarEstado("procesando");
     setTranscripciones((prev) => [...prev, { rol: "usuario", texto }]);
     try {
-      const { data: sesion } = await supabase.auth.getSession();
+      const token = await tokenDeSesion();
       const resp = await fetch(`${supabase.supabaseUrl}/functions/v1/asistente-ia`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${sesion.session.access_token}` },
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ mensaje: texto, modo: "voz", contexto_pantalla: contextoPantalla || null }),
       });
       const json = await resp.json().catch(() => ({}));
