@@ -60,3 +60,15 @@ export function Stat({ label, value, tone }) {
     </div>
   );
 }
+
+// Barra de Guardar/Descartar que aparece solo cuando hay algo que guardar.
+export function BarraGuardar({ sucio, onGuardar, onDescartar, etiqueta = "Guardar cambios" }) {
+  if (!sucio) return null;
+  return (
+    <div className="flex items-center gap-2 mt-3 pt-3 border-t gp-border">
+      <span className="text-[11px] gp-text-gold flex-1">Hay cambios sin guardar.</span>
+      <button onClick={onDescartar} className="gp-btn-ghost px-3 py-1.5 text-xs rounded shrink-0">Descartar</button>
+      <button onClick={onGuardar} className="gp-btn px-3 py-1.5 text-xs rounded shrink-0">{etiqueta}</button>
+    </div>
+  );
+}

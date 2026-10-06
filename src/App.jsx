@@ -25,7 +25,7 @@ import bannerMontanas from "./assets/dashboard-banner-montanas-nevadas.jpg";
 // Helpers compartidos que salieron de este archivo en la Fase 0 del corte por módulos. Mientras
 // vivían aquí no se podía extraer ningún módulo sin arrastrar el archivo completo.
 import {
-  uid, fmtMoney, todayISO, horaActualHHMM, daysUntil, MESES_LARGO, fmtFechaCorta, dateStr,
+  uid, fmtMoney, todayISO, horaActualHHMM, daysUntil, MESES_LARGO, fmtFechaCorta, dateStr, ahoraISO,
   MONEDA_BASE, MONEDAS, montoBaseDe, fmtMonedaOriginal,
 } from "./lib/formato";
 import {
@@ -35,7 +35,7 @@ import {
 import { cargarXLSX, exportarFilasExcel, exportarFilasPDF } from "./lib/exportar";
 // Primitivas de UI compartidas por todas las pantallas. Field tenía 393 usos y Modal 181 cuando
 // vivían aquí: eran la razón principal por la que no se podía extraer un módulo solo.
-import { Badge, IconBtn, Field, BloqueFicha } from "./components/ui/basicos";
+import { Badge, IconBtn, Field, BloqueFicha, BarraGuardar } from "./components/ui/basicos";
 import { Modal } from "./components/ui/Modal";
 import { MoneyInput, SelectGuardable, ComboboxMultiBuscar } from "./components/ui/campos";
 import { Th, OrdenSelector, BarraListaEstandar } from "./components/ui/tablas";
@@ -43,6 +43,12 @@ import { useBorrador, confirmarDescartarCambios } from "./components/ui/borrador
 // Analítica de Finanzas. El Dashboard y Presupuesto también la usan y NO son perezosos, por eso
 // vive en lib/ y no dentro de los módulos de Reportes/Estimaciones.
 import { buildMonthlyLedger, lastNMonthKeys, monthLabel, calcularSaldo } from "./lib/finanzas";
+import { leerPendientesOffline, quitarPendientesOffline, agregarPendienteOffline } from "./lib/offline";
+import { usePanelRedimensionable } from "./components/ui/usePanelRedimensionable";
+// Piezas compartidas que hablan con Supabase, por eso no están en ui/.
+import Bitacora from "./components/comunes/Bitacora";
+import ArchivosEntidad from "./components/comunes/ArchivosEntidad";
+import PresupuestoMensualForm from "./components/comunes/PresupuestoMensualForm";
 // Perezosos (Fase 1): Reportes y Estimaciones son capa analítica — se entra a ellas de vez en
 // cuando, no tienen por qué pesar en el arranque de todos los días.
 const Reportes = lazy(() => import("./components/modulos/Reportes"));
@@ -702,89 +708,6 @@ function paginasVisibles(actual, total) {
 
 
 /* Bitácora universal: comentarios + adjuntos (fotos/audio/video/documentos) para cualquier entidad. */
-function Bitacora({ data, entidadTipo, entidadId, onAdd, onRemove }) {
-  const [texto, setTexto] = useState("");
-  const [subiendo, setSubiendo] = useState(false);
-  const [adjuntosNuevos, setAdjuntosNuevos] = useState([]);
-  const [error, setError] = useState("");
-
-  const comentarios = (data.comentarios || [])
-    .filter((c) => c.entidadTipo === entidadTipo && c.entidadId === entidadId)
-    .sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
-
-  const iconoTipo = (t) => t === "video" ? <Film size={11} /> : t === "audio" ? <Mic size={11} /> : t === "imagen" ? <Camera size={11} /> : <FileText size={11} />;
-
-  const handleFiles = async (e) => {
-    const files = Array.from(e.target.files || []);
-    if (files.length === 0) return;
-    setError("");
-    setSubiendo(true);
-    const nuevos = [];
-    for (const file of files) {
-      if (file.size > 25 * 1024 * 1024) { setError(`"${file.name}" pesa más de 25 MB, se omitió.`); continue; }
-      const path = `${entidadTipo}/${entidadId}/${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
-      const { error: upErr } = await supabase.storage.from("adjuntos").upload(path, file);
-      if (upErr) { setError(`No se pudo subir "${file.name}": ${upErr.message}`); continue; }
-      const { data: pub } = supabase.storage.from("adjuntos").getPublicUrl(path);
-      const tipo = file.type.startsWith("image/") ? "imagen" : file.type.startsWith("video/") ? "video" : file.type.startsWith("audio/") ? "audio" : "documento";
-      nuevos.push({ tipo, nombre: file.name, url: pub.publicUrl });
-    }
-    setAdjuntosNuevos((prev) => [...prev, ...nuevos]);
-    setSubiendo(false);
-  };
-
-  const enviar = () => {
-    if (!texto.trim() && adjuntosNuevos.length === 0) return;
-    onAdd({ entidadTipo, entidadId, texto: texto.trim(), adjuntos: adjuntosNuevos });
-    setTexto("");
-    setAdjuntosNuevos([]);
-  };
-
-  return (
-    <div>
-      <p className="text-xs font-medium mb-2 gp-text-muted">Comentarios y adjuntos</p>
-      <div className="space-y-1.5 mb-2 max-h-56 overflow-y-auto gp-scroll">
-        {comentarios.map((c) => (
-          <div key={c.id} className="text-xs gp-panel p-2">
-            <div className="flex items-start justify-between gap-2">
-              <div className="flex-1">
-                {c.texto && <p>{c.texto}</p>}
-                {c.adjuntos?.length > 0 && (
-                  <div className="flex flex-wrap gap-2 mt-1">
-                    {c.adjuntos.map((a, i) => (
-                      <a key={i} href={a.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 gp-text-gold">
-                        {iconoTipo(a.tipo)} {a.nombre.length > 16 ? a.nombre.slice(0, 16) + "…" : a.nombre}
-                      </a>
-                    ))}
-                  </div>
-                )}
-                <p className="gp-mono gp-text-muted mt-1" style={{ fontSize: "10px" }}>{c.createdAt ? new Date(c.createdAt).toLocaleString("es-MX") : ""}</p>
-              </div>
-              <button onClick={() => onRemove(c.id)} className="gp-text-red shrink-0">✕</button>
-            </div>
-          </div>
-        ))}
-        {comentarios.length === 0 && <p className="text-xs gp-text-muted">Sin comentarios todavía.</p>}
-      </div>
-      <textarea className="gp-input" rows={2} placeholder="Escribe un comentario…" value={texto} onChange={(e) => setTexto(e.target.value)} />
-      <div className="flex items-center justify-between mt-2 gap-2 flex-wrap">
-        <input type="file" accept="image/*,video/*,audio/*,.pdf,.doc,.docx" multiple onChange={handleFiles} className="text-xs gp-text-muted" disabled={subiendo} style={{ maxWidth: 190 }} />
-        <button className="gp-btn-ghost px-3 py-1.5 text-xs" disabled={subiendo} onClick={enviar}>Agregar</button>
-      </div>
-      {subiendo && <p className="text-xs gp-text-muted mt-1">Subiendo…</p>}
-      {error && <p className="text-xs gp-text-red mt-1">{error}</p>}
-      {adjuntosNuevos.length > 0 && (
-        <div className="flex flex-wrap gap-1 mt-2">
-          {adjuntosNuevos.map((a, i) => (
-            <span key={i} className="text-xs gp-text-teal flex items-center gap-1 gp-panel px-2 py-1">
-              {iconoTipo(a.tipo)} {a.nombre.length > 16 ? a.nombre.slice(0, 16) + "…" : a.nombre}
-            </span>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
 
 const calcIMC = (pesoKg, alturaCm) => {
   const p = Number(pesoKg), a = Number(alturaCm);
@@ -963,22 +886,6 @@ function mensajeErrorGuardado(error) {
 // (fallaría), cada intento de guardar/editar/borrar se guarda aquí, en el propio
 // navegador, marcado como "pendiente de subir", hasta que vuelva la conexión y el
 // usuario decida qué hacer (ver AvisoPendientesOffline).
-const CLAVE_PENDIENTES_OFFLINE = "arkeyone_pendientes_offline";
-function leerPendientesOffline() {
-  try { return JSON.parse(localStorage.getItem(CLAVE_PENDIENTES_OFFLINE) || "[]"); }
-  catch { return []; }
-}
-function guardarPendientesOffline(lista) {
-  try { localStorage.setItem(CLAVE_PENDIENTES_OFFLINE, JSON.stringify(lista)); } catch {}
-}
-function agregarPendienteOffline({ ownerId, operacion, key, targetIds, payload, descripcion }) {
-  const lista = leerPendientesOffline();
-  lista.push({ id: uid(), ownerId, operacion, key, targetIds: targetIds || null, payload: payload || null, descripcion, creadoEn: new Date().toISOString() });
-  guardarPendientesOffline(lista);
-}
-function quitarPendientesOffline(ids) {
-  guardarPendientesOffline(leerPendientesOffline().filter((p) => !ids.includes(p.id)));
-}
 
 // TTS simple y sin estado, para avisos puntuales fuera del panel del Asistente (que trae su
 // propia máquina de estados de escucha/habla). Solo habla; no toca el micrófono.
@@ -1202,90 +1109,7 @@ function NumeroGuardable({ valor, placeholder, onGuardar, ariaLabel, style }) {
    se recuerda por pantalla, porque no es el mismo el que conviene en Contactos que en Tareas.
 
    Solo aplica en escritorio: en celular los dos bloques van apilados y no hay nada que repartir. */
-const ANCHO_PANEL_MIN = 320;
-const ANCHO_PANEL_DEFECTO = 440;
 
-function usePanelRedimensionable(clave) {
-  const contenedorRef = useRef(null);
-  const [esEscritorio, setEsEscritorio] = useState(() => {
-    try { return window.matchMedia("(min-width: 1024px)").matches; } catch { return true; }
-  });
-  const [ancho, setAncho] = useState(() => {
-    try { return Number(localStorage.getItem(`arkeyone_panel_${clave}`)) || ANCHO_PANEL_DEFECTO; }
-    catch { return ANCHO_PANEL_DEFECTO; }
-  });
-  const arrastrandoRef = useRef(false);
-
-  useEffect(() => {
-    const mq = window.matchMedia("(min-width: 1024px)");
-    const alCambiar = (e) => setEsEscritorio(e.matches);
-    mq.addEventListener("change", alCambiar);
-    return () => mq.removeEventListener("change", alCambiar);
-  }, []);
-
-  useEffect(() => {
-    const alMover = (e) => {
-      if (!arrastrandoRef.current || !contenedorRef.current) return;
-      const caja = contenedorRef.current.getBoundingClientRect();
-      // El ancho se mide desde el borde DERECHO del contenedor: arrastrar hacia la izquierda
-      // agranda la ficha y encoge la lista, que es lo que uno espera al jalar el divisor.
-      const propuesto = caja.right - e.clientX;
-      const maximo = Math.max(ANCHO_PANEL_MIN, caja.width - 380); // la lista nunca baja de 380
-      setAncho(Math.round(Math.max(ANCHO_PANEL_MIN, Math.min(propuesto, maximo))));
-    };
-    const alSoltar = () => {
-      if (!arrastrandoRef.current) return;
-      arrastrandoRef.current = false;
-      document.body.style.cursor = "";
-      document.body.style.userSelect = "";
-      try { localStorage.setItem(`arkeyone_panel_${clave}`, String(ancho)); } catch { /* modo privado */ }
-    };
-    window.addEventListener("pointermove", alMover);
-    window.addEventListener("pointerup", alSoltar);
-    window.addEventListener("pointercancel", alSoltar);
-    return () => {
-      window.removeEventListener("pointermove", alMover);
-      window.removeEventListener("pointerup", alSoltar);
-      window.removeEventListener("pointercancel", alSoltar);
-    };
-  }, [clave, ancho]);
-
-  const divisor = (
-    <div
-      className="gp-divisor hidden lg:flex items-stretch justify-center shrink-0 self-stretch"
-      style={{ width: 11, touchAction: "none", minHeight: 120 }}
-      title="Arrastra para cambiar el ancho. Doble clic para volver al original."
-      role="separator" aria-orientation="vertical"
-      onPointerDown={(e) => {
-        e.preventDefault();
-        arrastrandoRef.current = true;
-        document.body.style.cursor = "col-resize";
-        document.body.style.userSelect = "none";
-      }}
-      onDoubleClick={() => {
-        setAncho(ANCHO_PANEL_DEFECTO);
-        try { localStorage.setItem(`arkeyone_panel_${clave}`, String(ANCHO_PANEL_DEFECTO)); } catch { /* modo privado */ }
-      }}
-    >
-      <span className="gp-divisor-linea" />
-    </div>
-  );
-
-  // En celular no se fija ancho: los bloques se apilan y cada uno toma todo el ancho.
-  return { contenedorRef, divisor, estiloPanel: esEscritorio ? { width: ancho } : undefined };
-}
-
-// Barra de Guardar/Descartar que aparece solo cuando hay algo que guardar.
-function BarraGuardar({ sucio, onGuardar, onDescartar, etiqueta = "Guardar cambios" }) {
-  if (!sucio) return null;
-  return (
-    <div className="flex items-center gap-2 mt-3 pt-3 border-t gp-border">
-      <span className="text-[11px] gp-text-gold flex-1">Hay cambios sin guardar.</span>
-      <button onClick={onDescartar} className="gp-btn-ghost px-3 py-1.5 text-xs rounded shrink-0">Descartar</button>
-      <button onClick={onGuardar} className="gp-btn px-3 py-1.5 text-xs rounded shrink-0">{etiqueta}</button>
-    </div>
-  );
-}
 
 
 
@@ -5479,33 +5303,6 @@ function Dashboard({ data: datosCompletos, empresas = [], contextos = [], contex
   );
 }
 
-function PresupuestoMensualForm({ presupuestoMensual, onSave, onSaved }) {
-  const [v, setV] = useState(presupuestoMensual != null ? String(presupuestoMensual) : "");
-  const [error, setError] = useState("");
-  const [estadoGuardado, setEstadoGuardado] = useState("idle");
-  return (
-    <div>
-      <p className="text-xs gp-text-muted mb-3">Cuánto planeas gastar al mes — el widget "Tu progreso" compara tus gastos reales contra este número. Puedes redefinirlo cuando quieras.</p>
-      <Field label="Presupuesto mensual"><MoneyInput className="gp-input" value={v} onChange={setV} /></Field>
-      {error && <p className="text-xs gp-text-red mb-2">{error}</p>}
-      <button
-        className="gp-btn w-full py-2 text-sm disabled:opacity-70"
-        disabled={estadoGuardado === "guardando"}
-        onClick={async () => {
-          const monto = Number(v);
-          if (!v || isNaN(monto) || monto <= 0) { setError("Captura un monto mayor a cero."); return; }
-          setError("");
-          setEstadoGuardado("guardando");
-          await onSave(monto);
-          setEstadoGuardado("guardado");
-          setTimeout(() => onSaved?.(), 900);
-        }}
-      >
-        {estadoGuardado === "guardando" ? "Guardando…" : estadoGuardado === "guardado" ? "Guardado ✓" : "Guardar"}
-      </button>
-    </div>
-  );
-}
 
 function SaldoInicialForm({ ultimo, onSave }) {
   const [v, setV] = useState({ fecha: todayISO(), efectivo: "", cuenta: "", notas: "" });
@@ -8657,7 +8454,6 @@ function calcAvanceTarea(nodo) {
 // proyecto). La regla vive aquí una sola vez para que se comporte igual en las tres: mismo texto
 // de confirmación, misma fecha registrada y mismo cierre automático del proyecto.
 
-const ahoraISO = () => new Date().toISOString();
 // "2026-09-24T18:30:00Z" -> "24 Sep 2026". Para mostrar cuándo se completó algo. (Aparte de
 // fmtFechaHora(), que es el de Citas y no lleva año.)
 const fmtFechaCompletado = (iso) => (iso ? fmtFechaCorta(String(iso).slice(0, 10)) : "");
@@ -12092,60 +11888,6 @@ function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
 // sin el texto, y subir un archivo crea un comentario que únicamente lleva el adjunto.
 // `carpeta` es el prefijo dentro del bucket de Storage, para que los archivos de cada módulo
 // queden separados (contactos/<id>/…, proyectos/<id>/…).
-function ArchivosEntidad({ entidadTipo, entidadId, carpeta, data, onAddComentario, vacioTexto }) {
-  const [subiendo, setSubiendo] = useState(false);
-  const [error, setError] = useState("");
-
-  const archivos = (data.comentarios || [])
-    .filter((x) => x.entidadTipo === entidadTipo && x.entidadId === entidadId)
-    .flatMap((x) => (x.adjuntos || []).map((a) => ({ ...a, comentarioId: x.id, fecha: x.createdAt })))
-    .sort((a, b) => (b.fecha || "").localeCompare(a.fecha || ""));
-
-  const iconoTipo = (t) => t === "video" ? <Film size={13} /> : t === "audio" ? <Mic size={13} /> : t === "imagen" ? <Camera size={13} /> : <FileText size={13} />;
-
-  const subir = async (e) => {
-    const files = Array.from(e.target.files || []);
-    if (files.length === 0) return;
-    setError("");
-    setSubiendo(true);
-    const nuevos = [];
-    for (const file of files) {
-      if (file.size > 25 * 1024 * 1024) { setError(`"${file.name}" pesa más de 25 MB, se omitió.`); continue; }
-      const path = `${carpeta}/${entidadId}/${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
-      const { error: upErr } = await supabase.storage.from("adjuntos").upload(path, file);
-      if (upErr) { setError(`No se pudo subir "${file.name}": ${upErr.message}`); continue; }
-      const { data: pub } = supabase.storage.from("adjuntos").getPublicUrl(path);
-      const tipo = file.type.startsWith("image/") ? "imagen" : file.type.startsWith("video/") ? "video" : file.type.startsWith("audio/") ? "audio" : "documento";
-      nuevos.push({ tipo, nombre: file.name, url: pub.publicUrl });
-    }
-    if (nuevos.length > 0) onAddComentario({ entidadTipo, entidadId, texto: "", adjuntos: nuevos });
-    setSubiendo(false);
-    e.target.value = "";
-  };
-
-  return (
-    <>
-      {archivos.length === 0
-        ? <p className="text-xs gp-text-muted py-2">{vacioTexto || "Sin archivos todavía."}</p>
-        : (
-          <div className="flex flex-col gap-1.5 mb-3">
-            {archivos.map((a, i) => (
-              <a key={`${a.comentarioId}-${i}`} href={a.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-xs py-1.5 px-2 rounded gp-panel-hi">
-                <span className="gp-text-gold shrink-0">{iconoTipo(a.tipo)}</span>
-                <span className="truncate flex-1">{a.nombre}</span>
-                <span className="gp-mono gp-text-muted shrink-0" style={{ fontSize: 10 }}>{(a.fecha || "").slice(0, 10)}</span>
-              </a>
-            ))}
-          </div>
-        )}
-      <label className="gp-btn-ghost px-3 py-2 text-xs rounded cursor-pointer inline-flex items-center gap-1.5">
-        <Upload size={13} /> {subiendo ? "Subiendo…" : "Subir archivo"}
-        <input type="file" multiple className="hidden" onChange={subir} disabled={subiendo} />
-      </label>
-      {error && <p className="text-xs gp-text-red mt-1">{error}</p>}
-    </>
-  );
-}
 
 // Nota rápida ligada al contacto: se guarda en el módulo de Notas con su contacto_id, no en una
 // copia aparte — por eso también aparece en la pantalla de Notas.

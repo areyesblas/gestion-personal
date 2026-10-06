@@ -61,3 +61,6 @@ export const fmtMonedaOriginal = (monto, moneda) => {
   try { return n.toLocaleString("es-MX", { style: "currency", currency: moneda || MONEDA_BASE }); }
   catch { return `${n.toLocaleString("es-MX")} ${moneda || ""}`.trim(); }
 };
+
+// Momento exacto, con hora, para sellar cuando se cerro una tarea o un proyecto.
+export const ahoraISO = () => new Date().toISOString();
