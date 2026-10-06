@@ -26,7 +26,6 @@ import bannerMontanas from "./assets/dashboard-banner-montanas-nevadas.jpg";
 // Logo de la marca para el encabezado de los PDF exportados (son reportes que salen de la app
 // y se comparten; deben verse de ARKEYONE).
 import logoArkeyone from "./assets/arkeyone-lockup.png";
-import * as XLSX from "xlsx";
 import {
   FolderKanban, CheckSquare, Wallet, AlertTriangle,
   Users, Activity, Plus, X, Trash2, Pencil, Github, ChevronDown,
@@ -44,7 +43,8 @@ import {
 // Perezoso: solo trae @dnd-kit (arrastrar y soltar) cuando el usuario realmente abre "Personalizar panel".
 const PersonalizarPanelModal = lazy(() => import("./components/CentroMando/PersonalizarPanelModal"));
 // Perezoso: solo trae la UI de importar (mapeo de columnas/vista previa) cuando el usuario abre
-// "Importar desde Excel" en Contactos o Finanzas — xlsx en sí ya está cargado (se usa para exportar).
+// "Importar desde Excel" en Contactos o Finanzas. El modal importa `xlsx` por su cuenta (ya no lo
+// recibe como prop), así que la librería viaja en su propio trozo y no en el arranque de la app.
 const ImportarExcelModal = lazy(() => import("./components/import/ImportarExcelModal"));
 // Perezoso: el onboarding se ve una sola vez por cuenta — no tiene por qué pesar en el arranque
 // de todos los días.
@@ -919,18 +919,31 @@ const esPWAStandalone = () => {
   } catch { return false; }
 };
 
+// `xlsx` pesa ~864kB (sabe leer y escribir todos los formatos de Excel desde los noventa) y solo
+// hace falta cuando alguien exporta o importa. Importarla arriba del archivo la metía en el bundle
+// principal, así que TODOS los usuarios la descargaban antes de ver el login aunque nunca
+// exportaran nada. Con el import dinámico viaja en su propio trozo, igual que jsPDF más abajo.
+// El módulo queda cacheado por el navegador y por este helper, así que exportar dos veces no la
+// vuelve a bajar.
+let xlsxPromesa; // undefined = nunca se ha pedido
+const cargarXLSX = () => (xlsxPromesa ??= import("xlsx"));
+
 // Exporta una lista YA filtrada/ordenada tal como el usuario la está viendo (secc. 23.5: la
 // exportación debe respetar exactamente los filtros, búsqueda y orden actuales).
-function exportarFilasExcel(filas, columnas, nombreArchivo) {
+async function exportarFilasExcel(filas, columnas, nombreArchivo) {
+  // La validación va ANTES de cargar la librería: no tiene sentido bajar 864kB para avisar que no
+  // hay nada que exportar.
   if (filas.length === 0) { alert("No hay filas para exportar con los filtros actuales."); return; }
   try {
+    const XLSX = await cargarXLSX();
     const limpias = filas.map((item) => Object.fromEntries(columnas.map((c) => [c.label, c.get(item) ?? ""])));
     const hoja = XLSX.utils.json_to_sheet(limpias);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, hoja, "Datos".slice(0, 31));
     XLSX.writeFile(wb, `arkeyone_${nombreArchivo}_${todayISO()}.xlsx`);
   } catch (err) {
-    // Antes esto se perdía en la consola y la pantalla se quedaba igual, sin decir nada.
+    // Antes esto se perdía en la consola y la pantalla se quedaba igual, sin decir nada. Ahora el
+    // try también cubre la carga del trozo de `xlsx` (misma razón que en el export a PDF).
     console.error("Error al exportar a Excel:", err);
     alert(`No se pudo generar el Excel: ${err?.message || err}`);
   }
@@ -1118,7 +1131,13 @@ const ETIQUETA_TABLA = {
 // Exporta toda la información visible del usuario a un archivo Excel, un módulo por hoja.
 // Respeta lo que cada quien puede ver: si eres colaborador con acceso limitado, `data` ya
 // viene filtrado por la base de datos, así que el archivo solo trae lo que sí te toca ver.
-function exportarExcel(data, nombreCuenta) {
+async function exportarExcel(data, nombreCuenta) {
+  // Igual que en exportarFilasExcel: se revisa que haya algo que exportar antes de bajar `xlsx`.
+  if (!TABLES.some((key) => (data[key] || []).length > 0)) {
+    alert("Todavía no tienes datos para exportar.");
+    return;
+  }
+  const XLSX = await cargarXLSX();
   const wb = XLSX.utils.book_new();
   const camposInternos = ["id", "userId", "deletedAt"];
 
@@ -3432,8 +3451,10 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
   const [exportPaso, setExportPaso] = useState(null); // null | "confirmar" | "listo"
   const [mfaModalAbierto, setMfaModalAbierto] = useState(false);
   const [temaModalAbierto, setTemaModalAbierto] = useState(false);
-  const confirmarExportar = () => {
-    exportarExcel(data, activeOwnerId === misId ? "mi-cuenta" : activeOwnerEmail?.split("@")[0]);
+  // await: desde que `xlsx` se carga de forma perezosa, exportar es asíncrono — sin el await el
+  // paso "listo" aparecía antes de que el archivo existiera.
+  const confirmarExportar = async () => {
+    await exportarExcel(data, activeOwnerId === misId ? "mi-cuenta" : activeOwnerEmail?.split("@")[0]);
     setExportPaso("listo");
   };
 
@@ -7070,7 +7091,7 @@ function Proyectos({
       {importarAbierto && (
         <Modal title="Importar proyectos" onClose={() => setImportarAbierto(false)}>
           <Suspense fallback={<p className="text-sm gp-text-muted">Cargando…</p>}>
-            <ImportarExcelModal tipo="proyectos" XLSX={XLSX} onImportarFila={(item) => onAdd(item)} onCerrar={() => setImportarAbierto(false)} />
+            <ImportarExcelModal tipo="proyectos" onImportarFila={(item) => onAdd(item)} onCerrar={() => setImportarAbierto(false)} />
           </Suspense>
         </Modal>
       )}
@@ -10837,7 +10858,7 @@ function FinanzasMovimientos({ data, onAdd, onEdit, onRemove, onAddPago, foco, o
       {importarAbierto && (
         <Modal title="Importar movimientos desde Excel" onClose={() => setImportarAbierto(false)}>
           <Suspense fallback={<p className="text-sm gp-text-muted">Cargando…</p>}>
-            <ImportarExcelModal tipo="finanzas" proyectos={data.proyectos} XLSX={XLSX} onImportarFila={(item) => onAdd(item)} onCerrar={() => setImportarAbierto(false)} />
+            <ImportarExcelModal tipo="finanzas" proyectos={data.proyectos} onImportarFila={(item) => onAdd(item)} onCerrar={() => setImportarAbierto(false)} />
           </Suspense>
         </Modal>
       )}
@@ -12765,7 +12786,7 @@ function Contactos({ data, onAdd, onEdit, onRemove, onAddComentario, onRemoveCom
             de duplicados. Por ahora se importa desde Excel.
           </p>
           <Suspense fallback={<p className="text-sm gp-text-muted">Cargando…</p>}>
-            <ImportarExcelModal tipo="contactos" XLSX={XLSX} onImportarFila={(item) => onAdd(item)} onCerrar={() => setImportarAbierto(false)} />
+            <ImportarExcelModal tipo="contactos" onImportarFila={(item) => onAdd(item)} onCerrar={() => setImportarAbierto(false)} />
           </Suspense>
         </Modal>
       )}

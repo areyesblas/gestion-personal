@@ -1,24 +1,19 @@
 // src/components/import/ImportarExcelModal.jsx
 //
 // Importar Contactos o Movimientos de Finanzas desde un archivo Excel/CSV (pedido por Angel,
-// 21 sept 2026 — solo estos dos módulos, no todo el sistema). Recibe `XLSX` como prop (App.jsx
-// ya lo importa de forma estática para exportar) en vez de importarlo aquí también, para no
-// dejar dos puntos de import de la misma librería sueltos en el código.
+// 21 sept 2026 — solo estos dos módulos, no todo el sistema).
 //
-// OJO de bundle: aun así, usar XLSX.read()/sheet_to_json() por primera vez en la app (antes
-// solo se usaba para escribir/exportar) hace que Rollup incluya código interno de `xlsx` que
-// antes se eliminaba por tree-shaking (parseo de fechas/celdas, etc.) — y como el import de
-// `xlsx` vive en App.jsx (no dentro de este archivo, que sí es perezoso), ese peso cae en el
-// bundle principal, no en el chunk perezoso de este modal (~140kB / ~45kB gzip de más en el
-// arranque de toda la app). Es el costo real de agregar "leer Excel" a una app que antes solo
-// escribía — no hay forma de evitarlo sin también volver perezoso el import de `xlsx` en
-// App.jsx, que se usa en ~10 pantallas para exportar y queda fuera del alcance de este cambio.
+// `xlsx` se importa aquí directamente (antes llegaba como prop desde App.jsx). Este archivo ya es
+// perezoso y App.jsx ahora también carga `xlsx` con import dinámico para exportar, así que Rollup
+// la deja en un trozo compartido entre los dos: la librería ya NO pesa en el arranque de la app,
+// que era el costo descrito aquí antes (~45kB gzip de más para todos los usuarios, exportaran o no).
 //
 // Flujo: elegir archivo → detectar/ajustar qué columna del archivo corresponde a cada campo →
 // vista previa con filas válidas/con error → confirmar → inserta una por una con addItem (sin
 // camino de bulk-insert nuevo) mostrando progreso → resumen final.
 
 import { useState } from 'react';
+import * as XLSX from 'xlsx';
 import { Upload, CheckCircle2, XCircle, Download } from 'lucide-react';
 
 // Mismo criterio que normalizarTexto en App.jsx (minúsculas, sin acentos) — se duplica aquí
@@ -192,7 +187,7 @@ const CONFIGS = {
   },
 };
 
-export default function ImportarExcelModal({ tipo, proyectos, XLSX, onImportarFila, onCerrar }) {
+export default function ImportarExcelModal({ tipo, proyectos, onImportarFila, onCerrar }) {
   const config = CONFIGS[tipo];
   const [paso, setPaso] = useState('elegir'); // elegir | revisar | importando | listo
   const [error, setError] = useState('');
