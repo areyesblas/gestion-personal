@@ -259,14 +259,14 @@ Deno.serve(async (_req) => {
       const nombreContacto = (id: string | null) => contactosUsr?.find((c) => c.id === id)?.nombre || "\u2014";
 
       // Deudas, cobros pendientes y pagos recurrentes salen TODOS de finanzas, en una sola
-      // consulta. Antes las deudas se ped\u00edan aparte a una tabla `deudas` que YA NO EXISTE: se
-      // renombr\u00f3 a deudas_legado_migrado_a_finanzas cuando Deudas se fusion\u00f3 con Finanzas
+      // consulta. Antes las deudas se pedían aparte a una tabla `deudas` que YA NO EXISTE: se
+      // renombró a deudas_legado_migrado_a_finanzas cuando Deudas se fusionó con Finanzas
       // (9 sept 2026). La consulta fallaba, el error se descartaba con `const { data }` sin mirar
       // el error, y el resultado era que el resumen diario NUNCA avisaba de una deuda por vencer.
       //
-      // La definici\u00f3n de deuda es la misma que usa la app en deudasDeFinanzas (App.jsx): un
+      // La definición de deuda es la misma que usa la app en deudasDeFinanzas (App.jsx): un
       // egreso NO recurrente con saldo pendiente. El tabla_origen se queda en "deudas" a
-      // prop\u00f3sito: es lo que MODULO_TO_VIEW usa para mandar el push a la pantalla de Deudas.
+      // propósito: es lo que MODULO_TO_VIEW usa para mandar el push a la pantalla de Deudas.
       { const { data } = await admin.from("finanzas").select("id, concepto, monto, fecha, fecha_vencimiento, contacto_id, es_recurrente, tipo, estatus").eq("user_id", uid).is("deleted_at", null);
         (data || []).forEach((r) => {
           if (r.tipo === "Ingreso" && r.estatus === "Pendiente") {
