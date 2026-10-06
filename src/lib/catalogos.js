@@ -65,3 +65,6 @@ export const COLORES_DESGLOSE = ["#087CF5", "#F59E0B", "#8B5CF6", "#16A36A", "#E
 // Mientras esté en false, la app NO pide contraseña para entrar a Finanzas, Salud, Documentos,
 // etc. Eso baja el nivel de protección a propósito y es una decisión del dueño del producto.
 export const CANDADO_SENSIBLE_ACTIVO = false;
+
+// Los dos lados del dinero. Orden con significado (entra / sale), no alfabetico.
+export const TIPO_FIN = ["Ingreso", "Egreso"];
