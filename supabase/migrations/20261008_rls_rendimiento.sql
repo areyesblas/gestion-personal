@@ -70,3 +70,25 @@
 -- el plan correcto seria un Index Scan. Para eso habria que reformular la politica como
 -- `user_id IN (<subconsulta con los propietarios a los que tengo acceso>)`, que SI es
 -- indexable. Es un rediseno de has_access y queda pendiente, con su propia medicion.
+
+-- ============================================================================
+-- APENDICE (misma sesion): indices de la ruta caliente de permisos
+-- ============================================================================
+-- Migracion remota `indices_ruta_caliente_permisos`.
+--
+-- El linter reporta 51 llaves foraneas sin indice. NO se agregaron los 51, y la razon esta
+-- medida: la app no filtra por esas columnas. Carga todo por user_id y hace los cruces en
+-- JavaScript — se verifico buscando `.eq("<columna>")` en src/ y en supabase/functions/, y casi
+-- ninguna aparece. Ademas los borrados son suaves (deleted_at), asi que las comprobaciones de FK
+-- tampoco se disparan. Serian 51 indices cobrando en cada escritura a cambio de nada.
+--
+-- Lo que si es ruta caliente son las consultas que has_access() y es_cuidador_de() hacen por
+-- dentro: corren en cada verificacion de politica, o sea en casi toda consulta de la app. Y
+-- `colaboradores` solo tenia su llave primaria.
+--
+--   idx_colaboradores_acceso        (propietario_id, colaborador_user_id, estatus)
+--   idx_colaboradores_mi_acceso     (colaborador_user_id, estatus)
+--   idx_colab_dependientes_cuidador (propietario_id, contacto_id)
+--
+-- Sin medicion antes/despues, a diferencia del resto de esta migracion: las dos tablas tienen 0
+-- filas hoy y cualquier EXPLAIN daria lo mismo. La justificacion es estructural.
