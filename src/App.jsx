@@ -597,8 +597,6 @@ const resolverOrdenWidgets = (guardado) => {
 // calculada sobre Finanzas (egresos no recurrentes con saldo pendiente). Esta función se usa
 // en cualquier lugar que antes leía `data.deudas`.
 const deudasDeFinanzas = (finanzas) => (finanzas || []).filter((f) => f.tipo === "Egreso" && !f.esRecurrente && (f.estatus === "Pendiente" || f.estatus === "Parcial"));
-const OLD_STORAGE_KEY = "gestion_personal_data"; // localStorage, versión muy vieja
-const OLD_BLOB_TABLE = "gestion_data"; // tabla única jsonb, versión anterior a este modelo relacional
 
 
 
@@ -715,29 +713,6 @@ async function loadAllTables(ownerId) {
   return result;
 }
 
-// migración única desde la versión anterior (un solo blob jsonb), solo si las tablas nuevas están vacías
-async function migrateFromOldBlobIfNeeded(current, ownerId) {
-  const allEmpty = TABLES.every((k) => current[k].length === 0);
-  if (!allEmpty) return current;
-  try {
-    const { data: blobRow } = await supabase.from(OLD_BLOB_TABLE).select("data").eq("id", "main").maybeSingle();
-    const blob = blobRow?.data;
-    if (!blob) return current;
-    for (const key of TABLES) {
-      for (const item of blob[key] || []) {
-        const { error } = await supabase.from(tableName(key)).insert(toRow(key, item));
-        if (error) console.error(`Error migrando ${key}:`, error);
-      }
-    }
-    if (blob.perfilSalud?.alturaCm) {
-      await supabase.from("perfil_salud").upsert({ altura_cm: blob.perfilSalud.alturaCm }, { onConflict: "user_id" });
-    }
-    return await loadAllTables(ownerId);
-  } catch (e) {
-    console.error("No se pudo migrar desde la versión anterior:", e);
-    return current;
-  }
-}
 
 
 
@@ -1997,8 +1972,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
       if (pref?.actividad_profesional) setActividadProfesional(pref.actividad_profesional);
       setOnboardingCompletado(!!pref?.onboarding_completado);
 
-      let result = await loadAllTables(misId);
-      result = await migrateFromOldBlobIfNeeded(result, misId);
+      const result = await loadAllTables(misId);
       // Nota: ya no se siembran proyectos de ejemplo en cuentas nuevas — esto era correcto
       // cuando la app era solo para Angel, pero con registro abierto (SaaS) sembrarle a un
       // desconocido los proyectos personales de Angel no tiene sentido, y además los ids
