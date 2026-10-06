@@ -26,6 +26,16 @@ import bannerMontanas from "./assets/dashboard-banner-montanas-nevadas.jpg";
 // Logo de la marca para el encabezado de los PDF exportados (son reportes que salen de la app
 // y se comparten; deben verse de ARKEYONE).
 import logoArkeyone from "./assets/arkeyone-lockup.png";
+// Helpers compartidos que salieron de este archivo en la Fase 0 del corte por módulos. Mientras
+// vivían aquí no se podía extraer ningún módulo sin arrastrar el archivo completo.
+import {
+  uid, fmtMoney, todayISO, horaActualHHMM, daysUntil, MESES_LARGO, fmtFechaCorta, dateStr,
+  MONEDA_BASE, MONEDAS, montoBaseDe, fmtMonedaOriginal,
+} from "./lib/formato";
+import {
+  ordenAlfabetico, compararEs, ordenadosPorNombre, ordenadosPor,
+  normalizarTexto, filtrarPorBusqueda, PRIORIDAD_ORDEN, ordenarLista,
+} from "./lib/listas";
 import {
   FolderKanban, CheckSquare, Wallet, AlertTriangle,
   Users, Activity, Plus, X, Trash2, Pencil, Github, ChevronDown,
@@ -328,15 +338,6 @@ const claseTema = (tema) => (tema && tema !== "actual" ? `tema-${tema}` : "");
 // `get` permite ordenar una lista de objetos por el texto que de verdad se ve en pantalla (la
 // etiqueta), no por su id interno: si el id es "Proveedor" pero el combo dice "Proveedores", lo
 // que tiene que quedar alfabético es lo segundo.
-const ordenAlfabetico = (lista, get = (x) => x) => {
-  const esCajonDeSastre = (x) => /^otros?$/i.test(String(x).trim());
-  return [...lista].sort((a, b) => {
-    const ka = String(get(a)), kb = String(get(b));
-    if (esCajonDeSastre(ka) !== esCajonDeSastre(kb)) return esCajonDeSastre(ka) ? 1 : -1;
-    return ka.localeCompare(kb, "es");
-  });
-};
-
 const CATS = ordenAlfabetico(["Fundación", "Software", "Música", "Renta", "Marketing", "Chatbots", "Personal", "Otro"]);
 const ESTATUS_PROYECTO = ["Idea", "En validación", "En desarrollo", "Activo", "Finalizado", "Pausado", "Archivado"];
 // Etiqueta corta SOLO para dibujar (chips de filtro, badges): el valor guardado en Supabase sigue
@@ -420,34 +421,8 @@ const toneEstatusTarea = (estatus) => (
 const TIPO_FIN = ["Ingreso", "Egreso"];
 
 /* ---------- Divisas ----------
-   La cuenta lleva UNA moneda base (MXN) y todo lo que se suma, reporta o compara usa el monto ya
-   convertido y CONGELADO en el momento de capturar (finanzas.monto_base). Un movimiento de hace
-   dos años no cambia de valor porque hoy se moviera el dólar: eso fue lo que costó ese día.
-   Las monedas son las que cubre la API de tipos de cambio (lista del BCE); para cualquier otra
-   se captura el tipo de cambio a mano, que de todos modos siempre se puede corregir. */
-const MONEDA_BASE = "MXN";
-const MONEDAS = [
-  { codigo: "MXN", nombre: "Peso mexicano" },
-  { codigo: "USD", nombre: "Dólar estadounidense" },
-  { codigo: "EUR", nombre: "Euro" },
-  { codigo: "CAD", nombre: "Dólar canadiense" },
-  { codigo: "GBP", nombre: "Libra esterlina" },
-  { codigo: "BRL", nombre: "Real brasileño" },
-  { codigo: "JPY", nombre: "Yen japonés" },
-  { codigo: "CHF", nombre: "Franco suizo" },
-];
-
-// El monto con el que se hacen TODAS las cuentas. El `?? monto` no es decoración: los
-// movimientos viejos y los que crean las sincronizaciones automáticas (eventos, activos) no
-// traen monto_base, y esos siempre son MXN, donde monto y monto base son el mismo número.
-const montoBaseDe = (f) => Number(f?.montoBase ?? f?.monto) || 0;
-
-// Formatea un importe en su moneda original, para enseñar "USD 1,200" junto al equivalente.
-const fmtMonedaOriginal = (monto, moneda) => {
-  const n = Number(monto) || 0;
-  try { return n.toLocaleString("es-MX", { style: "currency", currency: moneda || MONEDA_BASE }); }
-  catch { return `${n.toLocaleString("es-MX")} ${moneda || ""}`.trim(); }
-};
+   MONEDA_BASE, MONEDAS, montoBaseDe y fmtMonedaOriginal viven en src/lib/formato.js, con la nota
+   de por qué el monto base se congela al capturar. Aquí se queda solo lo que necesita red. */
 
 // Tipo de cambio del DÍA del movimiento, no el de hoy: api.frankfurter.dev responde histórico
 // pidiéndole una fecha. Si falla (sin internet, fecha futura, moneda que la API no cubre) se
@@ -597,13 +572,6 @@ const seed = () => ({
   contactoProyectos: [],
 });
 
-const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2, 10) + Date.now().toString(36));
-const fmtMoney = (n) => (Number(n) || 0).toLocaleString("es-MX", { style: "currency", currency: "MXN", minimumFractionDigits: 0, maximumFractionDigits: 0 });
-const todayISO = () => new Date().toISOString().slice(0, 10);
-const horaActualHHMM = () => { const d = new Date(); return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`; };
-const daysUntil = (dateStr) => Math.ceil((new Date(dateStr) - new Date(todayISO())) / 86400000);
-// Días que faltan para el próximo cumpleaños (a partir de una fecha de nacimiento cualquiera).
-const MESES_LARGO = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
 // ARKEYONE solo pide Día y Mes de cumpleaños (no la fecha de nacimiento completa) — mucha gente no
 // quiere compartir el año. Internamente se sigue guardando como fecha (columna "date" en Supabase),
 // pero con un año ficticio (2000) que diasParaCumple() ignora por completo: solo usa mes/día.
@@ -700,6 +668,8 @@ function CumpleanosField({ value, onChange }) {
     </Field>
   );
 }
+
+// Días que faltan para el próximo cumpleaños (a partir de una fecha de nacimiento cualquiera).
 const diasParaCumple = (fechaNacimiento) => {
   if (!fechaNacimiento) return null;
   const hoy = new Date(todayISO());
@@ -708,30 +678,6 @@ const diasParaCumple = (fechaNacimiento) => {
   if (proximo < hoy) proximo = new Date(hoy.getFullYear() + 1, nac.getMonth(), nac.getDate());
   return Math.round((proximo - hoy) / 86400000);
 };
-
-const PRIORIDAD_ORDEN = { Alta: 0, Media: 1, Baja: 2 };
-
-/* Ordena una lista según una clave de criterio ("campo:tipo"), con nulls siempre al final. */
-function ordenarLista(lista, criterio, campos, dir = "asc") {
-  if (!criterio || criterio === "default" || !campos[criterio]) return lista;
-  const { get, tipo } = campos[criterio];
-  const copia = [...lista];
-  copia.sort((a, b) => {
-    const va = get(a);
-    const vb = get(b);
-    const aVacio = va === null || va === undefined || va === "";
-    const bVacio = vb === null || vb === undefined || vb === "";
-    if (aVacio && bVacio) return 0;
-    if (aVacio) return 1;
-    if (bVacio) return -1;
-    let r;
-    if (tipo === "texto") r = String(va).localeCompare(String(vb), "es");
-    else if (tipo === "prioridad") r = (PRIORIDAD_ORDEN[va] ?? 9) - (PRIORIDAD_ORDEN[vb] ?? 9);
-    else r = va < vb ? -1 : va > vb ? 1 : 0;
-    return dir === "desc" ? -r : r;
-  });
-  return copia;
-}
 
 /* Números de página a dibujar, con "…" cuando hay muchas (1 2 3 4 5 … 11), para no llenar la
    barra de paginación de botones. Devuelve números y la cadena "…" como separador. */
@@ -885,29 +831,9 @@ const tagsUnicos = (citas) => [...new Set((citas || []).flatMap((c) => c.tags ||
 const OLD_STORAGE_KEY = "gestion_personal_data"; // localStorage, versión muy vieja
 const OLD_BLOB_TABLE = "gestion_data"; // tabla única jsonb, versión anterior a este modelo relacional
 
-// Todo combo que liste registros de OTRA entidad (proyectos, contactos, colaboradores, tareas…)
-// va en orden alfabético (pedido de Angel, 29 sept 2026: "revisar en todos los combos que traigan
-// información de otras entidades"). Los catálogos fijos ya se ordenan en su propia definición con
-// ordenAlfabetico(), y los pipelines —estatus de proyecto, de tarea— conservan su orden a
-// propósito: ahí el orden ES información.
-const compararEs = (a, b) => (a || "").toString().localeCompare((b || "").toString(), "es", { sensitivity: "base" });
-const ordenadosPorNombre = (lista) => [...(lista || [])].sort((a, b) => compararEs(a.nombre, b.nombre));
-const ordenadosPor = (lista, get) => [...(lista || [])].sort((a, b) => compararEs(get(a), get(b)));
-
 const camelToSnake = (s) => s.replace(/[A-Z]/g, (c) => "_" + c.toLowerCase());
 const snakeToCamel = (s) => s.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
 const tableName = (key) => camelToSnake(key);
-// Quita acentos y pasa a minúsculas, para que buscar "cancion" también encuentre "canción".
-const normalizarTexto = (s) => (s || "").toString().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-
-// Búsqueda por contenido (contiene, no solo empieza-con) e insensible a acentos, para el
-// estándar transversal de listas (Documento Maestro v1.2, secc. 23.5/38). `getters` es un
-// arreglo de funciones (item) => texto; basta que la búsqueda coincida con cualquiera de ellas.
-const filtrarPorBusqueda = (lista, query, getters) => {
-  const q = normalizarTexto(query).trim();
-  if (!q) return lista;
-  return lista.filter((item) => getters.some((get) => normalizarTexto(get(item)).includes(q)));
-};
 
 // La app instalada en iPhone (PWA en modo standalone) no deja que una página dispare una descarga:
 // el archivo se genera pero no pasa nada visible, que es justo el "no hace nada" que se reportó.
@@ -6662,16 +6588,6 @@ function RangoFechasProyecto({ p }) {
     </div>
   );
 }
-
-const MESES_CORTO_FECHA = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
-// "2026-03-01" -> "01 Mar 2026". Se parte la cadena a mano (sin new Date) porque construir una
-// fecha desde un ISO sin hora la interpreta en UTC y en México puede mostrar el día anterior.
-const fmtFechaCorta = (iso) => {
-  if (!iso) return "";
-  const [y, m, d] = String(iso).slice(0, 10).split("-");
-  if (!y || !m || !d) return String(iso);
-  return `${d} ${MESES_CORTO_FECHA[Number(m) - 1] || m} ${y}`;
-};
 
 // Menú "···" de cada proyecto. Igual que en Contactos, el estado de cuál está abierto vive en la
 // lista (uno solo para toda la tabla), no uno por fila.
@@ -17334,10 +17250,6 @@ function sumarDias(fecha, n) {
   const d = new Date(fecha);
   d.setDate(d.getDate() + n);
   return d;
-}
-function dateStr(d) {
-  const pad = (n) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 function hhmmADecimal(hhmm) {
   const [h, m] = String(hhmm || "").split(":").map(Number);
