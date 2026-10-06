@@ -137,6 +137,9 @@ const Deudas = lazy(() => import("./components/modulos/Deudas"));
 const Colaboradores = lazy(() => import("./components/modulos/Colaboradores"));
 const MisEmpresas = lazy(() => import("./components/modulos/MisEmpresas"));
 const Papelera = lazy(() => import("./components/modulos/Papelera"));
+// Fase 3: la ÚNICA gráfica que quedaba en el bundle principal. Sacarla de aquí es lo que deja
+// que recharts (160 KB gzip) salga del arranque — ver el comentario largo en ese archivo.
+const GraficaResumenFinanciero = lazy(() => import("./components/CentroMando/GraficaResumenFinanciero"));
 import {
   FolderKanban, CheckSquare, Wallet, AlertTriangle,
   Users, Activity, Plus, X, Trash2, Pencil, Github, ChevronDown,
@@ -147,10 +150,6 @@ import {
   ChevronsDownUp, ChevronsUpDown, Briefcase, Building2, ArrowRight,
   TrendingUp, ArrowDownCircle, ArrowUpCircle, Banknote, HandCoins,
 } from "lucide-react";
-import {
-  ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
-  PieChart, Pie, Cell, LineChart, Line, ReferenceLine, ComposedChart,
-} from "recharts";
 // Perezoso: solo trae @dnd-kit (arrastrar y soltar) cuando el usuario realmente abre "Personalizar panel".
 const PersonalizarPanelModal = lazy(() => import("./components/CentroMando/PersonalizarPanelModal"));
 // Perezoso: solo trae la UI de importar (mapeo de columnas/vista previa) cuando el usuario abre
@@ -3779,16 +3778,11 @@ function Dashboard({ data: datosCompletos, empresas = [], contextos = [], contex
             <p className="text-xs gp-text-muted mt-1">Finanzas es un módulo protegido — toca aquí para desbloquearlo.</p>
           </button>
         ) : (
-          <ResponsiveContainer width="100%" height={200}>
-            <BarChart data={serieMensualDashboard} margin={{ left: -20 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-              <XAxis dataKey="mes" tick={{ fill: "var(--muted)", fontSize: 11 }} />
-              <YAxis tick={{ fill: "var(--muted)", fontSize: 11 }} />
-              <Tooltip contentStyle={{ background: "var(--panel)", border: "1px solid var(--border)", fontSize: 12 }} formatter={(v) => fmtMoney(v)} />
-              <Bar dataKey="ingresos" name="Ingresos" fill="var(--teal)" radius={[3, 3, 0, 0]} />
-              <Bar dataKey="egresos" name="Egresos" fill="var(--red)" radius={[3, 3, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
+          // El fallback reserva los mismos 200px de alto que la gráfica, para que el panel no
+          // salte cuando termina de bajar recharts.
+          <Suspense fallback={<div style={{ height: 200 }} />}>
+            <GraficaResumenFinanciero serie={serieMensualDashboard} />
+          </Suspense>
         )}
       </div>
     ),
