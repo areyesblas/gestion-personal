@@ -252,8 +252,12 @@ Deno.serve(async (_req) => {
     }
     for (const usuario of usuariosTodos) {
       const uid = usuario.id;
-      type Item = { tipo: string; tabla: string; id: string; texto: string };
+      // `id` admite null: el aviso agrupado de pagos vencidos no apunta a un registro concreto,
+      // sino al conjunto. Las dos columnas que lo reciben (recordatorios.registro_origen_id y
+      // notifications.recurso_id) son uuid NULLABLE, asi que null es un valor valido ahi.
+      type Item = { tipo: string; tabla: string; id: string | null; texto: string };
       const items: Item[] = [];
+      let deudasVencidas = 0;
 
       const { data: contactosUsr } = await admin.from("contactos").select("id, nombre").eq("user_id", uid).is("deleted_at", null);
       const nombreContacto = (id: string | null) => contactosUsr?.find((c) => c.id === id)?.nombre || "\u2014";
@@ -276,11 +280,31 @@ Deno.serve(async (_req) => {
           if (r.tipo === "Egreso" && !r.es_recurrente && (r.estatus === "Pendiente" || r.estatus === "Parcial")) {
             const f = r.fecha_vencimiento || r.fecha;
             if (f && f >= hoy && f <= limite) items.push({ tipo: "deuda", tabla: "deudas", id: r.id, texto: textoSeguro("deuda", `${r.concepto || "Pago"} \u2014 ${fmtMoney(r.monto)}, vence ${fmtFecha(f)}`) });
+            else if (f && f < hoy) deudasVencidas++;
           }
           if (r.es_recurrente && r.tipo === "Egreso" && r.fecha_vencimiento >= hoy && r.fecha_vencimiento <= limite) {
             items.push({ tipo: "pago_recurrente", tabla: "finanzas", id: r.id, texto: textoSeguro("pago_recurrente", `${r.concepto || "Pago recurrente"} \u2014 ${fmtMoney(r.monto)}, vence ${fmtFecha(r.fecha_vencimiento)}`) });
           }
         }); }
+
+      // Pagos YA VENCIDOS: UN solo aviso agrupado, nunca uno por deuda (decisión de Angel,
+      // 6 oct 2026). El resto del resumen mira hacia adelante 3 días, así que lo vencido no
+      // aparecía por ningún lado — y un pago vencido es MÁS urgente que uno por vencer, no menos.
+      //
+      // Agrupado a propósito: con 12 pagos vencidos, uno por uno serían 12 avisos diarios que
+      // se vuelven ruido y se acaban ignorando. Uno solo informa y manda a la pantalla a ver el
+      // detalle.
+      //
+      // El texto NO pasa por textoSeguro(): ese enmascara los tipos sensibles quitando montos y
+      // nombres, y aquí no hay ninguno — solo un conteo. Pasarlo lo reemplazaría por el texto
+      // genérico y se perdería el número, que es justo lo único que aporta este aviso.
+      if (deudasVencidas > 0) {
+        items.push({
+          tipo: "deuda", tabla: "deudas", id: null,
+          texto: deudasVencidas === 1 ? "Tienes 1 pago vencido" : `Tienes ${deudasVencidas} pagos vencidos`,
+        });
+      }
+
       { const { data } = await admin.from("pendientes").select("id, descripcion, fecha_limite").eq("user_id", uid).is("deleted_at", null).not("estatus", "in", "(Completada,Cancelada)").gte("fecha_limite", hoy).lte("fecha_limite", limite);
         (data || []).forEach((r) => items.push({ tipo: "pendiente", tabla: "pendientes", id: r.id, texto: `${r.descripcion} \u2014 vence ${fmtFecha(r.fecha_limite)}` })); }
       { const { data } = await admin.from("documentos").select("id, nombre, fecha_vencimiento").eq("user_id", uid).is("deleted_at", null).gte("fecha_vencimiento", hoy).lte("fecha_vencimiento", limite);
