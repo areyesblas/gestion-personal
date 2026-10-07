@@ -1,11 +1,18 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
+import { BrowserRouter } from 'react-router-dom'
 import App from './App.jsx'
 import './index.css'
 
+// BrowserRouter: la pantalla actual pasa a vivir en la DIRECCION, no en una variable de React.
+// Eso da enlaces que se pueden compartir y hace que el boton atras del navegador funcione.
+// Requiere la regla de public/_redirects para que el servidor devuelva index.html en cualquier
+// ruta; sin ella, recargar en /finanzas daria 404.
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
-    <App />
+    <BrowserRouter>
+      <App />
+    </BrowserRouter>
   </React.StrictMode>,
 )
 

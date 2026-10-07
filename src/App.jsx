@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useLayoutEffect, useMemo, useRef, Suspense, lazy, Fragment } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { supabase } from "./supabaseClient";
 import LoginScreenNuevo from "./components/auth/LoginScreen";
 import AuthCard, { AuthField, AuthPasswordField, AuthButton, AuthBanner, AuthBackLink } from "./components/auth/AuthCard";
@@ -1546,13 +1547,48 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [vistaRestauradaTrasReload] = useState(() => leerVistaGuardadaTrasReload());
-  const [view, setView] = useState(() => {
-    if (!vistaRestauradaTrasReload) return "dashboard";
-    // contextoPantalla usa {modulo:"proyectos", entidad_id} cuando estabas viendo UN proyecto.
-    // Desde el rediseño del 24 sept 2026 eso se restaura como la lista con su ficha abierta (ver
-    // proyectoSelId más abajo), que es donde vive el detalle — ya no como una pantalla aparte.
-    return vistaRestauradaTrasReload.modulo || "dashboard";
-  });
+
+  // --- La pantalla actual vive en la DIRECCION, no en una variable -----------------------------
+  // Antes era un useState. Al moverlo a la URL se gana: enlaces que se pueden compartir y guardar,
+  // el botón atrás del navegador, y que recargar te deje donde estabas.
+  //
+  // `view` sigue llamándose igual y conserva EXACTAMENTE los mismos ids ("finanzas", "movimientos",
+  // "proyecto-detalle"…), que es lo que evita tocar los 35 lugares que ya hacían setView(...) y lo
+  // que mantiene vivos los deep links de las notificaciones push y los permisos de colaborador.
+  // Lo único que cambia es de dónde sale el valor y a dónde va al escribirlo.
+  const location = useLocation();
+  const navigate = useNavigate();
+  const view = location.pathname === "/" ? "dashboard" : location.pathname.slice(1);
+  // `replace` para los saltos que no deben dejar rastro en el historial del navegador (restaurar
+  // tras la recarga de iOS, o corregir una ruta inválida): si dejaran rastro, el botón atrás
+  // regresaría a una pantalla que el usuario nunca pidió.
+  const setView = (id, opciones) => navigate(id === "dashboard" ? "/" : `/${id}`, opciones);
+
+  // Rutas que la app reconoce. Si alguien escribe una direccion que no existe (o queda un enlace
+  // viejo), se manda al Centro de mando en vez de dibujar una pantalla en blanco.
+  const VISTAS_VALIDAS = new Set([
+    "dashboard", "papelera", "colaboradores", "admin", "configuracion", "empresas", "proyectos",
+    "proyecto-detalle", "pendientes", "finanzas", "movimientos", "facturas", "reportes",
+    "estimaciones", "deudas", "apartados", "patrimonio", "documentos", "presupuesto", "mi-perfil",
+    "equipo", "contactos", "regalos", "marketing", "redes", "actividades", "eventos", "habitos",
+    "salud", "mi-trabajo", "mi-calendario", "mis-pagos", "medicamentos", "activos", "agenda",
+    "notas",
+  ]);
+  useEffect(() => {
+    if (!VISTAS_VALIDAS.has(view)) setView("dashboard", { replace: true });
+  }, [view]);
+
+  // Al cerrar Arkey en iOS la app se recarga entera (bug de WebKit con el microfono, ver
+  // VoiceMode.cerrar). Esto devuelve al usuario a donde estaba. Va con `replace` para no dejar
+  // un paso extra en el historial: el boton atras debe llevar a donde estabas ANTES de abrir
+  // Arkey, no a la pantalla intermedia de la recarga.
+  const yaRestaure = useRef(false);
+  useEffect(() => {
+    if (yaRestaure.current) return;
+    yaRestaure.current = true;
+    const destino = vistaRestauradaTrasReload?.modulo;
+    if (destino && destino !== view) setView(destino, { replace: true });
+  }, []);
   const [regalosFiltroContacto, setRegalosFiltroContacto] = useState("");
   const [proyectoDetalleId, setProyectoDetalleId] = useState(() => vistaRestauradaTrasReload?.entidad_id || null);
   // El contacto seleccionado (su ficha a la derecha) vive aquí arriba, no dentro de Contactos:
@@ -1744,20 +1780,26 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
   const [reauthError, setReauthError] = useState("");
   const [reauthCargando, setReauthCargando] = useState(false);
 
+  // Pide la contraseña para una vista. Se usa desde el menú (antes de moverse) y desde el muro
+  // que se dibuja cuando se llega a una vista protegida por cualquier otro camino.
+  const pedirReauthPara = (id) => {
+    setReauthPendiente(id);
+    setReauthPassword("");
+    setReauthError("");
+  };
+
+  // ¿La vista actual está protegida y sin desbloquear? Esta es la barrera real del candado:
+  // no depende de POR DONDE se llegó, sino de DONDE se está. Cubre la dirección escrita a mano,
+  // el botón atrás, un enlace guardado y los deep links de las notificaciones.
+  const candadoBloqueaVista = CANDADO_SENSIBLE_ACTIVO && (
+    (VISTAS_SENSIBLES.includes(view) && Date.now() > sensibleDesbloqueadoHasta) ||
+    (VISTAS_SENSIBLES_DIARIO.includes(view) && Date.now() > diarioDesbloqueadoHasta)
+  );
+
   const irAVista = (id) => {
     if (!confirmarDescartarCambios()) return;
-    if (CANDADO_SENSIBLE_ACTIVO && VISTAS_SENSIBLES.includes(id) && Date.now() > sensibleDesbloqueadoHasta) {
-      setReauthPendiente(id);
-      setReauthPassword("");
-      setReauthError("");
-      return;
-    }
-    if (CANDADO_SENSIBLE_ACTIVO && VISTAS_SENSIBLES_DIARIO.includes(id) && Date.now() > diarioDesbloqueadoHasta) {
-      setReauthPendiente(id);
-      setReauthPassword("");
-      setReauthError("");
-      return;
-    }
+    if (CANDADO_SENSIBLE_ACTIVO && VISTAS_SENSIBLES.includes(id) && Date.now() > sensibleDesbloqueadoHasta) { pedirReauthPara(id); return; }
+    if (CANDADO_SENSIBLE_ACTIVO && VISTAS_SENSIBLES_DIARIO.includes(id) && Date.now() > diarioDesbloqueadoHasta) { pedirReauthPara(id); return; }
     if (VISTAS_SENSIBLES.includes(id)) setSensibleDesbloqueadoHasta(Date.now() + SENSIBLE_MS);
     if (VISTAS_SENSIBLES_DIARIO.includes(id)) setDiarioDesbloqueadoHasta(Date.now() + DIARIO_MS);
     setView(id);
@@ -2885,6 +2927,27 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
               descargar, el error lo lanza el propio lazy() y hay que atraparlo aquí, no adentro.
               `clave={view}` hace que al cambiar de pantalla se limpie el error — si falló Finanzas,
               Contactos tiene que poder abrir igual. */}
+          {/* EL CANDADO VIVE AQUI, en el punto donde se dibuja la pantalla — no en irAVista().
+              Ese era el único lugar antes, y bastaba mientras la pantalla fuera una variable: para
+              llegar a Finanzas había que pasar por ahí. Con direcciones de verdad ya no: escribir
+              arkeyone.com/finanzas, usar el botón atrás o abrir un enlace guardado NO pasan por
+              irAVista y se saltarían la contraseña.
+              Poniéndolo aquí, el candado cubre TODOS los caminos a la vez, incluidos los que aún
+              no existen. irAVista conserva su propia verificación solo para que al tocar el menú
+              pida la contraseña antes de moverse, que se siente mejor que llegar y encontrar el
+              muro — pero la barrera real es esta. */}
+          {candadoBloqueaVista ? (
+            <div className="gp-panel p-5 max-w-md">
+              <Lock size={20} className="gp-text-gold mb-2" />
+              <h2 className="gp-serif text-lg mb-1">Este módulo está protegido</h2>
+              <p className="text-sm gp-text-muted mb-4">
+                Confirma tu contraseña para ver esta información.
+              </p>
+              <button className="gp-btn px-3 py-2 text-sm rounded" onClick={() => pedirReauthPara(view)}>
+                Desbloquear
+              </button>
+            </div>
+          ) : (
           <ErrorBoundary nombre={view} clave={view}>
           <Suspense fallback={<p className="text-sm gp-text-muted p-1">Cargando…</p>}>
           {view === "dashboard" && (
@@ -3171,6 +3234,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
           )}
           </Suspense>
           </ErrorBoundary>
+          )}
         </div>
       </div>
 

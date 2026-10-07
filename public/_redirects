@@ -1,0 +1,8 @@
+# La app es una SPA: todas las rutas las resuelve React en el navegador, no el servidor.
+# Sin esta regla, recargar estando en /finanzas (o compartir ese enlace) daria 404 de Netlify,
+# porque no existe un archivo /finanzas en el sitio. Se responde siempre con index.html y la app
+# decide que pantalla mostrar segun la direccion.
+#
+# Va DESPUES de los assets: Netlify sirve primero los archivos que existen de verdad
+# (/assets/*, /icons/*, sw.js, manifest), asi que esta regla solo atrapa lo que no es un archivo.
+/*  /index.html  200
