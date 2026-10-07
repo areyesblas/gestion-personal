@@ -173,7 +173,7 @@ Deno.serve(async (_req) => {
 
       if (await debeEnviarPush(med.user_id, "medicamento", horaMin)) {
         await enviarPushAUsuario(med.user_id, {
-          titulo, mensaje, url: "/?modulo=medicamentos", tag: `medicamento-${med.id}`, recordatorioId: nuevo?.id,
+          titulo, mensaje, url: `/?modulo=medicamentos&registro=${med.id}`, tag: `medicamento-${med.id}`, recordatorioId: nuevo?.id,
           actions: [{ action: "tomado", title: "Tomado" }, { action: "posponer30", title: "+30 min" }],
         });
       }
@@ -216,7 +216,7 @@ Deno.serve(async (_req) => {
       });
 
       if (await debeEnviarPush(cita.user_id, "cita", horaMin)) {
-        await enviarPushAUsuario(cita.user_id, { titulo, mensaje, url: "/?modulo=citas", tag: `cita-${cita.id}` });
+        await enviarPushAUsuario(cita.user_id, { titulo, mensaje, url: `/?modulo=citas&registro=${cita.id}`, tag: `cita-${cita.id}` });
       }
       resultado.citas++;
     }
@@ -400,7 +400,7 @@ Deno.serve(async (_req) => {
     const mensaje = `${nombreColaborador} no respondió en 2 días a la tarea "${t.descripcion}"${sufProyecto} — se marcó como no aceptada.`;
     await admin.from("notifications").insert({ user_id: t.user_id, tipo: "colaboradores", severidad: "info", titulo, mensaje, recurso_tabla: "pendientes", recurso_id: t.id });
     if (await debeEnviarPush(t.user_id, "colaboradores", horaMin)) {
-      await enviarPushAUsuario(t.user_id, { titulo, mensaje, url: "/?modulo=pendientes", tag: "colaboradores", recursoTabla: "pendientes", recursoId: t.id });
+      await enviarPushAUsuario(t.user_id, { titulo, mensaje, url: `/?modulo=pendientes&registro=${t.id}`, tag: "colaboradores", recursoTabla: "pendientes", recursoId: t.id });
     }
   }
 

@@ -1558,11 +1558,19 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
   // Lo único que cambia es de dónde sale el valor y a dónde va al escribirlo.
   const location = useLocation();
   const navigate = useNavigate();
-  const view = location.pathname === "/" ? "dashboard" : location.pathname.slice(1);
+  // La ruta puede ser /vista o /vista/<id-del-registro>. El segundo tramo es opcional y sirve
+  // para que una notificacion abra la FICHA de algo concreto, no solo su modulo.
+  const [tramoVista, tramoRegistro] = location.pathname.replace(/^\//, "").split("/");
+  const view = tramoVista || "dashboard";
+  const registroDeRuta = tramoRegistro || null;
   // `replace` para los saltos que no deben dejar rastro en el historial del navegador (restaurar
   // tras la recarga de iOS, o corregir una ruta inválida): si dejaran rastro, el botón atrás
   // regresaría a una pantalla que el usuario nunca pidió.
   const setView = (id, opciones) => navigate(id === "dashboard" ? "/" : `/${id}`, opciones);
+  // Igual que setView pero llevando el registro en la direccion, para que el enlace se pueda
+  // compartir y para que recargar no pierda la ficha abierta.
+  const irARegistro = (id, registroId, opciones) =>
+    navigate(registroId ? `/${id}/${registroId}` : (id === "dashboard" ? "/" : `/${id}`), opciones);
 
   // Rutas que la app reconoce. Si alguien escribe una direccion que no existe (o queda un enlace
   // viejo), se manda al Centro de mando en vez de dibujar una pantalla en blanco.
@@ -1607,12 +1615,29 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
   // las tareas"): las tareas se gestionan en SU módulo, no en un sistema paralelo dentro de
   // Proyectos.
   const [pendientesFiltroProyecto, setPendientesFiltroProyecto] = useState("");
+
+  // --- La ficha abierta se sincroniza con la direccion -----------------------------------------
+  // Si la ruta trae un registro (/contactos/abc123), se abre esa ficha. Eso es lo que hace que una
+  // notificacion pueda llevarte a la ficha concreta y no solo al modulo, y de paso que el enlace
+  // se pueda compartir y que recargar no pierda lo que tenias abierto.
+  //
+  // Solo se conectan los modulos que YA tenian seleccion de registro (Contactos y Proyectos). El
+  // resto ignora el segundo tramo sin romperse; para sumarlos basta agregar su caso aqui.
+  useEffect(() => {
+    if (!registroDeRuta) return;
+    if (view === "contactos") { setContactoSelId(registroDeRuta); setContactoSelTab("informacion"); }
+    if (view === "proyectos") { setProyectoSelId(registroDeRuta); setProyectoSelTab("resumen"); }
+  }, [view, registroDeRuta]);
+
+  // Que vistas saben abrir un registro concreto. Lo usa el deep link para decidir si vale la pena
+  // mandar la direccion con el id o quedarse en el modulo.
+  const VISTAS_CON_FICHA = new Set(["contactos", "proyectos"]);
   // "Ver el proyecto" desde cualquier lado (ficha de un contacto, buscador) abre la lista de
   // Proyectos con su ficha abierta — ese ES el detalle. El centro de proyecto (pantalla completa
   // con el árbol de tareas, metas, marketing y documentos) es un paso más adentro.
-  const irADetalleProyecto = (proyectoId) => { setProyectoSelId(proyectoId); setProyectoSelTab("resumen"); irAVista("proyectos"); };
+  const irADetalleProyecto = (proyectoId) => { setProyectoSelId(proyectoId); setProyectoSelTab("resumen"); irARegistro("proyectos", proyectoId); };
   const irACentroProyecto = (proyectoId) => { setProyectoDetalleId(proyectoId); irAVista("proyecto-detalle"); };
-  const irAFichaContacto = (contactoId) => { setContactoSelId(contactoId); setContactoSelTab("informacion"); irAVista("contactos"); };
+  const irAFichaContacto = (contactoId) => { setContactoSelId(contactoId); setContactoSelTab("informacion"); irARegistro("contactos", contactoId); };
   const irATareasDeProyecto = (proyectoId) => { setPendientesFiltroProyecto(proyectoId); irAVista("pendientes"); };
 
   // --- Breadcrumb / "volver" a una vista anterior --------------------------------------------
@@ -2225,9 +2250,18 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
     }
   };
 
-  const irADeepLink = (recursoTabla) => {
+  // Lleva al modulo de la notificacion y, si ese modulo sabe abrir fichas y la notificacion trae
+  // el registro, directo a la ficha. Antes siempre se quedaba en el modulo aunque el id estuviera
+  // guardado en notifications.recurso_id desde el principio — nadie lo usaba.
+  const irADeepLink = (recursoTabla, recursoId) => {
     const destino = recursoTabla && MODULO_TO_VIEW[recursoTabla];
-    if (destino) irAVista(destino);
+    if (!destino) { setNotifPanelAbierto(false); return; }
+    if (recursoId && VISTAS_CON_FICHA.has(destino)) {
+      if (!confirmarDescartarCambios()) return;
+      irARegistro(destino, recursoId);
+    } else {
+      irAVista(destino);
+    }
     setNotifPanelAbierto(false);
   };
 
@@ -2236,7 +2270,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
       setNotificaciones((prev) => prev.map((x) => (x.id === n.id ? { ...x, leido: true } : x)));
       await supabase.from("notifications").update({ leido: true }).eq("id", n.id);
     }
-    irADeepLink(n.recurso_tabla);
+    irADeepLink(n.recurso_tabla, n.recurso_id);
   };
 
   const marcarTodasLeidas = async () => {
@@ -2281,13 +2315,14 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const modulo = params.get("modulo");
+    const registro = params.get("registro");
     const accion = params.get("accion");
     const recordatorioId = params.get("recordatorio");
     if (accion && recordatorioId) {
       procesarAccionRecordatorio(accion, recordatorioId);
       window.history.replaceState({}, "", window.location.pathname);
     } else if (modulo) {
-      irADeepLink(modulo);
+      irADeepLink(modulo, registro);
       window.history.replaceState({}, "", window.location.pathname);
     }
     const alMensaje = (event) => {
@@ -2297,8 +2332,9 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
           const a = url.searchParams.get("accion");
           const rid = url.searchParams.get("recordatorio");
           const m = url.searchParams.get("modulo");
+          const reg = url.searchParams.get("registro");
           if (a && rid) procesarAccionRecordatorio(a, rid);
-          else if (m) irADeepLink(m);
+          else if (m) irADeepLink(m, reg);
         } catch {}
       }
     };
@@ -3211,12 +3247,11 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
               onAceptarEnNombre={aceptarTareaEnNombre}
               onAsignar={notificarAsignacionTarea}
               onAbrirOrigen={(tabla, id) => {
-                // No duplica el dato: lleva al registro real que generó la tarea. Proyecto y
-                // contacto abren su ficha exacta; el resto usa el mismo deep link que ya usan
-                // las notificaciones push (llega al módulo correspondiente).
+                // No duplica el dato: lleva al registro real que generó la tarea. Proyecto abre
+                // su centro (un paso más adentro que la ficha); el resto usa el mismo deep link
+                // que las notificaciones, que ya abre la ficha concreta cuando el módulo sabe.
                 if (tabla === "proyectos" && id) irACentroProyecto(id);
-                else if (tabla === "contactos" && id) irAFichaContacto(id);
-                else irADeepLink(tabla);
+                else irADeepLink(tabla, id);
               }}
               onEditCita={async (id, p) => {
                 await editItem("citas", id, p);
