@@ -5064,13 +5064,21 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
     arrastreRef.current.activo = false;
   };
 
+  // iPadOS se anuncia como "Macintosh" -- se distingue por tener pantalla táctil.
+  const esIOS = typeof navigator !== "undefined" && (
+    /iPad|iPhone|iPod/.test(navigator.userAgent || "") ||
+    (/Macintosh/.test(navigator.userAgent || "") && (navigator.maxTouchPoints || 0) > 1)
+  );
   const SpeechRecognitionCtor = typeof window !== "undefined" && (window.SpeechRecognition || window.webkitSpeechRecognition);
-  const usaSTTNativo = !!SpeechRecognitionCtor;
-  // Nota: algún Safari futuro (iOS 26+) podría traer reconocimiento de voz nativo real, con lo
-  // que usaSTTNativo sería true también en iOS y entraría por el mismo camino que Chrome/Android
-  // (ver hablar()/iniciarEscuchaNativa). Hoy en la práctica los iPhone reales usan el camino de
-  // respaldo de abajo (MediaRecorder + VAD), donde esta variable sí se usa para sus propios ajustes.
-  const esIOS = typeof navigator !== "undefined" && /iPad|iPhone|iPod/.test(navigator.userAgent || "");
+  // En iOS NO se usa el reconocimiento nativo aunque Safari ya lo exponga (webkitSpeechRecognition
+  // existe en Safari 27). Bug real del 21-oct-2026 en el iPhone de Angel: la primera pregunta
+  // funcionaba y después Arkey ya no escuchaba. Causa: en iOS, start() del reconocedor solo
+  // funciona cerca de un toque real del usuario, y además después de que speechSynthesis habla
+  // la sesión de audio queda en modo "reproducción" -- el reinicio automático tras la respuesta
+  // arranca sin error pero sordo. El camino MediaRecorder + VAD + Whisper (transcribir-voz,
+  // OPENAI_API_KEY ya configurada) abre el micrófono una sola vez y lo mantiene vivo toda la
+  // sesión, así que no depende de gestos ni de reiniciar el reconocedor en cada turno.
+  const usaSTTNativo = !!SpeechRecognitionCtor && !esIOS;
   const soportaModoVoz = usaSTTNativo || (typeof navigator !== "undefined" && navigator.mediaDevices?.getUserMedia && typeof window !== "undefined" && window.MediaRecorder);
 
   useEffect(() => () => detenerTodo(), []); // limpia todo si el componente se desmonta
@@ -5316,6 +5324,8 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
   // más bajito.
   async function asegurarMicAbierto() {
     if (streamRef.current?.getAudioTracks().some((t) => t.readyState === "live")) return true; // ya está abierto de antes
+    try { audioCtxRef.current?.close(); } catch {} // si había uno de una pista ya muerta, no dejarlo colgado
+    audioCtxRef.current = null;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
@@ -5445,7 +5455,15 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
   function volverAEscucharIOS() {
     if (!abiertoRef.current) return;
     cambiarEstado("escuchando");
+    // iOS puede dejar el AudioContext "suspended" (o "interrupted") después de que speechSynthesis
+    // habló: el analyser devuelve silencio puro y el VAD nunca detecta que el usuario habla.
+    const ctx = audioCtxRef.current;
+    if (ctx && ctx.state !== "running") { try { ctx.resume(); } catch {} }
+    // Si iOS mató la pista del micrófono mientras Arkey hablaba, se reabre en vez de grabar de una pista muerta.
+    const vivo = streamRef.current?.getAudioTracks().some((t) => t.readyState === "live");
+    if (!vivo) { iniciarEscuchaIOS(); return; }
     iniciarSegmentoGrabacion();
+    if (!rafRef.current) loopVAD();
   }
 
   // Cierre completo del micrófono en iOS -- YA NO se llama automáticamente antes de cada
