@@ -5011,6 +5011,22 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
       // el cancel() y cualquier speak() posterior se encola sin sonar nunca, sin lanzar error --
       // eso hacía que Arkey transcribiera y respondiera en texto bien, pero nunca hablara en Chrome.
       if (!esIOS) return;
+      // Sesión de audio de "llamada" (grabar + reproducir): en iOS esta categoría suena aunque el
+      // interruptor de silencio del iPhone esté activado -- antes Arkey solo se oía con el
+      // interruptor en sonido. Safari 16.4+ (Audio Session API); se ignora donde no exista.
+      try { if (navigator.audioSession) navigator.audioSession.type = "play-and-record"; } catch {}
+      // El AudioContext del detector de voz (VAD) TIENE que nacer y reanudarse dentro de este toque
+      // sincrónico: si se crea después de un await (getUserMedia), iOS lo deja "suspended", el
+      // analizador lee silencio puro y Arkey nunca detecta que terminaste de hablar -- no mandaba
+      // nada (bug del 21-oct-2026, ni siquiera llegaba a transcribir-voz). asegurarMicAbierto()
+      // reutiliza este mismo contexto.
+      try {
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        if (AudioCtx && (!audioCtxRef.current || audioCtxRef.current.state === "closed")) {
+          audioCtxRef.current = new AudioCtx();
+        }
+        audioCtxRef.current?.resume?.();
+      } catch {}
       if (!("speechSynthesis" in window)) return;
       const u = new SpeechSynthesisUtterance(" ");
       u.volume = 0;
@@ -5324,15 +5340,19 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
   // más bajito.
   async function asegurarMicAbierto() {
     if (streamRef.current?.getAudioTracks().some((t) => t.readyState === "live")) return true; // ya está abierto de antes
-    try { audioCtxRef.current?.close(); } catch {} // si había uno de una pista ya muerta, no dejarlo colgado
-    audioCtxRef.current = null;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
       stream.getAudioTracks().forEach((t) => { t.enabled = true; });
-      const AudioCtx = window.AudioContext || window.webkitAudioContext;
-      const ctx = new AudioCtx();
-      audioCtxRef.current = ctx;
+      // Reusar el contexto creado dentro del toque (desbloquearVoz) -- uno nuevo aquí, después
+      // del await, nacería suspendido en iOS.
+      let ctx = audioCtxRef.current;
+      if (!ctx || ctx.state === "closed") {
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        ctx = new AudioCtx();
+        audioCtxRef.current = ctx;
+      }
+      try { ctx.resume(); } catch {}
       const source = ctx.createMediaStreamSource(stream);
       const analyser = ctx.createAnalyser();
       analyser.fftSize = 2048;
@@ -5450,6 +5470,16 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
       setErrorMsg("No se pudo transcribir. Revisa tu conexión.");
       volverAEscucharIOS();
     }
+  }
+
+  // Respaldo manual del VAD en iOS: si el detector no notó que terminaste de hablar (ruido de
+  // fondo, voz muy baja, contexto de audio suspendido), este toque manda lo grabado de inmediato.
+  // Al ser un toque real, también aprovecha para reanudar el AudioContext.
+  function terminarTurnoManual() {
+    try { audioCtxRef.current?.resume?.(); } catch {}
+    empezoHablarRef.current = null;
+    silencioDesdeRef.current = null;
+    finalizarSegmentoYEnviar();
   }
 
   function volverAEscucharIOS() {
@@ -6054,11 +6084,16 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
                 {sinCreditos && "Arkey está dormido 💤"}
                 {!sinCreditos && mensajeReproduciendoId !== null && "Hablando..."}
                 {!sinCreditos && mensajeReproduciendoId === null && estado === "hablando" && vozActiva && "Hablando... (Para interrumpir presione el botón 🗣️)"}
-                {!sinCreditos && estado === "escuchando" && escuchaActiva && "Escuchando..."}
+                {!sinCreditos && estado === "escuchando" && escuchaActiva && (usaSTTNativo ? "Escuchando..." : "Escuchando… habla y espera, o toca «Ya terminé»")}
                 {!sinCreditos && estado === "procesando" && "Pensando…"}
                 {!sinCreditos && estado === "permiso" && (errorMsg || "Necesito permiso de micrófono.")}
                 {!sinCreditos && estado === "error" && (errorMsg || "Algo salió mal.")}
               </p>
+              {!usaSTTNativo && !sinCreditos && estado === "escuchando" && escuchaActiva && (
+                <button onClick={terminarTurnoManual} className="gp-btn px-4 py-2 rounded-full text-sm">
+                  Ya terminé
+                </button>
+              )}
               <div className="flex items-center gap-2 w-full mt-1">
                 <input
                   type="text"
