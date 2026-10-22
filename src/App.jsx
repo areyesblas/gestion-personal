@@ -5011,6 +5011,22 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
       // el cancel() y cualquier speak() posterior se encola sin sonar nunca, sin lanzar error --
       // eso hacía que Arkey transcribiera y respondiera en texto bien, pero nunca hablara en Chrome.
       if (!esIOS) return;
+      // Sesión de audio de "llamada" (grabar + reproducir): en iOS esta categoría suena aunque el
+      // interruptor de silencio del iPhone esté activado -- antes Arkey solo se oía con el
+      // interruptor en sonido. Safari 16.4+ (Audio Session API); se ignora donde no exista.
+      try { if (navigator.audioSession) navigator.audioSession.type = "play-and-record"; } catch {}
+      // El AudioContext del detector de voz (VAD) TIENE que nacer y reanudarse dentro de este toque
+      // sincrónico: si se crea después de un await (getUserMedia), iOS lo deja "suspended", el
+      // analizador lee silencio puro y Arkey nunca detecta que terminaste de hablar -- no mandaba
+      // nada (bug del 21-oct-2026, ni siquiera llegaba a transcribir-voz). asegurarMicAbierto()
+      // reutiliza este mismo contexto.
+      try {
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        if (AudioCtx && (!audioCtxRef.current || audioCtxRef.current.state === "closed")) {
+          audioCtxRef.current = new AudioCtx();
+        }
+        audioCtxRef.current?.resume?.();
+      } catch {}
       if (!("speechSynthesis" in window)) return;
       const u = new SpeechSynthesisUtterance(" ");
       u.volume = 0;
@@ -5064,13 +5080,21 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
     arrastreRef.current.activo = false;
   };
 
+  // iPadOS se anuncia como "Macintosh" -- se distingue por tener pantalla táctil.
+  const esIOS = typeof navigator !== "undefined" && (
+    /iPad|iPhone|iPod/.test(navigator.userAgent || "") ||
+    (/Macintosh/.test(navigator.userAgent || "") && (navigator.maxTouchPoints || 0) > 1)
+  );
   const SpeechRecognitionCtor = typeof window !== "undefined" && (window.SpeechRecognition || window.webkitSpeechRecognition);
-  const usaSTTNativo = !!SpeechRecognitionCtor;
-  // Nota: algún Safari futuro (iOS 26+) podría traer reconocimiento de voz nativo real, con lo
-  // que usaSTTNativo sería true también en iOS y entraría por el mismo camino que Chrome/Android
-  // (ver hablar()/iniciarEscuchaNativa). Hoy en la práctica los iPhone reales usan el camino de
-  // respaldo de abajo (MediaRecorder + VAD), donde esta variable sí se usa para sus propios ajustes.
-  const esIOS = typeof navigator !== "undefined" && /iPad|iPhone|iPod/.test(navigator.userAgent || "");
+  // En iOS NO se usa el reconocimiento nativo aunque Safari ya lo exponga (webkitSpeechRecognition
+  // existe en Safari 27). Bug real del 21-oct-2026 en el iPhone de Angel: la primera pregunta
+  // funcionaba y después Arkey ya no escuchaba. Causa: en iOS, start() del reconocedor solo
+  // funciona cerca de un toque real del usuario, y además después de que speechSynthesis habla
+  // la sesión de audio queda en modo "reproducción" -- el reinicio automático tras la respuesta
+  // arranca sin error pero sordo. El camino MediaRecorder + VAD + Whisper (transcribir-voz,
+  // OPENAI_API_KEY ya configurada) abre el micrófono una sola vez y lo mantiene vivo toda la
+  // sesión, así que no depende de gestos ni de reiniciar el reconocedor en cada turno.
+  const usaSTTNativo = !!SpeechRecognitionCtor && !esIOS;
   const soportaModoVoz = usaSTTNativo || (typeof navigator !== "undefined" && navigator.mediaDevices?.getUserMedia && typeof window !== "undefined" && window.MediaRecorder);
 
   useEffect(() => () => detenerTodo(), []); // limpia todo si el componente se desmonta
@@ -5320,9 +5344,15 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
       stream.getAudioTracks().forEach((t) => { t.enabled = true; });
-      const AudioCtx = window.AudioContext || window.webkitAudioContext;
-      const ctx = new AudioCtx();
-      audioCtxRef.current = ctx;
+      // Reusar el contexto creado dentro del toque (desbloquearVoz) -- uno nuevo aquí, después
+      // del await, nacería suspendido en iOS.
+      let ctx = audioCtxRef.current;
+      if (!ctx || ctx.state === "closed") {
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        ctx = new AudioCtx();
+        audioCtxRef.current = ctx;
+      }
+      try { ctx.resume(); } catch {}
       const source = ctx.createMediaStreamSource(stream);
       const analyser = ctx.createAnalyser();
       analyser.fftSize = 2048;
@@ -5442,10 +5472,28 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
     }
   }
 
+  // Respaldo manual del VAD en iOS: si el detector no notó que terminaste de hablar (ruido de
+  // fondo, voz muy baja, contexto de audio suspendido), este toque manda lo grabado de inmediato.
+  // Al ser un toque real, también aprovecha para reanudar el AudioContext.
+  function terminarTurnoManual() {
+    try { audioCtxRef.current?.resume?.(); } catch {}
+    empezoHablarRef.current = null;
+    silencioDesdeRef.current = null;
+    finalizarSegmentoYEnviar();
+  }
+
   function volverAEscucharIOS() {
     if (!abiertoRef.current) return;
     cambiarEstado("escuchando");
+    // iOS puede dejar el AudioContext "suspended" (o "interrupted") después de que speechSynthesis
+    // habló: el analyser devuelve silencio puro y el VAD nunca detecta que el usuario habla.
+    const ctx = audioCtxRef.current;
+    if (ctx && ctx.state !== "running") { try { ctx.resume(); } catch {} }
+    // Si iOS mató la pista del micrófono mientras Arkey hablaba, se reabre en vez de grabar de una pista muerta.
+    const vivo = streamRef.current?.getAudioTracks().some((t) => t.readyState === "live");
+    if (!vivo) { iniciarEscuchaIOS(); return; }
     iniciarSegmentoGrabacion();
+    if (!rafRef.current) loopVAD();
   }
 
   // Cierre completo del micrófono en iOS -- YA NO se llama automáticamente antes de cada
@@ -6036,11 +6084,16 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
                 {sinCreditos && "Arkey está dormido 💤"}
                 {!sinCreditos && mensajeReproduciendoId !== null && "Hablando..."}
                 {!sinCreditos && mensajeReproduciendoId === null && estado === "hablando" && vozActiva && "Hablando... (Para interrumpir presione el botón 🗣️)"}
-                {!sinCreditos && estado === "escuchando" && escuchaActiva && "Escuchando..."}
+                {!sinCreditos && estado === "escuchando" && escuchaActiva && (usaSTTNativo ? "Escuchando..." : "Escuchando… habla y espera, o toca «Ya terminé»")}
                 {!sinCreditos && estado === "procesando" && "Pensando…"}
                 {!sinCreditos && estado === "permiso" && (errorMsg || "Necesito permiso de micrófono.")}
                 {!sinCreditos && estado === "error" && (errorMsg || "Algo salió mal.")}
               </p>
+              {!usaSTTNativo && !sinCreditos && estado === "escuchando" && escuchaActiva && (
+                <button onClick={terminarTurnoManual} className="gp-btn px-4 py-2 rounded-full text-sm">
+                  Ya terminé
+                </button>
+              )}
               <div className="flex items-center gap-2 w-full mt-1">
                 <input
                   type="text"
