@@ -27,6 +27,27 @@ const headersJson = { "Content-Type": "application/json", ...corsHeaders };
 // incluso varios minutos -- evita que un error del cliente mande audio gigante sin querer).
 const MAX_BYTES = 10 * 1024 * 1024;
 
+// Frases que Whisper inventa sobre ruido o silencio. Se compara sin acentos ni puntuación.
+const ALUCINACIONES = [
+  "amara.org", "amara org", "subtitulos realizados por", "subtitulos por la comunidad",
+  "subtitulado por", "gracias por ver", "gracias por ver el video", "suscribete",
+  "no olvides suscribirte", "dale like", "musica", "aplausos", "risas", "silencio",
+  "hasta la proxima", "nos vemos en el proximo video",
+  // "gracias" y "adiós" NO van aquí: son cosas que alguien sí le diría a Arkey.
+];
+function normalizar(s: string) {
+  return s.toLowerCase().normalize("NFD").replace(/\p{M}/gu, "").replace(/[^\p{L}\p{N}. ]/gu, " ").replace(/\s+/g, " ").trim();
+}
+function esAlucinacion(texto: string) {
+  const t = normalizar(texto);
+  if (!t) return true;
+  // Créditos de subtítulos: aparezcan donde aparezcan, el turno no sirve.
+  if (t.includes("amara") || t.includes("subtitulos realizados") || t.includes("subtitulado por")) return true;
+  // Muletillas cortas: solo se descartan si son TODO lo que se transcribió.
+  const sinPunto = t.replace(/\./g, "").trim();
+  return ALUCINACIONES.includes(sinPunto);
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   if (req.method !== "POST") return new Response(JSON.stringify({ error: "Metodo no permitido" }), { status: 405, headers: headersJson });
@@ -62,6 +83,10 @@ Deno.serve(async (req) => {
     whisperForm.append("file", archivo, archivo.name || "audio.webm");
     whisperForm.append("model", "whisper-1");
     whisperForm.append("language", "es");
+    whisperForm.append("temperature", "0");
+    // Contexto para Whisper: reduce las alucinaciones en audio con poco habla y le enseña a
+    // escribir bien los nombres propios ("ARKEYONE", no "Arqui One").
+    whisperForm.append("prompt", "Conversación en español de México con Arkey, el asistente de ARKEYONE, sobre tareas, finanzas, citas, contactos y proyectos.");
 
     const resp = await fetch("https://api.openai.com/v1/audio/transcriptions", {
       method: "POST",
@@ -76,7 +101,15 @@ Deno.serve(async (req) => {
     }
 
     const data = await resp.json();
-    return new Response(JSON.stringify({ texto: (data.text || "").trim() }), { headers: headersJson });
+    const texto = (data.text || "").trim();
+    // Whisper "alucina" frases de créditos de video cuando el audio es ruido o silencio (las
+    // aprendió de subtítulos de YouTube). Si la transcripción es solo eso, se descarta como si no
+    // se hubiera dicho nada y el cliente vuelve a escuchar sin gastar una consulta del asistente.
+    if (esAlucinacion(texto)) {
+      console.log("Alucinacion de Whisper descartada:", texto);
+      return new Response(JSON.stringify({ texto: "", descartado: true }), { headers: headersJson });
+    }
+    return new Response(JSON.stringify({ texto }), { headers: headersJson });
   } catch (err) {
     console.error("Error en transcribir-voz:", err);
     return new Response(JSON.stringify({ error: String(err) }), { status: 500, headers: headersJson });

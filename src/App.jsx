@@ -5120,6 +5120,10 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
   const diagTimerRef = useRef(null);
   const diagVadRef = useRef({ desde: 0, max: 0 });
   const hablaTokenRef = useRef(null);
+  // Detector de voz (VAD) de iOS: ruido de fondo medido, milisegundos de voz clara del turno.
+  const ruidoFondoRef = useRef(0.005);
+  const vozMsRef = useRef(0);
+  const ultimoTickRef = useRef(0);
   function estadoPista() {
     const t = streamRef.current?.getAudioTracks?.()[0];
     return t ? `${t.readyState}${t.muted ? "/muted" : ""}${t.enabled ? "" : "/disabled"}` : "sin-pista";
@@ -5471,6 +5475,7 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
     try {
       const mr = new MediaRecorder(streamRef.current, mime ? { mimeType: mime } : undefined);
       chunksRef.current = [];
+      vozMsRef.current = 0; // cada segmento cuenta su propia voz desde cero
       mr.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
       mr.start();
       mediaRecorderRef.current = mr;
@@ -5495,7 +5500,17 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
       }
       const rms = Math.sqrt(suma / buffer.length);
       const ahora = Date.now();
-      const UMBRAL = 0.012;
+      const dt = Math.min(100, ahora - (ultimoTickRef.current || ahora));
+      ultimoTickRef.current = ahora;
+      // Umbral que se adapta al ruido del lugar: mientras no estás hablando se mide el ruido de
+      // fondo, y solo cuenta como voz lo que esté claramente encima de él. Con el umbral fijo de
+      // antes (0.012), el ruido de una oficina (~0.016 en la traza del 22-oct) ya contaba como
+      // "hablando" y se mandaban turnos de puro ruido -> Whisper inventaba "Amara.org".
+      if (!empezoHablarRef.current && estadoRef.current === "escuchando") {
+        ruidoFondoRef.current = ruidoFondoRef.current * 0.97 + rms * 0.03;
+      }
+      const UMBRAL = Math.max(0.012, ruidoFondoRef.current * 2.5);
+      if (estadoRef.current === "escuchando" && rms > UMBRAL) vozMsRef.current += dt;
       // Diagnóstico: nivel máximo del micrófono cada segundo (si iOS lo deja sordo, aquí sale 0).
       const dv = diagVadRef.current;
       if (rms > dv.max) dv.max = rms;
@@ -5533,8 +5548,20 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
 
   function finalizarSegmentoYEnviar() {
     const mr = mediaRecorderRef.current;
-    diag("fin_turno_detectado");
+    const vozMs = vozMsRef.current;
+    vozMsRef.current = 0;
+    diag("fin_turno_detectado", { vozMs, umbral: Math.round(Math.max(0.012, ruidoFondoRef.current * 2.5) * 10000) / 10000 });
     if (!mr || mr.state === "inactive") return;
+    // Menos de ~0.4 s de voz clara en todo el turno = fue un golpe o ruido, no una pregunta.
+    // Se descarta sin mandarlo a Whisper (que con audio así inventa frases) y se sigue escuchando.
+    if (vozMs < 400) {
+      mr.onstop = null;
+      try { mr.stop(); } catch {}
+      chunksRef.current = [];
+      diag("turno_descartado_ruido", { vozMs });
+      volverAEscucharIOS();
+      return;
+    }
     cambiarEstado("procesando");
     mr.onstop = async () => {
       const blob = new Blob(chunksRef.current, { type: mr.mimeType || "audio/webm" });
