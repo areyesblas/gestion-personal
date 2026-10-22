@@ -5124,6 +5124,7 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
   const ruidoFondoRef = useRef(0.005);
   const vozMsRef = useRef(0);
   const ultimoTickRef = useRef(0);
+  const segInicioRef = useRef(0); // cuándo arrancó la grabación actual
   function estadoPista() {
     const t = streamRef.current?.getAudioTracks?.()[0];
     return t ? `${t.readyState}${t.muted ? "/muted" : ""}${t.enabled ? "" : "/disabled"}` : "sin-pista";
@@ -5469,7 +5470,7 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
     return true;
   }
 
-  function iniciarSegmentoGrabacion() {
+  function iniciarSegmentoGrabacion(reciclado = false) {
     if (!streamRef.current) return;
     const mime = mimeTypeSoportado();
     try {
@@ -5479,7 +5480,8 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
       mr.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
       mr.start();
       mediaRecorderRef.current = mr;
-      diag("grabacion_inicio", { mime: mr.mimeType });
+      segInicioRef.current = Date.now();
+      if (!reciclado) diag("grabacion_inicio", { mime: mr.mimeType });
     } catch (err) {
       diag("grabacion_error", { error: String(err?.name || err) });
       cambiarEstado("error");
@@ -5532,6 +5534,12 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
         if (rms > UMBRAL) {
           if (!empezoHablarRef.current) empezoHablarRef.current = ahora;
           silencioDesdeRef.current = null;
+        } else if (!empezoHablarRef.current) {
+          // Nadie está hablando: si la grabación ya acumuló más de 3 s de puro ruido, se tira y se
+          // empieza otra. Así, cuando hablas, el audio que llega a Whisper empieza justo antes de
+          // tu voz. Traza del 22-oct 09:46:12: una frase real llegó pegada a ~10 s de ruido de
+          // fondo y Whisper la "transcribió" como "¡Gracias por ver el video!".
+          if (ahora - segInicioRef.current > 3000) reciclarSegmento();
         } else if (empezoHablarRef.current) {
           if (!silencioDesdeRef.current) silencioDesdeRef.current = ahora;
           else if (ahora - silencioDesdeRef.current > 900) {
@@ -5544,6 +5552,17 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
       rafRef.current = requestAnimationFrame(tick);
     };
     rafRef.current = requestAnimationFrame(tick);
+  }
+
+  // Descarta la grabación en curso (solo ruido, nadie habló) y arranca una nueva al instante.
+  function reciclarSegmento() {
+    const mr = mediaRecorderRef.current;
+    if (!mr || mr.state !== "recording") return;
+    mr.onstop = null;
+    mr.ondataavailable = null;
+    try { mr.stop(); } catch {}
+    chunksRef.current = [];
+    iniciarSegmentoGrabacion(true);
   }
 
   function finalizarSegmentoYEnviar() {
