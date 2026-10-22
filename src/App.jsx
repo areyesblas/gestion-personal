@@ -5472,16 +5472,6 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
     }
   }
 
-  // Respaldo manual del VAD en iOS: si el detector no notó que terminaste de hablar (ruido de
-  // fondo, voz muy baja, contexto de audio suspendido), este toque manda lo grabado de inmediato.
-  // Al ser un toque real, también aprovecha para reanudar el AudioContext.
-  function terminarTurnoManual() {
-    try { audioCtxRef.current?.resume?.(); } catch {}
-    empezoHablarRef.current = null;
-    silencioDesdeRef.current = null;
-    finalizarSegmentoYEnviar();
-  }
-
   function volverAEscucharIOS() {
     if (!abiertoRef.current) return;
     cambiarEstado("escuchando");
@@ -6084,16 +6074,11 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
                 {sinCreditos && "Arkey está dormido 💤"}
                 {!sinCreditos && mensajeReproduciendoId !== null && "Hablando..."}
                 {!sinCreditos && mensajeReproduciendoId === null && estado === "hablando" && vozActiva && "Hablando... (Para interrumpir presione el botón 🗣️)"}
-                {!sinCreditos && estado === "escuchando" && escuchaActiva && (usaSTTNativo ? "Escuchando..." : "Escuchando… habla y espera, o toca «Ya terminé»")}
+                {!sinCreditos && estado === "escuchando" && escuchaActiva && "Escuchando..."}
                 {!sinCreditos && estado === "procesando" && "Pensando…"}
                 {!sinCreditos && estado === "permiso" && (errorMsg || "Necesito permiso de micrófono.")}
                 {!sinCreditos && estado === "error" && (errorMsg || "Algo salió mal.")}
               </p>
-              {!usaSTTNativo && !sinCreditos && estado === "escuchando" && escuchaActiva && (
-                <button onClick={terminarTurnoManual} className="gp-btn px-4 py-2 rounded-full text-sm">
-                  Ya terminé
-                </button>
-              )}
               <div className="flex items-center gap-2 w-full mt-1">
                 <input
                   type="text"
