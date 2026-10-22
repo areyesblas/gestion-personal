@@ -5028,6 +5028,7 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario, vozHumana 
     // lo deje reproducir las respuestas solo. Se hace en todas las plataformas (no estorba).
     if (vozHumana) {
       try {
+        callarVozHumana();
         const a = obtenerAudioEl();
         a.src = silencioWav();
         a.volume = 0;
@@ -5171,6 +5172,18 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario, vozHumana 
     }
     return audioElRef.current;
   }
+  // Cambia la categoría de la sesión de audio de iOS (Audio Session API, Safari 16.4+). Se ignora
+  // donde no exista. "play-and-record" = escuchar (volumen de llamada); "playback" = Arkey hablando.
+  function modoAudioIOS(tipo) {
+    if (!esIOS) return;
+    try {
+      if (navigator.audioSession && navigator.audioSession.type !== tipo) {
+        navigator.audioSession.type = tipo;
+        diag("modo_audio", { tipo });
+      }
+    } catch {}
+  }
+
   // Corta la voz natural si está sonando (interrumpir, cerrar, escribir, etc.).
   function callarVozHumana() {
     const a = audioElRef.current;
@@ -5544,7 +5557,8 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario, vozHumana 
   }
 
   async function iniciarEscuchaIOS() {
-    if (!escuchaActivaRef.current) return false; // la oreja está apagada -- no arrancamos hasta que se reactive (ver alternarEscuchaActiva)
+    if (!escuchaActivaRef.current) return false;
+    modoAudioIOS("play-and-record"); // la oreja está apagada -- no arrancamos hasta que se reactive (ver alternarEscuchaActiva)
     if (sinCreditosRef.current) return false; // sin consultas disponibles este mes: Arkey se queda dormido, no escucha
     const ok = await asegurarMicAbierto();
     if (!ok) return false;
@@ -5704,6 +5718,7 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario, vozHumana 
   function volverAEscucharIOS() {
     diag("volver_escuchar");
     if (!abiertoRef.current) return;
+    modoAudioIOS("play-and-record"); // venía de "playback" si Arkey acaba de hablar con voz natural
     cambiarEstado("escuchando");
     // iOS puede dejar el AudioContext "suspended" (o "interrupted") después de que speechSynthesis
     // habló: el analyser devuelve silencio puro y el VAD nunca detecta que el usuario habla.
@@ -6115,10 +6130,20 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario, vozHumana 
       // Voz natural de OpenAI (en prueba, solo cuenta de Angel). Si falla por lo que sea (red,
       // servidor, iOS no deja reproducir), se cae a la voz del sistema de siempre, sin perder la respuesta.
       if (vozHumana) {
+        // iPhone: con el micrófono abierto, iOS trata el audio como llamada -- lo baja y lo manda
+        // a la bocina del oído (Angel, 22-oct: "se escucha bajito, con o sin silencio"). Mientras
+        // Arkey habla se suelta el micrófono y la sesión pasa a "playback": bocina principal a
+        // volumen normal, y además ignora el interruptor de silencio. Al terminar,
+        // volverAEscucharIOS() regresa a "play-and-record" y reabre el micrófono.
+        if (esIOS) {
+          soltarMic();
+          modoAudioIOS("playback");
+        }
         diag("voz_pedida", { letras: texto.length, voz: "openai" });
         const ok = await reproducirVozHumana(texto, alTerminar);
         if (ok) return;
         diag("voz_humana_respaldo_sistema");
+        if (esIOS) modoAudioIOS("play-and-record");
         if (hablaTokenRef.current !== ficha) return; // la interrumpieron mientras se intentaba
       }
       await vocesListas();
