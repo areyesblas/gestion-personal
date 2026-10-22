@@ -5159,6 +5159,8 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario, vozHumana 
   const segInicioRef = useRef(0); // cuándo arrancó la grabación actual
   const micsAbiertosRef = useRef(new Set()); // todos los micrófonos abiertos en la sesión (ver apagarTodosLosMics)
   const abriendoMicRef = useRef(null); // apertura de micrófono en curso (ver asegurarMicAbierto)
+  const reanudarVozRef = useRef(null); // trozo de voz que iOS no dejó arrancar en segundo plano
+  const alTerminarActualRef = useRef(null); // cómo cerrar la respuesta en curso (ver hablar)
   // Voz natural (OpenAI): un solo elemento <audio> para toda la sesión -- iOS lo deja sonar sin
   // toque solo si ese mismo elemento ya sonó una vez dentro de un toque (ver desbloquearVoz).
   const audioElRef = useRef(null);
@@ -5188,6 +5190,7 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario, vozHumana 
 
   // Corta la voz natural si está sonando (interrumpir, cerrar, escribir, etc.).
   function callarVozHumana() {
+    reanudarVozRef.current = null; // si se calla a propósito, no hay nada que continuar después
     const a = audioElRef.current;
     if (!a) return;
     a.onended = null; a.onerror = null; a.onplaying = null;
@@ -5242,9 +5245,26 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario, vozHumana 
         a.onplaying = i === 0 ? () => diag("voz_empieza", { humana: true, letras: texto.length, trozos: trozos.length, espera_ms: Date.now() - t0 }) : null;
         a.onerror = () => { diag("voz_error", { humana: true, trozo: i, codigo: a.error?.code }); alTerminar(); };
         a.onended = async () => {
-          if (i + 1 >= trozos.length) { diag("voz_termina", { humana: true }); alTerminar(); return; }
+          if (i + 1 >= trozos.length) {
+            diag("voz_termina", { humana: true });
+            // "ended" llega cuando el archivo se terminó de leer, no cuando el sonido terminó de salir
+            // por la bocina: si se cambia al modo micrófono de inmediato, iOS corta las últimas
+            // décimas de segundo (Angel, 22-oct: "no termina de decir una parte corta al final").
+            setTimeout(alTerminar, 450);
+            return;
+          }
           try { await tocar(i + 1); }
-          catch (err) { diag("voz_error", { humana: true, trozo: i + 1, error: String(err?.message || err) }); alTerminar(); }
+          catch (err) {
+            // Con la app en segundo plano iOS no deja arrancar el siguiente trozo: se guarda para
+            // continuar donde se quedó al volver (ver recuperarTrasSegundoPlano), no se pierde.
+            if (document.visibilityState !== "visible") {
+              diag("voz_pausada_fondo", { trozo: i + 1 });
+              reanudarVozRef.current = () => tocar(i + 1);
+              return;
+            }
+            diag("voz_error", { humana: true, trozo: i + 1, error: String(err?.message || err) });
+            alTerminar();
+          }
         };
         await a.play();
         return true;
@@ -6029,12 +6049,41 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario, vozHumana 
   // igual mató el reconocedor o el stream de audio de fondo, al volver a estar visible no debe
   // quedarse colgado en "hablando"/"escuchando" sin que nada esté pasando de verdad -- se reinicia
   // a un estado sano en vez de obligar a cerrar y volver a abrir todo el panel.
+  // Termina la respuesta en curso como si hubiera acabado de hablar (restaura la oreja y vuelve a escuchar).
+  function terminarRespuestaEnCurso() {
+    callarVozHumana();
+    const fin = alTerminarActualRef.current;
+    if (fin) fin();
+  }
+
   function recuperarTrasSegundoPlano() {
     if (!abiertoRef.current || sinCreditosRef.current) return;
+    // Voz natural a media respuesta: NO se corta (antes esta rutina callaba a Arkey a propósito,
+    // pensada para la voz del sistema que se atoraba -- Angel, 22-oct: "cambié de app y al regresar
+    // se calló"). Se continúa donde se quedó; solo si iOS no deja, se da por terminada y se escucha.
+    if (estadoRef.current === "hablando" && vozHumana) {
+      const pendiente = reanudarVozRef.current;
+      reanudarVozRef.current = null;
+      if (pendiente) {
+        diag("voz_reanuda", { como: "siguiente_trozo" });
+        pendiente().catch(() => { diag("voz_no_reanuda"); terminarRespuestaEnCurso(); });
+        return;
+      }
+      const a = audioElRef.current;
+      if (a && a.src && !a.ended && a.paused) {
+        diag("voz_reanuda", { como: "play" });
+        a.play().catch(() => { diag("voz_no_reanuda"); terminarRespuestaEnCurso(); });
+      }
+      return; // sigue sonando, o el audio aún se está generando: el flujo normal continúa solo
+    }
     if (estadoRef.current !== "hablando" && estadoRef.current !== "escuchando") return;
+    const veniaHablando = estadoRef.current === "hablando";
     try { window.speechSynthesis.cancel(); } catch {}
     callarVozHumana();
     hablaTokenRef.current = null;
+    // Mientras Arkey habla la oreja se apaga sola: si se corta aquí, hay que devolverle el valor
+    // que tenía antes (si no, parecía apagada por el usuario y Arkey ya no volvía a escuchar).
+    if (veniaHablando) cambiarEscuchaActiva(escuchaActivaPreHablandoRef.current);
     if (!escuchaActivaRef.current) { cambiarEstado("inactivo"); return; } // la oreja estaba apagada -- no reactivar solo
     cambiarEstado("escuchando");
     if (usaSTTNativo) {
@@ -6182,14 +6231,21 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario, vozHumana 
     // "hablando" sin volver a escuchar. Si pasa el tiempo razonable para decir el texto (~110 ms
     // por letra + margen; más margen con voz natural, que primero se descarga), se da por terminado.
     const esperaMax = Math.max(6000, texto.length * 110 + (vozHumana ? 12000 : 4000));
-    setTimeout(() => {
-      if (hablaTokenRef.current === ficha && estadoRef.current === "hablando") {
-        diag("seguro_tiempo_voz", { esperaMax });
-        try { window.speechSynthesis.cancel(); } catch {}
-        callarVozHumana();
-        alTerminar();
+    alTerminarActualRef.current = alTerminar;
+    const revisarSeguro = () => {
+      if (hablaTokenRef.current !== ficha || estadoRef.current !== "hablando") return;
+      const a = audioElRef.current;
+      // La voz natural sigue sonando de verdad (o quedó pendiente en segundo plano): esperar más.
+      if (vozHumana && ((a && !a.paused && !a.ended) || reanudarVozRef.current || document.visibilityState !== "visible")) {
+        setTimeout(revisarSeguro, 3000);
+        return;
       }
-    }, esperaMax);
+      diag("seguro_tiempo_voz", { esperaMax });
+      try { window.speechSynthesis.cancel(); } catch {}
+      callarVozHumana();
+      alTerminar();
+    };
+    setTimeout(revisarSeguro, esperaMax);
     try {
       window.speechSynthesis.cancel();
       // Voz natural de OpenAI (en prueba, solo cuenta de Angel). Si falla por lo que sea (red,
