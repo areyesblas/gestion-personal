@@ -5191,31 +5191,67 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario, vozHumana 
     a.onended = null; a.onerror = null; a.onplaying = null;
     try { a.pause(); } catch {}
   }
-  async function reproducirVozHumana(texto, alTerminar) {
+  // Parte la respuesta en trozos para que la voz empiece con la primera frase en vez de esperar
+  // a que se genere el audio completo (traza del 22-oct: 3 a 5.5 s de espera solo por eso). El
+  // primer trozo es corto (una frase) para que llegue rápido; los demás se agrupan hasta ~350
+  // letras para no hacer demasiadas peticiones.
+  function trozosParaVoz(texto) {
+    const frases = texto.replace(/\s+/g, " ").trim().split(/(?<=[.!?…:;])\s+/).filter(Boolean);
+    const trozos = [];
+    let actual = "";
+    for (const f of frases) {
+      const limite = trozos.length === 0 ? 60 : 350; // primer trozo: corto, para arrancar ya
+      if (actual && (actual.length + 1 + f.length) > limite) { trozos.push(actual); actual = f; }
+      else actual = actual ? `${actual} ${f}` : f;
+    }
+    if (actual) trozos.push(actual);
+    return trozos.length ? trozos : [texto];
+  }
+
+  async function pedirAudioVoz(trozo, token) {
+    const resp = await fetch(`${supabase.supabaseUrl}/functions/v1/voz-arkey`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ texto: trozo }),
+    });
+    if (!resp.ok) throw new Error(`http_${resp.status}`);
+    return resp.blob();
+  }
+
+  // Reproduce la respuesta con la voz natural: pide el audio de todos los trozos en paralelo y
+  // los toca en orden -- el primero suena en cuanto está listo mientras los demás se generan.
+  // Devuelve false si ni el primero pudo sonar (hablar() cae entonces a la voz del sistema).
+  // vigente() dice si esta respuesta sigue en curso (no la interrumpieron ni cerraron el panel).
+  async function reproducirVozHumana(texto, alTerminar, vigente) {
+    const t0 = Date.now();
     try {
       const token = await tokenDeSesion();
-      const resp = await fetch(`${supabase.supabaseUrl}/functions/v1/voz-arkey`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ texto }),
-      });
-      if (!resp.ok) { diag("voz_humana_http", { http: resp.status }); return false; }
-      const blob = await resp.blob();
-      // Si mientras se generaba el audio lo interrumpieron o cerraron el panel, ya no debe sonar.
-      if (!abiertoRef.current || estadoRef.current !== "hablando") return true;
+      const trozos = trozosParaVoz(texto);
+      const audios = trozos.map((t) => pedirAudioVoz(t, token));
+      audios.forEach((p) => p.catch(() => {})); // evitar avisos de promesa sin atender
       const a = obtenerAudioEl();
-      if (audioUrlRef.current) { try { URL.revokeObjectURL(audioUrlRef.current); } catch {} }
-      audioUrlRef.current = URL.createObjectURL(blob);
-      a.src = audioUrlRef.current;
-      a.volume = audioMuteadoRef.current ? 0 : 1;
-      a.onplaying = () => diag("voz_empieza", { humana: true, letras: texto.length, bytes: blob.size });
-      a.onended = () => { diag("voz_termina", { humana: true }); alTerminar(); };
-      a.onerror = () => { diag("voz_error", { humana: true, codigo: a.error?.code }); alTerminar(); };
-      await a.play();
+      const tocar = async (i) => {
+        const blob = await audios[i];
+        if (!vigente() || !abiertoRef.current || estadoRef.current !== "hablando") return false;
+        if (audioUrlRef.current) { try { URL.revokeObjectURL(audioUrlRef.current); } catch {} }
+        audioUrlRef.current = URL.createObjectURL(blob);
+        a.src = audioUrlRef.current;
+        a.volume = audioMuteadoRef.current ? 0 : 1;
+        a.onplaying = i === 0 ? () => diag("voz_empieza", { humana: true, letras: texto.length, trozos: trozos.length, espera_ms: Date.now() - t0 }) : null;
+        a.onerror = () => { diag("voz_error", { humana: true, trozo: i, codigo: a.error?.code }); alTerminar(); };
+        a.onended = async () => {
+          if (i + 1 >= trozos.length) { diag("voz_termina", { humana: true }); alTerminar(); return; }
+          try { await tocar(i + 1); }
+          catch (err) { diag("voz_error", { humana: true, trozo: i + 1, error: String(err?.message || err) }); alTerminar(); }
+        };
+        await a.play();
+        return true;
+      };
+      await tocar(0);
       return true;
     } catch (err) {
       callarVozHumana();
-      diag("voz_humana_error", { error: String(err?.name || err) });
+      diag("voz_humana_error", { error: String(err?.message || err?.name || err) });
       return false;
     }
   }
@@ -6140,7 +6176,7 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario, vozHumana 
           modoAudioIOS("playback");
         }
         diag("voz_pedida", { letras: texto.length, voz: "openai" });
-        const ok = await reproducirVozHumana(texto, alTerminar);
+        const ok = await reproducirVozHumana(texto, alTerminar, () => hablaTokenRef.current === ficha);
         if (ok) return;
         diag("voz_humana_respaldo_sistema");
         if (esIOS) modoAudioIOS("play-and-record");

@@ -1,15 +1,13 @@
-// Transcribe un audio grabado por el navegador a texto, usando OpenAI Whisper.
+// Transcribe un audio grabado por el navegador a texto, usando OpenAI (gpt-4o-mini-transcribe,
+// con whisper-1 de respaldo).
 //
-// Por que existe esta funcion separada de asistente-ia: Safari en iOS (incluida la PWA
-// instalada) NO soporta el reconocimiento de voz nativo del navegador (SpeechRecognition/
-// webkitSpeechRecognition) -- es una restriccion de WebKit, no de ARKEYONE. En Chrome/Android
-// el frontend sigue usando el reconocimiento nativo del navegador (gratis, sin esta funcion).
-// En iOS, el frontend graba el audio con MediaRecorder y lo manda aqui para transcribirlo.
+// Por que existe esta funcion separada de asistente-ia: en iOS el frontend graba el audio con
+// MediaRecorder y lo manda aqui para transcribirlo (el reconocimiento nativo de Safari queda
+// sordo despues de la primera respuesta en iOS 27). En Chrome/Android el frontend sigue usando
+// el reconocimiento nativo del navegador (gratis, sin esta funcion).
 //
-// Ni Claude ni Supabase ofrecen speech-to-text, por eso se usa un proveedor aparte (OpenAI
-// Whisper). Esta funcion solo transcribe -- no toca ningun dato de ARKEYONE ni llama al
-// asistente; el texto resultante se manda despues a asistente-ia como si el usuario lo
-// hubiera escrito.
+// Esta funcion solo transcribe -- no toca ningun dato de ARKEYONE ni llama al asistente; el
+// texto resultante se manda despues a asistente-ia como si el usuario lo hubiera escrito.
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -26,6 +24,7 @@ const headersJson = { "Content-Type": "application/json", ...corsHeaders };
 // Tamano maximo del audio aceptado (10 MB es generoso para un turno de conversacion hablado,
 // incluso varios minutos -- evita que un error del cliente mande audio gigante sin querer).
 const MAX_BYTES = 10 * 1024 * 1024;
+const MODELO = "gpt-4o-mini-transcribe";
 
 // Frases que Whisper inventa sobre ruido o silencio. Se compara sin acentos ni puntuación.
 const ALUCINACIONES = [
@@ -81,30 +80,43 @@ Deno.serve(async (req) => {
 
     const whisperForm = new FormData();
     whisperForm.append("file", archivo, archivo.name || "audio.webm");
-    whisperForm.append("model", "whisper-1");
+    // gpt-4o-mini-transcribe (22-oct-2026): whisper-1 tardaba 2.7-4.5 s por turno en la traza;
+    // este modelo es más rápido, más preciso y cuesta la mitad. Si fallara, se reintenta con whisper-1.
+    whisperForm.append("model", MODELO);
     whisperForm.append("language", "es");
     whisperForm.append("temperature", "0");
-    // Contexto para Whisper: reduce las alucinaciones en audio con poco habla y le enseña a
+    // Contexto para el transcriptor: reduce las alucinaciones en audio con poco habla y le enseña a
     // escribir bien los nombres propios ("ARKEYONE", no "Arqui One").
     whisperForm.append("prompt", "Conversación en español de México con Arkey, el asistente de ARKEYONE, sobre tareas, finanzas, citas, contactos y proyectos.");
 
-    const resp = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+    const t0 = Date.now();
+    let resp = await fetch("https://api.openai.com/v1/audio/transcriptions", {
       method: "POST",
       headers: { Authorization: `Bearer ${OPENAI_API_KEY}` },
       body: whisperForm,
     });
+    if (!resp.ok && MODELO !== "whisper-1") {
+      console.error("Fallo", MODELO, resp.status, await resp.text().catch(() => ""), "-- reintento con whisper-1");
+      whisperForm.set("model", "whisper-1");
+      resp = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${OPENAI_API_KEY}` },
+        body: whisperForm,
+      });
+    }
 
     if (!resp.ok) {
       const detalle = await resp.text();
-      console.error("Error de OpenAI Whisper:", detalle);
+      console.error("Error de OpenAI al transcribir:", detalle);
       return new Response(JSON.stringify({ error: "No se pudo transcribir el audio. Intenta de nuevo." }), { status: 502, headers: headersJson });
     }
 
     const data = await resp.json();
     const texto = (data.text || "").trim();
-    // Whisper "alucina" frases de créditos de video cuando el audio es ruido o silencio (las
-    // aprendió de subtítulos de YouTube). Si la transcripción es solo eso, se descarta como si no
-    // se hubiera dicho nada y el cliente vuelve a escuchar sin gastar una consulta del asistente.
+    console.log(`transcripcion ${Date.now() - t0} ms`);
+    // El transcriptor "alucina" frases de créditos de video cuando el audio es ruido o silencio
+    // (las aprendió de subtítulos de YouTube). Si la transcripción es solo eso, se descarta como si
+    // no se hubiera dicho nada y el cliente vuelve a escuchar sin gastar una consulta del asistente.
     if (esAlucinacion(texto)) {
       console.log("Alucinacion de Whisper descartada:", texto);
       return new Response(JSON.stringify({ texto: "", descartado: true }), { headers: headersJson });
