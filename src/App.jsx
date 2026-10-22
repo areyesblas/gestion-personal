@@ -344,13 +344,18 @@ const Tokens = ({ tema = "oscuro" }) => (
        a cualquier div con una tabla directamente adentro, sin tocar las veinte pantallas que las
        dibujan. En navegadores sin :has() simplemente no se pega, que es como estaba antes. */
     div:has(> table.gp-table){ max-height:72vh; overflow:auto; }
-    /* Sin barra de desplazamiento a la vista en los grids (pedido de Angel, 5 oct 2026). La barra
-       sigue EXISTIENDO —se recorre igual con rueda, trackpad, dedo, teclado y arrastrando— solo
-       deja de dibujarse: scrollbar-width para Firefox, ::-webkit-scrollbar para Safari y Chrome.
-       Se aplica SOLO al contenedor del grid, nunca al documento: la barra de la página se queda.
-       Lo que se pierde es el aviso visual de que hay más columnas a la derecha. */
-    div:has(> table.gp-table){ scrollbar-width:none; -ms-overflow-style:none; }
-    div:has(> table.gp-table)::-webkit-scrollbar{ width:0; height:0; }
+    /* Barra HORIZONTAL visible en los grids cuando no caben todas las columnas (pedido de Angel,
+       22 oct 2026 — antes, desde el 5 oct, no se dibujaba ninguna y no había aviso de que había más
+       columnas a la derecha). Solo aparece si de verdad hay más contenido (overflow:auto). La
+       vertical sigue sin dibujarse en Chrome/Safari de escritorio (width:0), como se pidió el 5 oct.
+       Firefox no permite elegir una sola: ahí ambas se ven delgadas.
+       iPhone/iPad: iOS no respeta este estilo; su barra aparece solo mientras se desplaza. */
+    div:has(> table.gp-table){ scrollbar-width:thin; scrollbar-color:color-mix(in srgb, var(--muted) 55%, transparent) transparent; }
+    div:has(> table.gp-table)::-webkit-scrollbar{ width:0; height:8px; }
+    div:has(> table.gp-table)::-webkit-scrollbar-track{ background:transparent; }
+    div:has(> table.gp-table)::-webkit-scrollbar-button{ display:none; width:0; height:0; }
+    div:has(> table.gp-table)::-webkit-scrollbar-thumb{ background:color-mix(in srgb, var(--muted) 55%, transparent); border-radius:4px; }
+    div:has(> table.gp-table)::-webkit-scrollbar-thumb:hover{ background:var(--muted); }
     table.gp-table td{ padding:8px 10px; border-bottom:1px solid var(--border); vertical-align:top; }
     table.gp-table tr:hover td{ background:var(--panel-hi); }
     /* Tareas (pedido de Angel, 29 sept 2026): nada de tinte al pasar el mouse — solo la manita,
