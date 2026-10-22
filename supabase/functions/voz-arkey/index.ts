@@ -2,7 +2,10 @@
 //
 // Por qué existe: la voz del sistema (speechSynthesis) suena robótica y en iOS 27 además
 // silencia el micrófono mientras habla y obedece el interruptor de silencio del iPhone. Esta
-// función devuelve un MP3 que el navegador reproduce como audio normal de la página.
+// función devuelve un WAV que el navegador reproduce como audio normal de la página.
+// WAV y no MP3 (22-oct-2026): Safari calcula mal la duración de algunos MP3 y deja de sonar antes
+// del final -- Angel no oyó "Eso es todo." al final de una respuesta. WAV pesa más (~48 KB por
+// segundo) pero su duración es exacta.
 //
 // Costo aproximado: ~0.015 USD por minuto de voz. Usa la misma OPENAI_API_KEY que transcribir-voz.
 // FASE DE PRUEBA (22-oct-2026): solo la cuenta de Angel puede usarla. Para abrirla a todos,
@@ -56,14 +59,14 @@ Deno.serve(async (req) => {
     const resp = await fetch("https://api.openai.com/v1/audio/speech", {
       method: "POST",
       headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ model: "gpt-4o-mini-tts", voice: VOZ, input: texto, instructions: INSTRUCCIONES, response_format: "mp3" }),
+      body: JSON.stringify({ model: "gpt-4o-mini-tts", voice: VOZ, input: texto, instructions: INSTRUCCIONES, response_format: "wav" }),
     });
     if (!resp.ok || !resp.body) {
       console.error("Error de OpenAI TTS:", resp.status, await resp.text().catch(() => ""));
       return new Response(JSON.stringify({ error: "No se pudo generar la voz" }), { status: 502, headers: headersJson });
     }
     // Se pasa el audio tal cual va llegando, sin esperar a tenerlo completo.
-    return new Response(resp.body, { headers: { "Content-Type": "audio/mpeg", "Cache-Control": "no-store", ...corsHeaders } });
+    return new Response(resp.body, { headers: { "Content-Type": "audio/wav", "Cache-Control": "no-store", ...corsHeaders } });
   } catch (err) {
     console.error("Error en voz-arkey:", err);
     return new Response(JSON.stringify({ error: String(err) }), { status: 500, headers: headersJson });

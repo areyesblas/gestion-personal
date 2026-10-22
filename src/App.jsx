@@ -5157,6 +5157,7 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario, vozHumana 
   const vozMsRef = useRef(0);
   const ultimoTickRef = useRef(0);
   const segInicioRef = useRef(0); // cuándo arrancó la grabación actual
+  const picoVozRef = useRef(0); // volumen más alto de tu voz en el turno actual (ver loopVAD)
   const micsAbiertosRef = useRef(new Set()); // todos los micrófonos abiertos en la sesión (ver apagarTodosLosMics)
   const abriendoMicRef = useRef(null); // apertura de micrófono en curso (ver asegurarMicAbierto)
   const reanudarVozRef = useRef(null); // trozo de voz que iOS no dejó arrancar en segundo plano
@@ -5219,7 +5220,28 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario, vozHumana 
       body: JSON.stringify({ texto: trozo }),
     });
     if (!resp.ok) throw new Error(`http_${resp.status}`);
-    return resp.blob();
+    const blob = await resp.blob();
+    return (blob.type || "").includes("wav") ? corregirEncabezadoWav(blob) : blob;
+  }
+
+  // OpenAI manda el WAV en streaming, sin conocer el tamaño final: el encabezado puede traer
+  // "tamaño desconocido" y Safari entonces no sabe cuánto dura el audio. Se escriben los tamaños
+  // reales (RIFF y bloque "data") ya con el archivo completo en la mano.
+  async function corregirEncabezadoWav(blob) {
+    try {
+      const buf = await blob.arrayBuffer();
+      const v = new DataView(buf);
+      const txt = (o) => String.fromCharCode(v.getUint8(o), v.getUint8(o + 1), v.getUint8(o + 2), v.getUint8(o + 3));
+      if (buf.byteLength < 44 || txt(0) !== "RIFF" || txt(8) !== "WAVE") return blob;
+      v.setUint32(4, buf.byteLength - 8, true);
+      let o = 12;
+      while (o + 8 <= buf.byteLength) {
+        const id = txt(o);
+        if (id === "data") { v.setUint32(o + 4, buf.byteLength - (o + 8), true); break; }
+        o += 8 + v.getUint32(o + 4, true);
+      }
+      return new Blob([buf], { type: "audio/wav" });
+    } catch { return blob; }
   }
 
   // Reproduce la respuesta con la voz natural: pide el audio de todos los trozos en paralelo y
@@ -5244,6 +5266,7 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario, vozHumana 
         a.onplaying = i === 0 ? () => diag("voz_empieza", { humana: true, letras: texto.length, trozos: trozos.length, espera_ms: Date.now() - t0 }) : null;
         a.onerror = () => { diag("voz_error", { humana: true, trozo: i, codigo: a.error?.code }); alTerminar(); };
         a.onended = async () => {
+          diag("trozo_fin", { trozo: i, de: trozos.length, dur: Math.round((a.duration || 0) * 100) / 100, en: Math.round((a.currentTime || 0) * 100) / 100, bytes: blob.size, tipo: blob.type });
           if (i + 1 >= trozos.length) {
             diag("voz_termina", { humana: true });
             // "ended" llega cuando el archivo se terminó de leer, no cuando el sonido terminó de salir
@@ -5657,6 +5680,7 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario, vozHumana 
       const mr = new MediaRecorder(streamRef.current, mime ? { mimeType: mime } : undefined);
       chunksRef.current = [];
       vozMsRef.current = 0; // cada segmento cuenta su propia voz desde cero
+      picoVozRef.current = 0;
       mr.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
       mr.start();
       mediaRecorderRef.current = mr;
@@ -5711,7 +5735,17 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario, vozHumana 
       if (estadoRef.current === "hablando") {
         // (intencionalmente sin acción)
       } else if (estadoRef.current === "escuchando") {
-        if (rms > UMBRAL) {
+        // Ya hablando, "silencio" es relativo a tu propia voz: lo que quede por debajo del 20% de tu
+        // pico cuenta como pausa aunque el ruido del lugar siga por encima del umbral de arranque.
+        // Antes, en un lugar ruidoso el ruido mantenía "hablando" varios segundos después de que
+        // terminabas, y Arkey tardaba en contestar (Angel, 22-oct 11:40: "tardaba más en responder").
+        if (empezoHablarRef.current && rms > picoVozRef.current) picoVozRef.current = rms;
+        const umbralFin = empezoHablarRef.current ? Math.max(UMBRAL, picoVozRef.current * 0.2) : UMBRAL;
+        // Tope: un turno de más de 25 s seguidos se manda tal cual (nadie dicta tanto sin pausa).
+        if (empezoHablarRef.current && ahora - empezoHablarRef.current > 25000) {
+          empezoHablarRef.current = null; silencioDesdeRef.current = null; picoVozRef.current = 0;
+          finalizarSegmentoYEnviar();
+        } else if (rms > umbralFin) {
           if (!empezoHablarRef.current) empezoHablarRef.current = ahora;
           silencioDesdeRef.current = null;
         } else if (!empezoHablarRef.current) {
@@ -5725,6 +5759,7 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario, vozHumana 
           else if (ahora - silencioDesdeRef.current > 900) {
             empezoHablarRef.current = null;
             silencioDesdeRef.current = null;
+            picoVozRef.current = 0;
             finalizarSegmentoYEnviar();
           }
         }

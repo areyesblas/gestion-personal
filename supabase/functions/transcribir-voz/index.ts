@@ -50,9 +50,24 @@ const MARCAS_ALUCINACION = [
   "deja tu comentario", "dejar tu comentario", "dejen sus comentarios", "activa la campanita",
   "proximo video", "siguiente video", "nos vemos en el proximo",
 ];
+// Whisper atorado en un bucle: el mismo fragmento de 3 palabras repetido 4+ veces. Una persona
+// hablando con su asistente no hace eso.
+function esBucle(t: string) {
+  const p = t.replace(/\./g, " ").split(" ").filter(Boolean);
+  if (p.length < 12) return false;
+  const cuenta = new Map<string, number>();
+  for (let i = 0; i + 2 < p.length; i++) {
+    const k = `${p[i]} ${p[i + 1]} ${p[i + 2]}`;
+    const n = (cuenta.get(k) || 0) + 1;
+    if (n >= 4) return true;
+    cuenta.set(k, n);
+  }
+  return false;
+}
 function esAlucinacion(texto: string) {
   const t = normalizar(texto);
   if (!t) return true;
+  if (esBucle(t)) return true;
   if (MARCAS_ALUCINACION.some((m) => t.includes(m))) return true;
   // Muletillas cortas: solo se descartan si son TODO lo que se transcribió.
   const sinPunto = t.replace(/\./g, "").trim();
@@ -107,9 +122,9 @@ Deno.serve(async (req) => {
     whisperForm.append("temperature", "0");
     // verbose_json trae no_speech_prob por tramo (ver sinVozSegunWhisper). Solo whisper-1 lo da.
     whisperForm.append("response_format", MODELO === "whisper-1" ? "verbose_json" : "json");
-    // Contexto para el transcriptor: reduce las alucinaciones en audio con poco habla y le enseña a
-    // escribir bien los nombres propios ("ARKEYONE", no "Arqui One").
-    whisperForm.append("prompt", "Conversación en español de México con Arkey, el asistente de ARKEYONE, sobre tareas, finanzas, citas, contactos y proyectos.");
+    // SIN "prompt" a propósito (22-oct-2026): con audio sin voz, Whisper repetía en bucle la frase
+    // de contexto ("ARKEYONE, el asistente de ARKEYONE, el asistente de..."), y ese texto le llegaba
+    // a Arkey como si el usuario lo hubiera dicho.
 
     const t0 = Date.now();
     let resp = await fetch("https://api.openai.com/v1/audio/transcriptions", {
