@@ -5165,8 +5165,7 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario, vozHumana 
   // toque solo si ese mismo elemento ya sonó una vez dentro de un toque (ver desbloquearVoz).
   const audioElRef = useRef(null);
   const audioUrlRef = useRef(null);
-  const ultimaRespuestaRef = useRef(""); // lo último que dijo Arkey, para el botón "Repetir"
-  const [hayRespuesta, setHayRespuesta] = useState(false);
+  const ultimaRespuestaRef = useRef(""); // lo último que dijo Arkey
   function obtenerAudioEl() {
     if (!audioElRef.current) {
       const a = new Audio();
@@ -6217,7 +6216,6 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario, vozHumana 
     escuchaActivaPreHablandoRef.current = escuchaActivaRef.current;
     cambiarEscuchaActiva(false);
     ultimaRespuestaRef.current = texto;
-    setHayRespuesta(true);
     // Ficha de esta respuesta: el seguro de tiempo de abajo solo actúa si sigue siendo la
     // respuesta en curso y nadie la cerró antes (fin normal, error o el botón boca).
     const ficha = {};
@@ -6298,22 +6296,6 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario, vozHumana 
       // (ver arriba) -- solo queda esperar a que speak() termine (alTerminar) o a que lo
       // interrumpan con el botón boca (interrumpirVoz()).
     } catch { alTerminar(); }
-  }
-
-  // Botón "Repetir": vuelve a decir la última respuesta de Arkey (no gasta consulta: no llama al
-  // asistente). Pensado para cuando no se oyó -- p. ej. el iPhone estaba en modo silencio.
-  function repetirUltima() {
-    const texto = ultimaRespuestaRef.current;
-    if (!texto || estadoRef.current === "hablando" || estadoRef.current === "procesando") return;
-    desbloquearVoz(); // es un toque real: aprovecharlo para que iOS deje sonar el audio
-    if (timerSilencioRef.current) { clearTimeout(timerSilencioRef.current); timerSilencioRef.current = null; }
-    finalBufferRef.current = "";
-    empezoHablarRef.current = null;
-    silencioDesdeRef.current = null;
-    const mr = mediaRecorderRef.current;
-    if (mr) { mr.onstop = null; mr.ondataavailable = null; }
-    diag("repetir");
-    hablar(texto);
   }
 
   return (
@@ -6515,20 +6497,6 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario, vozHumana 
                 {!sinCreditos && estado === "permiso" && (errorMsg || "Necesito permiso de micrófono.")}
                 {!sinCreditos && estado === "error" && (errorMsg || "Algo salió mal.")}
               </p>
-              {/* Modo silencio del iPhone: una página web no puede saber si el interruptor está en
-                  silencio (iOS no lo expone), así que el aviso es fijo en iPhone, y "Repetir" vuelve
-                  a decir lo último sin gastar consulta. */}
-              {!sinCreditos && esIOS && estado === "hablando" && (
-                <p className="text-[11px] gp-text-muted text-center">🔇 ¿No oyes nada? Quita el modo silencio del iPhone.</p>
-              )}
-              {!sinCreditos && hayRespuesta && (estado === "escuchando" || estado === "inactivo") && (
-                <div className="flex items-center justify-center gap-2 flex-wrap">
-                  <button onClick={repetirUltima} className="gp-btn-ghost px-3 py-1 rounded-full text-xs" title="Volver a decir la última respuesta">
-                    🔁 Repetir
-                  </button>
-                  {esIOS && <span className="text-[11px] gp-text-muted">¿No lo oíste? Quita el modo silencio y toca Repetir.</span>}
-                </div>
-              )}
               <div className="flex items-center gap-2 w-full mt-1">
                 <input
                   type="text"

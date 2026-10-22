@@ -39,14 +39,34 @@ const ALUCINACIONES = [
 function normalizar(s: string) {
   return s.toLowerCase().normalize("NFD").replace(/\p{M}/gu, "").replace(/[^\p{L}\p{N}. ]/gu, " ").replace(/\s+/g, " ").trim();
 }
+// Frases típicas de cierre de video que Whisper inventa sobre ruido, aunque vengan dentro de un
+// texto más largo (22-oct-2026: "Gracias por ver el video, no olvides dejar tu comentario y
+// suscribirte al canal" pasó porque solo se filtraba la frase corta exacta). Son expresiones que
+// nadie le dice a un asistente personal.
+const MARCAS_ALUCINACION = [
+  "amara", "subtitulos realizados", "subtitulado por", "subtitulos por",
+  "gracias por ver el video", "gracias por ver este video", "gracias por verlo",
+  "suscribete", "suscribirte al canal", "suscribanse", "dale like", "deja tu like",
+  "deja tu comentario", "dejar tu comentario", "dejen sus comentarios", "activa la campanita",
+  "proximo video", "siguiente video", "nos vemos en el proximo",
+];
 function esAlucinacion(texto: string) {
   const t = normalizar(texto);
   if (!t) return true;
-  // Créditos de subtítulos: aparezcan donde aparezcan, el turno no sirve.
-  if (t.includes("amara") || t.includes("subtitulos realizados") || t.includes("subtitulado por")) return true;
+  if (MARCAS_ALUCINACION.some((m) => t.includes(m))) return true;
   // Muletillas cortas: solo se descartan si son TODO lo que se transcribió.
   const sinPunto = t.replace(/\./g, "").trim();
   return ALUCINACIONES.includes(sinPunto);
+}
+
+// Whisper dice, por cada tramo, qué tan probable es que NO haya voz (no_speech_prob) y qué tan
+// seguro está del texto (avg_logprob). Regla clásica de Whisper para silencio: no_speech_prob > 0.6
+// Y avg_logprob < -1. Si TODOS los tramos cumplen, lo "transcrito" es inventado. Se usan las dos
+// condiciones juntas para no tirar frases reales cortas (p. ej. "Finanzas, por favor").
+type Tramo = { no_speech_prob?: number; avg_logprob?: number };
+function sinVozSegunWhisper(segmentos: Tramo[]) {
+  if (!Array.isArray(segmentos) || segmentos.length === 0) return false;
+  return segmentos.every((sg) => (sg.no_speech_prob ?? 0) > 0.6 && (sg.avg_logprob ?? 0) < -1);
 }
 
 Deno.serve(async (req) => {
@@ -85,6 +105,8 @@ Deno.serve(async (req) => {
     whisperForm.append("model", MODELO);
     whisperForm.append("language", "es");
     whisperForm.append("temperature", "0");
+    // verbose_json trae no_speech_prob por tramo (ver sinVozSegunWhisper). Solo whisper-1 lo da.
+    whisperForm.append("response_format", MODELO === "whisper-1" ? "verbose_json" : "json");
     // Contexto para el transcriptor: reduce las alucinaciones en audio con poco habla y le enseña a
     // escribir bien los nombres propios ("ARKEYONE", no "Arqui One").
     whisperForm.append("prompt", "Conversación en español de México con Arkey, el asistente de ARKEYONE, sobre tareas, finanzas, citas, contactos y proyectos.");
@@ -117,6 +139,12 @@ Deno.serve(async (req) => {
     // El transcriptor "alucina" frases de créditos de video cuando el audio es ruido o silencio
     // (las aprendió de subtítulos de YouTube). Si la transcripción es solo eso, se descarta como si
     // no se hubiera dicho nada y el cliente vuelve a escuchar sin gastar una consulta del asistente.
+    const tramos = (data.segments || []).map((sg: Tramo) => [Math.round((sg.no_speech_prob ?? 0) * 100) / 100, Math.round((sg.avg_logprob ?? 0) * 100) / 100]);
+    console.log("tramos [no_speech_prob, avg_logprob]:", JSON.stringify(tramos)); // sin el texto: es lo que dijo el usuario
+    if (texto && sinVozSegunWhisper(data.segments)) {
+      console.log("Sin voz segun Whisper, descartado:", texto);
+      return new Response(JSON.stringify({ texto: "", descartado: true }), { headers: headersJson });
+    }
     if (esAlucinacion(texto)) {
       console.log("Alucinacion de Whisper descartada:", texto);
       return new Response(JSON.stringify({ texto: "", descartado: true }), { headers: headersJson });
