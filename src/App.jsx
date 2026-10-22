@@ -3292,6 +3292,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
         }
         onDatosCreados={recargarModulos}
         nombreUsuario={nombreMostrar || miEmail}
+        vozHumana={misId === ADMIN_UID /* voz natural de OpenAI: en prueba solo para Angel (ver voz-arkey) */}
       />
       {busquedaAbierta && <BusquedaGlobal data={data} onNavigate={buscarNavegarA} onClose={() => setBusquedaAbierta(false)} />}
 
@@ -4868,7 +4869,26 @@ function ArkeyRobot({ estado }) {
   );
 }
 
-function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
+// Medio segundo de silencio en WAV, generado en memoria. Sirve para "desbloquear" el elemento de
+// audio dentro de un toque real del usuario: iOS solo deja que un <audio> suene solo (sin toque)
+// si ese mismo elemento ya sonó antes dentro de un toque.
+let urlSilencioWav = null;
+function silencioWav() {
+  if (urlSilencioWav) return urlSilencioWav;
+  const muestras = 4000; // 0.5 s a 8 kHz, 8 bits mono
+  const buf = new ArrayBuffer(44 + muestras);
+  const v = new DataView(buf);
+  const txt = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+  txt(0, "RIFF"); v.setUint32(4, 36 + muestras, true); txt(8, "WAVE"); txt(12, "fmt ");
+  v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, 8000, true); v.setUint32(28, 8000, true); v.setUint16(32, 1, true); v.setUint16(34, 8, true);
+  txt(36, "data"); v.setUint32(40, muestras, true);
+  for (let i = 0; i < muestras; i++) v.setUint8(44 + i, 128); // 128 = silencio en 8 bits
+  urlSilencioWav = URL.createObjectURL(new Blob([buf], { type: "audio/wav" }));
+  return urlSilencioWav;
+}
+
+function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario, vozHumana = false }) {
   const [abierto, setAbierto] = useState(false);
   const [estado, setEstado] = useState("inactivo"); // inactivo | escuchando | procesando | hablando | permiso | error
   const [errorMsg, setErrorMsg] = useState("");
@@ -5004,6 +5024,17 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
   // ya se perdió para cuando intentamos hablar. Por eso "desbloqueamos" la voz aquí, directo
   // dentro de cada toque genuino (abrir el panel, cortar el turno), con una utterance silenciosa.
   const desbloquearVoz = () => {
+    // Voz natural: el <audio> tiene que sonar una vez dentro de este toque para que después iOS
+    // lo deje reproducir las respuestas solo. Se hace en todas las plataformas (no estorba).
+    if (vozHumana) {
+      try {
+        const a = obtenerAudioEl();
+        a.src = silencioWav();
+        a.volume = 0;
+        const p = a.play();
+        if (p?.catch) p.catch(() => {});
+      } catch {}
+    }
     try {
       // Solo hace falta en iOS Safari (ver arriba) -- en el resto de plataformas, esta utterance
       // silenciosa seguida del cancel() de hablar() (a milisegundos de distancia) coincidía con un
@@ -5125,6 +5156,56 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
   const vozMsRef = useRef(0);
   const ultimoTickRef = useRef(0);
   const segInicioRef = useRef(0); // cuándo arrancó la grabación actual
+  // Voz natural (OpenAI): un solo elemento <audio> para toda la sesión -- iOS lo deja sonar sin
+  // toque solo si ese mismo elemento ya sonó una vez dentro de un toque (ver desbloquearVoz).
+  const audioElRef = useRef(null);
+  const audioUrlRef = useRef(null);
+  const ultimaRespuestaRef = useRef(""); // lo último que dijo Arkey, para el botón "Repetir"
+  const [hayRespuesta, setHayRespuesta] = useState(false);
+  function obtenerAudioEl() {
+    if (!audioElRef.current) {
+      const a = new Audio();
+      a.setAttribute("playsinline", "");
+      a.preload = "auto";
+      audioElRef.current = a;
+    }
+    return audioElRef.current;
+  }
+  // Corta la voz natural si está sonando (interrumpir, cerrar, escribir, etc.).
+  function callarVozHumana() {
+    const a = audioElRef.current;
+    if (!a) return;
+    a.onended = null; a.onerror = null; a.onplaying = null;
+    try { a.pause(); } catch {}
+  }
+  async function reproducirVozHumana(texto, alTerminar) {
+    try {
+      const token = await tokenDeSesion();
+      const resp = await fetch(`${supabase.supabaseUrl}/functions/v1/voz-arkey`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ texto }),
+      });
+      if (!resp.ok) { diag("voz_humana_http", { http: resp.status }); return false; }
+      const blob = await resp.blob();
+      // Si mientras se generaba el audio lo interrumpieron o cerraron el panel, ya no debe sonar.
+      if (!abiertoRef.current || estadoRef.current !== "hablando") return true;
+      const a = obtenerAudioEl();
+      if (audioUrlRef.current) { try { URL.revokeObjectURL(audioUrlRef.current); } catch {} }
+      audioUrlRef.current = URL.createObjectURL(blob);
+      a.src = audioUrlRef.current;
+      a.volume = audioMuteadoRef.current ? 0 : 1;
+      a.onplaying = () => diag("voz_empieza", { humana: true, letras: texto.length, bytes: blob.size });
+      a.onended = () => { diag("voz_termina", { humana: true }); alTerminar(); };
+      a.onerror = () => { diag("voz_error", { humana: true, codigo: a.error?.code }); alTerminar(); };
+      await a.play();
+      return true;
+    } catch (err) {
+      callarVozHumana();
+      diag("voz_humana_error", { error: String(err?.name || err) });
+      return false;
+    }
+  }
   function estadoPista() {
     const t = streamRef.current?.getAudioTracks?.()[0];
     return t ? `${t.readyState}${t.muted ? "/muted" : ""}${t.enabled ? "" : "/disabled"}` : "sin-pista";
@@ -5176,6 +5257,8 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
     rafRef.current = null;
     try { window.speechSynthesis?.cancel(); } catch {}
+    callarVozHumana();
+    hablaTokenRef.current = null;
     cambiarMensajeReproduciendoId(null); // no dejar una burbuja marcada como "sonando" para la próxima vez que se abra el panel
     if (timerSilencioRef.current) { clearTimeout(timerSilencioRef.current); timerSilencioRef.current = null; } // corta el envío pendiente de lo último que se dijo, si lo había -- si no, se manda solo y reactiva el mic aunque el panel ya esté cerrado
     finalBufferRef.current = ""; // no dejar texto de un turno a medias colgado para la próxima vez que se abra el panel
@@ -5772,6 +5855,8 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
   // llamen dos veces sin problema.
   function interrumpirVoz() {
     try { window.speechSynthesis.cancel(); } catch {}
+    callarVozHumana();
+    hablaTokenRef.current = null; // la respuesta en curso queda cerrada: su fin tardío ya no reactiva nada
     if (mensajeReproduciendoIdRef.current !== null) cambiarMensajeReproduciendoId(null);
     if (estadoRef.current !== "hablando") return;
     if (usaSTTNativo) volverAEscuchar();
@@ -5798,6 +5883,8 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
     if (!t) return;
     try { recognitionRef.current?.stop(); } catch {}
     try { window.speechSynthesis.cancel(); } catch {}
+    callarVozHumana();
+    hablaTokenRef.current = null;
     setTextoManual("");
     enviarTurno(t);
   };
@@ -5856,6 +5943,7 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
     if (!sinCreditos) return;
     try { recognitionRef.current?.stop(); } catch {}
     try { window.speechSynthesis?.cancel(); } catch {}
+    callarVozHumana();
     cambiarEstado("dormido");
   }, [sinCreditos]);
 
@@ -5867,6 +5955,8 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
     if (!abiertoRef.current || sinCreditosRef.current) return;
     if (estadoRef.current !== "hablando" && estadoRef.current !== "escuchando") return;
     try { window.speechSynthesis.cancel(); } catch {}
+    callarVozHumana();
+    hablaTokenRef.current = null;
     if (!escuchaActivaRef.current) { cambiarEstado("inactivo"); return; } // la oreja estaba apagada -- no reactivar solo
     cambiarEstado("escuchando");
     if (usaSTTNativo) {
@@ -5997,8 +6087,40 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
     // siempre vuelve a quedar encendida y escuchando en cuanto Arkey termine.
     escuchaActivaPreHablandoRef.current = escuchaActivaRef.current;
     cambiarEscuchaActiva(false);
+    ultimaRespuestaRef.current = texto;
+    setHayRespuesta(true);
+    // Ficha de esta respuesta: el seguro de tiempo de abajo solo actúa si sigue siendo la
+    // respuesta en curso y nadie la cerró antes (fin normal, error o el botón boca).
+    const ficha = {};
+    hablaTokenRef.current = ficha;
+    const alTerminar = () => {
+      if (hablaTokenRef.current !== ficha) return; // ya se cerró esta respuesta (evita doble cierre)
+      hablaTokenRef.current = null;
+      if (usaSTTNativo) volverAEscuchar(); else reanudarMicTrasHablarIOS();
+    };
+    // Seguro: iOS a veces nunca avisa que terminó de hablar, y Arkey se quedaría para siempre en
+    // "hablando" sin volver a escuchar. Si pasa el tiempo razonable para decir el texto (~110 ms
+    // por letra + margen; más margen con voz natural, que primero se descarga), se da por terminado.
+    const esperaMax = Math.max(6000, texto.length * 110 + (vozHumana ? 12000 : 4000));
+    setTimeout(() => {
+      if (hablaTokenRef.current === ficha && estadoRef.current === "hablando") {
+        diag("seguro_tiempo_voz", { esperaMax });
+        try { window.speechSynthesis.cancel(); } catch {}
+        callarVozHumana();
+        alTerminar();
+      }
+    }, esperaMax);
     try {
       window.speechSynthesis.cancel();
+      // Voz natural de OpenAI (en prueba, solo cuenta de Angel). Si falla por lo que sea (red,
+      // servidor, iOS no deja reproducir), se cae a la voz del sistema de siempre, sin perder la respuesta.
+      if (vozHumana) {
+        diag("voz_pedida", { letras: texto.length, voz: "openai" });
+        const ok = await reproducirVozHumana(texto, alTerminar);
+        if (ok) return;
+        diag("voz_humana_respaldo_sistema");
+        if (hablaTokenRef.current !== ficha) return; // la interrumpieron mientras se intentaba
+      }
       await vocesListas();
       const voces = window.speechSynthesis.getVoices();
       // Pequeña pausa: en Safari, hablar justo después de cancelar o de cerrar el AudioContext
@@ -6017,28 +6139,9 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
         || candidatasEs.find((v) => /enhanced|premium|neural/i.test(v.name || ""))
         || candidatasEs[0];
       if (vozEs) { u.voice = vozEs; u.lang = vozEs.lang; } else { u.lang = "es-MX"; }
-      // Ficha de esta respuesta: el seguro de tiempo de abajo solo actúa si sigue siendo la
-      // respuesta en curso y nadie la cerró antes (onend, onerror o el botón boca).
-      const ficha = {};
-      hablaTokenRef.current = ficha;
-      const alTerminar = () => {
-        if (hablaTokenRef.current === ficha) hablaTokenRef.current = null;
-        if (usaSTTNativo) volverAEscuchar(); else reanudarMicTrasHablarIOS();
-      };
       u.onstart = () => diag("voz_empieza", { letras: texto.length });
       u.onend = () => { diag("voz_termina"); alTerminar(); };
       u.onerror = (e) => { diag("voz_error", { error: e.error }); setErrorMsg(`TTS: ${e.error || "error desconocido"}`); alTerminar(); };
-      // Seguro: iOS a veces nunca dispara onend/onerror de speechSynthesis cuando el micrófono está
-      // abierto, y Arkey se quedaría para siempre en "hablando" sin volver a escuchar. Si pasa el
-      // tiempo razonable para decir el texto (~110 ms por letra + 4 s de margen), se da por terminado.
-      const esperaMax = Math.max(6000, texto.length * 110 + 4000);
-      setTimeout(() => {
-        if (hablaTokenRef.current === ficha && estadoRef.current === "hablando") {
-          diag("seguro_tiempo_voz", { esperaMax });
-          try { window.speechSynthesis.cancel(); } catch {}
-          alTerminar();
-        }
-      }, esperaMax);
       diag("voz_pedida", { letras: texto.length, voz: vozEs?.name || "default" });
       // Respaldo contra el mismo bug de Chrome descrito en desbloquearVoz(): si el motor quedó
       // "pausado" por cualquier otra razón, resume() antes de hablar evita que este speak() se
@@ -6048,7 +6151,23 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
       // No hace falta hacer nada más aquí: en ninguna plataforma se escucha mientras "hablando"
       // (ver arriba) -- solo queda esperar a que speak() termine (alTerminar) o a que lo
       // interrumpan con el botón boca (interrumpirVoz()).
-    } catch { if (usaSTTNativo) volverAEscuchar(); else reanudarMicTrasHablarIOS(); }
+    } catch { alTerminar(); }
+  }
+
+  // Botón "Repetir": vuelve a decir la última respuesta de Arkey (no gasta consulta: no llama al
+  // asistente). Pensado para cuando no se oyó -- p. ej. el iPhone estaba en modo silencio.
+  function repetirUltima() {
+    const texto = ultimaRespuestaRef.current;
+    if (!texto || estadoRef.current === "hablando" || estadoRef.current === "procesando") return;
+    desbloquearVoz(); // es un toque real: aprovecharlo para que iOS deje sonar el audio
+    if (timerSilencioRef.current) { clearTimeout(timerSilencioRef.current); timerSilencioRef.current = null; }
+    finalBufferRef.current = "";
+    empezoHablarRef.current = null;
+    silencioDesdeRef.current = null;
+    const mr = mediaRecorderRef.current;
+    if (mr) { mr.onstop = null; mr.ondataavailable = null; }
+    diag("repetir");
+    hablar(texto);
   }
 
   return (
@@ -6250,6 +6369,20 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
                 {!sinCreditos && estado === "permiso" && (errorMsg || "Necesito permiso de micrófono.")}
                 {!sinCreditos && estado === "error" && (errorMsg || "Algo salió mal.")}
               </p>
+              {/* Modo silencio del iPhone: una página web no puede saber si el interruptor está en
+                  silencio (iOS no lo expone), así que el aviso es fijo en iPhone, y "Repetir" vuelve
+                  a decir lo último sin gastar consulta. */}
+              {!sinCreditos && esIOS && estado === "hablando" && (
+                <p className="text-[11px] gp-text-muted text-center">🔇 ¿No oyes nada? Quita el modo silencio del iPhone.</p>
+              )}
+              {!sinCreditos && hayRespuesta && (estado === "escuchando" || estado === "inactivo") && (
+                <div className="flex items-center justify-center gap-2 flex-wrap">
+                  <button onClick={repetirUltima} className="gp-btn-ghost px-3 py-1 rounded-full text-xs" title="Volver a decir la última respuesta">
+                    🔁 Repetir
+                  </button>
+                  {esIOS && <span className="text-[11px] gp-text-muted">¿No lo oíste? Quita el modo silencio y toca Repetir.</span>}
+                </div>
+              )}
               <div className="flex items-center gap-2 w-full mt-1">
                 <input
                   type="text"
