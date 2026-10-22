@@ -5384,8 +5384,31 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
   // aceptado de nuevo por Angel (como al principio, antes de que existiera pausarMicIOS): con el
   // mic siempre abierto, a veces Safari puede enrutar el audio distinto y la voz de Arkey sonar
   // más bajito.
+  // ¿El micrófono actual sirve de verdad? "live" no basta: la traza del 22-oct-2026 mostró que
+  // iOS SILENCIA la pista (muted=true) en cuanto speechSynthesis empieza a hablar, y nunca la
+  // vuelve a activar -- la pista sigue "live" pero entrega silencio puro para siempre. Por eso
+  // el iPhone solo respondía la primera pregunta (y a veces ni esa: el saludo ya lo silenciaba).
+  function micUtil() {
+    const t = streamRef.current?.getAudioTracks?.()[0];
+    return !!t && t.readyState === "live" && !t.muted;
+  }
+
+  // Suelta por completo un micrófono que iOS dejó silenciado, para pedir uno nuevo.
+  function soltarMic() {
+    const mr = mediaRecorderRef.current;
+    if (mr) { try { mr.onstop = null; if (mr.state !== "inactive") mr.stop(); } catch {} }
+    mediaRecorderRef.current = null;
+    try { streamRef.current?.getTracks().forEach((t) => { t.onmute = null; t.onunmute = null; t.onended = null; t.stop(); }); } catch {}
+    streamRef.current = null;
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    rafRef.current = null;
+    analyserRef.current = null;
+    nivelAnalyserRef.current = null;
+  }
+
   async function asegurarMicAbierto() {
-    if (streamRef.current?.getAudioTracks().some((t) => t.readyState === "live")) return true; // ya está abierto de antes
+    if (micUtil()) return true; // ya está abierto de antes y sí capta audio
+    if (streamRef.current) { diag("mic_reabrir", { donde: "asegurar" }); soltarMic(); }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
@@ -5403,7 +5426,16 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
         ctx.onstatechange = () => diag("ctx_cambio");
         stream.getAudioTracks().forEach((t) => {
           t.onended = () => diag("pista_terminada");
-          t.onmute = () => diag("pista_muteada");
+          t.onmute = () => {
+            diag("pista_muteada");
+            // Si iOS lo silencia mientras escuchamos (no mientras Arkey habla, eso se repara al
+            // terminar de hablar), se espera un momento por si se reactiva solo y si no, se reabre.
+            setTimeout(() => {
+              if (abiertoRef.current && estadoRef.current === "escuchando" && streamRef.current === stream && !micUtil()) {
+                volverAEscucharIOS();
+              }
+            }, 800);
+          };
           t.onunmute = () => diag("pista_desmuteada");
         });
       } catch {}
@@ -5548,9 +5580,14 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
     // habló: el analyser devuelve silencio puro y el VAD nunca detecta que el usuario habla.
     const ctx = audioCtxRef.current;
     if (ctx && ctx.state !== "running") { try { ctx.resume(); } catch {} }
-    // Si iOS mató la pista del micrófono mientras Arkey hablaba, se reabre en vez de grabar de una pista muerta.
-    const vivo = streamRef.current?.getAudioTracks().some((t) => t.readyState === "live");
-    if (!vivo) { iniciarEscuchaIOS(); return; }
+    // Si iOS dejó el micrófono silenciado (lo normal después de que Arkey habla) o lo mató, se
+    // suelta y se pide uno nuevo en vez de grabar silencio. El permiso ya se dio: no vuelve a preguntar.
+    if (!micUtil()) {
+      diag("mic_reabrir", { donde: "volver_escuchar" });
+      soltarMic();
+      iniciarEscuchaIOS();
+      return;
+    }
     iniciarSegmentoGrabacion();
     if (!rafRef.current) loopVAD();
   }
@@ -5588,9 +5625,7 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
     // dejaría filtrado (dos sesiones de mic abiertas a la vez). Si por lo que sea no quedó un
     // stream vivo (ej. falló al abrirlo, o la oreja estaba apagada y se acaba de reactivar), se
     // pide uno nuevo.
-    const vivo = streamRef.current?.getAudioTracks().some((t) => t.readyState === "live");
-    if (vivo) volverAEscucharIOS();
-    else await iniciarEscuchaIOS(); // ya se concedio el permiso antes, no vuelve a preguntar
+    volverAEscucharIOS(); // ya revisa si el micrófono sirve y lo reabre si iOS lo dejó silenciado
   }
 
   // Espera a que el navegador tenga la lista de voces cargada -- en Safari/iOS a veces esta
