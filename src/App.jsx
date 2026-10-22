@@ -5111,6 +5111,48 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
     wakeLockRef.current = null;
   }
 
+  // ---------- Diagnóstico temporal (solo iOS) ----------
+  // Traza cada paso del Modo Conversación en la tabla voz_diagnostico para encontrar por qué el
+  // iPhone deja de escuchar después de la primera respuesta (bug abierto el 21-oct-2026). Se
+  // manda en lotes para no frenar la conversación. Quitar junto con la tabla cuando se resuelva.
+  const diagSesionRef = useRef(null);
+  const diagBufRef = useRef([]);
+  const diagTimerRef = useRef(null);
+  const diagVadRef = useRef({ desde: 0, max: 0 });
+  const hablaTokenRef = useRef(null);
+  function estadoPista() {
+    const t = streamRef.current?.getAudioTracks?.()[0];
+    return t ? `${t.readyState}${t.muted ? "/muted" : ""}${t.enabled ? "" : "/disabled"}` : "sin-pista";
+  }
+  function diag(evento, datos = {}) {
+    if (!esIOS) return;
+    try {
+      if (!diagSesionRef.current) diagSesionRef.current = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+      diagBufRef.current.push({
+        sesion: diagSesionRef.current,
+        ms_cliente: Date.now(),
+        evento,
+        datos: {
+          ...datos,
+          estado: estadoRef.current,
+          ctx: audioCtxRef.current?.state || "sin-ctx",
+          pista: estadoPista(),
+          rec: mediaRecorderRef.current?.state || "sin-rec",
+          vad: !!rafRef.current,
+          sesionAudio: (() => { try { return navigator.audioSession ? `${navigator.audioSession.type}/${navigator.audioSession.state || ""}` : "n/a"; } catch { return "err"; } })(),
+          visible: document.visibilityState,
+        },
+      });
+      if (!diagTimerRef.current) diagTimerRef.current = setTimeout(diagFlush, 1500);
+    } catch {}
+  }
+  async function diagFlush() {
+    diagTimerRef.current = null;
+    const filas = diagBufRef.current.splice(0);
+    if (!filas.length) return;
+    try { await supabase.from("voz_diagnostico").insert(filas); } catch {}
+  }
+
   function detenerTodo() {
     // Desconectamos los handlers ANTES de abortar: si no, el propio r.onend puede disparar
     // un r.start() de auto-reinicio (ver iniciarEscuchaNativa) por una condición de carrera
@@ -5156,6 +5198,8 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
   }
 
   const abrir = async () => {
+    diagSesionRef.current = null; // cada apertura del panel es una sesión de diagnóstico nueva
+    diag("abrir", { ua: navigator.userAgent, standalone: !!window.navigator.standalone });
     setTranscripciones([{ rol: "asistente", texto: SALUDO_INICIAL }]);
     setErrorMsg("");
     abiertoRef.current = true;
@@ -5206,7 +5250,9 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
     // realmente apagado sobre evitar ese re-permiso.
     if (esIOS) {
       try { localStorage.setItem("arkeyone_reload_vista", JSON.stringify(contextoPantalla || null)); } catch {}
-      window.location.reload();
+      diag("cerrar");
+      // Mandar la traza pendiente antes de recargar (máximo 1.5 s de espera para no trabar el cierre).
+      Promise.race([diagFlush(), new Promise((r) => setTimeout(r, 1500))]).finally(() => window.location.reload());
       return;
     }
     detenerTodo();
@@ -5353,6 +5399,15 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
         audioCtxRef.current = ctx;
       }
       try { ctx.resume(); } catch {}
+      try {
+        ctx.onstatechange = () => diag("ctx_cambio");
+        stream.getAudioTracks().forEach((t) => {
+          t.onended = () => diag("pista_terminada");
+          t.onmute = () => diag("pista_muteada");
+          t.onunmute = () => diag("pista_desmuteada");
+        });
+      } catch {}
+      diag("mic_abierto");
       const source = ctx.createMediaStreamSource(stream);
       const analyser = ctx.createAnalyser();
       analyser.fftSize = 2048;
@@ -5360,7 +5415,8 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
       analyserRef.current = analyser;
       nivelAnalyserRef.current = analyser; // mismo analyser sirve para el VAD y para el medidor visual
       return true;
-    } catch {
+    } catch (err) {
+      diag("mic_error", { error: String(err?.name || err) });
       cambiarEstado("permiso");
       setErrorMsg("ARKEYONE necesita permiso de micrófono para el Modo Conversación.");
       return false;
@@ -5386,7 +5442,9 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
       mr.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
       mr.start();
       mediaRecorderRef.current = mr;
-    } catch {
+      diag("grabacion_inicio", { mime: mr.mimeType });
+    } catch (err) {
+      diag("grabacion_error", { error: String(err?.name || err) });
       cambiarEstado("error");
       setErrorMsg("No se pudo grabar audio en este navegador.");
     }
@@ -5406,6 +5464,13 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
       const rms = Math.sqrt(suma / buffer.length);
       const ahora = Date.now();
       const UMBRAL = 0.012;
+      // Diagnóstico: nivel máximo del micrófono cada segundo (si iOS lo deja sordo, aquí sale 0).
+      const dv = diagVadRef.current;
+      if (rms > dv.max) dv.max = rms;
+      if (ahora - dv.desde > 1000) {
+        diag("nivel", { max: Math.round(dv.max * 10000) / 10000, hablaba: !!empezoHablarRef.current });
+        dv.desde = ahora; dv.max = 0;
+      }
 
       // La interrupción automática por voz mientras "hablando" se desactivó a petición de Angel:
       // iOS ahora se comporta igual que Android -- la única forma de interrumpir a Arkey es el
@@ -5436,11 +5501,13 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
 
   function finalizarSegmentoYEnviar() {
     const mr = mediaRecorderRef.current;
+    diag("fin_turno_detectado");
     if (!mr || mr.state === "inactive") return;
     cambiarEstado("procesando");
     mr.onstop = async () => {
       const blob = new Blob(chunksRef.current, { type: mr.mimeType || "audio/webm" });
       chunksRef.current = [];
+      diag("audio_listo", { bytes: blob.size });
       if (blob.size < 2000) { volverAEscucharIOS(); return; } // muy corto, probablemente ruido
       await transcribirYEnviar(blob);
     };
@@ -5458,6 +5525,7 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
         body: form,
       });
       const json = await resp.json().catch(() => ({}));
+      diag("transcripcion", { http: resp.status, letras: (json.texto || "").length, error: json.error || null });
       if (!resp.ok || json.error) {
         setErrorMsg(json.error || "No se pudo transcribir tu audio.");
         volverAEscucharIOS();
@@ -5473,6 +5541,7 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
   }
 
   function volverAEscucharIOS() {
+    diag("volver_escuchar");
     if (!abiertoRef.current) return;
     cambiarEstado("escuchando");
     // iOS puede dejar el AudioContext "suspended" (o "interrupted") después de que speechSynthesis
@@ -5506,6 +5575,7 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
   }
 
   async function reanudarMicTrasHablarIOS() {
+    diag("reanudar_tras_hablar", { orejaAntes: escuchaActivaPreHablandoRef.current });
     if (!abiertoRef.current) return;
     // La oreja se había apagado sola al entrar a "hablando" (ver hablar()) -- se restaura aquí al
     // valor real de antes de forzarla, sea que Arkey terminó de hablar solo o lo interrumpieron
@@ -5866,9 +5936,29 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario }) {
         || candidatasEs.find((v) => /enhanced|premium|neural/i.test(v.name || ""))
         || candidatasEs[0];
       if (vozEs) { u.voice = vozEs; u.lang = vozEs.lang; } else { u.lang = "es-MX"; }
-      const alTerminar = () => { if (usaSTTNativo) volverAEscuchar(); else reanudarMicTrasHablarIOS(); };
-      u.onend = alTerminar;
-      u.onerror = (e) => { setErrorMsg(`TTS: ${e.error || "error desconocido"}`); alTerminar(); };
+      // Ficha de esta respuesta: el seguro de tiempo de abajo solo actúa si sigue siendo la
+      // respuesta en curso y nadie la cerró antes (onend, onerror o el botón boca).
+      const ficha = {};
+      hablaTokenRef.current = ficha;
+      const alTerminar = () => {
+        if (hablaTokenRef.current === ficha) hablaTokenRef.current = null;
+        if (usaSTTNativo) volverAEscuchar(); else reanudarMicTrasHablarIOS();
+      };
+      u.onstart = () => diag("voz_empieza", { letras: texto.length });
+      u.onend = () => { diag("voz_termina"); alTerminar(); };
+      u.onerror = (e) => { diag("voz_error", { error: e.error }); setErrorMsg(`TTS: ${e.error || "error desconocido"}`); alTerminar(); };
+      // Seguro: iOS a veces nunca dispara onend/onerror de speechSynthesis cuando el micrófono está
+      // abierto, y Arkey se quedaría para siempre en "hablando" sin volver a escuchar. Si pasa el
+      // tiempo razonable para decir el texto (~110 ms por letra + 4 s de margen), se da por terminado.
+      const esperaMax = Math.max(6000, texto.length * 110 + 4000);
+      setTimeout(() => {
+        if (hablaTokenRef.current === ficha && estadoRef.current === "hablando") {
+          diag("seguro_tiempo_voz", { esperaMax });
+          try { window.speechSynthesis.cancel(); } catch {}
+          alTerminar();
+        }
+      }, esperaMax);
+      diag("voz_pedida", { letras: texto.length, voz: vozEs?.name || "default" });
       // Respaldo contra el mismo bug de Chrome descrito en desbloquearVoz(): si el motor quedó
       // "pausado" por cualquier otra razón, resume() antes de hablar evita que este speak() se
       // quede en cola sin sonar. No afecta a navegadores donde nunca se pausó (resume() ahí no hace nada).
