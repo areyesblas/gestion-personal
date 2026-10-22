@@ -1,5 +1,4 @@
-// Transcribe un audio grabado por el navegador a texto, usando OpenAI (gpt-4o-mini-transcribe,
-// con whisper-1 de respaldo).
+// Transcribe un audio grabado por el navegador a texto, usando OpenAI Whisper (whisper-1).
 //
 // Por que existe esta funcion separada de asistente-ia: en iOS el frontend graba el audio con
 // MediaRecorder y lo manda aqui para transcribirlo (el reconocimiento nativo de Safari queda
@@ -24,7 +23,10 @@ const headersJson = { "Content-Type": "application/json", ...corsHeaders };
 // Tamano maximo del audio aceptado (10 MB es generoso para un turno de conversacion hablado,
 // incluso varios minutos -- evita que un error del cliente mande audio gigante sin querer).
 const MAX_BYTES = 10 * 1024 * 1024;
-const MODELO = "gpt-4o-mini-transcribe";
+// whisper-1: se probó gpt-4o-mini-transcribe el 22-oct-2026 y fue MÁS lento en frases medianas y
+// largas (4.8-9.8 s contra 2.1-4.5 s de whisper-1 con audios parecidos); solo ganaba en frases muy
+// cortas. Se deja el reintento por si algún día se vuelve a cambiar el modelo principal.
+const MODELO = "whisper-1";
 
 // Frases que Whisper inventa sobre ruido o silencio. Se compara sin acentos ni puntuación.
 const ALUCINACIONES = [
@@ -80,8 +82,6 @@ Deno.serve(async (req) => {
 
     const whisperForm = new FormData();
     whisperForm.append("file", archivo, archivo.name || "audio.webm");
-    // gpt-4o-mini-transcribe (22-oct-2026): whisper-1 tardaba 2.7-4.5 s por turno en la traza;
-    // este modelo es más rápido, más preciso y cuesta la mitad. Si fallara, se reintenta con whisper-1.
     whisperForm.append("model", MODELO);
     whisperForm.append("language", "es");
     whisperForm.append("temperature", "0");

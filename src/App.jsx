@@ -5157,6 +5157,8 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario, vozHumana 
   const vozMsRef = useRef(0);
   const ultimoTickRef = useRef(0);
   const segInicioRef = useRef(0); // cuándo arrancó la grabación actual
+  const micsAbiertosRef = useRef(new Set()); // todos los micrófonos abiertos en la sesión (ver apagarTodosLosMics)
+  const abriendoMicRef = useRef(null); // apertura de micrófono en curso (ver asegurarMicAbierto)
   // Voz natural (OpenAI): un solo elemento <audio> para toda la sesión -- iOS lo deja sonar sin
   // toque solo si ese mismo elemento ya sonó una vez dentro de un toque (ver desbloquearVoz).
   const audioElRef = useRef(null);
@@ -5298,8 +5300,7 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario, vozHumana 
     detenerRecognitionActual();
     try { mediaRecorderRef.current?.stop(); } catch {}
     mediaRecorderRef.current = null;
-    try { streamRef.current?.getTracks().forEach((t) => t.stop()); } catch {}
-    streamRef.current = null;
+    apagarTodosLosMics();
     try { audioCtxRef.current?.close(); } catch {}
     audioCtxRef.current = null;
     analyserRef.current = null;
@@ -5535,19 +5536,46 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario, vozHumana 
     const mr = mediaRecorderRef.current;
     if (mr) { try { mr.onstop = null; if (mr.state !== "inactive") mr.stop(); } catch {} }
     mediaRecorderRef.current = null;
-    try { streamRef.current?.getTracks().forEach((t) => { t.onmute = null; t.onunmute = null; t.onended = null; t.stop(); }); } catch {}
-    streamRef.current = null;
+    apagarTodosLosMics();
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
     rafRef.current = null;
     analyserRef.current = null;
     nivelAnalyserRef.current = null;
   }
 
-  async function asegurarMicAbierto() {
-    if (micUtil()) return true; // ya está abierto de antes y sí capta audio
-    if (streamRef.current) { diag("mic_reabrir", { donde: "asegurar" }); soltarMic(); }
+  // Apaga cualquier micrófono que se haya abierto en esta sesión, no solo el actual. Traza del
+  // 22-oct 10:51: al volver de otra app se abrieron dos micrófonos casi al mismo tiempo y uno quedó
+  // huérfano y encendido -- con un micrófono activo iOS manda el audio a la bocina del oído, y
+  // Arkey se oyó bajito el resto de la sesión.
+  function apagarTodosLosMics() {
+    const todos = new Set(micsAbiertosRef.current);
+    if (streamRef.current) todos.add(streamRef.current);
+    todos.forEach((st) => {
+      try { st.getTracks().forEach((t) => { t.onmute = null; t.onunmute = null; t.onended = null; t.stop(); }); } catch {}
+    });
+    micsAbiertosRef.current.clear();
+    streamRef.current = null;
+  }
+
+  // Solo puede haber UNA apertura de micrófono en curso: si dos caminos la piden a la vez (p. ej.
+  // al regresar de otra app), el segundo espera a la misma en vez de abrir otro micrófono.
+  function asegurarMicAbierto() {
+    if (micUtil()) return Promise.resolve(true); // ya está abierto de antes y sí capta audio
+    if (abriendoMicRef.current) return abriendoMicRef.current;
+    abriendoMicRef.current = abrirMicDeVerdad().finally(() => { abriendoMicRef.current = null; });
+    return abriendoMicRef.current;
+  }
+
+  async function abrirMicDeVerdad() {
+    // En segundo plano (otra app, pantalla bloqueada) iOS no deja abrir el micrófono y al volver
+    // pide permiso otra vez. Se espera a que la app vuelva a estar visible (ver el efecto de
+    // visibilitychange -> recuperarTrasSegundoPlano).
+    if (document.visibilityState !== "visible") { diag("mic_espera_visible"); return false; }
+    if (streamRef.current || micsAbiertosRef.current.size) { diag("mic_reabrir", { donde: "asegurar" }); soltarMic(); }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      micsAbiertosRef.current.add(stream);
+      if (!abiertoRef.current) { apagarTodosLosMics(); return false; } // cerraron el panel mientras se abría
       streamRef.current = stream;
       stream.getAudioTracks().forEach((t) => { t.enabled = true; });
       // Reusar el contexto creado dentro del toque (desbloquearVoz) -- uno nuevo aquí, después
@@ -5784,8 +5812,7 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario, vozHumana 
     mediaRecorderRef.current = null;
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
     rafRef.current = null;
-    try { streamRef.current?.getTracks().forEach((t) => t.stop()); } catch {}
-    streamRef.current = null;
+    apagarTodosLosMics();
     try { await audioCtxRef.current?.close(); } catch {} // esperamos de verdad a que cierre, si no iOS puede tardar en soltar la sesion de audio de grabacion
     audioCtxRef.current = null;
     analyserRef.current = null;
@@ -6013,9 +6040,8 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario, vozHumana 
     if (usaSTTNativo) {
       iniciarEscuchaNativa(); // apaga cualquier reconocedor viejo como primer paso; barato crear uno nuevo
     } else {
-      const vivo = streamRef.current?.getAudioTracks().some((t) => t.readyState === "live");
-      if (vivo) volverAEscucharIOS(); // reusa el stream si el sistema no lo mató al bloquear
-      else iniciarEscuchaIOS(); // stream nuevo -- el permiso ya está otorgado, no debería re-preguntar
+      diag("regreso_visible");
+      volverAEscucharIOS(); // revisa si el micrófono sirve; si no, lo reabre (una sola vez)
     }
   }
 
@@ -6123,7 +6149,10 @@ function VoiceMode({ contextoPantalla, onDatosCreados, nombreUsuario, vozHumana 
       try { mediaRecorderRef.current?.stop(); } catch {}
       mediaRecorderRef.current = null;
       const ok = await asegurarMicAbierto();
-      if (!ok) { volverAEscuchar(); return; }
+      // Con voz natural el micrófono no hace falta para hablar (se suelta antes de sonar): si no se
+      // pudo abrir porque la app estaba en segundo plano, Arkey igual dice la respuesta. Solo se
+      // detiene si de verdad negaron el permiso.
+      if (!ok && (!vozHumana || estadoRef.current === "permiso")) { volverAEscuchar(); return; }
     } else {
       // Camino nativo (Android/Mac/desktop): igual que en Android, se apaga explícitamente el
       // reconocedor de la escucha anterior -- r.stop() es async y a veces no cierra de inmediato,
