@@ -3292,7 +3292,7 @@ function AppLoggedIn({ session, tema, toggleTema, setTema }) {
         }
         onDatosCreados={recargarModulos}
         nombreUsuario={nombreMostrar || miEmail}
-        vozHumana={misId === ADMIN_UID /* voz natural de OpenAI: en prueba solo para Angel (ver voz-arkey) */}
+        vozHumana /* voz natural de OpenAI para todos desde el 22-oct-2026 (ver voz-arkey) */
       />
       {busquedaAbierta && <BusquedaGlobal data={data} onNavigate={buscarNavegarA} onClose={() => setBusquedaAbierta(false)} />}
 

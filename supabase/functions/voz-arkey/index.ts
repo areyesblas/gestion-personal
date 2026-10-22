@@ -8,15 +8,16 @@
 // segundo) pero su duración es exacta.
 //
 // Costo aproximado: ~0.015 USD por minuto de voz. Usa la misma OPENAI_API_KEY que transcribir-voz.
-// FASE DE PRUEBA (22-oct-2026): solo la cuenta de Angel puede usarla. Para abrirla a todos,
-// vaciar USUARIOS_PERMITIDOS (y quitar la restricción equivalente en App.jsx, prop vozHumana).
+// Para volver a limitarla (p. ej. por costo), poner UUIDs en USUARIOS_PERMITIDOS y la misma
+// condición en App.jsx (prop vozHumana de VoiceMode).
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY")!;
 
-const USUARIOS_PERMITIDOS = ["eca7e776-6c96-44eb-b4e0-b03c85fa5bb8"]; // vacío = todos
+// Abierta a todos desde el 22-oct-2026 (antes solo la cuenta de Angel, en prueba).
+const USUARIOS_PERMITIDOS: string[] = []; // vacío = todos
 
 const VOZ = "coral";
 const INSTRUCCIONES =
